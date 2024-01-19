@@ -1,0 +1,230 @@
+- name: Pre-run checks
+  ansible.builtin.import_playbook: pre-run-checks.yml
+
+- name: Gather VMs to to action
+  tags: [always]
+  hosts: "{{ defaults.router_vm_name }}"
+  tasks:
+    - name: Collect VMs to action
+      ansible.builtin.set_fact:
+        action_vms: "{{ ((block_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: item.testing is undefined or (item.testing is defined and item.testing.block_internet is undefined) or (item.testing.block_internet is defined and item.testing.block_internet)
+  
+    - name: Collect IPs to action from config
+      ansible.builtin.set_fact:
+        action_ips: "{{ ((action_ips | default([])) + ['10.' + range_second_octet | string + '.' + item.vlan | string + '.' + item.ip_last_octet | string]) | unique }}"
+      loop: "{{ ludus }}"
+      when: item.testing is undefined or (item.testing is defined and item.testing.block_internet is undefined) or (item.testing.block_internet is defined and item.testing.block_internet)
+
+    - name: Collect IPs to action from ansible inventory
+      ansible.builtin.set_fact:
+        action_ips_from_inventory: "{{ ((action_ips_from_inventory | default([])) + [ hostvars[item.vm_name]['ansible_host'] ]) | unique }}"
+      loop: "{{ ludus }}"
+      when: item.testing is undefined or (item.testing is defined and item.testing.block_internet is undefined) or (item.testing.block_internet is defined and item.testing.block_internet)
+
+    - name: Show IPs to action from config
+      ansible.builtin.debug:
+        var: action_ips
+
+    - name: Show IPs to action from config from inventory
+      ansible.builtin.debug:
+        var: action_ips        
+
+    - name: Check that IPs are the same in the config and dynamic inventory
+      ansible.builtin.assert:
+        that:
+          - action_ips == action_ips_from_inventory
+        fail_msg: IPs collected from the config do not match the dynamic inventory. If a VM was manually modidified this may be the cause.
+        success_msg: IPs collected from the config match the dynamic inventory
+
+
+
+# ==========================================================
+# Start-testing
+# ==========================================================
+- name: Take a snapshot of all VMs where testing undefined or snapshot is true
+  tags: [never, start-testing]
+  hosts: localhost
+  tasks: 
+    - name: Collect VMs to snapshot
+      ansible.builtin.set_fact:
+        vm_names_to_snapshot: "{{ ((vm_names_to_snapshot | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: item.testing is undefined or (item.testing is defined and item.testing.snapshot is undefined) or (item.testing.snapshot is defined and item.testing.snapshot)
+
+    - name: Snapshot VMs
+      ansible.builtin.include_tasks: tasks/proxmox/snapshot-management.yml
+  vars:
+    snapshot_action: take_snapshot
+    snapshot_name: ludus_automated_clean_snapshot
+    include_RAM: "{{ defaults.snapshot_with_RAM }}" # allows you to revert to a running state, but uses more disk space and is slower
+    stale_hours: "{{ hours_until_snapshot_stale }}"
+
+- name: Block VMs from accessing the internet when testing undefined or block_internet is true
+  tags: [never, start-testing]
+  hosts: "{{ defaults.router_vm_name }}"
+  become: true
+  tasks:
+    - include_tasks: tasks/firewall/firewall-management.yml
+    - include_tasks: tasks/firewall/dns-management.yml
+  vars:
+    testing_action: block
+
+# ==========================================================
+# Stop-testing
+# ==========================================================
+- name: Revert to a snapshot for all test-range VMs
+  tags: [never, stop-testing]
+  hosts: localhost
+  tasks:
+    - name: Collect VMs to snapshot
+      ansible.builtin.set_fact:
+        vm_names_to_snapshot: "{{ ((vm_names_to_snapshot | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: item.testing is undefined or (item.testing is defined and item.testing.snapshot is undefined) or (item.testing.snapshot is defined and item.testing.snapshot)
+
+    - include_tasks: tasks/proxmox/snapshot-management.yml
+  vars:
+    snapshot_action: revert_snapshot
+    snapshot_name: ludus_automated_clean_snapshot
+    include_RAM: "{{ defaults.snapshot_with_RAM }}"
+    allow_errors: "{{ force_stop }}"
+
+- name: Allow test-range subnet from the internet
+  tags: [never, stop-testing]
+  hosts: "{{ defaults.router_vm_name }}"
+  become: true
+  tasks:
+    - include_tasks: tasks/firewall/firewall-management.yml
+    - include_tasks: tasks/firewall/dns-management.yml
+  vars:
+    testing_action: allow
+
+- name: Set the time and check expiration of the DC(s)
+  tags: [never, stop-testing]
+  hosts: "{{ range_id }}_test_range_dc"
+  tasks:
+    - name: Find FQDN for role member
+      set_fact:
+        domain_fqdn: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn }}"
+    - name: Set dc_vm_name for the primary-dc with the same FQDN
+      set_fact:
+        dc_vm_name: "{{ item.vm_name }}"
+      loop: "{{ ludus }}"
+      when:
+        - item.domain is defined
+        - item.domain.role == 'primary-dc'
+        - item.domain.fqdn == domain_fqdn
+    - name: Set DC IP 
+      set_fact:
+        dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"  
+    - name: Set the NTP server to NIST
+      ansible.windows.win_shell: |
+        w32tm /config /manualpeerlist:"time.nist.gov" /syncfromflags:manual /update
+    - name: Resync the time
+      ansible.windows.win_shell: |
+        w32tm /resync /rediscover
+    - name: Set DNS to public DNS before we try to reset the Windows evaluation
+      ansible.windows.win_dns_client:
+        adapter_names: '*'
+        dns_servers: 
+        - "1.1.1.1"
+    - name: Check if the Windows evaluation is expiring/expired
+      ansible.windows.win_powershell:
+        script: |
+          . c:\ludus\scripts\fix-windows-expiration.ps1
+    - name: Set DNS (Windows)
+      ansible.windows.win_dns_client:
+        adapter_names: '*'
+        dns_servers: 
+        - "{{ dc_ip }}"
+
+- name: Set the time and check expiration of Windows endpoints/servers
+  tags: [never, stop-testing]
+  hosts: "{{ range_id }}_windows_endpoints"
+  vars:
+    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+  tasks:
+    - name: Find FQDN for role member
+      set_fact:
+        domain_fqdn: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn }}"
+      when: (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain is defined and (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain.fqdn is defined
+    - name: Set dc_vm_name for the primary-dc with the same FQDN
+      set_fact:
+        dc_vm_name: "{{ item.vm_name }}"
+      loop: "{{ ludus }}"
+      when:
+        - (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain is defined
+        - (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain.fqdn is defined
+        - item.domain is defined
+        - item.domain.role == 'primary-dc'
+        - item.domain.fqdn == domain_fqdn
+    - name: Set DC IP 
+      set_fact:
+        dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"
+      when: (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain is defined and (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain.fqdn is defined
+    - name: Set the NTP server to NIST
+      ansible.windows.win_shell: |
+        w32tm /config /manualpeerlist:"time.nist.gov" /syncfromflags:manual /update
+    - name: Resync the time
+      ansible.windows.win_shell: |
+        w32tm /resync /rediscover
+    - name: Set DNS to public DNS before we try to reset the Windows evaluation
+      ansible.windows.win_dns_client:
+        adapter_names: '*'
+        dns_servers: 
+        - "1.1.1.1"
+    - name: Check if the Windows evaluation is expiring/expired
+      ansible.windows.win_powershell:
+        script: |
+          . c:\ludus\scripts\fix-windows-expiration.ps1
+    - name: Set DNS (Windows)
+      ansible.windows.win_dns_client:
+        adapter_names: '*'
+        dns_servers: 
+        - "{{ dc_ip if dc_ip is defined else dns_server }}"
+
+# ==========================================================
+# Firewall management
+# ==========================================================
+- name: Allow VMs to an IP
+  tags: [never, allow-ip]
+  hosts: "{{ defaults.router_vm_name }}"
+  become: true
+  tasks:
+    - include_tasks: tasks/firewall/firewall-management.yml
+  vars:
+    testing_action: open
+    ip: "{{ action_ip }}"
+
+- name: Allow VMs to a domain
+  tags: [never, allow-domain]
+  hosts: "{{ defaults.router_vm_name }}"
+  become: true
+  tasks:
+    - include_tasks: tasks/firewall/firewall-management.yml
+    - include_tasks: tasks/firewall/dns-management.yml
+  vars:
+    testing_action: allow-domain
+
+- name: Deny VMs to an IP
+  tags: [never, deny-ip]
+  hosts: "{{ defaults.router_vm_name }}"
+  become: true
+  tasks:
+    - include_tasks: tasks/firewall/firewall-management.yml
+  vars:
+    testing_action: close
+    ip: "{{ action_ip }}"
+
+- name: Deny VMs to a domain
+  tags: [never, deny-domain]
+  hosts: "{{ defaults.router_vm_name }}"
+  become: true
+  tasks:
+    - include_tasks: tasks/firewall/firewall-management.yml
+    - include_tasks: tasks/firewall/dns-management.yml
+  vars:
+    testing_action: deny-domain
+    domain: "{{ action_domain }}"

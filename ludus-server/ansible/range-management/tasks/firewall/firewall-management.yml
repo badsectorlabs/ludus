@@ -1,0 +1,147 @@
+# ==========================================================
+# Block
+# ==========================================================
+- name: Block VMs from getting out to the internet
+  ansible.builtin.iptables:
+    chain: FORWARD
+    source: "{{ item }}"
+    destination: "! 10.{{ range_second_octet }}.0.0/16"
+    protocol: all
+    jump: REJECT
+    state: present
+    action: insert
+    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
+    comment: "Ludus Testing: Deny internet traffic for {{ item }}"
+    numeric: true
+  loop: "{{ action_ips }}"
+
+- name: Reset the conntrack entries to prevent previously allowed traffic to continue
+  ansible.builtin.shell: conntrack -F
+  async: 5 # Becuase this resets the conntrack entries, ansible will hang unless we run it async
+  poll: 1
+  when: testing_action == "block"
+
+# ==========================================================
+# Allow
+# ==========================================================
+- name: Unblock VMs from getting out to the internet
+  ansible.builtin.iptables:
+    chain: FORWARD
+    source: "{{ item }}"
+    destination: "! 10.{{ range_second_octet }}.0.0/16"
+    protocol: all
+    jump: REJECT
+    state: absent
+    action: insert
+    comment: "Ludus Testing: Deny internet traffic for {{ item }}"
+    numeric: true
+  loop: "{{ action_ips }}"
+  when: testing_action == "allow"
+
+- name: Remove site specific IP allow rules now that testing is done - Get iptables rules
+  ansible.builtin.command: iptables -S
+  register: iptables_rules
+  when: testing_action == "allow"
+
+- name: Find rules to delete and replace their actions with -D
+  ansible.builtin.set_fact:
+    rules_to_delete: "{{ rules_to_delete | default([]) + [item | regex_replace('^-[AI]', '-D')] }}"
+  loop: "{{ iptables_rules.stdout_lines }}"
+  when: 'testing_action == "allow" and "Ludus Testing: Allow" in item'
+
+- name: Remove rules
+  ansible.builtin.command: iptables {{ item }}
+  loop: "{{ rules_to_delete }}"
+  when: testing_action == "allow" and rules_to_delete is defined and rules_to_delete | length > 0
+  register: iptables_delete
+  failed_when: iptables_delete.rc == 1 and 'Bad rule (does a matching rule exist in that chain?)' not in iptables_delete.stderr
+
+# ==========================================================
+# Open
+# ==========================================================
+- name: Open the firewall for a single IP
+  ansible.builtin.iptables:
+    chain: FORWARD
+    source: "{{ item }}"
+    destination: "{{ ip }}"
+    protocol: all
+    jump: ACCEPT
+    state: present
+    action: insert
+    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
+    comment: "Ludus Testing: Allow specific IP - {{ ip }}"
+    numeric: true
+  loop: "{{ action_ips }}"
+  when: testing_action == "open"
+
+# ==========================================================
+# Close
+# ==========================================================
+- name: Close the firewall for a single IP
+  ansible.builtin.iptables:
+    chain: FORWARD
+    source: "{{ item }}"
+    destination: "{{ ip }}"
+    protocol: all
+    jump: ACCEPT
+    state: absent
+    action: insert
+    comment: "Ludus Testing: Allow specific IP - {{ ip }}"
+    numeric: true
+  loop: "{{ action_ips }}"
+  when: testing_action == "close"
+
+- name: Reset the conntrack entries to prevent previously allowed traffic to continue
+  ansible.builtin.shell: conntrack -F
+  async: 5 # Becuase this resets the conntrack entries, ansible will hang unless we run it async
+  poll: 1
+  when: testing_action == "close"
+
+# ==========================================================
+# Allow Domain
+# ==========================================================
+- name: Allow IPs for a domain
+  ansible.builtin.iptables:
+    chain: FORWARD
+    source: "{{ item }}"
+    destination: "{{ domainIP }}"
+    protocol: all
+    jump: ACCEPT
+    state: present
+    action: insert
+    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
+    comment: "Ludus Testing: Allow {{ domain }}"
+    numeric: true
+  loop: "{{ action_ips }}"
+  when: testing_action == "allow-domain"
+
+# ==========================================================
+# Deny Domain
+# ==========================================================
+- name: Deny IPs for a domain
+  ansible.builtin.iptables:
+    chain: FORWARD
+    source: "{{ item }}"
+    destination: "{{ domainIP }}"
+    protocol: all
+    jump: ACCEPT
+    state: absent
+    action: insert
+    comment: "Ludus Testing: Allow {{ domain }}"
+    numeric: true
+  loop: "{{ action_ips }}"
+  when: testing_action == "deny-domain"
+
+- name: Reset the conntrack entries to prevent previously allowed traffic to continue
+  ansible.builtin.shell: conntrack -F
+  async: 5 # Becuase this resets the conntrack entries, ansible will hang unless we run it async
+  poll: 1
+  when: testing_action == "deny-domain"
+
+# ==========================================================
+# Persist!
+# ==========================================================
+- name: Save current state of the firewall to a file
+  community.general.iptables_state:
+    state: saved
+    path: /etc/iptables/rules.v4

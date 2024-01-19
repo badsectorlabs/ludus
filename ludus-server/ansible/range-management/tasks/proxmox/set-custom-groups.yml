@@ -1,0 +1,24 @@
+- name: Update the VM description by name
+  block:
+    - name: Update the VM description by name (take 1)
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        name: "{{ vm_name }}"
+        description: '{ "groups": [{{ vm_groups }}] }'
+        update: true
+  rescue:
+    - name: Pause a little more to allow the vmid to become populated
+      ansible.builtin.pause:
+        seconds: 5
+    - name: Update the VM description by name (take 2)
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        name: "{{ vm_name }}"
+        description: '{ "groups": [{{ vm_groups }}] }'
+        update: true

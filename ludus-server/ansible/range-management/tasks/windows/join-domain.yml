@@ -1,0 +1,42 @@
+- name: Set dns server
+  ansible.windows.win_dns_client:
+    adapter_names: '*'
+    dns_servers:
+      - "{{ dc_ip }}"
+
+- name: Join the domain
+  ansible.windows.win_domain_membership:
+    dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
+    domain_admin_user: "{{ netbios_name }}.{{ fqdn_tail }}\\{{ domain_admin }}"
+    domain_admin_password: "{{ domain_admin_password }}"
+    domain_ou_path: "ou={{ ou_name }},DC={{ netbios_name }},DC={{ fqdn_tail.split('.') | join(',DC=') }}"
+    state: domain
+  register: domain_joined
+
+- name: Set autologin entries
+  ansible.builtin.include_tasks: tasks/windows/configure-autologon.yml
+
+- name: Reboot after domain join
+  win_reboot:
+  when: domain_joined.reboot_required
+
+- name: Sync time with the DC
+  win_shell: "w32tm /resync"
+
+- name: Update group policy
+  win_shell: "gpupdate /force"
+
+# "The users have to be part of the RDusers group locally on the server you want to login via RDP, not only in the AD."
+# https://serverfault.com/questions/265531/members-of-remote-desktop-users-group-cannot-login
+- name: Add a domainuser and domainadmin user to local RDUsers group
+  ansible.windows.win_group_membership:
+    name: Remote Desktop Users
+    members:
+      - "{{ netbios_name }}\\{{ defaults.ad_domain_admin }}"
+      - "{{ netbios_name }}\\{{ defaults.ad_domain_user }}"
+    state: present
+
+- name: Set DNS search domain to include domain
+  ansible.windows.win_powershell:
+    script: |
+      Set-DnsClientGlobalSetting -SuffixSearchList @("{{ netbios_name }}.{{ fqdn_tail }}","home.arpa")

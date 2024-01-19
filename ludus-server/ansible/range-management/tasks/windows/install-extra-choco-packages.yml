@@ -1,0 +1,30 @@
+---
+- name: Test for a chocolatey cache
+  delegate_to: localhost
+  ansible.builtin.wait_for:
+    host: 192.0.2.2
+    port: 8081
+    timeout: 2
+  register: choco_test
+  ignore_errors: true
+
+- name: Set chocolatey source
+  ansible.builtin.set_fact:
+    chocolatey_source: http://192.0.2.2:8081/repository/chocolatey/
+  when: not choco_test.failed
+
+# https://github.com/chocolatey/chocolatey-ansible/issues/18
+- name: Bootstrap chocolatey by hand
+  win_chocolatey:
+    name:
+      - chocolatey
+    source: http://192.0.2.2:8081/repository/raw/install.ps1
+  when: not choco_test.failed
+
+- name: Install custom chocolatey packages
+  win_chocolatey:
+    name: "{{ item }}"
+    state: present
+    source: "{{ chocolatey_source | default('') }}"
+    ignore_checksums: "{{ true if ignore_chocolatey_checksums is defined and ignore_chocolatey_checksums else false }}"
+  with_items: "{{ chocolatey_packages }}"

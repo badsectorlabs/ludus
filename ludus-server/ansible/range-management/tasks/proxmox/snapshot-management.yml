@@ -1,0 +1,105 @@
+- name: Initialize an empty list for our vmids
+  ansible.builtin.set_fact:
+    vmids_to_snapshot: []
+
+- name: Get vmid from vm name
+  ansible.builtin.shell:
+    cmd: |
+      curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" https://127.0.0.1:8006/api2/json/cluster/resources | jq -r '.[] | .[] | select(.name=="{{ item }}").vmid'
+  loop: "{{ vm_names_to_snapshot }}"
+  register: vmid_commands
+
+- name: Append vmids to list
+  ansible.builtin.set_fact:
+    vmids_to_snapshot: "{{ vmids_to_snapshot + item.stdout_lines }}"
+  with_items: "{{ vmid_commands.results }}"
+
+- name: Get time of last snapshot
+  ansible.builtin.shell:
+    cmd: |
+      curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ item }}/snapshot/{{ snapshot_name }}/config" | jq '.[] | .snaptime'
+  loop: "{{ vmids_to_snapshot }}"
+  register: snapshot_times
+  ignore_errors: true
+
+- name: Display snapshot snapshot
+  ansible.builtin.debug:
+    msg: "{{ snapshot_times }}"
+
+- name: Remove previous clean snapshot
+  community.general.proxmox_snap:
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    vmid: "{{ item }}"
+    state: absent
+    snapname: "{{ snapshot_name }}"
+    timeout: 300
+  loop: "{{ vmids_to_snapshot }}"
+  loop_control:
+    index_var: index
+  when:
+    - snapshot_action == "take_snapshot"
+    # Only care about previous snapshots if the date detection returned successfully
+    - snapshot_times.results[index].rc == 0
+    # Subtract the time of snapshot from the current time and see if it exceeds the threshold for staleness, if it does, remove the snapshot
+    - (((ansible_date_time.epoch | int) - (snapshot_times.results[index].stdout | int)) / 3600 | int > defaults.stale_hours)
+  retries: 5
+  delay: 3
+  register: result
+  until: result is not failed
+
+- name: Create new clean snapshot
+  community.general.proxmox_snap:
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    vmid: "{{ item }}"
+    state: present
+    snapname: "{{ snapshot_name }}"
+    description: "Automated snapshot created by ludus at {{ ansible_date_time.iso8601 }}"
+    vmstate: "{{ include_RAM }}"
+    timeout: 600
+  loop: "{{ vmids_to_snapshot }}"
+  loop_control:
+    index_var: index
+  when:
+    - snapshot_action == "take_snapshot"
+    # Force a new snapshot if the previous snapshot time detection failed
+    - (((ansible_date_time.epoch | int) - (snapshot_times.results[index].stdout | int)) / 3600 | int > defaults.stale_hours)
+  retries: 5
+  delay: 3
+  register: result
+  until: result is not failed
+
+- name: Revert VM to snapshot
+  community.general.proxmox_snap:
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    vmid: "{{ item }}"
+    state: rollback
+    snapname: "{{ snapshot_name }}"
+    timeout: 300
+  loop: "{{ vmids_to_snapshot }}"
+  when: snapshot_action == "revert_snapshot"
+  register: revert_to_snapshot
+  failed_when: revert_to_snapshot.changed == false or ('Too many redirections' in revert_to_snapshot.msg)
+  ignore_errors: "{{ allow_errors | default(false) }}"
+
+- name: Start the VMs
+  community.general.proxmox_kvm:
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    node: "{{ node_name }}"
+    vmid: "{{ item }}"
+    state: started
+    timeout: 300
+  loop: "{{ vmids_to_snapshot }}"
+  when: snapshot_action == "revert_snapshot"
+  # But sometimes it fails anyway?
+  retries: 3
+  delay: 5
+  register: result
+  until: result is not failed

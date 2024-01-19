@@ -1,0 +1,14 @@
+# This file describes the network interfaces available on your system
+# and how to activate them. For more information, see interfaces(5).
+
+source /etc/network/interfaces.d/*
+
+# The loopback network interface
+auto lo
+iface lo inet loopback
+
+auto {{ interface_name }}
+iface {{ interface_name }} inet static
+    address {{ static_ip }}/{{ cidr_netmask }}
+    gateway {{ default_gateway }}
+    dns-nameservers {{ default_gateway }}

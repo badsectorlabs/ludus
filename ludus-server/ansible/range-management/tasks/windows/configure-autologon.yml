@@ -1,0 +1,28 @@
+- name: Set autologin entries
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\WinLogon
+    name: AutoAdminLogon
+    data: 1
+    type: string
+
+- name: Set autologin entries
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\WinLogon
+    name: DefaultUserName
+    data: "{{ autologon_user }}"
+    type: string
+
+- name: Set autologin entries
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\WinLogon
+    name: DefaultPassword
+    data: "{{ autologon_password }}"
+    type: string
+
+- name: Set autologin entries
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\WinLogon
+    name: DefaultDomainName
+    data: "{{ netbios_name }}.{{ fqdn_tail }}"
+    type: string
+  when: netbios_name is defined and fqdn_tail is defined

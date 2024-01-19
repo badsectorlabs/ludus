@@ -1,0 +1,24 @@
+---
+# - name: Enable default SMB allow rule
+#   win_firewall_rule:
+#     name: File and Printer Sharing (SMB-In)
+#     localport: 445
+#     action: allow
+#     direction: in
+#     protocol: TCP
+#     state: present
+
+- name: Add SMB allow rule
+  win_firewall_rule:
+    name: Allow RDP
+    action: allow
+    description: Allow SMB From Any
+    direction: in
+    enable: true
+    force: true
+    localport: 445
+    profile: any
+    protocol: TCP
+    remoteip: any
+    profiles: domain,private,public
+    state: present

@@ -1,0 +1,176 @@
+- name: Create a VM from a template
+  community.general.proxmox_kvm:
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    node: "{{ node_name }}"
+    clone: "{{ template_vm_name }}"
+    name: "{{ vm_name }}"
+    pool: "{{ vm_pool | default(range_id) }}"
+    full: "{{ true if (full_clone is defined and full_clone) else false }}"
+    format: "{{ 'unspecified' if (full_clone is not defined or (full_clone is defined and not full_clone)) else proxmox_vm_storage_format }}" # proxmox_vm_storage_format comes from /opt/ludus/config.yml
+    storage: "{{ proxmox_vm_storage_pool if (full_clone is defined and full_clone) else omit }}" # proxmox_vm_storage_pool comes from /opt/ludus/config.yml
+    timeout: 500
+  register: clone_vm
+
+- name: Pause for 5 seconds to allow the vmid to populate
+  ansible.builtin.pause:
+    seconds: 5
+  when: clone_vm is changed
+
+- name: Set the vm_id
+  ansible.builtin.set_fact:
+    vm_id: "{{ clone_vm.vmid }}"
+  when: clone_vm is successful
+  until: vm_id != -1
+
+- name: Update the VM description by vmid
+  community.general.proxmox_kvm:
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    node: "{{ node_name }}"
+    vmid: "{{ vm_id }}"
+    description: '{ "groups": [{{ vm_groups }}] }'
+    # This must be set to update the config
+    update: true
+  when: clone_vm is changed and clone_vm.vmid != -1
+  register: update_desc
+
+- name: Update the VM description by name
+  when: clone_vm is changed and update_desc is skipped
+  block:
+    - name: Update the VM description by name (take 1)
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        name: "{{ vm_name }}"
+        description: '{ "groups": [{{ vm_groups }}] }'
+        update: true
+  rescue:
+    - name: Pause a little more to allow the vmid to become populated
+      ansible.builtin.pause:
+        seconds: 5
+    - name: Set the vm_id
+      ansible.builtin.set_fact:
+        vm_id: "{{ clone_vm.vmid }}"
+    - name: Update the VM description by name (take 2)
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        name: "{{ vm_name }}"
+        description: '{ "groups": [{{ vm_groups }}] }'
+        update: true
+
+- name: Update the VM's options
+  community.general.proxmox_kvm:
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    node: "{{ node_name }}"
+    vmid: "{{ vm_id }}"
+    bootdisk: "{{ boot_disk | default('sata0') }}" # Boot from sata0 unless specified
+    balloon: "{{ (balloon_size | default('0') | int) * 1024 }}" # Default to no balloon
+    ide: {} # remove install CD
+    tablet: "{{ use_tablet_pointer | default('false') }}" # Set this to 'true' for windows and macOS VMs
+    memory: "{{ (ram | default('8') | int) * 1024 }}"
+    cores: "{{ cpu_cores | default('4') }}" # how how many host threads each socket should be allocated
+    vcpus: "{{ num_vcpus | default('4') }}" # how many virtual CPUs are presented to the VM
+    update: true
+  when: clone_vm is changed
+
+- name: Update the VM network interfaces
+  community.general.proxmox_nic:
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    vmid: "{{ vm_id }}"
+    interface: net0
+    bridge: "vmbr{{ vmbr_number }}"
+    tag: "{{ vlan | default(1) }}"
+  when: clone_vm is changed
+  register: network_change
+
+- name: Start the VM
+  community.general.proxmox_kvm:
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    node: "{{ node_name }}"
+    vmid: "{{ vm_id }}"
+    state: started
+  # This is required or ansible will attempt to start a VM that doesn't exist
+  when: clone_vm is successful
+  # But sometimes it fails anyway?
+  retries: 3
+  delay: 5
+
+- name: Wait for VM to be running, and try to start it if not running after 20 seconds
+  block:
+    - name: Check VM running status
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ vm_id }}"
+        state: current
+      register: result
+      until: result.status.find("running") != -1
+      retries: 2
+      delay: 5
+  rescue:
+    - name: Start the VM
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ vm_id }}"
+        state: started
+
+# The 'until' is a way to fail if the VM has a self-assigned 169.254.0.0/16 or a Docker 172.17.0.0/16 IP
+- name: Wait for VM to acquire an IP address
+  delegate_to: localhost
+  ansible.builtin.command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host {{ vm_name }}
+  register: nodecheck
+  changed_when: false
+  until: >
+    nodecheck.stdout | default('') | from_json | json_query('ansible_host') |
+    regex_search('^(?!169\.254|172\.17)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') is not none
+  retries: 30
+  delay: 5
+  when: clone_vm is changed
+
+- name: Save off the IP for use with checking on the WinRM/SSH connectivity
+  ansible.builtin.set_fact:
+    last_deployed_ip: "{{ (nodecheck.stdout | from_json).ansible_host | default('') | ansible.utils.ipaddr }}"
+  when: clone_vm is changed
+
+# The VM interface update changes the IP of the VM with DHCP, without this the inventory has the old IP still
+- name: Refresh inventory
+  ansible.builtin.meta: refresh_inventory
+
+- name: Wait for the host's control interface (WinRM via HTTPS) to come up
+  local_action:
+    module: wait_for
+    host: "{{ last_deployed_ip }}"
+    port: 5986
+    delay: 3
+    state: started
+  register: wait_result
+  when: is_windows is defined and is_windows and clone_vm is changed
+
+- name: Wait for the host's control interface (SSH) to come up
+  local_action:
+    module: wait_for
+    host: "{{ last_deployed_ip }}"
+    port: 22
+    delay: 3
+    state: started
+  register: wait_result
+  when: ((is_linux is defined and is_linux) or (is_macos is defined and is_macos)) and clone_vm is changed

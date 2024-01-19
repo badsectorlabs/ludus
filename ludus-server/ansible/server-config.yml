@@ -1,0 +1,27 @@
+---
+############################
+## Ludus default settings ##
+############################
+
+defaults:
+  router_vm_name: "{{ range_id }}-router-debian11-x64"
+  snapshot_with_RAM: true
+  stale_hours: 0
+  ad_domain_functional_level: Win2012R2
+  ad_forest_functional_level: Win2012R2
+  ad_domain_admin: domainadmin
+  ad_domain_admin_password: password
+  ad_domain_user: domainuser
+  ad_domain_user_password: password
+  ad_domain_safe_mode_password: password
+
+########################################################################################
+#### Nothing below needs to be manually changed unless you know what you are doing #####
+########################################################################################
+
+ludus_install_path: /opt/ludus
+ludus_users_dir: "{{ ludus_install_path }}/users"
+
+# Wireguard config
+wg_port: "51820"
+wg_server_allowed_ips: "198.51.100.0/24"

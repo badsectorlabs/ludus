@@ -1,0 +1,15 @@
+[Unit]
+Description=Ludus admin server
+Wants=network.target
+After=network.target
+After=wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=root
+ExecStart={{ ludus_install_path }}/ludus-server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

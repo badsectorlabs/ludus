@@ -1,0 +1,22 @@
+# {{ ansible_managed }}
+auto lo
+iface lo inet loopback
+
+auto {{ pve_interface }}
+iface {{ pve_interface }} inet static
+    address {{ pve_ip }}
+    gateway {{ pve_gateway }}
+    netmask {{ pve_netmask }}
+
+# This is the default Ludus NAT'd network used for VM setup before VMs are moved onto their user interface/VLANs
+auto vmbr0
+iface vmbr0 inet static
+    address 192.0.2.254/24
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+    bridge-vlan-aware yes
+    bridge-vids 2-4094
+    post-up   echo 1 > /proc/sys/net/ipv4/ip_forward
+    post-up   iptables -t nat -A POSTROUTING -s '192.0.2.254/24' -o {{ pve_interface }} -j MASQUERADE
+    post-down iptables -t nat -D POSTROUTING -s '192.0.2.254/24' -o {{ pve_interface }} -j MASQUERADE

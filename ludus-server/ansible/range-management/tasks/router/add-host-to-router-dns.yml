@@ -1,0 +1,81 @@
+- name: Get current DNS rules
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/list
+    method: GET
+    status_code: [200, 202]
+    return_content: true
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+  register: rewrites
+
+- name: Delete all rewrite rules to start fresh
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/delete
+    method: POST
+    status_code: [200, 202]
+    return_content: true
+    body_format: json
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      domain: "{{ rewrite_item.domain }}"
+      answer: "{{ rewrite_item.answer }}"
+  loop: "{{ rewrites.content | from_json | list }}"
+  loop_control:
+    loop_var: rewrite_item
+
+- name: Add IP address of all hosts for this range_id to DNS without range_id prefix
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/add
+    method: POST
+    status_code: [200, 202]
+    return_content: true
+    body_format: json
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      domain: "{{ item.hostname | regex_replace('^.*?-', '') }}"
+      answer: "10.{{ range_second_octet }}.{{ item.vlan }}.{{ item.ip_last_octet }}"
+  loop: "{{ ludus }}"
+
+- name: Add IP address of all hosts for this range_id to DNS with range_id prefix
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/add
+    method: POST
+    status_code: [200, 202]
+    return_content: true
+    body_format: json
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      domain: "{{ item.hostname }}"
+      answer: "10.{{ range_second_octet }}.{{ item.vlan }}.{{ item.ip_last_octet }}"
+  loop: "{{ ludus }}"
+
+- name: Add IP address of all hosts for this range_id to DNS without range_id prefix and with home.arpa
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/add
+    method: POST
+    status_code: [200, 202]
+    return_content: true
+    body_format: json
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      domain: "{{ item.hostname | regex_replace('^.*?-', '') }}.home.arpa"
+      answer: "10.{{ range_second_octet }}.{{ item.vlan }}.{{ item.ip_last_octet }}"
+  loop: "{{ ludus }}"
+
+- name: Add IP address of all hosts for this range_id to DNS with range_id prefix and with home.arpa
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/add
+    method: POST
+    status_code: [200, 202]
+    return_content: true
+    body_format: json
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      domain: "{{ item.hostname }}.home.arpa"
+      answer: "10.{{ range_second_octet }}.{{ item.vlan }}.{{ item.ip_last_octet }}"
+  loop: "{{ ludus }}"

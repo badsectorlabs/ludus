@@ -1,0 +1,9 @@
+[Interface]
+PrivateKey = {{ client_private_key }}
+Address = 198.51.100.{{ second_octet }}/32
+
+[Peer]
+PublicKey = {{ server_public_key }}
+Endpoint = {{ proxmox_public_ip }}:51820
+AllowedIPs = 10.{{ second_octet }}.0.0/16, 198.51.100.1/32
+PersistentKeepalive = 25

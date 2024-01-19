@@ -1,0 +1,207 @@
+- name: Stage 3
+  hosts: localhost
+  pre_tasks:
+    - name: Check if the stage-3 file exists
+      ansible.builtin.stat:
+        path: "{{ ludus_install_path }}/install/.stage-3-complete"
+      register: stat_result
+
+    - name: End play if completed
+      ansible.builtin.meta: end_play
+      when: stat_result.stat.exists
+
+    # These have to be present for the pve_acls to work
+    - name: Configure Proxmox pools (SHARED)
+      proxmox_pool:
+        name: SHARED
+        state: present
+        comment: "Templates shared will all Ludus users"
+
+    - name: Configure Proxmox pools (ADMIN)
+      proxmox_pool:
+        name: ADMIN
+        state: present
+        comment: "VMs managed by the Ludus admin"
+
+    - name: Update install progress
+      ansible.builtin.include_tasks: tasks/update-install-progress.yml
+      vars:
+        install_message: |-2
+              Ludus is installing and will not reboot again.
+
+              ████████████████████████████████████████████████░░░░░░░░░░░░ 80%
+  roles:
+    - role: geerlingguy.packer
+      packer_version: "1.9.4"
+    - role: lae.proxmox
+      pve_group: "{{ proxmox_node }}"
+      pve_run_system_upgrades: false
+      pve_reboot_on_kernel_update: false
+      pve_cluster_enabled: false
+      pve_zfs_enabled: false
+      pve_acls:
+        - path: /pool/SHARED
+          roles: ["PVEVMAdmin", "PVEPoolUser", "PVESDNAdmin"] # ["PVETemplateUser"] only allows using templates, not creating
+          groups: ["ludus_users"]
+        - path: /sdn/zones/localnetwork
+          roles: ["PVESDNUser"]
+          groups: ["ludus_users"]
+        - path: /pool/ADMIN
+          roles: ["PVEVMAdmin", "PVESDNAdmin"]
+          groups: ["ludus_admins"]
+        - path: /
+          roles: ["ResourceAudit"]
+          groups: ["ludus_users"]
+  vars:
+    - port: "51820"
+    - server_cidr: "198.51.100.1/24"
+  tasks:
+    - name: Install proxmox and ansible packer plugin
+      ansible.builtin.shell:
+        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/proxmox;
+        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/ansible
+      register: packer_plugin_install
+
+    - name: Ensure group "pveusers" exists
+      ansible.builtin.group:
+        name: pveusers
+        state: present
+
+    - name: Setup WireGuard VPN server
+      ansible.builtin.include_tasks: tasks/setup-wg.yml
+
+    - name: Update install progress
+      ansible.builtin.include_tasks: tasks/update-install-progress.yml
+      vars:
+        install_message: |-2
+              Ludus is installing and will not reboot again.
+
+              ██████████████████████████████████████████████████████░░░░░░ 90%
+
+    - name: Ensure group "ludus" exists
+      ansible.builtin.group:
+        name: ludus
+        state: present
+
+    - name: Create the ludus user
+      ansible.builtin.user:
+        name: ludus
+        shell: /bin/bash
+        groups:
+          - ludus
+          - www-data # required to read the proxmox SSL cert
+        append: true
+
+    - name: Create the ludus users directory
+      ansible.builtin.file:
+        path: "{{ ludus_install_path }}/users"
+        state: directory
+
+    - name: Chown install directory to ludus user
+      ansible.builtin.file:
+        dest: "{{ ludus_install_path }}"
+        owner: ludus
+        group: ludus
+        recurse: true
+
+    - name: Create the ludus root user directory
+      ansible.builtin.file:
+        path: "{{ ludus_install_path }}/users/root"
+        state: directory
+
+    - name: Install collections and roles together for the root user (used to create other users)
+      # community.general.ansible_galaxy_install:
+      #   type: both
+      #   requirements_file: "{{ ludus_install_path }}/ansible/requirements.yml"
+      # We must set the ANSIBLE_HOME correctly, so use the shell
+      ansible.builtin.shell:
+        cmd: |
+          ANSIBLE_HOME={{ ludus_install_path }}/users/root/.ansible ansible-galaxy install -r {{ ludus_install_path }}/ansible/requirements.yml
+
+    - name: TMP install the lae.proxmox role that supports proxmox 8
+      # We must set the ANSIBLE_HOME correctly, so use the shell
+      ansible.builtin.shell:
+        cmd: |
+          ANSIBLE_HOME={{ ludus_install_path }}/users/root/.ansible ansible-galaxy install https://github.com/lexxxel/ansible-role-proxmox/archive/feature/add_bookworm_and_debian_12_compatibility.tar.gz,pr-230,lae.proxmox --force
+
+    - name: Remove systemd service file for ludus install
+      ansible.builtin.file:
+        path: "/etc/systemd/system/ludus-install.service"
+        state: absent
+
+    - name: Create systemd service file for ludus admin
+      ansible.builtin.template:
+        src: ludus-admin.service.j2
+        dest: "/etc/systemd/system/ludus-admin.service"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Start the ludus admin service
+      ansible.builtin.service:
+        name: ludus-admin.service
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    - name: Create systemd service file for ludus
+      ansible.builtin.template:
+        src: ludus.service.j2
+        dest: "/etc/systemd/system/ludus.service"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Start the ludus service
+      ansible.builtin.service:
+        name: ludus
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    - name: Modify motd
+      ansible.builtin.template:
+        src: motd.j2
+        dest: /etc/update-motd.d/11-ludus-version
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Update the install status for console
+      ansible.builtin.template:
+        src: issue.j2
+        dest: /etc/issue
+        owner: root
+        group: root
+        mode: '0644'
+      vars:
+        issue_message: |-2
+              This is a Ludus host.
+
+              Ludus is a project to enable teams to quickly and
+              safely deploy test environments (ranges) to test tools and
+              techniques against representative virtual machines.
+
+              Ludus leverages Proxmox which is licensed under APGLv3.
+
+    - name: Bounce the TTY to update the install issue_message
+      ansible.builtin.service:
+        name: getty@tty1
+        state: restarted
+
+    - name: Disable SSH banner messages
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        state: absent
+        line: Banner /etc/sshbanner
+
+    - name: Bounce the SSH service to disable banners
+      ansible.builtin.service:
+        name: sshd
+        state: restarted
+
+    - name: Drop a file to indicate stage 3 is complete
+      ansible.builtin.file:
+        path: "{{ ludus_install_path }}/install/.stage-3-complete"
+        state: touch
+        mode: '0644'

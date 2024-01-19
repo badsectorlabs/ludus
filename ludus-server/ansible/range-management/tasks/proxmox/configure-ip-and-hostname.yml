@@ -1,0 +1,384 @@
+#######################################
+## Check if we need to change the IP ##
+#######################################
+- name: Check if the IP has been statically set correctly (Linux)
+  ansible.builtin.shell: |
+    ip address show | egrep 'inet 10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
+  register: linux_ip_address_line
+  failed_when: linux_ip_address_line.rc > 1
+  when: ansible_system == "Linux"
+
+- name: Ending play for this host (Linux)
+  ansible.builtin.debug:
+    msg: "Ending IP/Hostname play for {{ ansible_host }} as it is already configured. IP line: {{ linux_ip_address_line.stdout }}"
+  when:
+    - ansible_system == "Linux"
+    - linux_ip_address_line.stdout | length > 0
+    - '"dynamic" not in linux_ip_address_line.stdout'
+    - static_ip in linux_ip_address_line.stdout
+
+- name: End play if configured (Linux)
+  ansible.builtin.meta: end_host
+  when:
+    - ansible_system == "Linux"
+    - linux_ip_address_line.stdout | length > 0
+    - '"dynamic" not in linux_ip_address_line.stdout'
+    - static_ip in linux_ip_address_line.stdout
+
+- name: Get network interface configuration (Windows)
+  ansible.windows.win_shell: |
+    $interface = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like "10.*" } | Select-Object -First 1
+    if ($interface -ne $null) {
+        if (Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPAddress -like "10.*"} | select -ExpandProperty DHCPEnabled) {
+            Write-Output "DHCP"
+        } else {
+            Write-Output "Static"
+        }
+    } else {
+        Write-Output "No interface in 10.0.0.0/16 network found"
+    }
+  register: windows_ip_status
+  when: ansible_os_family == "Windows"
+
+- name: Output result
+  ansible.builtin.debug:
+    msg: "{{ windows_ip_status.stdout }}"
+  when: ansible_os_family == "Windows"
+
+- name: Get IP address of network interface (Windows)
+  ansible.windows.win_shell: |
+    $ipAddress = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like "10.*" } | Select-Object -First 1 -ExpandProperty IPAddress
+    if ($ipAddress -ne $null) {
+        Write-Output $ipAddress
+    } else {
+        Write-Output "No IP address found in 10.0.0.0/16 network"
+    }
+  register: windows_ip_address_result
+  when:
+    - ansible_os_family == "Windows"
+    - windows_ip_status.stdout | trim == "Static"
+
+- name: Show IP address
+  ansible.builtin.debug:
+    msg: "{{ windows_ip_address_result.stdout }}"
+  when:
+    - ansible_os_family == "Windows"
+    - windows_ip_status.stdout | trim == "Static"
+
+- name: Ending play for this host (Windows)
+  ansible.builtin.debug:
+    msg: "Ending IP/Hostname play for {{ ansible_host }} as it is already configured. IP status: {{ windows_ip_status.stdout | trim }}, IP: {{ windows_ip_address_result.stdout | trim }}"
+  when:
+    - ansible_os_family == "Windows"
+    - windows_ip_status.stdout | trim == "Static"
+    - windows_ip_address_result.stdout | trim == static_ip
+
+
+- name: End play if configured (Windows)
+  ansible.builtin.meta: end_host
+  when:
+    - ansible_os_family == "Windows"
+    - windows_ip_status.stdout | trim == "Static"
+    - windows_ip_address_result.stdout | trim == static_ip
+
+#############
+## Windows ##
+#############
+# Static IP - Windows
+- name: Set up static IP address (Windows)
+  # Windows sometimes screws up and sets a static IP but thinks it still needs DHCP. Kicking the adapter fixes it
+  win_shell: |
+    $eAdapter = Get-NetIpAddress -InterfaceAlias 'Ethernet*'
+    $eAdapter | New-NetIpAddress -IpAddress {{ static_ip }} -PrefixLength {{ cidr_netmask }} -DefaultGateway {{ default_gateway }}
+    Disable-NetAdapter -Name $eAdapter -Confirm: $false
+    Enable-NetAdapter -Name $eAdapter -Confirm: $false
+  async: 100 # Using "fire-and-forget" asynchronous execution for this task, otherwise it will always fail and time out
+  poll: 0
+  when: ansible_os_family == "Windows"
+
+- name: Change ansible's ip address for the host (Windows)
+  ansible.builtin.set_fact:
+    ansible_host: "{{ static_ip }}"
+  when: ansible_os_family == "Windows"
+
+- name: Wait for the host's network interface to come back up (Windows)
+  ansible.builtin.wait_for:
+    host: "{{ static_ip }}"
+    port: 5986
+    delay: 3
+    state: started
+  delegate_to: localhost
+  become: false
+  register: wait_result
+  when: ansible_os_family == "Windows"
+
+- name: Set DNS (Windows)
+  ansible.windows.win_dns_client:
+    adapter_names: '*'
+    dns_servers:
+      - "{{ dns_server }}"
+  when: ansible_os_family == "Windows" and dns_server is defined
+
+- name: Set DNS search domain (Windows)
+  ansible.windows.win_powershell:
+    script: |
+      Set-DnsClientGlobalSetting -SuffixSearchList @("home.arpa")
+  when: ansible_os_family == "Windows" and dns_server is defined
+
+# Hostname - Windows
+- name: Hostname change (Windows)
+  win_hostname:
+    name: "{{ vm_hostname }}"
+  register: res
+  when: ansible_os_family == "Windows"
+
+- name: Reboot
+  win_reboot:
+  when: ansible_os_family == "Windows" and res.reboot_required
+
+- name: Wait for the host's control interface (WinRM via HTTPS) to come up
+  ansible.builtin.wait_for:
+    host: "{{ static_ip }}"
+    port: 5986
+    delay: 3
+    state: started
+  delegate_to: localhost
+  become: false
+  register: wait_result
+  when: ansible_os_family == "Windows" and res.reboot_required
+
+###########
+## Linux ##
+###########
+- name: Install dbus for systemd hostname changes
+  ansible.builtin.apt:
+    name:
+      - dbus
+      - libpam-systemd
+    state: present
+  when: ansible_os_family == "Debian"
+  become: true
+
+- name: Install ifupdown to enable interfaces
+  ansible.builtin.apt:
+    name:
+      - ifupdown
+    state: present
+  when: ansible_distribution == "Ubuntu"
+  become: true
+
+- name: Check if /etc/cloud exists and is a directory
+  ansible.builtin.stat:
+    path: /etc/cloud
+  register: cloud_dir
+  when: ansible_distribution == "Ubuntu"
+
+- name: Ensure /etc/cloud/cloud-init.disabled exists to stop cloud-init from DHCPing the interface
+  ansible.builtin.file:
+    path: /etc/cloud/cloud-init.disabled
+    state: touch
+  when:
+    - ansible_distribution == "Ubuntu"
+    - cloud_dir.stat.isdir
+  become: true
+
+- name: Check if /etc/netplan/00-installer-config.yaml exists
+  ansible.builtin.stat:
+    path: /etc/netplan/00-installer-config.yaml
+  become: true
+  register: netplan_file
+  when: ansible_distribution == "Ubuntu"
+
+- name: Delete /etc/netplan/00-installer-config.yaml
+  ansible.builtin.file:
+    path: /etc/netplan/00-installer-config.yaml
+    state: absent
+  become: true
+  when:
+    - ansible_distribution == "Ubuntu"
+    - netplan_file.stat.exists
+
+- name: Set DNS search domain for systemd-resolved
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/resolved.conf
+    line: Domains=home.arpa
+  become: true
+  when: ansible_distribution == "Ubuntu"
+
+- name: Set DNS server for systemd-resolved
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/resolved.conf
+    line: "DNS={{ dns_server }}"
+  become: true
+  when: ansible_distribution == "Ubuntu" and dns_server is defined
+
+# Get the data needed for all Linux
+# I tried to do this with uri and json_query, but JMESPath is a mess.
+- name: get MAC for vlan interface (Linux)
+  ansible.builtin.shell: |
+    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ proxmox_vmid }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ vlan }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
+  register: vlan_mac_command
+  when: ansible_system == "Linux"
+  delegate_to: localhost
+  become: false
+
+- name: Set the vlan_mac variable
+  ansible.builtin.set_fact:
+    vlan_mac: "{{ vlan_mac_command.stdout }}"
+  when: ansible_system == "Linux"
+
+- name: get interface for MAC of vlan interface (Linux)
+  ansible.builtin.shell: |
+    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ proxmox_vmid }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
+  register: interface_name_command
+  when: ansible_system == "Linux"
+  delegate_to: localhost
+  become: false
+
+- name: Set the interface_name variable
+  ansible.builtin.set_fact:
+    interface_name: "{{ interface_name_command.stdout }}"
+  when: ansible_system == "Linux"
+
+- name: Assert we found the interface name
+  ansible.builtin.assert:
+    that: interface_name != ""
+    fail_msg: "Could not find the interface name for VM {{ proxmox_vmid }}"
+    success_msg: "Successfully found the interface name for VM {{ proxmox_vmid }}"
+  when: ansible_system == "Linux"
+
+# Static IP - Linux
+- name: Set static IP from the template (Linux-Debian)
+  become: true
+  ansible.builtin.template:
+    src: interfaces-debian.j2
+    dest: /etc/network/interfaces
+  register: interfaces_status_debian
+  when: ansible_os_family == "Debian"
+
+- name: Set static IP from the template (Linux-RedHat/CentOS/Alma/Rocky)
+  become: true
+  ansible.builtin.template:
+    src: interfaces-redhat.j2
+    dest: "/etc/sysconfig/network-scripts/ifcfg-{{ interface_name }}"
+  register: interfaces_status_redhat
+  # These should all resolve to 'RedHat' but on older ansible they will not be in the OS_FAMILY_MAP and default to the distribution
+  # https://github.com/ansible/ansible/blob/d10100968890d85602099c153b71a23c416930b4/lib/ansible/module_utils/facts/system/distribution.py#L543
+  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux']
+
+- name: Enable new interface (Linux)
+  become: true
+  ansible.builtin.shell: ifup {{ interface_name }}
+  ignore_errors: true
+  when: ansible_os_family == "Debian" and (interfaces_status_debian is changed or interfaces_status_redhat is changed)
+
+# Hostname - Linux
+- name: Setting hostname (Linux)
+  become: true
+  ansible.builtin.hostname:
+    name: "{{ vm_hostname }}"
+    use: debian
+  register: linux_hostname
+  when: ansible_os_family == "Debian"
+
+- name: Setting hostname (Linux-RedHat/CentOS/Alma/Rocky)
+  become: true
+  ansible.builtin.hostname:
+    name: "{{ vm_hostname }}"
+  register: linux_hostname
+  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux']
+
+- name: Add IP address to /etc/hosts
+  ansible.builtin.lineinfile:
+    dest: /etc/hosts
+    regexp: '.*{{ inventory_hostname }}$'
+    line: "{{ static_ip }} {{ inventory_hostname }} {{ vm_hostname }}"
+    state: present
+  when: ansible_system == "Linux"
+  become: true
+
+- name: Add hostname to /etc/hosts
+  ansible.builtin.lineinfile:
+    dest: /etc/hosts
+    regexp: '^127.0.1.1.*{{ inventory_hostname }}$'
+    line: "127.0.1.1    {{ inventory_hostname }}"
+    state: present
+  when: ansible_system == "Linux"
+  become: true
+
+- name: Remove default entry for 127.0.0.1 from /etc/hosts
+  ansible.builtin.lineinfile:
+    dest: /etc/hosts
+    regexp: '^127.*debian.*$'
+    state: absent
+  when: ansible_system == "Linux"
+  become: true
+
+# Can't use the built in reboot because it won't do async https://github.com/ansible/ansible/issues/71517
+- name: Reboot to set ip and hostname (Linux)
+  become: true
+  ansible.builtin.shell: |
+    reboot
+  async: 100
+  poll: 0
+  register: reboot
+  when: ansible_system == "Linux" and ((interfaces_status_debian is changed or interfaces_status_redhat is changed) or linux_hostname is changed)
+
+- name: Change ansible's ip address for the host
+  ansible.builtin.set_fact:
+    ansible_host: "{{ static_ip }}"
+  when: ansible_system == "Linux" and reboot is changed
+
+- name: Wait for the host's control interface (SSH) to come up
+  ansible.builtin.wait_for:
+    host: "{{ static_ip }}"
+    port: 22
+    delay: 3
+    state: started
+  delegate_to: localhost
+  become: false
+  register: wait_result
+  when: ansible_system == "Linux" and reboot is changed
+
+###########
+## macOS ##
+###########
+- name: Set up static IP address (macOS)
+  ansible.builtin.shell: |
+    networksetup -setmanual Ethernet {{ static_ip }} 255.255.255.0 {{ default_gateway }}
+  # macOS changes the IP immediately, so the command will never "return"
+  async: 100
+  poll: 0
+  when: ansible_system == 'Darwin'
+
+- name: Change ansible's ip address for the host
+  ansible.builtin.set_fact:
+    ansible_host: "{{ static_ip }}"
+  when: ansible_system == "Darwin"
+
+- name: Wait for the host's control interface (SSH) to come up
+  ansible.builtin.wait_for:
+    host: "{{ static_ip }}"
+    port: 22
+    delay: 3
+    state: started
+  delegate_to: localhost
+  become: false
+  register: wait_result
+  when: ansible_system == "Darwin"
+
+- name: Set DNS (macOS)
+  ansible.builtin.shell: |
+    networksetup -setdnsservers Ethernet {{ dns_server }}
+  when: ansible_system == "Darwin" and dns_server is defined
+
+- name: Setting hostname (macOS)
+  ansible.builtin.hostname:
+    name: "{{ vm_hostname }}"
+    use: darwin
+  become: true
+  register: macos_hostname
+  when: ansible_system == "Darwin"
+
+- name: Refresh inventory
+  ansible.builtin.meta: refresh_inventory

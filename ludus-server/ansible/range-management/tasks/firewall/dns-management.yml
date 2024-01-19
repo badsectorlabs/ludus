@@ -1,0 +1,189 @@
+# ==========================================================
+# Block
+# ==========================================================
+- name: Create block_rules list
+  ansible.builtin.set_fact:
+    block_rules: "{{ action_ips | map('regex_replace', '^(.*)$', '/.*/$client=\\1/32') | list }}"
+  when: testing_action == "block"
+
+- name: Block VMs from using any DNS
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/filtering/set_rules
+    method: POST
+    body_format: json
+    status_code: [200, 202]
+    return_content: true
+    headers:
+      Content-Type: application/json
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      rules:
+        "{{ block_rules }}"
+  when: testing_action == "block"
+
+# ==========================================================
+# Allow
+# ==========================================================
+- name: Unblock VMs from using any DNS
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/filtering/set_rules
+    method: POST
+    body_format: json
+    status_code: [200, 202]
+    return_content: true
+    headers:
+      Content-Type: application/json
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      rules:
+  when: testing_action == "allow"
+
+- name: Get list of rewrites (pins)
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/list
+    method: GET
+    status_code: [200, 202]
+    return_content: true
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+  register: rewrites
+  when: testing_action == "allow"
+
+- name: Loop over rewrites (pins) and remove any non-10.0.0.0/8 addresses.
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/delete
+    method: POST
+    status_code: [200, 202]
+    return_content: true
+    body_format: json
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      domain: "{{ item.domain }}"
+      answer: "{{ item.answer }}"
+  when: testing_action == "allow" and not (item['answer'] | ansible.utils.ipaddr('10.0.0.0/8'))
+  loop: "{{ rewrites.content | from_json }}"
+
+# ==========================================================
+# Allow Domain
+# ==========================================================
+- name: Get current DNS rules
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/filtering/status
+    method: GET
+    status_code: [200, 202]
+    return_content: true
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+  register: filtering_status
+  when: testing_action == "allow-domain"
+
+- name: Create the rules array for DNS
+  ansible.builtin.set_fact:
+    rules: "{{ filtering_status.content | from_json | json_query('user_rules') }}"
+  when: testing_action == "allow-domain"
+
+- name: Populate the rules array for DNS with new domains, skipping already allowed domains
+  ansible.builtin.set_fact:
+    rules: "{{ rules | default([]) + ['@@||' + domain + '^$client=' + item + '/32'] }}"
+  loop: "{{ action_ips }}"
+  when: testing_action == "allow-domain" and ('@@||' + domain + '^$client=' + item + '/32') not in (rules | join(" "))
+
+- name: Allow DNS for a domain
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/filtering/set_rules
+    method: POST
+    body_format: json
+    status_code: [200, 202]
+    return_content: true
+    headers:
+      Content-Type: application/json
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      rules:
+        "{{ rules }}"
+  when: testing_action == "allow-domain"
+
+- name: Get list of rewrites (pins)
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/list
+    method: GET
+    status_code: [200, 202]
+    return_content: true
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+  register: rewrites
+  when: testing_action == "allow-domain"
+
+- name: Pin IP of domain in the DNS server
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/add
+    method: POST
+    status_code: [200, 202]
+    return_content: true
+    body_format: json
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      domain: "{{ domain }}"
+      answer: "{{ domainIP }}"
+  when: testing_action == "allow-domain" and (rewrites.content | from_json | selectattr('domain', 'equalto', domain) | list | length == 0)
+
+# ==========================================================
+# Domain Block
+# ==========================================================
+- name: Get list of rewrites (pins)
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/list
+    method: GET
+    status_code: [200, 202]
+    return_content: true
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+  register: rewrites
+  when: testing_action == "deny-domain"
+
+- name: Loop over rewrites (pins) and remove the domain
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/rewrite/delete
+    method: POST
+    status_code: [200, 202]
+    return_content: true
+    body_format: json
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      domain: "{{ item.domain }}"
+      answer: "{{ item.answer }}"
+  when: testing_action == "deny-domain" and item['domain'] == domain
+  loop: "{{ rewrites.content | from_json }}"
+
+- name: Get list of user defined DNS allow rules
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/filtering/status
+    method: GET
+    status_code: [200, 202]
+    return_content: true
+    headers:
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+  register: filtering_status
+  when: testing_action == "deny-domain"
+
+- name: Remove domain from defined DNS allow rules
+  ansible.builtin.set_fact:
+    new_rules: "{{ filtering_status.content | from_json | json_query('user_rules') | reject('regex', '@@\\|\\|' + domain + '\\^\\$') | list }}"
+  when: testing_action == "deny-domain"
+
+- name: Set filtering rules (now without the domain)
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/control/filtering/set_rules
+    method: POST
+    body_format: json
+    status_code: [200, 202]
+    return_content: true
+    headers:
+      Content-Type: application/json
+      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+    body:
+      rules: "{{ new_rules }}"
+  when: testing_action == "deny-domain"

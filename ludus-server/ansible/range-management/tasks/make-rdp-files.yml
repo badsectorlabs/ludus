@@ -1,0 +1,62 @@
+- name: Delete RDP directory
+  ansible.builtin.file:
+    state: absent
+    path: "{{ ludus_users_dir }}/{{ username }}/rdp/"
+  ignore_errors: true
+
+- name: Create rdp directory for this user
+  ansible.builtin.file:
+    path: "{{ ludus_users_dir }}/{{ username }}/rdp"
+    state: directory
+    mode: '0770'
+
+- name: Create RDP files for each Windows host for domainuser
+  template:
+    src: RDP.j2
+    dest: "{{ ludus_users_dir }}/{{ username }}/rdp/{{ item }}-domainuser.rdp"
+  with_inventory_hostnames:
+    - all
+  when:
+    - hostvars[item]['proxmox_os_id'] is defined
+    - hostvars[item]['proxmox_os_id'] == "windows"
+    - (ludus | selectattr('vm_name', 'match', item))[0].domain is defined
+  vars:
+    rdp_host: "{{ hostvars[item]['ansible_host'] }}"
+    rdp_domain: "{{ (ludus | selectattr('vm_name', 'match', item))[0].domain.fqdn.split('.')[0] }}"
+    rdp_username: "{{ defaults.ad_domain_user }}"
+
+- name: Create RDP files for each Windows host for domainadmin
+  ansible.builtin.template:
+    src: RDP.j2
+    dest: "{{ ludus_users_dir }}/{{ username }}/rdp/{{ item }}-domainadmin.rdp"
+  with_inventory_hostnames:
+    - all
+  when:
+    - hostvars[item]['proxmox_os_id'] is defined
+    - hostvars[item]['proxmox_os_id'] == "windows"
+    - (ludus | selectattr('vm_name', 'match', item))[0].domain is defined
+  vars:
+    rdp_host: "{{ hostvars[item]['ansible_host'] }}"
+    rdp_domain: "{{ (ludus | selectattr('vm_name', 'match', item))[0].domain.fqdn.split('.')[0] }}"
+    rdp_username: "{{ defaults.ad_domain_admin }}"
+
+- name: Create RDP files for each Windows host for localuser
+  ansible.builtin.template:
+    src: RDP.j2
+    dest: "{{ ludus_users_dir }}/{{ username }}/rdp/{{ item }}-localuser.rdp"
+  with_inventory_hostnames:
+    - all
+  when:
+    - hostvars[item]['proxmox_os_id'] is defined
+    - hostvars[item]['proxmox_os_id'] == "windows"
+  vars:
+    rdp_host: "{{ hostvars[item]['ansible_host'] }}"
+    rdp_domain: "{{ item }}"
+    rdp_username: localuser
+
+- name: Zip up the RDP files
+  community.general.archive:
+    format: zip
+    path:
+      - "{{ ludus_users_dir }}/{{ username }}/rdp/*"
+    dest: "{{ ludus_users_dir }}/{{ username }}/rdp.zip"

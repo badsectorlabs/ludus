@@ -1,0 +1,95 @@
+- name: Create the VM for this CI run and power it on waiting for SSH to be available
+  hosts: localhost
+  tasks:
+    - name: Only run if needed
+      when: "runner_vm_name in hostvars or (skip_build is defined and skip_build == 'true')"
+      block:
+        - name: Check inventory to see if the pipeline VM already exists, end this play if so
+          debug:
+            msg: "Pipeline VM already running"
+        - name: End the play
+          meta: end_play
+
+    - name: Create CI VM from a Debian 12 template
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        clone: debian-12-x64-server-ludus-ci-template
+        name: "{{ runner_vm_name }}"
+        pool: CICD
+        full: true # TODO determine why the auto-built template doesn't support linked clones
+        timeout: 600
+      register: clone_vm
+
+    - name: Set the vm_id
+      ansible.builtin.set_fact:
+        vm_id: "{{ clone_vm.vmid }}"
+      when: clone_vm is successful
+      until: vm_id != -1
+
+    - name: Start the VM
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ vm_id }}"
+        state: started
+      # This is required or ansible will attempt to start a VM that doesn't exist
+      when: clone_vm is successful
+      # But sometimes it fails anyway?
+      retries: 3
+      delay: 5
+
+    - name: Wait for VM to be running, and try to start it if not running after 20 seconds
+      block:
+        - name: Check VM running status
+          community.general.proxmox_kvm:
+            api_user: "{{ api_user }}"
+            api_password: "{{ api_password }}"
+            api_host: "{{ api_host }}"
+            node: "{{ node_name }}"
+            vmid: "{{ vm_id }}"
+            state: current
+          register: result
+          until: result.status.find("running") != -1
+          retries: 2
+          delay: 5
+      rescue:
+        - name: Start the VM
+          community.general.proxmox_kvm:
+            api_user: "{{ api_user }}"
+            api_password: "{{ api_password }}"
+            api_host: "{{ api_host }}"
+            node: "{{ node_name }}"
+            vmid: "{{ vm_id }}"
+            state: started
+
+    - name: Wait for VM to acquire an IP address
+      command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host {{ runner_vm_name }}
+      register: nodecheck
+      changed_when: false
+      until: (nodecheck.stdout | default('') | from_json).ansible_host | default('') | ansible.utils.ipaddr
+      retries: 30
+      delay: 5
+      when: clone_vm is changed
+
+    - name: Save off the IP for use with checking on the SSH connectivity
+      set_fact: last_deployed_ip={{ (nodecheck.stdout | from_json).ansible_host | default('') | ansible.utils.ipaddr }}
+      when: clone_vm is changed
+
+    # The VM interface update changes the IP of the VM with DHCP, without this the inventory has the old IP still
+    - name: Refresh inventory
+      meta: refresh_inventory
+
+    - name: Wait for the host's control interface (SSH) to come up
+      action:
+        module: wait_for
+        host: "{{ last_deployed_ip }}"
+        port: 22
+        delay: 3
+        state: started
+      register: wait_result
+      when: clone_vm is changed

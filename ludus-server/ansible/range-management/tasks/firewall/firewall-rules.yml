@@ -1,0 +1,153 @@
+- name: Print
+  ansible.builtin.debug:
+    msg: "{{ item }}"
+
+- name: Set src for simple rule
+  ansible.builtin.set_fact:
+    src: "{{ '10.' + range_second_octet | string + '.' + item.vlan_src | string + '.0/24' if item.vlan_src | string != 'all' else '10.' + range_second_octet | string + '.0.0/16' }}"
+  when:
+    - item.ip_last_octet_src is undefined
+
+- name: Set dst for simple rule
+  ansible.builtin.set_fact:
+    dst: "{{ '10.' + range_second_octet | string + '.' + item.vlan_dst | string + '.0/24' if item.vlan_dst | string != 'all' else '10.' + range_second_octet | string + '.0.0/16' }}"
+  when:
+    - item.vlan_dst != 'public'
+    - item.ip_last_octet_dst is undefined
+
+- name: Set dst for simple rule (public)
+  ansible.builtin.set_fact:
+    dst: "! 10.{{ range_second_octet }}.0.0/16"
+  when:
+    - item.vlan_dst == 'public'
+    - item.ip_last_octet_dst is undefined
+
+- name: Set src for an IP rule
+  ansible.builtin.set_fact:
+    src: 10.{{ range_second_octet }}.{{ item.vlan_src }}.{{ item.ip_last_octet_src }}
+  when:
+    - item.ip_last_octet_src is defined
+    - '"-" not in (item.ip_last_octet_src | string)'
+
+- name: Set dst for an IP rule
+  ansible.builtin.set_fact:
+    dst: 10.{{ range_second_octet }}.{{ item.vlan_dst }}.{{ item.ip_last_octet_dst }}
+  when:
+    - item.ip_last_octet_dst is defined
+    - '"-" not in (item.ip_last_octet_dst | string)'
+
+- name: Set src for an IP rule (range)
+  ansible.builtin.set_fact:
+    src: 10.{{ range_second_octet }}.{{ item.vlan_src }}.{{ item.ip_last_octet_src.split('-')[0] }}-10.{{ range_second_octet }}.{{ item.vlan_src }}.{{ item.ip_last_octet_src.split('-')[1] }}
+  when:
+    - item.ip_last_octet_src is defined
+    - '"-" in (item.ip_last_octet_src | string)'
+
+- name: Set dst for an IP rule (range)
+  ansible.builtin.set_fact:
+    dst: 10.{{ range_second_octet }}.{{ item.vlan_dst }}.{{ item.ip_last_octet_dst.split('-')[0] }}-10.{{ range_second_octet }}.{{ item.vlan_dst }}.{{ item.ip_last_octet_dst.split('-')[1] }}
+  when:
+    - item.ip_last_octet_dst is defined
+    - '"-" in (item.ip_last_octet_dst | string)'
+
+# Handle all cases for protocol (undefined, 'all', or a string)
+- name: Set protocol (undefined or all)
+  ansible.builtin.set_fact:
+    proto: "all"
+  when:
+    - item.protocol is undefined or (item.protocol | string) == "all"
+
+- name: Set protocol (defined and not all)
+  ansible.builtin.set_fact:
+    proto: "{{ item.protocol }}"
+  when:
+    - item.protocol is defined
+    - (item.protocol | string) != "all"
+
+- name: Debug
+  ansible.builtin.debug:
+    msg: "src: {{ src }}    dst: {{ dst }}     proto: {{ proto }}    ports: {{ item.ports | default('undefined') }}    action: {{ item.action }}"
+
+- name: Check that ports are only set with supported protocols
+  ansible.builtin.assert:
+    that:
+      - item.protocol == 'tcp' or item.protocol == 'udp' or item.protocol == 'dccp' or item.protocol == 'sctp'
+    fail_msg: "You can only define ports with protocols: tcp, udp, dccp, or sctp"
+    success_msg: "Protocol and ports are compatible"
+  when:
+    - item.ports is defined
+    - item.ports | string != 'all'
+
+- name: Apply a standard firewall rule
+  ansible.builtin.iptables:
+    chain: FORWARD
+    source: "{{ src }}"
+    destination: "{{ dst }}"
+    protocol: "{{ proto }}"
+    destination_port: "{{ item.ports if (item.ports is defined and (item.ports | string) != 'all') else omit }}"
+    jump: "{{ item.action }}"
+    state: present
+    action: insert
+    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
+    comment: "User Rule: {{ item.name }}"
+    numeric: true
+  when: >
+      (item.ip_last_octet_src is undefined and item.ip_last_octet_dst is undefined) or
+      (item.ip_last_octet_dst is undefined and item.ip_last_octet_src is defined and "-" not in (item.ip_last_octet_src | string)) or
+      (item.ip_last_octet_src is undefined and item.ip_last_octet_dst is defined and "-" not in (item.ip_last_octet_dst | string)) or
+      (item.ip_last_octet_src is defined and "-" not in (item.ip_last_octet_src | string) and item.ip_last_octet_dst is defined and "-" not in (item.ip_last_octet_dst | string))
+
+- name: Apply a src range firewall rule
+  ansible.builtin.iptables:
+    chain: FORWARD
+    src_range: "{{ src }}"
+    destination: "{{ dst }}"
+    protocol: "{{ proto }}"
+    destination_port: "{{ item.ports if (item.ports is defined and (item.ports | string) != 'all') else omit }}"
+    jump: "{{ item.action }}"
+    state: present
+    action: insert
+    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
+    comment: "User Rule: {{ item.name }}"
+    numeric: true
+  when:
+    - item.ip_last_octet_src is defined
+    - '"-" in (item.ip_last_octet_src | string)'
+    - (item.ip_last_octet_dst is undefined or item.ip_last_octet_dst is defined and "-" not in (item.ip_last_octet_dst | string))
+
+- name: Apply a dst range firewall rule
+  ansible.builtin.iptables:
+    chain: FORWARD
+    source: "{{ src }}"
+    dst_range: "{{ dst }}"
+    protocol: "{{ proto }}"
+    destination_port: "{{ item.ports if (item.ports is defined and (item.ports | string) != 'all') else omit }}"
+    jump: "{{ item.action }}"
+    state: present
+    action: insert
+    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
+    comment: "User Rule: {{ item.name }}"
+    numeric: true
+  when:
+    - item.ip_last_octet_dst is defined
+    - '"-" in (item.ip_last_octet_dst| string)'
+    - (item.ip_last_octet_src is undefined or item.ip_last_octet_src is defined and "-" not in (item.ip_last_octet_src | string))
+
+- name: Apply a src and dst range firewall rule
+  ansible.builtin.iptables:
+    chain: FORWARD
+    src_range: "{{ src }}"
+    dst_range: "{{ dst }}"
+    protocol: "{{ proto }}"
+    destination_port: "{{ item.ports if (item.ports is defined and (item.ports | string) != 'all') else omit }}"
+    jump: "{{ item.action }}"
+    state: present
+    action: insert
+    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
+    comment: "User Rule: {{ item.name }}"
+    numeric: true
+  when:
+    - item.ip_last_octet_src is defined
+    - item.ip_last_octet_dst is defined
+    - '"-" in (item.ip_last_octet_src | string)'
+    - '"-" in (item.ip_last_octet_dst | string)'

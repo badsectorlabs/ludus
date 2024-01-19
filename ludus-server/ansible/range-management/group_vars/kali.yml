@@ -1,0 +1,8 @@
+ansible_connection: ssh
+ansible_user: kali
+ansible_ssh_pass: kali
+ansible_sudo_pass: kali
+ansible_python_interpreter: /usr/bin/python3
+ansible_become: true
+ansible_become_method: sudo
+ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"

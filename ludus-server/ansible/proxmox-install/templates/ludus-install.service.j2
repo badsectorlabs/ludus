@@ -1,0 +1,12 @@
+[Unit]
+Description=Run ludus server as root
+
+[Service]
+Type=idle
+User=root
+ExecStart={{ ludus_install_path }}/ludus-server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

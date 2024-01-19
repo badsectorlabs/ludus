@@ -1,0 +1,6 @@
+---
+- name: Enable default WMI allow rule
+  win_firewall_rule:
+    name: Windows Management Instrumentation (WMI-In)
+    action: allow
+    state: present

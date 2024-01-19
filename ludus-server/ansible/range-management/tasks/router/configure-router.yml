@@ -1,0 +1,62 @@
+- name: Setup ip forwarding on the router
+  become: true
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: 1
+    sysctl_set: true
+    state: present
+    reload: true
+
+- name: Disable ipv6
+  become: true
+  sysctl:
+    name: net.ipv6.conf.all.disable_ipv6
+    value: 1
+    sysctl_set: true
+    state: present
+    reload: true
+
+- name: Install dnsmasq, ca-certificates, and iptables-persistent
+  apt:
+    name:
+      - dnsmasq
+      - iptables-persistent
+      - ca-certificates
+      - rsync
+      - curl
+      - conntrack
+    state: present
+
+- name: Disable DNS in dnsmasq (only use it for DHCP)
+  lineinfile:
+    path: /etc/dnsmasq.conf
+    line: 'port=0'
+    create: true
+
+- name: Restart dnsmasq service to pick up changes
+  ansible.builtin.service:
+    name: dnsmasq
+    state: restarted
+
+- name: Install AdGuardHome
+  ansible.builtin.shell: |
+    curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
+  register: adguard_install
+  failed_when: adguard_install.rc != 0 and (adguard_install.rc == 1 and 'the existing AdGuard Home installation is detected' not in adguard_install.stderr)
+
+- name: Configure AdGuardHome
+  template:
+    src: AdGuardHome.yaml.j2
+    dest: /opt/AdGuardHome/AdGuardHome.yaml
+  when: adguard_install.rc == 0
+
+- name: Restart AdGuardHome to take config
+  ansible.builtin.service:
+    name: AdGuardHome
+    state: restarted
+  when: adguard_install.rc == 0
+
+- name: Drop a file to signal that we have completed configuration
+  ansible.builtin.file:
+    path: /etc/.ludus-configured
+    state: touch

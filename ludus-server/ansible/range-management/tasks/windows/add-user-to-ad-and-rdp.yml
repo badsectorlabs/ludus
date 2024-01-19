@@ -1,0 +1,24 @@
+- name: Create an AD user
+  delegate_to: "{{ ad_dc_vm_name }}"
+  run_once: true
+  community.windows.win_domain_user:
+    name: "{{ username }}"
+    firstname: "{{ firstname }}"
+    surname: "{{ lastname }}"
+    password: "{{ password }}"
+    state: present
+    password_never_expires: true
+    groups:
+      - Remote Desktop Users
+    groups_action: add
+    domain_username: "{{ netbios_name }}\\Administrator"
+    domain_password: password
+
+# "The users have to be part of the RDusers group locally on the server you want to login via RDP, not only in the AD."
+# https://serverfault.com/questions/265531/members-of-remote-desktop-users-group-cannot-login
+- name: Add a user to local RDUsers group
+  ansible.windows.win_group_membership:
+    name: Remote Desktop Users
+    members:
+      - "{{ netbios_name }}\\{{ username }}"
+    state: present

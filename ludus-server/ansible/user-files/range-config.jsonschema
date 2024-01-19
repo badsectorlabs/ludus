@@ -1,0 +1,380 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema",
+    "title": "Ludus",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+        "network": {
+            "$ref": "#/definitions/Network"
+        },
+        "ludus": {
+            "type": "array",
+            "items": {
+                "$ref": "#/definitions/Ludus"
+            }
+        },
+        "defaults": {
+            "$ref": "#/definitions/Defaults"
+        }
+    },
+    "required": [
+        "ludus"
+    ],
+    "definitions": {
+        "Defaults": {
+            "type": "object",
+            "description": "This key defines default settings for Ludus and Windows Domains created in ranges",
+            "additionalProperties": false,
+            "properties": {
+                "router_vm_name": {
+                    "type": "string",
+                    "description": "The name of the router VM deployed by Ludus"
+                },
+                "snapshot_with_RAM": {
+                    "type": "boolean",
+                    "description": "When entering testing mode, capture the RAM state which allows reverting to a running VM"
+                },
+                "stale_hours": {
+                    "type": "integer",
+                    "description": "How many hours until a pre-existing snapshot should be deleted and retaken (if entering and exiting testing mode quickly)"
+                },
+                "ad_domain_functional_level": {
+                    "type": "string",
+                    "description": "The functional level of each Windows domain created by Ludus"
+                },
+                "ad_forest_functional_level": {
+                    "type": "string",
+                    "description": "The functional level of each Windows forest created by Ludus"
+                },
+                "ad_domain_admin": {
+                    "type": "string",
+                    "description": "The domain admin username for every Windows domain"
+                },
+                "ad_domain_admin_password": {
+                    "type": "string",
+                    "description": "The domain admin password for every Windows domain"
+                },
+                "ad_domain_user": {
+                    "type": "string",
+                    "description": "The domain user username for every Windows domain"
+                },
+                "ad_domain_user_password": {
+                    "type": "string",
+                    "description": "The domain user password for every Windows domain"
+                },
+                "ad_domain_safe_mode_password": {
+                    "type": "string",
+                    "description": "The domain safe mode password for every Windows domain"
+                }
+            },
+            "title": "Defaults"
+        },
+        "Network": {
+            "type": "object",
+            "description": "This key defines network rules in your range. It is optional, and by default all traffic is allowed",
+            "additionalProperties": false,
+            "properties": {
+                "inter_vlan_default": {
+                    "type": "string",
+                    "pattern": "^(ACCEPT|REJECT|DROP)$",
+                    "description": "The default rule to apply to traffic between VLANs. Default: ACCEPT"
+                },
+                "external_default": {
+                    "type": "string",
+                    "pattern": "^(ACCEPT|REJECT|DROP)$",
+                    "description": "The default rule to apply to traffic leaving the range out to the internet. Default: ACCEPT"
+                },
+                "rules": {
+                    "type": "array",
+                    "description": "Specify rules to restrict or allow based on inter_vlan_default. Default: allow all traffic",
+                    "items": {
+                        "$ref": "#/definitions/Rule"
+                    }
+                }
+            },
+            "required": [
+            ],
+            "title": "Network"
+        },
+        "Rule": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The rule name will be added as a comment in iptables"
+                },
+                "vlan_src": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 255,
+                    "description": "Traffic source VLAN"
+                },
+                "ip_last_octet_src": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 255,
+                    "description": "The single machine from the vlan_src to apply the rule to"
+                },
+                "vlan_dst": {
+                    "anyOf": [
+                        {
+                            "type": "integer",
+                            "minimum": 2,
+                            "maximum": 255
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^public$"
+                        }
+                    ],
+                    "description": "Traffic destination VLAN"
+                },
+                "ip_last_octet_dst": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 255,
+                    "description": "The single machine from the vlan_dst to apply the rule to"
+                },                
+                "protocol": {
+                    "type": "string",
+                    "pattern": "^!?(tcp|udp|udplite|icmp|ipv6-icmp|icmpv6|esp|ah|sctp|all)$",
+                    "description": "The protocol the rule acts on"
+                },
+                "ports": {
+                    "$ref": "#/definitions/Ports",
+                    "description": "A single port, a range in the format start:end, or 'all'"
+                },
+                "action": {
+                    "type": "string",
+                    "pattern": "^(ACCEPT|REJECT|DROP)$",
+                    "description": "The action to apply to matching packets"
+                }
+            },
+            "required": [
+                "action",
+                "name",
+                "ports",
+                "protocol",
+                "vlan_dst",
+                "vlan_src"
+            ],
+            "title": "Rule"
+        },
+        "Ludus": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "vm_name": {
+                    "type": "string",
+                    "description": "The name of the VM in Proxmox. You can use the `{{ range_id }}` template string which resolves to your range ID (i.e. JS)"
+                },
+                "hostname": {
+                    "type": "string",
+                    "description": "The hostname for the VM. Note: Windows host names are limited to 15 characters due to NETBIOS"
+                },
+                "template": {
+                    "type": "string",
+                    "description": "The template that will be the base for this VM (`ludus templates list` to get a list of them)"
+                },
+                "vlan": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 255,
+                    "description": "The VLAN for this VM. This number will be the third octet of the VM's IP"
+                },
+                "ip_last_octet": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 255,
+                    "description": "The last octet for this VM's IP address. Must be unique in the VLAN."
+                },
+                "ram_min_gb": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4096,
+                    "description": "If defined, the minimum amount of RAM to allocated to the VM in ballooning mode"
+                },
+                "ram_gb": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4096,
+                    "description": "The amount of RAM to allocated to the VM in in non-ballooning mode, or the max RAM in ballooning mode. Define ram_min_gb to enable ballooning mode."
+                },
+                "cpus": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 512,
+                    "description": "The number of cpu cores to allocate to this VM (can provision more CPUs than the host physically has)"
+                },
+                "full_clone": {
+                    "type": "boolean",
+                    "description": "Should this VM be a full clone (true) or linked clone (false). Default: false"
+                },
+                "testing": {
+                    "$ref": "#/definitions/Testing"
+                },
+                "windows": {
+                    "$ref": "#/definitions/Windows"
+                },
+                "domain": {
+                    "$ref": "#/definitions/Domain"
+                },
+                "linux": {
+                    "type": "boolean",
+                    "description": "Set this to true for linux VMs - leave undefined or false for Windows/macOS VMs"
+                },
+                "macOS": {
+                    "type": "boolean",
+                    "description": "Set this to true for macOS VMs - leave undefined or false for Windows/Linux VMs"
+                },
+                "roles": {
+                    "type": "array",
+                    "description": "User defined Ansible roles to apply to this VM. Roles must be installed on the Ludus host with `ludus ansible role add`.",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "role_vars": {
+                    "$ref": "#/definitions/RoleVars"
+                },
+                "ansible_groups": {
+                    "type": "array",
+                    "description": "User defined Ansible groups to apply to this VM. The VM will be assigned to these groups in ansible and for `range inventory` output",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "dns_rewrites": {
+                    "$ref": "#/definitions/DNSRewrites"
+                }
+            },
+            "required": [
+                "cpus",
+                "hostname",
+                "ip_last_octet",
+                "ram_gb",
+                "template",
+                "vlan",
+                "vm_name"
+            ],
+            "title": "Range"
+        },
+        "Domain": {
+            "type": "object",
+            "description": "Define this key to put this machine in a domain (Windows only)",
+            "additionalProperties": false,
+            "properties": {
+                "fqdn": {
+                    "type": "string",
+                    "format": "hostname",
+                    "description": "The FQDN of the domain"
+                },
+                "role": {
+                    "type": "string",
+                    "pattern": "^(primary-dc|alt-dc|member)$",
+                    "description": "The role of the VM in the domain"
+                }
+            },
+            "required": [
+                "fqdn",
+                "role"
+            ],
+            "title": "Domain"
+        },
+        "Testing": {
+            "type": "object",
+            "description": "This key controls the behavior of the VM in testing mode. If undefined, both values are set to true",
+            "additionalProperties": false,
+            "properties": {
+                "snapshot": {
+                    "type": "boolean",
+                    "description": "Snapshot this VM going into testing, and revert it coming out of testing. Default: true"
+                },
+                "block_internet": {
+                    "type": "boolean",
+                    "description": "Cut this VM off from the internet during testing. Default true"
+                }
+            },
+            "required": [
+                "block_internet",
+                "snapshot"
+            ],
+            "title": "Testing"
+        },
+        "Windows": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sysprep": {
+                    "type": "boolean",
+                    "description": "Set to true to run sysprep before any other tasks on this VM. Default: false"
+                },
+                "install_additional_tools": {
+                    "type": "boolean",
+                    "description": "Install firefox, chrome, VSCode, burp suite, 7zip, process hacker, ilspy and other useful utilities. Default: false"
+                },
+                "chocolatey_ignore_checksums": {
+                    "type": "boolean",
+                    "description": "Ignore any checksum errors when installing chocolatey packages (for packages that are 3rd party hosted and update before the choco package). Default: false"
+                },
+                "chocolatey_packages": {
+                    "type": "array",
+                    "description": "An array of chocolatey package names you'd like installed on this VM. Default: none",
+                    "items": {
+                        "type": "string",
+                        "description": "Chocolatey package name"
+                    }
+                },
+                "office_version": {
+                    "type": "integer",
+                    "pattern": "^(2013|2016|2019|2021)$",
+                    "description": "The Microsoft office version you would like installed on this VM (2013|2016|2019|2021). Default: undefined (don't install office)"
+                },
+                "office_arch": {
+                    "type": "string",
+                    "pattern": "^(64bit|32bit)$",
+                    "description": "The architecture for the Microsoft office install (64bit|32bit). Default: undefined (don't install office)"
+                },
+                "visual_studio_version": {
+                    "type": "integer",
+                    "pattern": "^(2017|2019|2022)$",
+                    "description": "# The version of Microsoft Visual Studio to install (community edition). Note: 2022 cannot target < .NET 4.5. Default: undefined (don't install visual studio)"
+                }
+            },
+            "required": [],
+            "title": "Windows"
+        },
+        "Ports": {
+            "anyOf": [
+                {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                },
+                {
+                    "type": "string",
+                    "pattern": "^([0-9]{1,5}|[0-9]{1,5}:[0-9]{1,5}|all)$"
+                }
+            ],
+            "title": "Ports",
+            "description": "A single port, a range in the format start:end, or 'all'"
+        },
+        "RoleVars": {
+            "type": ["number", "string", "boolean", "object", "array", "null"],
+            "description": "User defined variables in `key: value` format that are passed to ALL user defined roles",
+            "additionalProperties": true,
+            "required": [
+            ],
+            "title": "RoleVars"
+        },
+        "DNSRewrites": {
+            "type": "array",
+            "description": "User defined domains to assign this VMs IP in DNS for the whole range",
+            "items": {
+                "type": "string",
+                "description": "Domain to assign this VM's IP in DNS (wildcards allowed)"
+            }
+        }
+    }
+}

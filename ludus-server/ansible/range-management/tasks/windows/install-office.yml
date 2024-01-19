@@ -1,0 +1,137 @@
+---
+- name: Test for a chocolatey cache
+  delegate_to: localhost
+  ansible.builtin.wait_for:
+    host: 192.0.2.2
+    port: 8081
+    timeout: 2
+  register: choco_test
+  ignore_errors: true
+
+- name: Set chocolatey source
+  ansible.builtin.set_fact:
+    chocolatey_source: http://192.0.2.2:8081/repository/chocolatey/
+  when: not choco_test.failed
+
+# https://github.com/chocolatey/chocolatey-ansible/issues/18
+- name: Bootstrap chocolatey by hand
+  win_chocolatey:
+    name:
+      - chocolatey
+    source: http://192.0.2.2:8081/repository/raw/install.ps1
+  when: not choco_test.failed
+
+# TODO: use the URL module and clean this up
+# Check the most recent commit of the office deployment project to see if contains a chocomilk update string and grab the version from that
+# This is required because chocolatey will not use the most recent version until the package maintainer approves it - leading to 404 errors from the installer
+- name: Get latest office chocolatey version (ugly)
+  delegate_to: localhost
+  ansible.builtin.shell: |
+    curl -s https://api.github.com/repos/open-circle-ltd/chocolatey.microsoft-office-deployment/commits\?per_page\=5 | jq -r '.[].commit.message' | grep -Po '(?<=chocomilk: Update to )[\d\.]*' | head -{{ office_installer_version_lookback }} | tail -1
+  register: latest_office_chocolatey_version
+  when: office_version != "2013"
+
+- name: Install Office Pro Plus 2013 32 bit
+  win_chocolatey:
+    name: officeproplus2013
+    package_params: "--version=15.0.4747"
+    source: "{{ chocolatey_source | default('') }}"
+  when: office_version == "2013" and office_arch == "32bit"
+
+- name: Install Office Pro Plus 2016 64 bit
+  win_chocolatey:
+    name: microsoft-office-deployment
+    package_params: "/64bit /Product:ProPlusRetail /Exclude:Lync,Groove"
+    source: "{{ chocolatey_source | default('') }}"
+    version: "{{ latest_office_chocolatey_version.stdout }}"
+  when: office_version == "2016" and office_arch == "64bit"
+  register: result
+  failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
+
+- name: Install Office Pro Plus 2016 32 bit
+  win_chocolatey:
+    name: microsoft-office-deployment
+    package_params: "/Product:ProPlusRetail /Exclude:Lync,Groove"
+    source: "{{ chocolatey_source | default('') }}"
+    version: "{{ latest_office_chocolatey_version.stdout }}"
+  when: office_version == "2016" and office_arch == "32bit"
+  register: result
+  failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
+
+- name: Install Office Pro Plus 2019 64 bit
+  win_chocolatey:
+    name: microsoft-office-deployment
+    package_params: "/64bit /Product:ProPlus2019Volume /Exclude:Publisher,Lync,Groove"
+    source: "{{ chocolatey_source | default('') }}"
+    version: "{{ latest_office_chocolatey_version.stdout }}"
+  when: office_version == "2019" and office_arch == "64bit"
+  register: result
+  failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
+
+- name: Install Office Pro Plus 2019 32 bit
+  win_chocolatey:
+    name: microsoft-office-deployment
+    package_params: "/Product:ProPlus2019Volume /Exclude:Lync,Groove"
+    source: "{{ chocolatey_source | default('') }}"
+    version: "{{ latest_office_chocolatey_version.stdout }}"
+  when: office_version == "2019" and office_arch == "32bit"
+  register: result
+  failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
+
+- name: Install Office Pro Plus 2021 64 bit
+  win_chocolatey:
+    name: microsoft-office-deployment
+    package_params: "/64bit /Product:ProPlus2021Volume /Exclude:Lync,Groove"
+    source: "{{ chocolatey_source | default('') }}"
+    version: "{{ latest_office_chocolatey_version.stdout }}"
+  when: office_version == "2021" and office_arch == "64bit"
+  register: result
+  failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
+
+- name: Install Office Pro Plus 2021 32 bit
+  win_chocolatey:
+    name: microsoft-office-deployment
+    package_params: "/Product:ProPlus2021Volume /Exclude:Lync,Groove"
+    source: "{{ chocolatey_source | default('') }}"
+    version: "{{ latest_office_chocolatey_version.stdout }}"
+  when: office_version == "2021" and office_arch == "32bit"
+  register: result
+  failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
+
+- name: Show the developer tab in the ribbon - Word (2016, 2019, 2021)
+  ansible.windows.win_regedit:
+    path: HKCU:\Software\Microsoft\Office\16.0\Word\Options
+    name: DeveloperTools
+    data: 1
+    type: dword
+  when: office_version == "2016" or office_version == "2019" or office_version == "2021"
+
+- name: Show the developer tab in the ribbon - Excel (2016, 2019, 2021)
+  ansible.windows.win_regedit:
+    path: HKCU:\Software\Microsoft\Office\16.0\Excel\Options
+    name: DeveloperTools
+    data: 1
+    type: dword
+  when: office_version == "2016" or office_version == "2019" or office_version == "2021"
+
+- name: Show the developer tab in the ribbon - Excel 2013
+  ansible.windows.win_regedit:
+    path: HKCU:\Software\Microsoft\Office\15.0\Excel\Options
+    name: DeveloperTools
+    data: 1
+    type: dword
+  when: office_version == "2013"
+
+- name: Show the developer tab in the ribbon - Word 2013
+  ansible.windows.win_regedit:
+    path: HKCU:\Software\Microsoft\Office\15.0\Word\Options
+    name: DeveloperTools
+    data: 1
+    type: dword
+  when: office_version == "2013"
+
+# - name: Activate Office 2016 32 bit
+#   ansible.windows.win_shell: cscript ospp.vbs /inpkey:{{ office_2016_key }}
+#   args:
+#     chdir: C:\Program Files (x86)\Microsoft Office\Office16
+#   when: office_version == "2016"

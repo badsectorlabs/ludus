@@ -1,0 +1,781 @@
+- name: Pre-run checks
+  ansible.builtin.import_playbook: pre-run-checks.yml
+
+- name: Deploy the router VM
+  tags: [network]
+  hosts: localhost
+  tasks:
+    - name: Deploy router VM
+      ansible.builtin.include_tasks: tasks/proxmox/deploy-vm.yml
+  vars:
+    template_vm_name: "debian-11-x64-server-template"
+    vm_name: "{{ defaults.router_vm_name }}"
+    vmbr_number: "0" # This is the NAT'd vmbr - the "WAN" side of the router
+    vm_groups: '"{{ range_id }}","{{ range_id }}_router"'
+    is_linux: true
+    ram: 4
+    cpu_cores: 4
+    num_vcpus: 4
+
+# This must come before the VLAN setup to install iptables etc
+- name: Configure the router
+  tags: [network]
+  hosts: "{{ defaults.router_vm_name }}"
+  become: true
+  pre_tasks:
+    - name: Check if the .ludus-configured file exists
+      ansible.builtin.stat:
+        path: /etc/.ludus-configured
+      register: stat_result
+    - name: End play if configured
+      ansible.builtin.meta: end_play
+      when: stat_result.stat.exists
+  tasks:
+    - name: Configure IP and Hostname
+      include_tasks: tasks/proxmox/configure-ip-and-hostname.yml
+    - name: Configure router
+      ansible.builtin.include_tasks: tasks/router/configure-router.yml
+  vars:
+    vlan: 1
+    static_ip: "192.0.2.{{ 100 + range_second_octet }}"
+    cidr_netmask: "24"
+    default_gateway: "192.0.2.254"
+    vm_hostname: "{{ range_id }}-router"
+    dns_server: "192.0.2.254"
+
+- name: Setup VLANs
+  tags: [network]
+  hosts: localhost
+  serial: 1
+  tasks:
+    - name: Collect VLANs
+      ansible.builtin.set_fact:
+        vlans: "{{ ((vlans | default([])) + [item.vlan]) | unique }}"
+      loop: "{{ ludus }}"
+    - name: Add all VLAN interfaces to the router
+      ansible.builtin.include_tasks: tasks/router/add-vlan-to-router.yml
+      loop: "{{ vlans }}"
+  vars:
+    vmbr_number: "{{ range_second_octet + 1000 }}"
+
+- name: Apply all user defined network rules to the router
+  tags: [network]
+  hosts: "{{ defaults.router_vm_name }}"
+  become: true
+  tasks:
+    - name: Set any user defined firewall rules
+      ansible.builtin.include_tasks: tasks/firewall/set-firewall-rules.yml
+
+- name: Deploy DC VMs
+  tags: [vm-deploy]
+  hosts: localhost
+  serial: 5
+  tasks:
+    - name: Deploy VM
+      include_tasks: tasks/proxmox/deploy-vm.yml
+      vars:
+        template_vm_name: "{{ item.template }}"
+        vm_name: "{{ item.vm_name }}"
+        vmbr_number: "{{ range_second_octet + 1000 }}"
+        vlan: "{{ item.vlan }}"
+        custom_groups: "{{ item.ansible_groups | map('regex_replace', '^(.*)$', '\"\\1\"') | join(', ') if item.ansible_groups is defined }}"
+        vm_groups: '"{{ range_id }}", "{{ range_id }}_test_range_network", "{{ range_id }}_test_range_dc", {{ custom_groups }}' # this leaves a trailing comma if no custom_groups are defined but the parser is ok with that
+        is_linux: "{{ true if item.linux is defined and item.linux else false }}"
+        is_windows: "{{ true if item.windows is defined else false }}"
+        use_tablet_pointer: "{{ true if item.windows is defined else false }}"
+        balloon_size: "{{ item.ram_min_gb if item.ram_min_gb is defined else '0' }}"
+        ram: "{{ item.ram_gb }}"
+        cpu_cores: "{{ item.cpus }}"
+        num_vcpus: "{{ item.cpus }}"
+        full_clone: "{{ item.full_clone | default(false) }}"
+      loop: "{{ ludus }}"
+      when:
+        - 'item.windows is defined'
+        - 'item.domain is defined'
+        - 'item.domain.role is defined'
+        - 'item.domain.fqdn is defined'
+        - 'item.domain.role == "primary-dc" or item.domain.role == "alt-dc"'
+
+- name: Deploy non-DC VMs
+  tags: [vm-deploy]
+  hosts: localhost
+  serial: 5
+  tasks:
+    - name: Deploy VM
+      include_tasks: tasks/proxmox/deploy-vm.yml
+      vars:
+        windows_group: "{{ range_id }}_windows_endpoints"
+        linux_group: "{{ range_id }}_linux_endpoints"
+        macos_group: "{{ range_id }}_macos_endpoints"
+        template_vm_name: "{{ item.template }}"
+        vm_name: "{{ item.vm_name }}"
+        vmbr_number: "{{ range_second_octet + 1000 }}"
+        vlan: "{{ item.vlan }}"
+        custom_groups: "{{ item.ansible_groups | map('regex_replace', '^(.*)$', '\"\\1\"') | join(', ') if item.ansible_groups is defined }}"
+        vm_groups: '"{{ range_id }}", "{{ windows_group if item.windows is defined else linux_group if item.linux is defined else macos_group if item.macos is defined }}", {{ custom_groups }}' # this leaves a trailing comma if no custom_groups are defined but the parser is ok with that'
+        is_linux: "{{ true if item.linux is defined and item.linux else false }}"
+        is_windows: "{{ true if item.windows is defined else false }}"
+        is_macos: "{{ true if item.macos is defined and item.is_macos else false }}"
+        use_tablet_pointer: "{{ true if (item.windows is defined or item.macos is defined) else false }}"
+        balloon_size: "{{ item.ram_min_gb if item.ram_min_gb is defined else '0' }}"
+        ram: "{{ item.ram_gb }}"
+        cpu_cores: "{{ item.cpus }}"
+        num_vcpus: "{{ item.cpus }}"
+        boot_disk: "{{ item.boot_disk | default('sata0') }}"
+        full_clone: "{{ item.full_clone | default(false) }}"
+      loop: "{{ ludus }}"
+      when:
+        - 'item.linux is defined or item.macos is defined or (item.windows is defined and (item.domain is defined and item.domain.role is defined and item.domain.role == "member")) or (item.windows is defined and item.domain is undefined)'
+
+- name: Collect VM names
+  tags: [always, assign-ip]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect VM names
+      set_fact:
+        range_vms: "{{ ((range_vms | default([])) + [item.vm_name]) }}"
+      loop: "{{ ludus }}"
+
+- name: Configure IP and Hostname for all VMs
+  tags: [assign-ip]
+  hosts: "{{ hostvars['localhost']['range_vms'] | default([]) }}"
+  tasks:
+    - name: Configure IP and Hostname
+      include_tasks: tasks/proxmox/configure-ip-and-hostname.yml
+  vars:
+    vlan: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}"
+    static_ip: "10.{{ range_second_octet }}.{{ vlan }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).ip_last_octet }}"
+    cidr_netmask: "24"
+    default_gateway: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+    vm_hostname: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).hostname }}"
+    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+
+# ==========================================================
+# Set up DNS on the router for range hosts
+# ==========================================================
+- name: Add all hosts to DNS on the router
+  tags: [dns-rewrites]
+  hosts: "{{ defaults.router_vm_name }}"
+  tasks:
+    - name: Add host to router DNS
+      include_tasks: tasks/router/add-host-to-router-dns.yml
+
+- name: Collect VMs with rewrite rules
+  tags: [dns-rewrites]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect VMs with rewrite rules
+      set_fact:
+        rewrite_vms: "{{ ((rewrite_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.dns_rewrites is defined'
+
+- name: Add custom DNS rewrite rules
+  tags: [dns-rewrites]
+  hosts: "{{ defaults.router_vm_name }}"
+  tasks:
+    - name: Add user-defined rewrites to the router
+      ansible.builtin.include_tasks: tasks/router/add-user-defined-rewrites-to-router.yml
+      loop: "{{ hostvars['localhost']['rewrite_vms'] | default([]) }}"
+      loop_control:
+        loop_var: vm_name
+
+# ==========================================================
+# Sysprep
+# ==========================================================
+- name: Collect Windows VMs to sysprep
+  tags: [sysprep]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect Windows VMs to sysprep
+      set_fact:
+        sysprep_vms: "{{ ((sysprep_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.windows is defined and item.windows.sysprep is defined and item.windows.sysprep'
+
+- name: Sysprep Windows VMs
+  tags: [sysprep]
+  hosts: "{{ hostvars['localhost']['sysprep_vms'] | default([]) }}"
+  tasks:
+    - name: Sysprep a VM
+      include_tasks: tasks/windows/sysprep.yml
+  vars:
+    vm_hostname: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).hostname }}"
+
+- name: Collect DC VM names
+  tags: [always, dcs]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect primary DC VM names
+      set_fact:
+        primary_dc_vms: "{{ ((primary_dc_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.windows is defined and item.domain is defined and item.domain.role is defined and item.domain.role == "primary-dc"'
+    - name: Collect alternate DCs VM names
+      set_fact:
+        alt_dc_vms: "{{ ((alt_dc_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.windows is defined and item.domain is defined and item.domain.role is defined and item.domain.role == "alt-dc"'
+
+# ==========================================================
+# Set up DCs
+# ==========================================================
+- name: Configure primary DC
+  tags: [dcs]
+  hosts: "{{ hostvars['localhost']['primary_dc_vms'] | default([]) }}"
+  tasks:
+    - name: Congiure Windows VMs (general)
+      include_tasks: tasks/windows/configure-windows.yml
+    - name: Configure automatic login for Windows
+      include_tasks: tasks/windows/configure-autologon.yml
+    - name: Configure Domain Controller
+      include_tasks: tasks/windows/configure-dc.yml
+  vars:
+    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+    dc_ip: "{{ ansible_host }}"
+    autologon_user: "{{ defaults.ad_domain_admin }}"
+    autologon_password: "{{ defaults.ad_domain_admin_password }}"
+    netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
+    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
+
+- name: Configure additional DCs
+  tags: [dcs]
+  hosts: "{{ hostvars['localhost']['alt_dc_vms'] | default([]) }}"
+  tasks:
+    - name: Set domain facts
+      set_fact:
+        domain_fqdn: "{{ ((ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn) }}"
+        dc_vm_name: "{{ (ludus | selectattr('domain.fqdn', 'match', domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
+        dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"
+    - name: Congiure Windows VMs (general)
+      include_tasks: tasks/windows/configure-windows.yml
+    - name: Configure automatic login for Windows
+      include_tasks: tasks/windows/configure-autologon.yml
+    - name: Configure additional Domain Controllers
+      include_tasks: tasks/windows/configure-additional-dc.yml
+  vars:
+    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+    netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
+    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
+    domain_admin: "{{ defaults.ad_domain_admin }}"
+    domain_admin_password: "{{ defaults.ad_domain_admin_password }}"
+    domain_safe_mode_password: "{{ defaults.ad_domain_safe_mode_password }}"
+    autologon_user: "{{ defaults.ad_domain_admin }}"
+    autologon_password: "{{ defaults.ad_domain_admin_password }}"
+
+# ==========================================================
+# Windows Endpoints
+# ==========================================================
+- name: Collect Non-DC Windows VM names
+  tags: [always, windows]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect Windows VM names
+      set_fact:
+        windows_vms: "{{ ((windows_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.windows is defined and ((item.domain is undefined) or (item.domain is defined and item.domain.role == "member"))'
+
+- name: Configure Windows VMs
+  tags: [windows]
+  hosts: "{{ hostvars['localhost']['windows_vms'] | default([]) }}"
+  tasks:
+    - name: Congiure Windows VMs (general)
+      include_tasks: tasks/windows/configure-windows.yml
+    - name: Configure automatic login for Windows
+      include_tasks: tasks/windows/configure-autologon.yml
+    - name: Enable RDP
+      include_tasks: tasks/windows/enable-rdp.yml
+    - name: Enable SMB
+      include_tasks: tasks/windows/enable-smb.yml
+  vars:
+    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+    # Set the autologin users to localuser or the domain user (if a domain is defined)
+    autologon_user: "{{ defaults.ad_domain_user if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain | default('')) | length > 0 else 'localuser' }}"
+    autologon_password: "{{ defaults.ad_domain_user_password if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain | default('')) | length > 0 else 'password' }}"
+
+- name: Collect Windows VMs to install additional tools on
+  tags: [additional-tools]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect Windows VMs to install additional tools on
+      set_fact:
+        additional_tool_vms: "{{ ((additional_tool_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.windows is defined and item.windows.install_additional_tools is defined and item.windows.install_additional_tools'
+
+- name: Install additional tools on Windows VMs
+  tags: [additional-tools]
+  hosts: "{{ hostvars['localhost']['additional_tool_vms'] | default([]) }}"
+  serial: 5
+  tasks:
+    - name: Add additional tools to Windows VMs
+      include_tasks: tasks/windows/add-additional-windows-tools.yml
+      vars:
+        ignore_chocolatey_checksums: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.chocolatey_ignore_checksums | default(false) }}"
+
+- name: Collect Windows VMs to install custom chocolatey packages
+  tags: [custom-choco]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect Windows VMs to install custom chocolatey packages
+      set_fact:
+        custom_choco_vms: "{{ ((custom_choco_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.windows is defined and item.windows.chocolatey_packages is defined'
+
+- name: Install additional tools on Windows VMs
+  tags: [custom-choco]
+  hosts: "{{ hostvars['localhost']['custom_choco_vms'] | default([]) }}"
+  serial: 5
+  tasks:
+    - name: Install extra chocolatey packages
+      include_tasks: tasks/windows/install-extra-choco-packages.yml
+      vars:
+        chocolatey_packages: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.chocolatey_packages }}"
+        ignore_chocolatey_checksums: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.chocolatey_ignore_checksums | default(false) }}"
+
+- name: Collect Windows VMs to join to the domain
+  tags: [domain-join]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect Windows VMs to join to the domain
+      set_fact:
+        join_domain_vms: "{{ ((join_domain_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.windows is defined and item.domain is defined and item.domain.role is defined and item.domain.role == "member"'
+
+- name: Domain join Windows VMs
+  tags: [domain-join]
+  hosts: "{{ hostvars['localhost']['join_domain_vms'] | default([]) }}"
+  serial: 5
+  tasks:
+    - name: Find FQDN for role member
+      set_fact:
+        domain_fqdn: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn }}"
+    - name: Set dc_vm_name for the primary-dc with the same FQDN
+      set_fact:
+        dc_vm_name: "{{ item.vm_name }}"
+      loop: "{{ ludus }}"
+      when:
+        - item.domain is defined
+        - item.domain.role == 'primary-dc'
+        - item.domain.fqdn == domain_fqdn
+    - name: Set DC IP 
+      set_fact:
+        dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"
+    - name: Join VMs to the domain
+      include_tasks: tasks/windows/join-domain.yml
+  vars:
+    netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
+    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
+    template_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].template | string }}"
+    domain_admin: "{{ defaults.ad_domain_admin }}"
+    domain_admin_password: "{{ defaults.ad_domain_admin_password }}"
+    ou_name: "{{ 'Servers' if template_name is defined and 'server' in (template_name | lower) else 'Workstations' }}"
+    autologon_user: "{{ defaults.ad_domain_user }}"
+    autologon_password: "{{ defaults.ad_domain_admin_password }}"
+
+# ==========================================================
+# Office Install
+# ==========================================================
+- name: Collect Windows VMs to install Office on
+  tags: [install-office]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect Windows VMs to install Office on
+      set_fact:
+        office_vms: "{{ ((office_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.windows is defined and item.windows.office_version is defined and (item.windows.office_version | string) in ["2013", "2016", "2019", "2021"]'
+
+- name: Install Office
+  tags: [install-office]
+  hosts: "{{ hostvars['localhost']['office_vms'] | default([]) }}"
+  tasks:
+    - name: Install Office (first attempt)
+      block:
+        - name: Install Office
+          include_tasks: tasks/windows/install-office.yml
+          vars:
+            office_version: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.office_version | string }}"
+            office_arch: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.office_arch | string }}"
+            office_installer_version_lookback: "1"
+      # Sometimes the latest office installer fails - fall back to the last version and try again
+      rescue:
+        - name: Install Office (second attempt)
+          block:
+            - name: Install Office
+              include_tasks: tasks/windows/install-office.yml
+              vars:
+                office_version: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.office_version | string }}"
+                office_arch: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.office_arch | string }}"
+                office_installer_version_lookback: "2"
+          # If Mircosoft has pulled the previous office install binary, it will fail with 404. Move on but warn the user at the end of the deploy
+          rescue:
+            - name: Warn user about failed Office install
+              set_fact:
+                office_install_failed: true
+              run_once: true
+              delegate_to: localhost
+              delegate_facts: true
+
+# ==========================================================
+# Development Box(s)
+# ==========================================================
+- name: Collect Windows VMs to install Visual Studio
+  tags: [install-visual-studio]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect Windows VMs to install Visual Studio
+      set_fact:
+        vs_vms: "{{ ((vs_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.windows is defined and item.windows.visual_studio_version is defined and (item.windows.visual_studio_version | string) in ["2017", "2019", "2022"]'
+
+- name: Install Visual Studio
+  tags: [install-visual-studio]
+  hosts: "{{ hostvars['localhost']['vs_vms'] | default([]) }}"
+  tasks:
+    - name: Install Visual Studio
+      include_tasks: tasks/windows/install-visual-studio.yml
+      vars:
+        visual_studio_version: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.visual_studio_version | string }}"
+
+# ==========================================================
+# User-Defined Roles
+# ==========================================================
+- name: Collect VMs with user-defined roles
+  tags: [user-defined-roles]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect VMs with user-defined roles
+      set_fact:
+        custom_roles_vms: "{{ ((custom_roles_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.roles is defined and ((item.roles | length) > 0)'
+
+- name: Add user-defined roles to VMs
+  hosts: "{{ hostvars['localhost']['custom_roles_vms'] | default([]) }}"
+  tags: [user-defined-roles]
+  tasks:
+    - name: Get roles for this VM
+      set_fact:
+        custom_roles_list: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).roles }}"
+
+    - name: Check type of role_vars
+      ansible.builtin.assert:
+        that: (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).role_vars | type_debug == 'dict'
+        fail_msg: "'role_vars' must be a dictionary. Remove the leading `-` from each value!"
+        success_msg: "'role_vars' is a dictionary"
+      when: (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).role_vars is defined
+
+    # This is required because you cannot simply add vars to include_role, see https://github.com/ansible/ansible/issues/19084
+    - name: Set all role variables for non-arrays
+      set_fact:
+        "{{ role_item.key }}": "{{ role_item.value }}"  
+      loop: "{{ ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).role_vars | dict2items) if (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).role_vars is defined else [] }}"
+      loop_control:
+        loop_var: role_item
+
+    - name: Include the user-defined role
+      ansible.builtin.include_role:
+        name: "{{ item }}"
+      loop: "{{ custom_roles_list }}"
+
+# ==========================================================
+# User management
+# ==========================================================
+- name: Add a user to AD that can RDP
+  tags: [never, user-management]
+  hosts: "{{ range_id | default('') }}_test_range_dc:{{ range_id | default('') }}_windows_endpoints"
+  tasks:
+    - name: Add user to AD and RDP
+      include_tasks: tasks/windows/add-user-to-ad-and-rdp.yml
+      when: netbios_name is defined
+  vars:
+    username: "{{ new_username }}"
+    firstname: "{{ first }}"
+    lastname: "{{ last }}"
+    password: "{{ pass }}"
+    netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
+    ad_dc_vm_name: "{{ (ludus | selectattr('domain.fqdn', 'match', domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
+
+# ==========================================================
+# Nexus nuget cache
+# ==========================================================
+- name: Deploy Nexus nuget cache VM
+  tags: [never, nexus]
+  hosts: localhost
+  serial: 5
+  tasks:
+    - name: Deploy VM
+      include_tasks: tasks/proxmox/deploy-vm.yml
+      vars:
+        template_vm_name: debian-11-x64-server-template
+        vm_name: ADMIN-nexus-3-oss
+        vmbr_number: "0" # 192.0.2.0/24
+        vm_groups: '"admin"'
+        is_linux: true
+        is_windows: false
+        os_type: l26
+        use_tablet_pointer: true
+        ram_gb: 4
+        balloon_size: 0 # don't balloon because java (nexus) will die with OOM with only 1GB of RAM
+        cpu_cores: 4
+        num_vcpus: 4
+        vm_pool: ADMIN
+
+- name: Configure Nexus nuget cache VM IP and Hostname
+  tags: [never, nexus]
+  hosts: ADMIN-nexus-3-oss
+  tasks:
+    - name: Configure IP and Hostname
+      include_tasks: tasks/proxmox/configure-ip-and-hostname.yml
+      vars:
+        vmbr_number: "0"
+        static_ip: "192.0.2.2"
+        cidr_netmask: "24"
+        default_gateway: "192.0.2.254"
+        vm_hostname: "nexus"
+        dns_server: "192.0.2.254"
+        vlan: 1
+
+- name: Configure Nexus nuget cache VM requirements
+  tags: [never, nexus]
+  hosts: ADMIN-nexus-3-oss
+  become: true
+  tasks:
+    - name: Install pre-reqs
+      apt:
+        name:
+          - gnupg
+          - wget
+          - ca-certificates
+          - software-properties-common
+        update_cache: true
+    # - name: Install openjdk repo
+    #   apt_repository:
+    #     repo: "deb https://adoptopenjdk.jfrog.io/adoptopenjdk/deb/ bullseye main"
+    #     state: present
+    - name: Install openjdk repo
+      shell: |
+        wget -qO - https://adoptopenjdk.jfrog.io/adoptopenjdk/api/gpg/key/public | apt-key add -
+        add-apt-repository --yes https://adoptopenjdk.jfrog.io/adoptopenjdk/deb/
+    - name: Install openjdk and rsync
+      apt:
+        name:
+          - rsync
+          - adoptopenjdk-8-hotspot
+        update_cache: true
+
+- name: Configure Nexus nuget cache VM
+  tags: [never, nexus]
+  hosts: ADMIN-nexus-3-oss
+  become: true
+  roles:
+    - role: ansible-thoteam.nexus3-oss
+  vars:
+    nexus_timezone: 'Etc/UTC'
+    nexus_admin_password: "{{ hostvars['localhost'].api_password }}"
+    nexus_public_hostname: '192.0.2.2'
+    nexus_public_scheme: http
+    nexus_download_dir: '/tmp'
+    nexus_default_port: 8081
+    nexus_application_host: "0.0.0.0"
+    nexus_default_context_path: '/'
+    nexus_os_group: 'nexus'
+    nexus_os_user: 'nexus'
+    nexus_os_user_home_dir: '/home/nexus'
+    nexus_installation_dir: '/opt'
+    nexus_data_dir: '/var/nexus'
+    nexus_tmp_dir: '/tmp/nexus'
+    nexus_min_heap_size: "1200M"
+    nexus_max_heap_size: "{{ nexus_min_heap_size }}"
+    nexus_max_direct_memory: "2G"
+    nexus_plugin_urls: []
+    nexus_onboarding_wizard: false
+    nexus_anonymous_access: true
+    nexus_branding_header: "Nexus"
+    nexus_branding_footer: "Last provisioned {{ ansible_date_time.iso8601 }}"
+    httpd_setup_enable: false
+    nexus_blobstores:
+      - name: chocolatey-artifacts
+        type: file
+        path: /var/nexus/blobs/chocolatey
+      - name: nuget-artifacts
+        type: file
+        path: /var/nexus/blobs/nuget
+      - name: raw-artifacts
+        type: file
+        path: /var/nexus/blobs/raw
+    nexus_config_maven: false
+    nexus_config_nuget: true
+    nexus_config_raw: true
+    nexus_repos_raw_proxy:
+      - name: raw-proxy
+        blob_store: raw-artifacts
+        remote_url: https://chocolatey.org
+    nexus_repos_raw_hosted:
+      - name: raw-hosted
+        blob_store: raw-artifacts
+    nexus_repos_raw_group:
+      - name: raw
+        blob_store: raw-artifacts
+        member_repos:
+          - raw-proxy
+          - raw-hosted
+    nexus_repos_nuget_proxy:
+      - name: nuget-proxy
+        blob_store: nuget-artifacts
+        remote_url: http://www.nuget.org/api/v2
+      - name: chocolatey-proxy
+        blob_store: chocolatey-artifacts
+        remote_url: https://chocolatey.org/api/v2
+    nexus_repos_nuget_hosted:
+      - name: chocolatey-hosted
+        blob_store: chocolatey-artifacts
+      - name: nuget-hosted
+        blob_store: nuget-artifacts
+    nexus_repos_nuget_group:
+      - name: chocolatey
+        blob_store: chocolatey-artifacts
+        member_repos:
+          - chocolatey-proxy
+          - chocolatey-hosted
+      - name: nuget
+        blob_store: nuget-artifacts
+        member_repos:
+          - nuget-proxy
+          - nuget-hosted
+  tasks:
+    - name: Operator Action Required
+      ansible.builtin.debug:
+        msg:
+          - ==================================================================================================
+          -              Operator Action Required
+          - ==================================================================================================
+          - You must manually toggle the chocolatey-proxy repository to Nuget V2 via the web interface!
+          -  1. RDP into a windows box
+          -  '2. Browse to: http://192.0.2.2:8081'
+          -  3. Log in with admin:{{ hostvars['localhost'].api_password }}
+          -  4. Navigate to Repositories -> chocolatey-proxy
+          -  5. Click the radio button for NuGet V2
+          -  6. Click save (at the bottom of the page)
+          - ==================================================================================================
+
+# ==========================================================
+# Write RDP Files
+# ==========================================================
+- name: Write out etc-hosts
+  tags: [never, generate-rdp]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Make RDP files
+      include_tasks: tasks/make-rdp-files.yml
+
+# ==========================================================
+# Set groups after VM deploy
+# ==========================================================
+- name: Configure groups for all VMs
+  tags: [custom-groups]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Set custom ansible groups for non-DC VMs
+      ansible.builtin.include_tasks: tasks/proxmox/set-custom-groups.yml
+      vars:
+        windows_group: "{{ range_id }}_windows_endpoints"
+        linux_group: "{{ range_id }}_linux_endpoints"
+        macos_group: "{{ range_id }}_macos_endpoints"
+        custom_groups: "{{ item.ansible_groups | map('regex_replace', '^(.*)$', '\"\\1\"') | join(', ') if item.ansible_groups is defined }}"
+        vm_groups: '"{{ range_id }}", "{{ windows_group if item.windows is defined else linux_group if item.linux is defined else macos_group if item.macos is defined }}", {{ custom_groups }}' # this leaves a trailing comma if no custom_groups are defined but the parser is ok with that'
+        vm_name: "{{ item.vm_name }}"
+      loop: "{{ ludus }}"
+      when: 
+       - item.ansible_groups is defined
+       - 'item.linux is defined or item.macos is defined or (item.windows is defined and (item.domain is defined and item.domain.role is defined and item.domain.role == "member")) or (item.windows is defined and item.domain is undefined)'
+    - name: Set custom ansible groups for DC VMs
+      ansible.builtin.include_tasks: tasks/proxmox/set-custom-groups.yml
+      vars:
+        windows_group: "{{ range_id }}_windows_endpoints"
+        linux_group: "{{ range_id }}_linux_endpoints"
+        macos_group: "{{ range_id }}_macos_endpoints"
+        custom_groups: "{{ item.ansible_groups | map('regex_replace', '^(.*)$', '\"\\1\"') | join(', ') if item.ansible_groups is defined }}"
+        vm_groups: '"{{ range_id }}", "{{ range_id }}_test_range_network", "{{ range_id }}_test_range_dc", {{ custom_groups }}' # this leaves a trailing comma if no custom_groups are defined but the parser is ok with that
+        vm_name: "{{ item.vm_name }}"
+      loop: "{{ ludus }}"
+      when: 
+        - item.ansible_groups is defined
+        - 'item.windows is defined'
+        - 'item.domain is defined'
+        - 'item.domain.role is defined'
+        - 'item.domain.fqdn is defined'
+        - 'item.domain.role == "primary-dc" or item.domain.role == "alt-dc"'
+
+# ==========================================================
+# Write etc-hosts
+# ==========================================================
+# Do this at the end, after the router and all hosts have been powered on
+- name: Write out etc-hosts
+  tags: [always]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Generate an /etc/hosts formatted file for use on WG clients
+      template:
+        src: etc-hosts.j2
+        dest: "{{ ludus_install_path }}/users/{{ username }}/etc-hosts"
+      # Skip this when doing a destroy-range, but run for every other tag
+      when: "'destroy-range' not in ansible_run_tags"
+
+# ==========================================================
+# Alert the user on failed office install
+# ==========================================================
+- name: Check for office install status
+  tags: [always]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Fail the deploy when office install failed
+      ansible.builtin.fail:
+        msg: |
+          Office was unable to be installed. This is either due to an upstream issue or your Windows VM is not up to date enough.
+          You can update your vm with:
+          ludus testing update -n [VM NAME]
+          Install office manually, or attempt the office install again with:
+          ludus deploy range -t office-install
+      when: office_install_failed is defined and office_install_failed
+
+# ==========================================================
+# Debug!
+# ==========================================================
+- name: Debug
+  tags: [never, debug]
+  hosts: "{{ defaults.router_vm_name }}"
+  tasks:
+    - name: Get currnet DNS rules
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/control/filtering/status
+        method: GET
+        status_code: [200, 202]
+        return_content: true
+        headers:
+          Authorization: Basic YWRtaW46cGFzc3dvcmQ=
+      register: filtering_status
+
+    - name: Debug
+      debug:
+        msg: "{{ filtering_status.json.user_rules }}"

@@ -1,0 +1,112 @@
+<mxfile host="Electron" modified="2024-01-18T18:29:14.425Z" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/22.1.18 Chrome/120.0.6099.199 Electron/28.1.2 Safari/537.36" etag="xVpp8JqY2HN0bQkJepHr" version="22.1.18" type="device">
+  <diagram id="l8hXMBHkgcEJcSW0mbfh" name="Page-1">
+    <mxGraphModel dx="1839" dy="2032" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-5" value="User&#39;s Host&lt;br&gt;198.51.100.ID (WireGuard)" style="verticalLabelPosition=bottom;sketch=0;aspect=fixed;html=1;verticalAlign=top;strokeColor=none;align=center;outlineConnect=0;shape=mxgraph.citrix.laptop_2;" vertex="1" parent="1">
+          <mxGeometry x="50" y="-548.48" width="116" height="86.5" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-6" value="Proxmox 8 Host with one static IP (Debian 12 with virtualization support)" style="whiteSpace=wrap;html=1;dashed=1;strokeWidth=3;rounded=1;arcSize=2;glass=0;comic=0;shadow=0;fontSize=20;align=left;labelPosition=center;verticalLabelPosition=top;verticalAlign=bottom;spacingLeft=15;connectable=0;container=1;collapsible=0;recursiveResize=0;dashPattern=4 3 4 3 4 3 32 3;strokeColor=#F5C100;fillColor=#292000;" vertex="1" parent="1">
+          <mxGeometry x="220" y="-770" width="1100" height="580" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-82" value="vmbr0 192.0.2.0/24 NATs via Proxmox" style="whiteSpace=wrap;html=1;rounded=1;arcSize=2;shadow=0;glass=0;dashed=1;comic=0;strokeWidth=3;fontSize=15;align=center;labelPosition=center;verticalLabelPosition=top;verticalAlign=bottom;fontStyle=0;horizontal=1;spacingLeft=15;connectable=1;container=1;collapsible=0;recursiveResize=0;dashPattern=4 3 4 3 4 3 32 3;spacingRight=15;sketch=0;fillStyle=auto;fillColor=#383835;strokeColor=#696963;fontColor=#FFFFFF;" vertex="1" parent="LCS_90sd1pdz4iZuHSMx-6">
+          <mxGeometry x="33.75" y="40" width="296.25" height="390" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-87" value="Nexus Cache&lt;br&gt;Debian 11&lt;br&gt;192.0.2.2" style="verticalLabelPosition=bottom;sketch=0;aspect=fixed;html=1;verticalAlign=top;strokeColor=none;align=center;outlineConnect=0;shape=mxgraph.citrix.cache_server;" vertex="1" parent="LCS_90sd1pdz4iZuHSMx-82">
+          <mxGeometry x="112.63" y="10" width="71" height="97.5" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-88" value="&lt;font style=&quot;font-size: 12px;&quot;&gt;vmbr(1000+ID) 10.ID.VLAN.0/24 NATs via router&lt;br style=&quot;font-size: 12px;&quot;&gt;&lt;/font&gt;" style="whiteSpace=wrap;html=1;rounded=1;arcSize=2;shadow=0;glass=0;dashed=1;comic=0;strokeColor=#c00;strokeWidth=4;fillColor=#290000;fontSize=12;align=center;labelPosition=center;verticalLabelPosition=top;verticalAlign=bottom;fontStyle=0;horizontal=1;spacingLeft=0;connectable=0;container=1;collapsible=0;recursiveResize=0;dashPattern=4 3 4 3 4 3 32 3;sketch=1;fillStyle=solid;fontColor=#EEEEEE;" vertex="1" parent="LCS_90sd1pdz4iZuHSMx-6">
+          <mxGeometry x="350" y="40" width="290" height="390" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-90" value="&lt;div style=&quot;color: rgb(204, 204, 204); background-color: rgb(31, 31, 31); font-family: Menlo, Monaco, &amp;quot;Courier New&amp;quot;, monospace; line-height: 18px;&quot;&gt;&lt;div style=&quot;color: rgb(255, 255, 255); font-family: Helvetica; line-height: 18px;&quot;&gt;Arbitrary User&lt;/div&gt;&lt;div style=&quot;color: rgb(255, 255, 255); font-family: Helvetica; line-height: 18px;&quot;&gt;Defined VM&lt;/div&gt;&lt;/div&gt;" style="verticalLabelPosition=bottom;sketch=0;aspect=fixed;html=1;verticalAlign=top;strokeColor=none;align=center;outlineConnect=0;shape=mxgraph.citrix.desktop;" vertex="1" parent="LCS_90sd1pdz4iZuHSMx-88">
+          <mxGeometry x="100.5" y="210" width="89" height="98" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-98" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="LCS_90sd1pdz4iZuHSMx-88" source="LCS_90sd1pdz4iZuHSMx-91" target="LCS_90sd1pdz4iZuHSMx-90">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-99" value="1 to 255" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="LCS_90sd1pdz4iZuHSMx-98">
+          <mxGeometry x="-0.2456" y="-1" relative="1" as="geometry">
+            <mxPoint y="1" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-91" value="&lt;div style=&quot;background-color: rgb(31, 31, 31); line-height: 18px;&quot;&gt;Arbitrary User&lt;/div&gt;&lt;div style=&quot;background-color: rgb(31, 31, 31); line-height: 18px;&quot;&gt;Defined VM&lt;/div&gt;" style="verticalLabelPosition=top;sketch=0;aspect=fixed;html=1;verticalAlign=bottom;strokeColor=none;align=center;outlineConnect=0;shape=mxgraph.citrix.dns_server;labelPosition=center;fontFamily=Helvetica;fontColor=#ffffff;" vertex="1" parent="LCS_90sd1pdz4iZuHSMx-88">
+          <mxGeometry x="106.75" y="50" width="76.5" height="92.5" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-101" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;endArrow=none;endFill=0;strokeWidth=2;" edge="1" parent="LCS_90sd1pdz4iZuHSMx-6" source="LCS_90sd1pdz4iZuHSMx-86" target="LCS_90sd1pdz4iZuHSMx-82">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-102" value="192.0.2.100+ID (&quot;WAN&quot;)" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="LCS_90sd1pdz4iZuHSMx-101">
+          <mxGeometry x="-0.5814" y="1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-108" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=none;endFill=0;strokeWidth=2;" edge="1" parent="LCS_90sd1pdz4iZuHSMx-6">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="488.5" y="430" as="targetPoint" />
+            <mxPoint x="605" y="480" as="sourcePoint" />
+            <Array as="points">
+              <mxPoint x="605.5" y="470" />
+              <mxPoint x="489.5" y="470" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-109" value="10.ID.VLAN.254" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="LCS_90sd1pdz4iZuHSMx-108">
+          <mxGeometry x="-0.0273" y="-1" relative="1" as="geometry">
+            <mxPoint x="15" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-110" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=none;endFill=0;strokeWidth=2;" edge="1" parent="LCS_90sd1pdz4iZuHSMx-6" source="LCS_90sd1pdz4iZuHSMx-86">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="820" y="430" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-111" value="10.ID.VLAN.254" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="LCS_90sd1pdz4iZuHSMx-110">
+          <mxGeometry x="-0.4541" y="-1" relative="1" as="geometry">
+            <mxPoint x="-19" y="-1" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-86" value="User&#39;s router&lt;br&gt;Debian 11" style="verticalLabelPosition=bottom;sketch=0;aspect=fixed;html=1;verticalAlign=top;strokeColor=none;align=center;outlineConnect=0;shape=mxgraph.citrix.router;" vertex="1" parent="LCS_90sd1pdz4iZuHSMx-6">
+          <mxGeometry x="572.75" y="480" width="67.25" height="44.63" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-103" value="&lt;font style=&quot;font-size: 12px;&quot;&gt;vmbr(1000+ID) 10.ID.VLAN.0/24 NATs via router&lt;br style=&quot;font-size: 12px;&quot;&gt;&lt;/font&gt;" style="whiteSpace=wrap;html=1;rounded=1;arcSize=2;shadow=0;glass=0;dashed=1;comic=0;strokeColor=#006EAF;strokeWidth=4;fillColor=#083145;fontSize=12;align=center;labelPosition=center;verticalLabelPosition=top;verticalAlign=bottom;fontStyle=0;horizontal=1;spacingLeft=0;connectable=0;container=1;collapsible=0;recursiveResize=0;dashPattern=4 3 4 3 4 3 32 3;sketch=1;fillStyle=solid;fontColor=#ffffff;" vertex="1" parent="LCS_90sd1pdz4iZuHSMx-6">
+          <mxGeometry x="660" y="40" width="290" height="390" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-104" value="&lt;div style=&quot;color: rgb(204, 204, 204); background-color: rgb(31, 31, 31); font-family: Menlo, Monaco, &amp;quot;Courier New&amp;quot;, monospace; line-height: 18px;&quot;&gt;&lt;div style=&quot;color: rgb(255, 255, 255); font-family: Helvetica; line-height: 18px;&quot;&gt;Arbitrary User&lt;/div&gt;&lt;div style=&quot;color: rgb(255, 255, 255); font-family: Helvetica; line-height: 18px;&quot;&gt;Defined VM&lt;/div&gt;&lt;/div&gt;" style="verticalLabelPosition=top;sketch=0;aspect=fixed;html=1;verticalAlign=bottom;strokeColor=none;align=center;outlineConnect=0;shape=mxgraph.citrix.desktop;labelPosition=center;" vertex="1" parent="LCS_90sd1pdz4iZuHSMx-103">
+          <mxGeometry x="110" y="50" width="89" height="98" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-105" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=none;endFill=0;startArrow=classic;startFill=1;" edge="1" parent="LCS_90sd1pdz4iZuHSMx-103" source="LCS_90sd1pdz4iZuHSMx-107" target="LCS_90sd1pdz4iZuHSMx-104">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-106" value="1 to 255" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="LCS_90sd1pdz4iZuHSMx-105">
+          <mxGeometry x="-0.2456" y="-1" relative="1" as="geometry">
+            <mxPoint y="1" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-107" value="&lt;div style=&quot;background-color: rgb(31, 31, 31); line-height: 18px;&quot;&gt;Arbitrary User&lt;/div&gt;&lt;div style=&quot;background-color: rgb(31, 31, 31); line-height: 18px;&quot;&gt;Defined VM&lt;/div&gt;" style="verticalLabelPosition=bottom;sketch=0;aspect=fixed;html=1;verticalAlign=top;strokeColor=none;align=center;outlineConnect=0;shape=mxgraph.citrix.dns_server;labelPosition=center;fontFamily=Helvetica;fontColor=#ffffff;" vertex="1" parent="LCS_90sd1pdz4iZuHSMx-103">
+          <mxGeometry x="116.25" y="224" width="76.5" height="92.5" as="geometry" />
+        </mxCell>
+        <mxCell id="hSpgXKkPW-a1WQYBkWb7-13" value="up to 254&amp;nbsp;VLANs&lt;br&gt;per user" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="LCS_90sd1pdz4iZuHSMx-6" vertex="1">
+          <mxGeometry x="970" y="230" width="110" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="Mg9XtMR-CCz6IochAO5K-26" value="198.51.100.1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="LCS_90sd1pdz4iZuHSMx-6" vertex="1">
+          <mxGeometry x="27.5" y="524.6317391304348" width="90" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="Mg9XtMR-CCz6IochAO5K-16" value="WireGuard on Proxmox&amp;nbsp;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="LCS_90sd1pdz4iZuHSMx-6" vertex="1">
+          <mxGeometry y="539.9968421052631" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-112" value="" style="sketch=0;pointerEvents=1;shadow=0;dashed=0;html=1;strokeColor=none;fillColor=#CC0000;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;align=center;outlineConnect=0;shape=mxgraph.veeam2.wireguard;" vertex="1" parent="LCS_90sd1pdz4iZuHSMx-6">
+          <mxGeometry x="52.75" y="480" width="44.5" height="39.32" as="geometry" />
+        </mxCell>
+        <mxCell id="LCS_90sd1pdz4iZuHSMx-113" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;startArrow=classic;startFill=1;" edge="1" parent="1" source="LCS_90sd1pdz4iZuHSMx-5" target="LCS_90sd1pdz4iZuHSMx-112">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="240" y="-505" />
+              <mxPoint x="240" y="-270" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

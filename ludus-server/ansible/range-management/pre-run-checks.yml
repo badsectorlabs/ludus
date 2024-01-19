@@ -1,0 +1,44 @@
+- name: Pre run checks
+  hosts: localhost
+  tags: [always]
+  gather_facts: false
+  tasks:
+    - name: Acquire session ticket
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:8006/api2/json/access/ticket"
+        method: POST
+        body:
+          username: "{{ username }}@pam"
+          password: "{{ hostvars['localhost'].api_password }}"
+        body_format: form-urlencoded
+        validate_certs: false
+      register: proxmox_ticket_response
+
+    - name: Extract ticket from response
+      ansible.builtin.set_fact:
+        proxmox_ticket: "{{ proxmox_ticket_response.json.data.ticket }}"
+
+    - name: Check for valid dynamic inventory
+      ansible.builtin.assert:
+        that:
+          - "'SHARED' in groups"
+        fail_msg: "Dynamic inventory failed to load correctly. This may be an issue if you changed your proxmox password but did not update it in ludus."
+        success_msg: "Dynamic inventory loaded!"
+
+    # ==========================================================
+    #  Test Range Checks
+    # ==========================================================
+    - name: Check vm names
+      ansible.builtin.assert:
+        that:
+          - number_of_vms | int == unique_vm_names | int
+        msg: Every VM in Ludus must have a unique vm_name value!
+    - name: Check hostnames
+      ansible.builtin.assert:
+        that:
+          - number_of_vms | int == unique_hostnames | int
+        msg: Every VM in Ludus must have a unique hostname value!
+  vars:
+    number_of_vms: "{{ ludus | length }}"
+    unique_vm_names: "{{ ludus | map(attribute='vm_name') | unique | length }}"
+    unique_hostnames: "{{ ludus | map(attribute='hostname') | unique | length }}"

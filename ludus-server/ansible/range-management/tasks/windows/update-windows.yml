@@ -1,0 +1,36 @@
+---
+- name: Enable the windows update service
+  ansible.windows.win_service:
+    name: wuauserv
+    start_mode: auto
+    state: started
+
+- name: Add reg key to run enable-updates.cmd
+  ansible.windows.win_regedit:
+    path: HKCU:\Software\Microsoft\Windows\Currentversion\Run
+    name: EnableUpdates
+    data: C:\ludus\scripts\enable-updates.cmd
+    type: string
+    state: present
+
+- name: Make sure the enable-updates.cmd is there
+  ansible.windows.win_copy:
+    src: files/windows/scripts/enable-updates.cmd
+    dest: C:\ludus\scripts\enable-updates.cmd
+
+- name: Install all updates and reboot as many times as needed
+  ansible.windows.win_updates:
+    category_names: '*'
+    reboot: true
+
+- name: Disable the windows update service
+  ansible.windows.win_service:
+    name: wuauserv
+    start_mode: disabled
+    state: stopped
+
+- name: Remove reg key to run enable-updates.cmd
+  ansible.windows.win_regedit:
+    path: HKCU:\Software\Microsoft\Windows\Currentversion\Run
+    name: EnableUpdates
+    state: absent

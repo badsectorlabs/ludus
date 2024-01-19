@@ -1,0 +1,4 @@
+# Ansible-lint completely ignores rules or tags listed below
+skip_list:
+  - risky-file-permissions
+  - yaml[line-length]

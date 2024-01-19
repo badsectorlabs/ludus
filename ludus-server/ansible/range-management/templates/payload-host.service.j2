@@ -1,0 +1,13 @@
+[Unit]
+Description=Payload Hosting HTTP Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/{{ range_id }}/payloads
+ExecStart=/usr/bin/gohfs -host 0.0.0.0 -port 80 -dir /opt/{{ range_id }}/payloads/
+Restart=on-abort
+
+[Install]
+WantedBy=multi-user.target

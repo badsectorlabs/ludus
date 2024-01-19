@@ -1,0 +1,510 @@
+stages:
+  - documentation
+  - build
+  - install
+  - client
+  - templates
+  - range
+  - post-deploy
+  - manual
+  - upload
+  - release
+
+# Protect CI by limiting it to a specific GitLab user ID (badsectorlabs)
+default:
+  before_script:
+    - if $GITLAB_USER_ID != "555113"; then exit 1; fi
+
+# This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key 
+.ci-setup: &ci-setup
+  - cd binaries
+  # Update the server to make sure we are running the latest version if a packer or ansible build is not running
+  - pgrep -f 'ansible|packer' || sudo ./ludus-server --update
+  # Move the latest client to /usr/local/bin for clean commands
+  - sudo cp -f ludus-client_linux-amd64 /usr/local/bin/ludus
+  # Set the config to use the "user" API by default
+  - mkdir -p ~/.config/ludus/
+  - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
+  # Start as the ROOT user
+  - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
+  # Add the CI user if it doesn't already exist, try 5 times since the server just restarted the first might fail
+  - for i in {1..5}; do (ludus --url https://127.0.0.1:8081 users list all | grep -q 'Continuous Integration' || ludus --url https://127.0.0.1:8081 users add -a -n "Continuous Integration" -i CI) && break || sleep 5; done
+  # Switch to CI user API Key - only request it once, save it to disk
+  - if [ ! -f /opt/ludus/ci/.apikey ]; then ludus --url https://127.0.0.1:8081 --json --user CI users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey; fi
+  # Set the CI user key as the key for all future ludus operations
+  - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey)
+
+documentation:
+  stage: documentation
+  tags:
+    - ludus-proxmox-runner
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[build docs\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - changes:
+      - "docs/**/*"
+  script:
+  - cd docs
+  - yarn install
+  - yarn build
+  - mv ./build ../public
+  artifacts:
+    paths:
+    - public
+
+build all:
+  stage: build
+  tags:
+    - ludus-proxmox-runner
+  dependencies:
+    - documentation
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
+      when: never
+    - changes:
+      - "**/*"
+  artifacts:
+    paths:
+      - binaries/*
+    expire_in: 1 week
+  variables:
+    LUDUS_BUILD_TYPE: any-built # we are just building go code, use any CI VM
+  timeout: 10m
+  script:
+    - echo "Compiling the server code..."
+    - export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+    - mkdir binaries
+    - cd ludus-server
+    - | # If we have docs from the previous stage, embed them, otherwise build without docs
+      if [[ -d ../public ]]; then
+        mv ../public ./src/docs
+        go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -tags=embeddocs -o ../binaries/ludus-server
+      else
+        go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -o ../binaries/ludus-server
+      fi
+    - cd ..
+    - echo "Compiling the client code..."
+    - cd ludus-client
+    # Use the fork that doesn't break the terminal on control+c for Linux and macOS
+    - git clone https://github.com/zimeg/spinner
+    - cd spinner && git checkout unhide-interrupts && cd .. && go mod edit -replace github.com/briandowns/spinner=./spinner
+    - go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -o ../binaries/ludus-client_linux-amd64
+    - GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -o ../binaries/ludus-client_linux-arm64
+    - GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -o ../binaries/ludus-client_macOS-amd64
+    - GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -o ../binaries/ludus-client_macOS-arm64
+    # The forked spinner library doesn't compile for windows, so switch back to the original
+    - go mod edit -dropreplace=github.com/briandowns/spinner
+    - GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -o ../binaries/ludus-client_windows-amd64.exe
+    - GOOS=windows GOARCH=386 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -o ../binaries/ludus-client_windows-386.exe
+    - GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -o ../binaries/ludus-client_windows-arm64.exe
+    - echo "Compile complete."
+
+install kickoff:
+  stage: install
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes: # Only run if we need to test installer related changes
+      - ludus-server/*.go
+      - ludus-server/ansible/proxmox-install/**/*
+  variables:
+    LUDUS_BUILD_TYPE: full # We have to test the install process, so do a full build
+    LUDUS_INSTALL_STEP: kickoff
+  timeout: 10m
+  script:
+    - sudo hostname ludus-$CI_PIPELINE_ID
+    - sudo hostnamectl set-hostname ludus-$CI_PIPELINE_ID
+    - cd binaries
+    - sudo ./ludus-server --no-prompt ludus-$CI_PIPELINE_ID # This causes a reboot, handle it in the run.sh ci script
+
+install check:
+  stage: install
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: install kickoff
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes: # Only run if we need to test installer related changes
+      - ludus-server/*.go
+      - ludus-server/ansible/proxmox-install/**/*
+  variables:
+    LUDUS_BUILD_TYPE: full
+    LUDUS_INSTALL_STEP: check
+  timeout: 1h
+  script:
+    - sudo cat /opt/ludus/install/install.log
+    - echo "root:$CI_PIPELINE_ID" | sudo chpasswd # allow root login via the web interface for debugging
+
+install snapshot:
+  stage: install
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+      artifacts: false
+    - job: install check
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes: # Only run if we need to test installer related changes
+      - ludus-server/*.go
+      - ludus-server/ansible/proxmox-install/**/*
+  variables:
+    LUDUS_BUILD_TYPE: full
+    LUDUS_INSTALL_STEP: take-snapshot  # The magic happens in prepare.sh
+    LUDUS_SNAPSHOT_NAME: clean_install
+  timeout: 5m
+  script:
+    - echo "Snapshot complete"
+
+client basic-commands:
+  stage: client
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all  
+    - job: install snapshot
+      optional: true
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[client tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/**/*
+      - ludus-server/ansible/range-management/**/*
+      - ludus-server/ansible/user-management/**/*
+      - ludus-server/ansible/user-files/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: clean_install
+  timeout: 5m
+  script:
+    - *ci-setup
+    - ludus version
+    - ludus version --verbose
+    - ludus users creds get
+    - ludus users wireguard
+    - ludus range list all
+    - ludus range list
+    - ludus range config get
+    - ludus templates list
+    - ludus testing status
+    - ludus range gettags
+
+templates build:
+  stage: templates
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: install snapshot
+      optional: true # depend on install snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from a clean install
+    - job: client basic-commands
+      optional: true
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-server/packer/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: clean_install
+  timeout: 5m
+  script:
+    - *ci-setup
+    # Build in parallel to speed up CI
+    - ludus templates build --parallel
+
+templates check:
+  stage: templates
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: templates build
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-server/packer/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: clean_install
+  timeout: 2h
+  retry:
+    max: 2
+  script:
+    - *ci-setup
+    # If there is no template building process, start one
+    # This may happen on a failed ISO upload
+    - pgrep -f 'packer' || ludus templates build 
+    # Wait for all templates to build
+    - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
+    - ludus templates list
+
+templates snapshot:
+  stage: templates
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+      artifacts: false
+    - job: templates check
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-server/packer/**/*
+  variables:
+    LUDUS_INSTALL_STEP: take-snapshot
+    LUDUS_SNAPSHOT_NAME: templates_built
+  timeout: 5m
+  script:
+    - echo "Snapshot complete"
+
+range deploy:
+  stage: range
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: templates snapshot
+      optional: true # depend on templates snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/**/*
+      - ludus-server/ansible/range-management/**/*
+      - ludus-server/ansible/user-management/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: templates_built
+  timeout: 5m
+  script:
+    - *ci-setup
+    - ludus range config get
+    - ludus range deploy
+
+range check:
+  stage: range
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: range deploy
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-server/ansible/range-management/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: templates_built
+  timeout: 3h
+  retry:
+    max: 2
+    when: script_failure
+  script:
+    - *ci-setup
+    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - ludus range logs
+    - ludus range list
+    - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
+
+range snapshot:
+  stage: range
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+      artifacts: false
+    - job: range check
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-server/ansible/range-management/**/*
+  variables:
+    LUDUS_INSTALL_STEP: take-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built
+  timeout: 5m
+  script:
+    - echo "Snapshot complete"
+
+post-deploy testing:
+  stage: post-deploy
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: range snapshot
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/**/*
+      - ludus-server/ansible/range-management/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built
+  timeout: 15m
+  script:
+    - *ci-setup
+    - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
+    - ludus testing status
+    # Validate that WIN10 can reach the internet
+    - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+    - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
+    - ludus testing start
+    - ludus testing status
+    - ludus range list
+    # Validate that WIN10 cannot reach the internet
+    - sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
+    # Sometimes the DNS lookup is cached from the test above, so test for a DNS failure or a connect failure
+    - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
+    - ludus testing allow -i 8.8.8.8
+    - ludus testing status
+    # Validate that WIN10 can get to 8.8.8.8 but not 1.1.1.1
+    - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+    - sudo qm guest exec $WIN11VMID -- ping -n 1 1.1.1.1 | egrep 'Request timed out.|Destination port unreachable.'
+    # Allow google.com and check that google is allowed but example isn't
+    - ludus testing allow -d google.com
+    - ludus testing status
+    # This sometimes takes a few seconds - try 3 times 5 seconds apart
+    - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML') && break || sleep 5; done
+    - sudo qm guest exec $WIN11VMID -- curl https://example.com/ | egrep 'Could not resolve host|Failed to connect to example.com'
+    # Deny google.com and 8.8.8.8 and check that they are not reachable
+    - ludus testing deny -d google.com
+    - ludus testing deny -i 8.8.8.8
+    - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
+    - sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
+    - ludus testing stop
+    - ludus testing status
+    # Now that testing has stopped, check the VM can reach the internet
+    - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+    - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
+    # Power on/off tests
+    - ludus power off -n CI-kali
+    - sleep 10
+    - ludus range status | grep 'CI-kali' | grep 'Off'
+    - ludus power on -n CI-kali
+    - sleep 10
+    - ludus range status | grep 'CI-kali' | grep 'On'
+
+manual testing:
+  stage: manual
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+  variables:
+    LUDUS_BUILD_TYPE: any-built # Just move our code to the most recent CI VM for manual testing
+  timeout: 15m
+  script:
+    - *ci-setup
+    - echo "manual testing"
+
+upload:
+  stage: upload
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+  variables:
+    LUDUS_BUILD_TYPE: any-built
+    PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
+  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-server ${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}'
+      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}'
+      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm64-${CI_COMMIT_TAG}'
+      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_macOS-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_macOS-amd64-${CI_COMMIT_TAG}'
+      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_macOS-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_macOS-arm64-${CI_COMMIT_TAG}'
+      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-amd64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe'
+      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-386.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-386-${CI_COMMIT_TAG}.exe'
+      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-arm64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe'
+
+release:
+  stage: release
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: upload
+  variables:
+    LUDUS_BUILD_TYPE: any-built
+    PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
+  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - wget "https://github.com/orhun/git-cliff/releases/download/v1.3.1/git-cliff-1.3.1-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/git-cliff.tar.gz
+    - tar -xvzf /tmp/git-cliff.tar.gz -C /tmp
+    - sudo mv /tmp/git-cliff-*/git-cliff /usr/local/bin/
+    - git-cliff -t ${CI_COMMIT_TAG} --current -o CHANGELOG.txt
+    - sudo curl --location --output /usr/local/bin/release-cli "https://gitlab.com/api/v4/projects/gitlab-org%2Frelease-cli/packages/generic/release-cli/latest/release-cli-linux-amd64"
+    - sudo chmod +x /usr/local/bin/release-cli
+    - 'release-cli create --name "ludus $CI_COMMIT_TAG" --description CHANGELOG.txt --tag-name $CI_COMMIT_TAG --assets-link 
+      "[{\"name\":\"ludus-server-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}\"},
+      {\"name\":\"ludus-client_linux-amd64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}\"},
+      {\"name\":\"ludus-client_linux-arm64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm64-${CI_COMMIT_TAG}\"},
+      {\"name\":\"ludus-client_macOS-amd64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_macOS-amd64-${CI_COMMIT_TAG}\"},
+      {\"name\":\"ludus-client_macOS-arm64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_macOS-arm64-${CI_COMMIT_TAG}\"},
+      {\"name\":\"ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\"},
+      {\"name\":\"ludus-client_windows-386-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-386-${CI_COMMIT_TAG}.exe\"},
+      {\"name\":\"ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\"}]"'

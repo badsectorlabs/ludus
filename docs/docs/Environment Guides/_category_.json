@@ -1,0 +1,8 @@
+{
+    "label": "Environment Guides",
+    "position": 3,
+    "link": {
+        "type": "generated-index",
+        "description": "Guides for different network setup scenarios."
+    }
+}

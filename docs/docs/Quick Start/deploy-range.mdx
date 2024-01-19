@@ -1,0 +1,114 @@
+---
+sidebar_position: 4
+---
+
+# Deploy a range
+
+Ludus ranges (environments) are defined by a single yaml configuration file. By default, a simple range configuration is provided to each user.
+
+To view your current configuration, run the following command
+
+```
+local:~$ ludus range config get
+```
+
+For a detailed explaination of the configuration file, see **[configuration](../configuration)**.
+
+If you would like to make changes to this file, save it to disk, modify it, and set it with the following commands.
+
+```
+local:~$ ludus range config get > ludus-range-config.yml
+local:~$ <vim|nano> config
+local:~$ ludus range config set -f ludus-range-config.yml
+[INFO]  Your range config has been successfully updated.
+```
+
+Once you are satisfied with your range configuration, deploy it with `range deploy`.
+
+```
+local:~$ ludus range deploy
+[INFO]  range deploy started
+```
+
+Just like with templates, you can tail the ansible logs for range deployment with `range logs -f`
+
+```
+local:~$ ludus range logs -f
+PLAY [Pre run checks] **********************************************************
+
+TASK [Acquire session ticket] **************************************************
+changed: [localhost]
+
+TASK [Check for valid dynamic inventory] ***************************************
+ok: [localhost] => {
+    "changed": false,
+    "msg": "Dynamic inventory loaded!"
+}
+...
+```
+
+You can also check the status of your range at any time with `range status`
+
+```
+local:~$ ludus range status
++---------+--------------+------------------+---------------+-------------------+-----------------+
+| USER ID | RANGE NUMBER | LAST DEPLOYMENT  | NUMBER OF VMS | DEPLOYMENT STATUS | TESTING ENABLED |
++---------+--------------+------------------+---------------+-------------------+-----------------+
+|   JD    |      2       | 2023-12-31 18:42 |       4       |      SUCCESS      |      FALSE      |
++---------+--------------+------------------+---------------+-------------------+-----------------+
++------------+-----------------------------------+-------+-------------+
+| PROXMOX ID |              VM NAME              | POWER |     IP      |
++------------+-----------------------------------+-------+-------------+
+|    107     | JD-router-debian11-x64            |  On   | 10.2.10.254 |
+|    109     | JD-ad-dc-win2019-server-x64       |  On   | 10.2.10.11  |
+|    113     | JD-ad-win11-22h2-enterprise-x64-1 |  On   | 10.2.10.21  |
+|    114     | JD-kali                           |  On   | 10.2.99.1   |
++------------+-----------------------------------+-------+-------------+
+```
+
+When the range status shows `SUCCESS` your range is fully deployed!
+The easiest way to interact with the VMs is via SSH or RDP.
+All VMs are directly accessable to users connected to the Ludus WireGuard server.
+To get a WireGuard configuration file for your user, run `user wireguard`
+
+```
+local:~$ ludus user wireguard
+[Interface]
+PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
+Address = 198.51.100.2/32
+
+[Peer]
+PublicKey = 5nlDO6gtqVXI89xQNkd2c2L0US7RnPinbAlfiyWHHBM=
+Endpoint = 10.2.99.240:51820
+AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
+PersistentKeepalive = 25
+```
+
+Import this configuration into a [WireGuard client](https://www.wireguard.com/install/) and once connected, all range VMs are directly accessable.
+
+To get a zip file of RDP configuration files for the Windows machines, use the `range rdp` command.
+
+```
+local:~$ ludus range rdp
+[INFO]  File downloaded and saved as rdp.zip
+```
+
+These configuration files can be imported into any RDP client and used to connect to the Windows VMs using the credentials below.
+
+All Linux machines have SSH running on port 22.
+
+The Kali template is running [KasmVNC](https://github.com/kasmtech/KasmVNC) on port 8443.
+The password for KasmVNC is `password` as it requires a 6 character password.
+
+## Default Machine Credentials
+  - Kali
+    - `kali:kali` (OS)
+    - `kali:password` (KasmVNC)
+  - Windows
+    - `localuser:password` (local Administrator)
+    - `LUDUS\domainuser:password`
+    - `LUDUS\domainadmin:password` (Domain Admin)
+  - Debian based boxes
+    - `debian:debian`
+  - Others
+    - `localuser:password`

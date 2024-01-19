@@ -1,0 +1,148 @@
+- name: Set the policy for the FORWARD chain to DROP while we change the firewall
+  ansible.builtin.iptables:
+    chain: FORWARD
+    policy: DROP
+
+- name: Flush the FORWARD table to remove any user defined rules to prevent old rules from lingering
+  ansible.builtin.iptables:
+    chain: FORWARD
+    flush: true
+
+# The following two rules are added directly to the FORWARD chain so they can be pre-empted by user rules and testing rules
+- name: Set the default external rule
+  ansible.builtin.iptables:
+    chain: FORWARD
+    source: "10.{{ range_second_octet }}.0.0/16"
+    destination: "! 10.{{ range_second_octet }}.0.0/16"
+    protocol: all
+    jump: "{{ network.external_default | default('ACCEPT') }}"
+    state: present
+    action: insert
+    comment: "User Default: External Rule"
+    numeric: true
+
+- name: Set the default inter-VLAN rule
+  ansible.builtin.iptables:
+    chain: FORWARD
+    source: "10.{{ range_second_octet }}.0.0/16"
+    destination: "10.{{ range_second_octet }}.0.0/16"
+    protocol: all
+    jump: "{{ network.inter_vlan_default | default('ACCEPT') }}"
+    state: present
+    action: insert
+    comment: "User Default: Inter-VLAN Rule"
+    numeric: true
+
+- name: Get the VM id of the router via Proxmox API
+  ansible.builtin.shell: |
+    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ defaults.router_vm_name }}").vmid'
+  delegate_to: localhost
+  become: false
+  register: router_id_command
+  when: router_vm_id is not defined
+
+- name: Set the router_vm_id from API lookup
+  ansible.builtin.set_fact:
+    router_vm_id: "{{ router_id_command.stdout }}"
+  when: router_vm_id is not defined
+
+- name: Get the interface with a 192.0.2.x ip (WAN)
+  ansible.builtin.shell: |
+    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
+  delegate_to: localhost
+  become: false
+  register: wan_interface_command
+
+- name: Set the router_external_interface variable
+  ansible.builtin.set_fact:
+    router_external_interface: "{{ wan_interface_command.stdout }}"
+
+- name: Deny all other traffic from the external interface
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    chain_management: true
+    in_interface: "{{ router_external_interface }}"
+    protocol: all
+    jump: REJECT
+    state: present
+    action: insert
+    comment: "Default: Deny traffic in on external interface"
+    numeric: true
+
+- name: Allow the user's WireGuard IP to hit this router from the outside
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    source: "198.51.100.{{ range_second_octet }}"
+    in_interface: "{{ router_external_interface }}"
+    protocol: all
+    jump: ACCEPT
+    state: present
+    action: insert
+    comment: "Default: WireGuard Client access rule"
+    numeric: true
+
+- name: Allow the Ludus IP to hit this router from the outside for ansible
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    source: "192.0.2.254"
+    in_interface: "{{ router_external_interface }}"
+    protocol: all
+    jump: ACCEPT
+    state: present
+    action: insert
+    comment: "Default: Ludus access rule"
+    numeric: true
+
+- name: Set the default allow related/established out to the user's WireGuard IP
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    protocol: all
+    ctstate:
+      - RELATED
+      - ESTABLISHED
+    jump: ACCEPT
+    state: present
+    action: insert
+    comment: "Default: allow related/established rule"
+    numeric: true
+
+- name: Jump all traffic from FORWARD to LUDUS_DEFAULTS
+  ansible.builtin.iptables:
+    chain: FORWARD
+    jump: LUDUS_DEFAULTS
+    state: present
+    action: insert
+    rule_num: 1
+    comment: "Default: Apply Ludus default routing rules"
+    numeric: true
+
+- name: Jump all traffic from INPUT to LUDUS_DEFAULTS
+  ansible.builtin.iptables:
+    chain: INPUT
+    jump: LUDUS_DEFAULTS
+    state: present
+    action: insert
+    rule_num: 1
+    comment: "Default: Apply Ludus default routing rules"
+    numeric: true
+
+- name: Loop over each user defined rule
+  ansible.builtin.include_tasks:
+    firewall-rules.yml
+  loop: "{{ network.rules }}"
+  when: 'network.rules is defined'
+
+- name: Reset the conntrack entries to prevent previously allowed traffic to continue
+  ansible.builtin.shell: conntrack -F
+  async: 5 # Becuase this resets the conntrack entries, ansible will hang unless we run it async
+  poll: 1
+
+- name: Set the policy for the FORWARD chain to ACCEPT as we are done changing the firewall
+  ansible.builtin.iptables:
+    chain: FORWARD
+    policy: ACCEPT
+
+- name: Save current state of the firewall to a file
+  community.general.iptables_state:
+    state: saved
+    path: /etc/iptables/rules.v4

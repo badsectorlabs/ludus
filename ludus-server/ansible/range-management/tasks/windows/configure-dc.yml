@@ -1,0 +1,122 @@
+- name: Install Powershell AD Tools
+  ansible.windows.win_feature:
+    name:
+      - RSAT-AD-PowerShell
+      - RSAT-AD-AdminCenter
+    state: present
+
+- name: Install Active Directory
+  ansible.windows.win_feature:
+    name: AD-Domain-Services
+    include_management_tools: true
+    include_sub_features: true
+    state: present
+
+- name: Disable password policy
+  community.windows.win_security_policy:
+    section: System Access
+    key: PasswordComplexity
+    value: 0
+
+- name: Set DNS
+  ansible.windows.win_dns_client:
+    adapter_names: '*'
+    dns_servers:
+      - 127.0.0.1
+      - "{{ dc_ip }}"
+
+# windows_domain errors out on subsequent domain creation
+# The specified argument 'CreateDNSDelegation' was not recognized
+# https://github.com/ansible-collections/ansible.windows/issues/252
+- name: Create domain
+  ansible.windows.win_domain:
+    create_dns_delegation: false
+    dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
+    domain_netbios_name: "{{ netbios_name }}"
+    domain_mode: "{{ defaults.ad_domain_functional_level }}"
+    forest_mode: "{{ defaults.ad_forest_functional_level }}"
+    safe_mode_password: "{{ defaults.ad_domain_safe_mode_password }}"
+    install_dns: true
+  register: domain_creation
+  failed_when:
+    - domain_creation.failed
+    - "domain_creation.msg is defined and \"The specified argument 'CreateDNSDelegation' was not recognized\" not in domain_creation.msg"
+
+- name: Reboot After Domain Creation
+  win_reboot:
+    msg: "Installing AD. Rebooting..."
+    pre_reboot_delay: 15
+    reboot_timeout: 600
+    post_reboot_delay: 60
+  when: domain_creation is changed
+
+- name: Configure default OUs
+  community.windows.win_domain_ou:
+    name: "{{ item }}"
+    path: "DC={{ netbios_name }},DC={{ fqdn_tail.split('.') | join(',DC=') }}"
+    state: present
+  with_items:
+    - Workstations
+    - Servers
+
+# Add the router as the DNS forwarder to allow windows machines to resolve addresses
+# Add home.arpa to the SuffixSearchList so we can access things by bare hostname (these will get forwarded to the router)
+- name: Configure DNS forwarding
+  ansible.windows.win_powershell:
+    script: |
+      $dnsip = "{{ dns_server }}"
+      $newDNSServers = "127.0.0.1", "$dnsip"
+      Add-DnsServerForwarder -IPAddress $dnsip
+      Set-DnsClientGlobalSetting -SuffixSearchList @( "{{ netbios_name }}.{{ fqdn_tail }}", "home.arpa")
+      Restart-Service DNS
+
+- name: Configure DC with raw Commands
+  win_shell: "{{ item }}"
+  with_items:
+    - "wevtutil el | Select-String -notmatch \"Microsoft-Windows-LiveId\" | Foreach-Object {wevtutil cl \"$_\"}"
+    - "Set-SmbServerConfiguration -AuditSmb1Access $true -Force"
+
+- name: Disable Telemetry
+  win_shell: ".\\disable-telemetry.ps1"
+  args:
+    chdir: 'c:\ludus\scripts'
+  register: disable_telemetry
+
+- name: Disable password complexity
+  win_security_policy:
+    section: System Access
+    key: PasswordComplexity
+    value: 0
+
+- name: Create a domain user
+  community.windows.win_domain_user:
+    name: "{{ defaults.ad_domain_user }}"
+    firstname: Domain
+    surname: User
+    password: "{{ defaults.ad_domain_user_password }}"
+    state: present
+    password_never_expires: true
+    groups:
+      - Remote Desktop Users
+    groups_action: add
+
+- name: Create a Domain Admin user
+  community.windows.win_domain_user:
+    name: "{{ defaults.ad_domain_admin }}"
+    firstname: Domain
+    surname: Admin
+    password: "{{ defaults.ad_domain_admin_password }}"
+    state: present
+    password_never_expires: true
+    groups:
+      - Domain Admins
+      - Remote Desktop Users
+    groups_action: add
+
+- name: Allow the domain user and domain admin to RDP
+  ansible.windows.win_user_right:
+    name: SeRemoteInteractiveLogonRight
+    users:
+      - "{{ netbios_name }}\\{{ defaults.ad_domain_user }}"
+      - "{{ netbios_name }}\\{{ defaults.ad_domain_admin }}"
+    action: add

@@ -1,0 +1,5 @@
+server=10.{{ range_second_octet }}.{{ item }}.254
+interface={{ interface_name }}
+dhcp-range=10.{{ range_second_octet }}.{{ item }}.100,10.{{ range_second_octet }}.{{ item }}.253,255.255.255.0,12h
+dhcp-option={{ interface_name }},3,10.{{ range_second_octet }}.{{ item }}.254
+dhcp-option={{ interface_name }},6,10.{{ range_second_octet }}.{{ item }}.254

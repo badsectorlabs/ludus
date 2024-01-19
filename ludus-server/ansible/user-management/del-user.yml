@@ -1,0 +1,90 @@
+---
+- name: Remove a user from the range
+  gather_facts: true
+  hosts: localhost
+  become: true
+  tasks:
+    - name: Remove the pool for this user
+      ansible.builtin.shell: |
+        pvesh delete /pools/{{ user_range_id }}
+
+    - name: 'Remove the cred directory for user'
+      delegate_to: localhost
+      become: false
+      file:
+        path: "{{ ludus_users_dir }}/{{ username }}"
+        state: absent
+
+    - name: Remove the user from the remote host
+      ansible.builtin.user:
+        name: "{{ username }}"
+        shell: /bin/bash
+        state: absent
+        remove: true
+
+    - name: Get wg client public key
+      slurp:
+        src: /etc/wireguard/{{ user_range_id }}-client-public-key
+      register: wg_client_public_key_slurp
+
+    - name: Set the client key fact
+      set_fact:
+        client_public_key: "{{ wg_client_public_key_slurp['content'] | b64decode | trim }}"
+
+    - name: Remove the user from wireguard
+      ansible.builtin.blockinfile:
+        path: /etc/wireguard/wg0.conf
+        block: |
+          [Peer]
+          PublicKey = {{ client_public_key }}
+          AllowedIPs = 198.51.100.{{ second_octet }}/32
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR {{ user_range_id }}"
+        state: absent
+
+    - name: Remove wireguard public key
+      file:
+        path: "/etc/wireguard/{{ user_range_id }}-client-public-key"
+        state: absent
+
+    - name: Remove wireguard private key
+      file:
+        path: "/etc/wireguard/{{ user_range_id }}-client-private-key"
+        state: absent
+
+    - name: Remove wireguard config
+      file:
+        path: "/etc/wireguard/{{ user_range_id }}_client.conf"
+        state: absent
+
+    # This can be used to sync the config, but it causes a hiccup in all client's connections
+    # Use the sync below instead
+    # - name: Restart wireguard
+    #   ansible.builtin.service:
+    #     name: wg-quick@wg0
+    #     state: restarted
+
+    - name: Sync the wireguard config
+      ansible.builtin.shell: |
+        wg syncconf wg0 <(wg-quick strip wg0)
+      args:
+        executable: /bin/bash
+
+    - name: Remove the vmbr interface for this user
+      ansible.builtin.include_tasks: vmbr-management.yml
+      vars:
+        - state_var: absent
+      loop:
+        - 1
+
+- hosts: localhost
+  become: true
+  roles:
+    - role: lae.proxmox
+      pve_group: "{{ proxmox_node }}"
+      pve_run_system_upgrades: false
+      pve_reboot_on_kernel_update: false
+      pve_cluster_enabled: false
+      pve_zfs_enabled: false
+      pve_users:
+        - name: "{{ username }}@pam"
+          state: absent

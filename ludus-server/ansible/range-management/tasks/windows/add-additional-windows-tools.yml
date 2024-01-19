@@ -1,0 +1,59 @@
+---
+- name: Test for a chocolatey cache
+  delegate_to: localhost
+  ansible.builtin.wait_for:
+    host: 192.0.2.2
+    port: 8081
+    timeout: 2
+  register: choco_test
+  ignore_errors: true
+
+- name: Set chocolatey source
+  ansible.builtin.set_fact:
+    chocolatey_source: http://192.0.2.2:8081/repository/chocolatey/
+  when: not choco_test.failed
+
+# https://github.com/chocolatey/chocolatey-ansible/issues/18
+- name: Bootstrap chocolatey by hand
+  win_chocolatey:
+    name:
+      - chocolatey
+    source: http://192.0.2.2:8081/repository/raw/install.ps1
+  when: not choco_test.failed
+
+- name: Install Additional Tools
+  win_chocolatey:
+    name:
+      - networkmonitor
+      - wireshark
+      - firefox
+      - vscode
+      - processhacker
+      - 7zip
+      - burp-suite-free-edition
+      - explorersuite
+      - ilspy
+      - croc
+    ignore_checksums: "{{ true if ignore_chocolatey_checksums is defined and ignore_chocolatey_checksums else false }}"
+    state: present
+    source: "{{ chocolatey_source | default('') }}"
+
+- name: Install Google Chrome
+  win_chocolatey:
+    name:
+      - googlechrome
+      # We have to ignore checksums here because: "This package always installs the latest version of Google Chrome,
+      # regardless of the version specified in the package. Google does not officially offer older versions of Chrome for download.
+      # Because of this you may get checksum mismatch between the time Google releases a new installer,
+      # and the package is automatically updated."
+      # See: https://github.com/chocolatey-community/chocolatey-packages/tree/master/automatic/googlechrome
+    ignore_checksums: true
+    state: present
+    source: "{{ chocolatey_source | default('') }}"
+
+- name: Install sysinternals to C:\Tools
+  win_chocolatey:
+    name: sysinternals
+    package_params: /InstallDir:C:\Tools
+    ignore_checksums: "{{ true if ignore_chocolatey_checksums is defined and ignore_chocolatey_checksums else false }}"
+    source: "{{ chocolatey_source | default('') }}"

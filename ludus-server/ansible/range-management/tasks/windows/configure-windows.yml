@@ -1,0 +1,118 @@
+- name: Check if files have been copied
+  win_stat:
+    path: C:\ludus\scripts
+  register: file_check
+
+- name: Create C:\ludus directory
+  win_file:
+    path: C:\ludus
+    state: directory
+  when: not file_check.stat.exists
+
+- name: Copy windows scripts to host
+  ansible.windows.win_copy:
+    src: windows/scripts/
+    dest: C:\ludus\scripts
+
+- name: Copy windows resources to host
+  ansible.windows.win_copy:
+    src: windows/background/
+    dest: C:\ludus\background
+  when: not file_check.stat.exists
+
+- name: Eject any isos
+  ansible.windows.win_powershell:
+    script: |
+      $sh = New-Object -ComObject "Shell.Application"
+      $sh.Namespace(17).Items() | Where-Object { $_.Type -eq "CD Drive" } | foreach { $_.InvokeVerb("Eject") }
+
+- name: Set DNS to public DNS before we try to reset the Windows evaluation
+  ansible.windows.win_dns_client:
+    adapter_names: '*'
+    dns_servers:
+      - "1.1.1.1"
+
+- name: Check if the Windows evaluation is expiring/expired
+  ansible.windows.win_powershell:
+    script: |
+      . c:\ludus\scripts\fix-windows-expiration.ps1
+
+# See https://github.com/PowerShell/PowerShell/issues/2138 for more info
+- name: Disable the Invoke-WebRequest download progress bar globally for speed improvements
+  ansible.windows.win_powershell:
+    script: |
+      New-Item -Path $ProfilePath | Out-Null
+      If (!(Get-Content $Profilepath| % { $_ -match "SilentlyContinue" } )) {
+        Add-Content -Path $ProfilePath -Value "$ProgressPreference = 'SilentlyContinue'"
+      }
+
+# https://support.microsoft.com/en-gb/help/929852/guidance-for-configuring-ipv6-in-windows-for-advanced-users
+# - name: Disable IPv6 for all interfaces
+#   ansible.windows.win_powershell:
+#     script: |
+#       Get-NetAdapterBinding -ComponentID ms_tcpip6 | ForEach-Object {Disable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6}
+#       reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters" /v DisabledComponents /t REG_DWORD /d 255 /f
+
+- name: Set DNS (Windows)
+  ansible.windows.win_dns_client:
+    adapter_names: '*'
+    dns_servers:
+      - "{{ dns_server }}"
+  when: ansible_os_family == "Windows" and dns_server is defined
+
+- name: Get bginfo.exe if needed
+  run_once: true
+  block:
+    - name: Create /opt/ludus/resources/windows directory if it doesn't exist
+      ansible.builtin.file:
+        path: /opt/ludus/resources/windows
+        state: directory
+        recurse: true
+      delegate_to: localhost
+
+    - name: Check if bginfo.exe exists
+      ansible.builtin.stat:
+        path: /opt/ludus/resources/windows/bginfo.exe
+      delegate_to: localhost
+      register: bginfo_exists
+
+    - name: Download bginfo.exe
+      ansible.builtin.get_url:
+        url: https://live.sysinternals.com/bginfo.exe
+        dest: /opt/ludus/resources/windows/bginfo.exe
+      delegate_to: localhost
+      when: not bginfo_exists.stat.exists
+
+- name: Check if bginfo.exe exists
+  ansible.windows.win_stat:
+    path: C:\ludus\background\bginfo.exe
+  register: bginfo_stat
+
+- name: Create C:\ludus\background directory
+  win_file:
+    path: C:\ludus\background
+    state: directory
+    recursive: true
+  when: not bginfo_stat.stat.exists
+
+- name: Copy bginfo.exe to windows host
+  win_copy:
+    src: /opt/ludus/resources/windows/bginfo.exe
+    dest: C:\ludus\background\bginfo.exe
+  when: not bginfo_stat.stat.exists
+
+- name: Install bginfo
+  ansible.windows.win_powershell:
+    script: |
+      Set-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run -Name bginfo -Value 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File "C:\ludus\background\set-bg.ps1"'
+      Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name TileWallpaper -Value '0' # fitted bg
+      Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name WallpaperStyle -Value '10' # stretch
+
+- name: Disable Telemetry
+  win_shell: ".\\disable-telemetry.ps1"
+  args:
+    chdir: 'c:\ludus\scripts'
+  register: disable_telemetry
+
+- name: Clear Event Logs
+  win_shell: "wevtutil el | Select-String -notmatch \"Microsoft-Windows-LiveId\" | Foreach-Object {wevtutil cl \"$_\"}"

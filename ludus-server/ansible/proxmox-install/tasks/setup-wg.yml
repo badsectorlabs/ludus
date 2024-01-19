@@ -1,0 +1,51 @@
+- name: Install wireguard-tools package
+  ansible.builtin.apt:
+    name: wireguard-tools
+    state: present
+
+- name: Check if wg key files exists
+  ansible.builtin.stat:
+    path: /etc/wireguard/server-private-key
+  register: key_stat
+
+- name: Generate the wireguard keys
+  ansible.builtin.shell: |
+    wg genkey | tee /etc/wireguard/server-private-key | wg pubkey > /etc/wireguard/server-public-key
+  when: not key_stat.stat.exists
+
+- name: Get wg server private key
+  ansible.builtin.slurp:
+    src: /etc/wireguard/server-private-key
+  register: wg_server_private_key_slurp
+
+- name: Get wg server public key
+  ansible.builtin.slurp:
+    src: /etc/wireguard/server-public-key
+  register: wg_server_public_key_slurp
+
+- name: Set the server and client key facts
+  set_fact:
+    server_private_key: "{{ wg_server_private_key_slurp['content'] | b64decode | trim }}"
+    server_public_key: "{{ wg_server_public_key_slurp['content'] | b64decode | trim }}"
+
+- name: Create server wireguard config
+  ansible.builtin.template:
+    dest: /etc/wireguard/wg0.conf
+    src: wg_server.conf.j2
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Enable and persist ip forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    state: present
+    sysctl_set: true
+    reload: true
+
+- name: Start wireguard and enable on boot
+  systemd:
+    name: wg-quick@wg0
+    enabled: true
+    state: started

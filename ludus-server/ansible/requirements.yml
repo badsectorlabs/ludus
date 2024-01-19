@@ -1,0 +1,26 @@
+---
+collections:
+- name: ansible.windows
+  version: 1.14.0
+- name: ansible.posix
+  version: 1.5.4
+- name: ansible.utils
+  version: 2.11.0
+- name: community.general
+  version: 7.5.0
+- name: community.windows
+  version: 1.13.0
+- name: chocolatey.chocolatey
+  version: 1.5.1
+
+roles:
+- name: lae.proxmox
+  version: v1.7.1
+- name: geerlingguy.ntp
+  version: 2.3.3
+- name: geerlingguy.packer
+  version: 1.0.2
+- name: ansible-thoteam.nexus3-oss
+  version: v2.5.1
+- name: gantsign.golang
+  version: 3.2.1

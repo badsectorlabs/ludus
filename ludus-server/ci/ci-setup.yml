@@ -1,0 +1,446 @@
+- name: Create the gitlab-runner user and deploy a Debian 12 VM
+  hosts: localhost
+  tasks:
+    - name: Check inventory
+      ansible.builtin.fail:
+        msg: The CI/CD template has already been created. Manually remove it and re-run this play to recreate it.
+      when: "'debian-12-x64-server-ludus-ci-template' in hostvars"
+
+    - name: Add the user to the host
+      ansible.builtin.user:
+        name: gitlab-runner
+        shell: /bin/bash
+        create_home: true
+        generate_ssh_key: true
+        comment: GitLab Runner
+        password: "{{ lookup('password', ludus_install_path + '/ci/.gitlab-runner-password length=24 chars=ascii_letters,digits') | password_hash }}"
+
+    # Note these won't actually take effect due to: https://gitlab.com/gitlab-org/gitlab-runner/-/issues/25423
+    # keeping them in the event that bug is fixed
+    - name: Add the gitlab-runner ssh config
+      ansible.builtin.blockinfile:
+        path: /home/gitlab-runner/.ssh/config
+        block: |
+          Host *
+            IdentityFile /home/gitlab-runner/.ssh/id_rsa
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            ServerAliveInterval 3
+            ServerAliveCountMax 2
+            ConnectTimeout 3
+            LogLevel ERROR
+        create: true
+
+    - name: Change gitlab-runner ssh config permissions
+      ansible.builtin.file:
+        path: /home/gitlab-runner/.ssh/config
+        state: file
+        owner: gitlab-runner
+        group: gitlab-runner
+        mode: '0600'
+
+    - name: Change ci file permissions
+      ansible.builtin.file:
+        path: "{{ ludus_install_path }}/ci"
+        state: directory
+        owner: gitlab-runner
+        group: gitlab-runner
+        mode: u=rwX,g=rX,o=rX
+        recurse: true
+
+    - name: Change gitlab-runner-password permissions
+      ansible.builtin.file:
+        path: "{{ ludus_install_path }}/ci/.gitlab-runner-password"
+        state: file
+        owner: gitlab-runner
+        group: gitlab-runner
+        mode: '0600'
+
+    - name: Create a pool for CICD
+      ansible.builtin.shell: |
+        pvesh create /pools --poolid CICD
+      register: pool_create
+      failed_when: pool_create.rc > 0 and 'already exists' not in pool_create.stderr
+
+    - name: Create the CI/CD network
+      ansible.builtin.blockinfile:
+        path: /etc/network/interfaces
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR vmbr1 (CI/CD)"
+        block: |
+          auto vmbr1
+          iface vmbr1 inet static
+              address 203.0.113.254/24
+              bridge-ports none
+              bridge-stp off
+              bridge-fd 0
+              post-up   echo 1 > /proc/sys/net/ipv4/ip_forward
+              post-up   iptables -t nat -A POSTROUTING -s '203.0.113.254/24' -o {{ proxmox_interface }} -j MASQUERADE
+              post-down iptables -t nat -D POSTROUTING -s '203.0.113.254/24' -o {{ proxmox_interface }} -j MASQUERADE
+      register: interfaces_status
+
+    - name: Enable new interface
+      shell: ADDRFAM=inet ifup vmbr1
+      when: interfaces_status is changed
+      ignore_errors: true
+
+    - name: Create dnsmasq config for CI/CD vmbr1
+      ansible.builtin.blockinfile:
+        path: /etc/dnsmasq.d/dnsmasq-vmbr1.conf
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR vmbr1 (CI/CD)"
+        block: |
+          server=203.0.113.254
+          interface=vmbr1
+          dhcp-range=203.0.113.100,203.0.113.250,255.255.255.0,12h
+          dhcp-option=vmbr1,3,203.0.113.254
+        create: true
+      register: dnsmasq_written
+
+    - name: Restart dnsmasq
+      ansible.builtin.service:
+        name: dnsmasq
+        enabled: true
+        state: restarted
+      when: dnsmasq_written is changed
+
+    - name: Create CI VM from a Debian 12 template
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        clone: debian-12-x64-server-template
+        name: debian-12-x64-server-ludus-ci
+        pool: CICD
+        full: true
+        timeout: 600
+      register: clone_vm
+
+    - name: Set the vm_id
+      set_fact:
+        vm_id: "{{ clone_vm.vmid }}"
+      when: clone_vm is successful
+      until: vm_id != -1
+
+    # Disk changes are not supported after a VM is created via proxmox_kvm
+    # - name: Change the disk size
+    #   community.general.proxmox_kvm:
+    #     api_user: "{{ api_user }}"
+    #     api_password: "{{ api_password }}"
+    #     api_host: "{{ api_host }}"
+    #     node: "{{ node_name }}"
+    #     vmid: "{{ vm_id }}"
+    #     sata:
+    #       sata0: "ZFS:250,format=raw" # expand the disk to 250GB, TODO: make the storage a variable
+    #     timeout: 15
+    #     update: true
+    #   when: clone_vm is changed and clone_vm.vmid != -1
+
+    - name: Update the VM description by vmid
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ vm_id }}"
+        description: '{ "groups": ["cicd"] }'
+        # This must be set to update the config
+        update: true
+      when: clone_vm is changed and clone_vm.vmid != -1
+      register: update_desc
+
+    - name: Update the VM's options
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ vm_id }}"
+        memory: 32768 # 32GB
+        cores: 8 # how how many host threads each socket should be allocated
+        vcpus: 8 # how many virtual CPUs are presented to the VM
+        cpu: host # allows nested virtualization
+        # This must be set to update the config
+        update: true
+      when: clone_vm is changed and clone_vm.vmid != -1
+
+    - name: Update the VM network interfaces
+      community.general.proxmox_nic:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        vmid: "{{ vm_id }}"
+        interface: net0
+        bridge: "vmbr1" # The CI/CD network (to avoid IP conflicts with the normal NAT'd network)
+      when: clone_vm is changed and clone_vm.vmid != -1
+
+    - name: Start the VM
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ vm_id }}"
+        state: started
+      # This is required or ansible will attempt to start a VM that doesn't exist
+      when: clone_vm is successful
+      # But sometimes it fails anyway?
+      retries: 3
+      delay: 5
+
+    - name: Wait for VM to be running, and try to start it if not running after 20 seconds
+      block:
+        - name: Check VM running status
+          community.general.proxmox_kvm:
+            api_user: "{{ api_user }}"
+            api_password: "{{ api_password }}"
+            api_host: "{{ api_host }}"
+            node: "{{ node_name }}"
+            vmid: "{{ vm_id }}"
+            state: current
+          register: result
+          until: result.status.find("running") != -1
+          retries: 2
+          delay: 5
+      rescue:
+        - name: Start the VM
+          community.general.proxmox_kvm:
+            api_user: "{{ api_user }}"
+            api_password: "{{ api_password }}"
+            api_host: "{{ api_host }}"
+            node: "{{ node_name }}"
+            vmid: "{{ vm_id }}"
+            state: started
+
+    - name: Wait for VM to acquire an IP address
+      command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host debian-12-x64-server-ludus-ci
+      register: nodecheck
+      changed_when: false
+      until: (nodecheck.stdout | default('') | from_json).ansible_host | default('') | ansible.utils.ipaddr
+      retries: 30
+      delay: 5
+      when: clone_vm is changed
+
+    - name: Save off the IP for use with checking on the WinRM/SSH connectivity
+      set_fact:
+        last_deployed_ip: "{{ (nodecheck.stdout | from_json).ansible_host | default('') | ansible.utils.ipaddr }}"
+      when: clone_vm is changed
+
+    # The VM interface update changes the IP of the VM with DHCP, without this the inventory has the old IP still
+    - meta: refresh_inventory
+
+    - name: Wait for the host's control interface (SSH) to come up
+      action:
+        module: wait_for
+        host: "{{ last_deployed_ip }}"
+        port: 22
+        delay: 3
+        state: started
+      register: wait_result
+      when: clone_vm is changed
+
+- name: Install Gitlab runner prerequisites
+  hosts: debian-12-x64-server-ludus-ci
+  vars:
+    - ansible_connection: ssh
+    - ansible_user: debian
+    - ansible_ssh_pass: debian
+    - become_method: sudo
+    - ansible_sudo_pass: debian
+  tasks:
+    - name: Install curl and ca-certificates
+      ansible.builtin.apt:
+        name:
+          - curl
+          - ca-certificates
+        state: present
+        update_cache: true
+      become: true
+
+    - name: Install gitlab runner repo
+      ansible.builtin.shell: "curl -L 'https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh' | bash"
+      become: true
+
+    - name: Install git lfs repo
+      ansible.builtin.shell: "curl -s 'https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh' | bash"
+      become: true
+
+    - name: Add the user to the host
+      ansible.builtin.user:
+        name: gitlab-runner
+        shell: /bin/bash
+        create_home: true
+      become: true
+
+    - name: Remove the .bash_logout as it breaks gitlab runner
+      ansible.builtin.file:
+        path: /home/gitlab-runner/.bash_logout
+        state: absent
+      become: true
+
+    - name: Allow 'gitlab-runner' user to have passwordless sudo
+      lineinfile:
+        dest: /etc/sudoers
+        state: present
+        regexp: '^gitlab-runner'
+        line: 'gitlab-runner ALL=(ALL) NOPASSWD: ALL'
+        validate: 'visudo -cf %s'
+      become: true
+
+    - name: Copy ssh key for gitlab-runner with owner and permissions
+      authorized_key:
+        user: gitlab-runner
+        key: "{{ lookup('file', '/home/gitlab-runner/.ssh/id_rsa.pub') }}"
+      become: true
+
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name:
+          - gitlab-runner
+          - git
+          - git-lfs
+          - build-essential # for CGO
+          - vim # to help with debugging edits
+          - tmux
+          - htop
+        state: present
+        update_cache: true
+      become: true
+
+    # ll needs to be a thing everywhere
+    - name: Enable ll alias
+      become: true
+      ansible.builtin.lineinfile:
+        path: /root/.bashrc
+        line: "alias ll='ls $LS_OPTIONS -lart'"
+        create: true
+
+    - name: Enable ll alias
+      become: true
+      ansible.builtin.lineinfile:
+        path: /home/gitlab-runner/.bashrc
+        line: "alias ll='ls $LS_OPTIONS -lart'"
+        create: true
+
+    - name: Enable ll alias in skel
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/skel/.bashrc
+        line: "alias ll='ls $LS_OPTIONS -lart'"
+        create: true
+
+    - name: Automatically load the CI key if it exists on login for gitlab-runner (helpful for interactive debugging CI builds)
+      become: true
+      lineinfile:
+        path: /home/gitlab-runner/.bashrc
+        line: "if [ -f /opt/ludus/ci/.apikey ]; then export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey); fi"
+        create: true
+
+- name: Install Go # Must come after the tasks or ca certificates may not exist
+  hosts: debian-12-x64-server-ludus-ci
+  vars:
+    - ansible_connection: ssh
+    - ansible_user: debian
+    - ansible_ssh_pass: debian
+    - become_method: sudo
+    - ansible_sudo_pass: debian
+  roles:
+    - role: gantsign.golang
+      golang_version: '1.21.1'
+  tasks:
+    # Install node + yarn to build the documentation
+    - name: Install node
+      ansible.builtin.shell: curl -fsSL https://deb.nodesource.com/setup_21.x | bash - && apt-get install -y nodejs
+
+    - name: Install yarn
+      ansible.builtin.shell: npm install --global yarn
+
+- name: Add gitlab-runner to proxmox and convert the VM to a template
+  hosts: localhost
+  roles:
+    - role: lae.proxmox
+      pve_group: "{{ proxmox_node }}"
+      pve_run_system_upgrades: false
+      pve_reboot_on_kernel_update: false
+      pve_cluster_enabled: false
+      pve_zfs_enabled: false
+      pve_users:
+        - name: "gitlab-runner@pam"
+          password: "{{ lookup('password', ludus_install_path + '/ci/.gitlab-runner-password length=24 chars=ascii_letters,digits') }}"
+      pve_acls:
+        - path: "/pool/CICD"
+          roles: ["PVEAdmin"]
+          users:
+            - "gitlab-runner@pam"
+          groups:
+            - "ludus_admins"
+        - path: "/storage/{{ proxmox_vm_storage_pool }}"
+          roles: ["DatastoreUser"]
+          users:
+            - "gitlab-runner@pam"
+        - path: "/sdn/zones/localnetwork/vmbr1"
+          roles: ["PVESDNUser"]
+          users:
+            - "gitlab-runner@pam"
+
+  tasks:
+    - name: Change name
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ vm_id }}"
+        state: present
+        name: debian-12-x64-server-ludus-ci-template
+        update: true
+
+    - name: Power off template VM
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ vm_id }}"
+        state: stopped
+        update: true
+
+    - name: Pause for 5 seconds to build allow VM to stop
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: Convert to template
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ vm_id }}"
+        state: present
+        template: true
+        update: true
+
+    - name: Download the gitlab-runner binary
+      ansible.builtin.get_url:
+        url: https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-linux-amd64
+        dest: /usr/local/bin/gitlab-runner
+        mode: '0755'
+
+    - name: Install the gitlab runner
+      ansible.builtin.shell: gitlab-runner install --working-directory /home/gitlab-runner --user gitlab-runner
+
+    - name: Register the gitlab runner
+      ansible.builtin.shell: gitlab-runner register --non-interactive --executor custom --tag-list "ludus-proxmox-runner" --locked --maximum-timeout 21600 --custom-prepare-exec /opt/ludus/ci/prepare.sh --custom-run-exec /opt/ludus/ci/run.sh --custom-cleanup-exec /opt/ludus/ci/cleanup.sh --cache-dir /home/gitlab-runner/cache --builds-dir /home/gitlab-runner/builds --registration-token {{ gitlab_registration_token }} --url {{ gitlab_url }}
+
+    - name: Run the gitlab runner
+      ansible.builtin.shell: gitlab-runner start
+
+    # This is required as the register command does not support concurrency settings
+    # See https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1539
+    - name: Update GitLab runner config concurrency
+      ansible.builtin.replace:
+        path: "/etc/gitlab-runner/config.toml"
+        regexp: "concurrent *= *\\d+"
+        replace: "concurrent = 3"
+
+    - name: Restart GitLab runner
+      ansible.builtin.shell: gitlab-runner restart

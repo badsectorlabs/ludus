@@ -1,0 +1,31 @@
+[Unit]
+Description=Ludus server
+Wants=network.target
+After=network.target
+After=wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=ludus
+Group=ludus
+ExecStart={{ ludus_install_path }}/ludus-server
+Restart=always
+RestartSec=5
+RemoveIPC=true
+PrivateTmp=true
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateDevices=yes
+DevicePolicy=closed
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=true
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+ReadWritePaths={{ ludus_install_path }}
+
+[Install]
+WantedBy=multi-user.target

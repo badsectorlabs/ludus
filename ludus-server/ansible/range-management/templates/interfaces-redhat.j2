@@ -1,0 +1,20 @@
+TYPE=Ethernet
+# Device Name #
+NAME={{ interface_name }}
+DEVICE={{ interface_name }}
+# Static IP Address #
+PROXY_METHOD=none
+BROWSER_ONLY=no
+BOOTPROTO=none
+IPADDR={{ static_ip }}
+DNS1={{ default_gateway }}
+GATEWAY={{ default_gateway }}
+# SUBNET MASK #
+SUBNET MASK=255.255.255.0
+DEFROUTE=yes
+IPV4_FAILURE_FATAL=no
+# Disable ipv6#
+IPV6INIT=no
+
+# Activate on system Boot #
+ONBOOT=yes

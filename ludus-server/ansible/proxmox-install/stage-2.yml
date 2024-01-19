@@ -1,0 +1,93 @@
+- name: Stage 2
+  hosts: localhost
+  pre_tasks:
+    - name: Check if the stage-2 file exists
+      ansible.builtin.stat:
+        path: "{{ ludus_install_path }}/install/.stage-2-complete"
+      register: stat_result
+
+    - name: End play if completed
+      ansible.builtin.meta: end_play
+      when: stat_result.stat.exists
+
+    - name: Generating admin proxmox password
+      ansible.builtin.set_fact:
+        proxmox_admin_password: "{{ lookup('password', 'proxmox_admin_password length=20 chars=ascii_letters,digits') }}"
+
+    - name: Update install progress
+      ansible.builtin.include_tasks: tasks/update-install-progress.yml
+      vars:
+        install_message: |-2
+              Ludus is installing and will reboot 1 more time.
+
+              ████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 40%
+
+  roles:
+    - role: geerlingguy.ntp
+      ntp_manage_config: true
+      ntp_servers:
+        - time.nist.gov
+        - clock.nyc.he.net
+    - role: lae.proxmox
+      pve_group: "{{ proxmox_node }}"
+      pve_run_system_upgrades: true
+      pve_reboot_on_kernel_update: false # Since we are running ansible on localhost, we will do this manually
+      pve_cluster_enabled: false
+      pve_zfs_enabled: false
+      pve_roles:
+        - name: ResourceAudit
+          privileges:
+            - "Sys.Audit"
+            - "Datastore.Audit"
+        - name: DatastoreUser
+          privileges:
+            - "Datastore.AllocateSpace"
+            - "Datastore.AllocateTemplate"
+            - "Datastore.Audit"
+      pve_groups:
+        - name: Admins
+          comment: Administrators of this PVE cluster
+        - name: ludus_users
+          comment: Ludus users
+        - name: ludus_admins
+          comment: Ludus admins
+  post_tasks:
+    - name: Disable the pvebanner service
+      ansible.builtin.service:
+        name: pvebanner.service
+        enabled: false
+
+    - name: Update install progress
+      ansible.builtin.include_tasks: tasks/update-install-progress.yml
+      vars:
+        install_message: |-2
+              Ludus is installing and will reboot 1 more time.
+
+              ██████████████████████████████████████████░░░░░░░░░░░░░░░░░░ 70%
+
+    - name: Disable no subscription warning
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          echo "DPkg::Post-Invoke { \"dpkg -V proxmox-widget-toolkit | grep -q '/proxmoxlib\.js$'; if [ \$? -eq 1 ]; then { echo 'Removing subscription nag from UI...'; sed -i '/data.status/{s/\!//;s/active/NoMoreNagging/}' /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js; }; fi\"; };" >/etc/apt/apt.conf.d/no-nag-script
+          apt --reinstall install proxmox-widget-toolkit &>/dev/null
+
+    - name: Drop a file to indicate stage 2 is complete
+      ansible.builtin.file:
+        path: "{{ ludus_install_path }}/install/.stage-2-complete"
+        state: touch
+
+    - name: Alert
+      ansible.builtin.pause:
+        prompt: |
+          Rebooting after stage 2. Ludus install will continue automatically on reboot.
+        seconds: 10
+
+    - name: Reboot into the PVE kernel
+      ansible.builtin.shell: "sleep 5 && /usr/sbin/shutdown -r now 'PVE kernel installed, rebooting'"
+      async: 1
+      poll: 0
+
+    - name: Pause for reboot
+      ansible.builtin.pause:
+        seconds: 20

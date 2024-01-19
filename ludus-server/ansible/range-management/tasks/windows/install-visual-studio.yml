@@ -1,0 +1,22 @@
+- name: Test for a chocolatey cache
+  delegate_to: localhost
+  ansible.builtin.wait_for:
+    host: 192.0.2.2
+    port: 8081
+    timeout: 2
+  register: choco_test
+  ignore_errors: true
+
+- name: Set chocolatey source
+  ansible.builtin.set_fact:
+    chocolatey_source: http://192.0.2.2:8081/repository/chocolatey/
+  when: not choco_test.failed
+
+- name: "Install Visual Studio {{ visual_studio_version }}"
+  win_chocolatey:
+    name: "visualstudio{{ visual_studio_version }}community"
+    # See here for packages: https://docs.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-community?view=vs-2019
+    # Microsoft.VisualStudio.Workload.NativeDesktop == C++
+    # Microsoft.VisualStudio.Workload.NetCoreTools == C#
+    package_params: "--add Microsoft.VisualStudio.Workload.NativeDesktop --add Microsoft.VisualStudio.Workload.NetCoreTools --includeRecommended --includeOptional --passive --locale en-US"
+    source: "{{ chocolatey_source | default('') }}"

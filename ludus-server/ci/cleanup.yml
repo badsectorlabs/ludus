@@ -1,0 +1,30 @@
+- name: Create the VM for this CI run and power it on waiting for SSH to be available
+  hosts: localhost
+  tasks:
+    - name: Check inventory
+      ansible.builtin.fail:
+        msg: The CI/CD runner VM {{runner_vm_name}} does not exist.
+      when: "'{{runner_vm_name}}' not in hostvars"
+
+    - name: Power off runner VM
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        name: "{{ runner_vm_name }}"
+        state: stopped
+        update: true
+
+    - name: Pause for 5 seconds to build allow VM to stop
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: Remove runner VM
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        name: "{{ runner_vm_name }}"
+        state: absent

@@ -1,0 +1,25 @@
+- name: Update the install status for console
+  ansible.builtin.template:
+    src: issue.j2
+    dest: /etc/issue
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    issue_message: "{{ install_message }}"
+
+- name: Update the ssh banner
+  ansible.builtin.template:
+    src: sshbanner.j2
+    dest: /etc/sshbanner
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    banner_message: "{{ install_message }}"
+
+- name: Bounce the TTY to update the install issue_message
+  ansible.builtin.service:
+    name: getty@tty1
+    state: restarted
+  when: no_bounce_tty is undefined or not no_bounce_tty

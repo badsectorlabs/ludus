@@ -1,0 +1,8 @@
+---
+proxmox_node: ludus               # The hostname and proxmox node name that the install will set for this machine
+proxmox_interface: ens18          # The network interface that will get the static ip proxmox_local_ip
+proxmox_local_ip: "192.168.0.0"   # The static IP for this machine. In some cloud providers (AWS, Azure) this will be a private IP
+proxmox_public_ip: "192.168.0.0"  # The IP users will connect to via WireGuard to reach this machine
+proxmox_gateway: "192.168.0.0"    # The default gateway for this machine
+proxmox_netmask: "255.255.255.0"  # The netmask for this machine's network
+proxmox_storage: local            # The storage pool to use for templates and VMs (default: local; if you set up ZFS manually after install, change this)

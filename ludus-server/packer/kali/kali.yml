@@ -1,0 +1,168 @@
+---
+- name: Setup Kali (update, enable SSH, install kasmvnc)
+  hosts: all
+  become_method: sudo
+  tasks:
+    - name: Upgrade all packages
+      become: true
+      ansible.builtin.apt:
+        upgrade: full
+        update_cache: true
+
+    - name: Enable ssh
+      become: true
+      ansible.builtin.service:
+        name: ssh
+        state: started
+        enabled: true
+
+    - name: Install packages
+      become: true
+      ansible.builtin.apt:
+        name:
+          - git
+          - python3-pip
+          - jq
+          - curl
+          - dbus
+          - dbus-user-session
+          - dbus-x11
+          - vim
+          - swapspace # helps with machines with low RAM
+          - kali-defaults
+          - kali-root-login
+          - desktop-base
+          - kali-linux-default
+        state: present
+
+    - name: Installing kasm dependencies
+      become: true
+      ansible.builtin.apt:
+        autoremove: true
+        state: present
+        name:
+          - libexporter-tiny-perl
+          - libhash-merge-simple-perl
+          - liblist-moreutils-perl
+          - liblist-moreutils-xs-perl
+          - libswitch-perl
+          - libyaml-tiny-perl
+          - ssl-cert
+
+    - name: Download kasmvnc deb
+      ansible.builtin.get_url:
+        url: https://github.com/kasmtech/KasmVNC/releases/download/v1.2.0/kasmvncserver_kali-rolling_1.2.0_amd64.deb
+        dest: /tmp/kasmvncserver_kali-rolling.deb
+        mode: '0700'
+
+    - name: Install the kasmvnc deb
+      become: true
+      ansible.builtin.apt:
+        deb: /tmp/kasmvncserver_kali-rolling.deb
+        state: present
+
+    - name: Add Kali to the ssl-cert group
+      become: true
+      ansible.builtin.user:
+        name: kali
+        groups: ssl-cert
+        append: true
+
+    - name: Create .vnc directory for VNC user
+      ansible.builtin.file:
+        path: /home/kali/.vnc
+        state: directory
+        mode: '0755'
+        owner: kali
+        group: kali
+
+    # Add a user to the vncserver, create a systemd service for it
+    - name: Set the password for the kali user
+      ansible.builtin.shell:
+        cmd: |
+          printf "password\npassword\n\n" | vncpasswd -u kali -ow /home/kali/.kasmpasswd
+
+    - name: Set correct permissions for VNC passwd file
+      ansible.builtin.file:
+        path: /home/kali/.kasmpasswd
+        owner: kali
+        group: kali
+        mode: '0600'
+
+    - name: Set the de-was-selected file
+      ansible.builtin.file:
+        path: "/home/kali/.vnc/.de-was-selected"
+        state: touch
+        owner: kali
+        group: kali
+        mode: '0644'
+
+    - name: Create xstartup script
+      ansible.builtin.copy:
+        dest: "/home/kali/.vnc/xstartup"
+        force: false
+        mode: '0755'
+        content: |-
+          #!/bin/bash
+          exec xfce4-session
+
+    - name: Deploy kasmvnc.yml config to user ~/.vnc
+      ansible.builtin.blockinfile:
+        path: "/home/kali/.vnc/kasmvnc.yaml"
+        create: true
+        block: |
+          desktop:
+            resolution:
+              width: 1920
+              height: 1080
+            allow_resize: true
+            pixel_depth: 24
+
+          keyboard:
+            remap_keys:
+            ignore_numlock: false
+            raw_keyboard: true
+
+          user_session:
+            idle_timeout: never
+
+          server:
+            auto_shutdown:
+              no_user_session_timeout: never
+              active_user_session_timeout: never
+              inactive_user_session_timeout: never
+
+          pointer:
+            enabled: true
+
+    - name: Create a service for kasmvnc
+      become: true
+      ansible.builtin.blockinfile:
+        path: /etc/systemd/system/kasmvnc@1.service
+        create: true
+        block: |
+          [Unit]
+          Description=Remote desktop service (VNC)
+          After=syslog.target network.target
+          StartLimitIntervalSec=30s
+          StartLimitBurst=5
+
+          [Service]
+          Type=simple
+          User=kali
+          PIDFile=/home/kali/.vnc/%H%i.pid
+          ExecStartPre=/bin/sh -c "/usr/bin/kasmvncserver -kill :%i > /dev/null 2>&1 || :"
+          ExecStart=/usr/bin/kasmvncserver :%i -localhost no -alwaysshared -fg -geometry 1920x1080 -SecurityTypes VncAuth
+          ExecStop=/usr/bin/kasmvncserver -kill :%i
+          Restart=on-failure
+          RestartSec=5s
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable the kasmvnc service
+      become: true
+      ansible.builtin.service:
+        name: kasmvnc@1.service
+        enabled: true
+        daemon_reload: true

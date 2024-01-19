@@ -1,0 +1,16 @@
+# proxmox_kvm options
+api_user: "{{ lookup('env', 'PROXMOX_USERNAME') }}"
+api_password: "{{ lookup('env', 'PROXMOX_PASSWORD') }}"
+api_host: "{{ lookup('env', 'PROXMOX_HOSTNAME') | default('127.0.0.1') }}"
+node_name: "{{ lookup('env', 'PROXMOX_NODE') }}"
+proxmox_default_behavior: compatibility
+ansible_remote_tmp: "{{ '/opt/ludus/ansible/tmp' if (lookup('env', 'USER') != 'root') else '/tmp/.ansible/tmp' }}"
+defaults:
+  cpu: "host"
+  net: '{"net0":"virtio,bridge=vmbr0"}'
+  cores: '2'
+  memory: '2048'
+  balloon: '2048'
+  scsihw: 'virtio-scsi-pci'
+  virtio: '{"scsi0":"local:16,cache=writeback,discard=on"}'
+  ostype: 'l26'

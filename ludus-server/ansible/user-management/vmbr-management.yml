@@ -1,0 +1,26 @@
+- name: Add a vmbr interface that will be a private virtual network
+  blockinfile:
+    path: /etc/network/interfaces
+    marker: "# LUDUS MANAGED INTERFACE FOR USER {{ second_octet }} {mark}"
+    block: |
+      auto vmbr{{ item }}{{ '%03d' % second_octet }}
+      iface vmbr{{ item }}{{ '%03d' % second_octet }} inet manual
+          bridge-ports none
+          bridge-stp off
+          bridge-fd 0
+          bridge-vlan-aware yes
+          bridge-vids 2-4094
+          post-up ip route add 10.{{ second_octet }}.0.0/16 via 192.0.2.{{ 100 + second_octet }}
+          post-down ip route del 10.{{ second_octet }}.0.0/16 via 192.0.2.{{ 100 + second_octet }}
+    state: "{{ state_var }}"
+  register: interfacesStatus
+
+- name: Enable new vmbr interface
+  shell: ADDRFAM=inet ifup vmbr{{ item }}{{ '%03d' % second_octet }}
+  when: interfacesStatus is changed and state_var == "present"
+  ignore_errors: true
+
+- name: Disable vmbr interface
+  shell: ADDRFAM=inet ifdown vmbr{{ item }}{{ '%03d' % second_octet }}
+  when: interfacesStatus is changed and state_var == "absent"
+  ignore_errors: true

@@ -1,0 +1,8 @@
+ansible_connection: winrm
+ansible_user: localuser
+ansible_password: password
+ansible_winrm_scheme: https
+ansible_winrm_server_cert_validation: ignore
+win_async_startup_timeout: 3600 # Prevent timeouts, see https://docs.ansible.com/ansible/latest/reference_appendices/config.html#win-async-startup-timeout
+ansible_winrm_operation_timeout_sec: 120
+ansible_winrm_read_timeout_sec: 160

@@ -1,0 +1,42 @@
+- name: Pre-run checks
+  ansible.builtin.import_playbook: pre-run-checks.yml
+
+# ==========================================================
+# Start up (turn on) an existing environment
+# ==========================================================
+
+- name: Start up VMs
+  tags: [never, startup-range]
+  hosts: localhost
+  tasks:
+    - name: Set VM State
+      ansible.builtin.include_tasks: tasks/proxmox/set-vm-state.yml
+  vars:
+    vm_group_to_change: "{{ range_id }}"
+    new_vm_state: "started"
+
+# ==========================================================
+# Shut down the entire environment to preserve resources
+# ==========================================================
+- name: Shut down VMs
+  tags: [never, stop-range]
+  hosts: localhost
+  tasks:
+    - name: Set VM State
+      ansible.builtin.include_tasks: tasks/proxmox/set-vm-state.yml
+  vars:
+    vm_group_to_change: "{{ range_id }}"
+    new_vm_state: "stopped"
+
+# ==========================================================
+# Blow away the entire environment
+# ==========================================================
+- name: Destroy VMs
+  tags: [never, destroy-range]
+  hosts: localhost
+  tasks:
+    - name: Set VM state
+      ansible.builtin.include_tasks: tasks/proxmox/set-vm-state.yml
+  vars:
+    vm_group_to_change: "{{ range_id }}"
+    new_vm_state: "absent"

@@ -1,0 +1,42 @@
+- name: Initialize an empty list for our vmids
+  ansible.builtin.set_fact:
+    vm_names_to_change: []
+    vmids_to_change: []
+
+- name: Append hostnames to list
+  ansible.builtin.set_fact:
+    vm_names_to_change: "{{ vm_names_to_change + [item] }}"
+  loop: "{{ groups[vm_group_to_change] }}"
+
+- name: Get a JSON blob of vmids and vm names
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:8006/api2/json/cluster/resources"
+    method: GET
+    validate_certs: false
+    headers:
+      Cookie: "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}"
+  register: vm_ids_response
+
+- name: Parse vmids from JSON and append to list
+  ansible.builtin.set_fact:
+    vmids_to_change: "{{ vmids_to_change + vm_ids_response.json | json_query(query_string) }}"
+  loop: "{{ vm_names_to_change }}"
+  vars:
+    query_string: "data[?name=='{{ item }}'].vmid"
+
+- name: Configure VM state
+  community.general.proxmox_kvm:
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    node: "{{ node_name }}"
+    state: "{{ new_vm_state }}"
+    vmid: "{{ item }}"
+    force: "{{ true if new_vm_state == 'stopped' else omit }}"
+    timeout: "{{ 120 if new_vm_state != 'stopped' else 30 }}"
+  with_items:
+    - "{{ vmids_to_change }}"
+  # Sometimes the proxmox module fails changing vm state and reports errors
+  retries: 3
+  delay: 5
+  timeout: "{{ 240 if new_vm_state != 'stopped' else 60 }}"

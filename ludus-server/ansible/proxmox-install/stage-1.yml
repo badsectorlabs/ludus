@@ -1,0 +1,244 @@
+- name: Stage 1
+  hosts: localhost
+  pre_tasks:
+    - name: Set install path
+      ansible.builtin.set_fact:
+        ludus_install_path: "{{ install_path | default('/opt/ludus') }}"
+
+    - name: Check if the stage-1 file exists
+      ansible.builtin.stat:
+        path: "{{ ludus_install_path }}/install/.stage-1-complete"
+      register: stat_result
+
+    - name: End play if completed
+      ansible.builtin.meta: end_play
+      when: stat_result.stat.exists
+  vars:
+    pve_interface: "{{ proxmox_interface | default(ansible_default_ipv4.interface) }}"
+    pve_ip: "{{ proxmox_local_ip }}"
+    pve_gateway: "{{ proxmox_gateway }}"
+    pve_netmask: "{{ proxmox_netmask | default('255.255.255.0') }}"
+    pve_ip_cidr_network: "{{ (proxmox_local_ip + '/' + proxmox_netmask) | ipaddr('network/prefix')  }}"
+    pve_gateway_cidr_network: "{{ (proxmox_gateway + '/' + proxmox_netmask) | ipaddr('network/prefix')  }}"
+  serial: 1
+  tasks:
+    - name: Check if pve_gateway is in the same network as pve_ip
+      assert:
+        that:
+          - (pve_ip_cidr_network | ansible.utils.ipaddr('network')) == (pve_gateway_cidr_network | ansible.utils.ipaddr('network'))
+        fail_msg: "proxmox_gateway is not in the same network as proxmox_local_ip"
+
+    - name: Enable SSH banner messages
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        state: present
+        line: Banner /etc/sshbanner
+
+    - name: Bounce the SSH service to enable banners
+      ansible.builtin.service:
+        name: sshd
+        state: restarted
+
+    - name: Debug
+      ansible.builtin.debug:
+        var: in_tty
+
+    - name: Update install progress
+      ansible.builtin.include_tasks: tasks/update-install-progress.yml
+      vars:
+        no_bounce_tty: "{{ in_tty | default('true') }}" # Don't bounce the TTY if we are using it! (var set in go)
+        install_message: |-2
+              Ludus is installing and will reboot 2 more times.
+
+              ██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 10%
+
+    - name: Create systemd service file for ludus install
+      ansible.builtin.template:
+        src: ludus-install.service.j2
+        dest: "/etc/systemd/system/ludus-install.service"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Enable the ludus-install service
+      ansible.builtin.service:
+        name: ludus-install.service
+        enabled: true
+        daemon_reload: true
+
+    - name: Enable helpful aliases
+      ansible.builtin.blockinfile:
+        path: /root/.bashrc
+        block: |
+          alias ll='ls $LS_OPTIONS -lart'
+          alias ludus-install-status="if [[ -f {{ ludus_install_path }}/install/.stage-3-complete ]]; then echo 'Ludus install completed successfully' && echo -n \"Root API key: \" && cat {{ ludus_install_path }}/install/root-api-key && echo; else tail -f {{ ludus_install_path }}/install/install.log; fi"
+        create: true
+
+    - name: Install bridge-utils, git, python3-pip, dnsmasq, jq, and other required packages
+      ansible.builtin.apt:
+        name:
+          - bridge-utils
+          - git
+          - python3-pip
+          - jq
+          - dnsmasq
+          - curl
+          - gpg-agent
+          - dbus
+          - dbus-user-session
+          - vim
+          - iptables-persistent
+          - sshpass # for ansible provisioner in packer
+          - swapspace # helps with machines with low RAM (32GB)
+        state: present
+        update_cache: true
+
+    # Only swap when you run out of RAM
+    - name: Set swappiness to zero
+      ansible.posix.sysctl:
+        name: vm.swappiness
+        value: '0'
+        state: present
+
+    - name: Check if ufw package is installed
+      ansible.builtin.command: service ufw status
+      register: ufw_installed
+      ignore_errors: true
+      changed_when: false
+      check_mode: false
+
+    - name: Disable the ufw firewall (if configured)
+      ansible.builtin.service:
+        name: ufw
+        state: stopped
+        enabled: false
+      when:
+        - ufw_installed.rc == 0
+
+    # Jeff Geerling approved: https://github.com/geerlingguy/ansible-role-pip/pull/58
+    - name: Remove python externally-managed file to allow pip to run via ansible
+      ansible.builtin.file:
+        path: /usr/lib/python3.11/EXTERNALLY-MANAGED
+        state: absent
+
+    - name: Install required python packages (for ansible/proxmox interoperability)
+      ansible.builtin.pip:
+        name:
+          - proxmoxer
+          - requests
+          - netaddr
+          - pywinrm
+          - dnspython
+          - jmespath
+
+    - name: Set a hostname
+      ansible.builtin.hostname:
+        name: "{{ proxmox_node }}"
+
+    - name: Update install progress
+      ansible.builtin.include_tasks: tasks/update-install-progress.yml
+      vars:
+        no_bounce_tty: "{{ in_tty | default('true') }}" # Don't bounce the TTY if we are using it! (var set in go)
+        install_message: |-2
+              Ludus is installing and will reboot 2 more times.
+
+              ████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 20%
+
+    - name: Ensure /etc/ansible directory exists
+      file:
+        path: /etc/ansible
+        state: directory
+        mode: '0755'
+
+    - name: Set configuration in /etc/ansible/ansible.cfg
+      copy:
+        dest: /etc/ansible/ansible.cfg
+        content: |
+          [defaults]
+          timeout = 60
+        mode: '0644'
+
+    - name: Remove unattended-upgrades
+      ansible.builtin.apt:
+        name: unattended-upgrades
+        state: absent
+
+    - name: Configure dnsmasq (part 1) - setup base config
+      ansible.builtin.template:
+        src: dnsmasq.conf.j2
+        dest: /etc/dnsmasq.conf
+
+    - name: Configure dnsmasq (part 2) - setup interface config
+      ansible.builtin.template:
+        src: dnsmasq-interface.conf.j2
+        dest: "/etc/dnsmasq.d/dnsmasq-{{ pve_interface }}.conf"
+
+    - name: Configure dnsmasq (part 3) - enable service
+      ansible.builtin.service:
+        name: dnsmasq
+        enabled: true
+
+    - name: Configure /etc/network/interfaces
+      ansible.builtin.template:
+        src: interfaces.j2
+        dest: /etc/network/interfaces
+      register: _configure_interfaces
+
+    - name: Disable Spectre and Meltdown mitigations - Speed is king! Also disable APST and ASPM to prevent disk I/O issues.
+      ansible.builtin.lineinfile:
+        dest: /etc/default/grub
+        line: 'GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX noibrs noibpb nopti nospectre_v2 nospectre_v1 l1tf=off nospec_store_bypass_disable no_stf_barrier mds=off srbds=off mitigations=off nvme_core.default_ps_max_latency_us=0 pcie_aspm=off"'
+        insertafter: '^GRUB_CMDLINE_LINUX="'
+      register: _pve_grub
+
+    - name: Update GRUB configuration
+      ansible.builtin.command: update-grub
+      register: _pve_grub_update
+      failed_when: ('error' in _pve_grub_update.stderr)
+      when: "_pve_grub is changed"
+
+    - name: Check if /etc/cloud/templates/hosts.debian.tmpl exists
+      ansible.builtin.stat:
+        path: /etc/cloud/templates/hosts.debian.tmpl
+      register: cloud_templates
+
+    - name: Set /etc/hosts cloud template
+      ansible.builtin.template:
+        src: hosts.debian.tmpl.j2
+        dest: /etc/cloud/templates/hosts.debian.tmpl
+      when: cloud_templates.stat.exists
+
+    - name: Set /etc/hosts
+      ansible.builtin.template:
+        src: hosts.j2
+        dest: /etc/hosts
+
+    - name: Update install progress
+      ansible.builtin.include_tasks: tasks/update-install-progress.yml
+      vars:
+        no_bounce_tty: "{{ in_tty | default('true') }}" # Don't bounce the TTY if we are using it! (var set in go)
+        install_message: |-2
+              Ludus is installing and will reboot 2 more times.
+
+              ██████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 30%
+
+    - name: Drop a file to indicate stage 1 is complete
+      ansible.builtin.file:
+        path: "{{ ludus_install_path }}/install/.stage-1-complete"
+        state: touch
+
+    - name: Alert
+      ansible.builtin.pause:
+        prompt: |
+          Rebooting after stage 1. Ludus install will continue automatically on reboot.
+        seconds: 10
+
+    - name: Reboot for networking changes
+      ansible.builtin.shell: "sleep 5 && /usr/sbin/shutdown -r now 'Networking changes found, rebooting'"
+      async: 1
+      poll: 0
+      when: _configure_interfaces is changed
+
+    - name: Pause for reboot
+      ansible.builtin.pause:
+        seconds: 20

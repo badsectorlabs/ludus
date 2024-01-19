@@ -1,0 +1,56 @@
+- name: Install Powershell AD Tools
+  ansible.windows.win_feature:
+    name:
+      - RSAT-AD-PowerShell
+      - RSAT-AD-AdminCenter
+    state: present
+
+- name: Install Active Directory
+  ansible.windows.win_feature:
+    name: AD-Domain-Services
+    include_management_tools: true
+    include_sub_features: true
+    state: present
+
+- name: Disable password policy
+  community.windows.win_security_policy:
+    section: System Access
+    key: PasswordComplexity
+    value: 0
+
+- name: Set DNS
+  ansible.windows.win_dns_client:
+    adapter_names: '*'
+    dns_servers:
+      - "{{ dc_ip }}"
+
+- name: Promoted the server to a DC
+  block:
+    - name: Promote this server to Additional DC 1
+      win_domain_controller:
+        dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
+        domain_admin_user: "{{ domain_admin }}@{{ netbios_name }}.{{ fqdn_tail }}"
+        domain_admin_password: "{{ domain_admin_password }}"
+        safe_mode_password: "{{ domain_safe_mode_password }}"
+        state: domain_controller
+  # Why do you have to run this twice to actually have it take effect? No idea.
+    - name: Promote this server to Additional DC 2
+      win_domain_controller:
+        dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
+        domain_admin_user: "{{ domain_admin }}@{{ netbios_name }}.{{ fqdn_tail }}"
+        domain_admin_password: "{{ domain_admin_password }}"
+        safe_mode_password: "{{ domain_safe_mode_password }}"
+        state: domain_controller
+  rescue:
+    # {"changed": true, "msg": "Failed to install ADDSDomainController with DCPromo: The operation failed because:\r\n\r\n
+    # DFS Replication: The dependency service or group failed to start. \r\n\r\n\
+    # "The dependency service or group failed to start.\"\r\n", "reboot_required": true}
+    - name: Reboot the Additional DC
+      win_reboot:
+    - name: Promote this server to Additional DC
+      win_domain_controller:
+        dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
+        domain_admin_user: "{{ domain_admin }}@{{ netbios_name }}.{{ fqdn_tail }}"
+        domain_admin_password: "{{ domain_admin_password }}"
+        safe_mode_password: "{{ domain_safe_mode_password }}"
+        state: domain_controller

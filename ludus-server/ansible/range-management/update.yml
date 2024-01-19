@@ -1,0 +1,12 @@
+- name: Pre-run checks
+  ansible.builtin.import_playbook: pre-run-checks.yml
+
+# ==========================================================
+# Update
+# ==========================================================
+- name: Update
+  tags: [never, update]
+  hosts: "{{ update_host | default([]) }}"
+  tasks:
+    - name: Update Windows
+      ansible.builtin.include_tasks: tasks/windows/update-windows.yml
