@@ -1,4 +1,5 @@
 stages:
+  - pages
   - documentation
   - build
   - install
@@ -13,7 +14,7 @@ stages:
 # Protect CI by limiting it to a specific GitLab user ID (badsectorlabs)
 default:
   before_script:
-    - if $GITLAB_USER_ID != "555113"; then exit 1; fi
+    - if [[ $GITLAB_USER_ID != "555113" ]]; then exit 1; fi
 
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key 
 .ci-setup: &ci-setup
@@ -33,6 +34,26 @@ default:
   - if [ ! -f /opt/ludus/ci/.apikey ]; then ludus --url https://127.0.0.1:8081 --json --user CI users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey; fi
   # Set the CI user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey)
+
+pages:
+  stage: pages
+  tags:
+    - ludus-proxmox-runner
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[build pages\]/
+    - if: $CI_COMMIT_BRANCH == "main"
+    - changes:
+      - "docs/**/*"
+  script:
+  - cd docs
+  - yarn install
+  - yarn build
+  - mv ./build ../public
+  artifacts:
+    paths:
+    - public
 
 documentation:
   stage: documentation

@@ -55,6 +55,7 @@ The available tags are listed below:
 - `[skip ci]` - this tag skips all CI jobs
 - `[skip build]` - skips the documentation build and the binary build stages
 - `[build docs]` - force a documentation build
+- `[build pages]` - force a documentation build and pages deploy
 - `[full build]` - run every step of the CI pipeline, no matter how small the change to the code base
 - `[manual]` - only run the documentation build (if docs have changed) and binary build, then push the code to an already running CI VM (typically used with the `[VMID-XYZ]` tag)
 - `[VMID-XYZ]` - run jobs on the specified VM where `XYZ` is the numeric VMID of the CI/CD VM.
