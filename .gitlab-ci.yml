@@ -37,6 +37,8 @@ default:
 
 pages:
   stage: pages
+  variables:
+    LUDUS_BUILD_TYPE: any-built
   tags:
     - ludus-proxmox-runner
   rules:
@@ -48,6 +50,8 @@ pages:
       - "docs/**/*"
   script:
   - cd docs
+  # Change the base URL as we are hosting the site straight off the root of the domain
+  - "sed -i 's|baseUrl: \\'/ludus/\\'|baseUrl: \\'/\\'|' docusaurus.config.js"
   - yarn install
   - yarn build
   - mv ./build ../public
@@ -57,6 +61,8 @@ pages:
 
 documentation:
   stage: documentation
+  variables:
+    LUDUS_BUILD_TYPE: any-built
   tags:
     - ludus-proxmox-runner
   rules:
