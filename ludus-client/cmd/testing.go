@@ -49,7 +49,9 @@ var testingStatusCmd = &cobra.Command{
 
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"Testing Enabled", "Allowed IPs", "Allowed Domains"})
+		table.SetHeaderAlignment(tablewriter.ALIGN_CENTER)
 		table.SetAlignment(tablewriter.ALIGN_CENTER)
+		table.SetAutoWrapText(false)
 		var allowedIPsString string
 		var allowedDomainsString string
 		rangeObject.AllowedIPs = removeEmptyStrings(rangeObject.AllowedIPs)
@@ -64,8 +66,11 @@ var testingStatusCmd = &cobra.Command{
 		} else {
 			allowedDomainsString = rangeObject.AllowedDomains[0]
 		}
-		table.Append([]string{strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled)), allowedIPsString, allowedDomainsString})
-
+		if rangeObject.TestingEnabled {
+			table.Rich([]string{strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled)), allowedIPsString, allowedDomainsString}, []tablewriter.Colors{tablewriter.Colors{tablewriter.FgBlackColor, tablewriter.Bold, tablewriter.BgGreenColor}, tablewriter.Colors{}, tablewriter.Colors{}})
+		} else {
+			table.Rich([]string{strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled)), allowedIPsString, allowedDomainsString}, []tablewriter.Colors{tablewriter.Colors{tablewriter.FgHiRedColor, tablewriter.Bold, tablewriter.BgBlackColor}, tablewriter.Colors{}, tablewriter.Colors{}})
+		}
 		// Loop through the arrays and add elements to the table, using blank strings if the end of either array is reached
 		for i := 1; ; i++ {
 			var allowedIP, allowedDomain string
@@ -88,12 +93,6 @@ var testingStatusCmd = &cobra.Command{
 			}
 
 			table.Append([]string{"", allowedIP, allowedDomain})
-		}
-
-		if rangeObject.TestingEnabled {
-			table.SetColumnColor(tablewriter.Colors{tablewriter.FgBlackColor, tablewriter.Bold, tablewriter.BgGreenColor}, nil, nil)
-		} else {
-			table.SetColumnColor(tablewriter.Colors{tablewriter.FgHiRedColor, tablewriter.Bold, tablewriter.BgBlackColor}, nil, nil)
 		}
 		table.Render()
 
