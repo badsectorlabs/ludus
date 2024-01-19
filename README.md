@@ -1,21 +1,22 @@
-<p align="center">
+# Ludus
+
+<div align="center">
   <a href="https://ludus.cloud"><img width="500px" src="docs/static/img/ludus-social-card.jpg" alt="Ludus"></a>
-</p>
+</div>
+
 <p align="center">
-    <em>🏛️ self hosted, 🤖 automated, 🚀 fast deployments, 🤯 complex networks, 👥 muti-user, 🧑‍💻 API driven</em>
+    <em>🏛️ self-hosted, 🤖 automated, 🚀 fast deployments, 🤯 complex networks, 👥 multi-user, 🧑‍💻 API driven</em>
 </p>
-<p align="center">
 
+## 🏟️ Ludus
 
-# 🏟️ Ludus
-
-Ludus is a system to build easy to use cyber environments, or "ranges" for testing and development.
+Ludus is a system to build easy-to-use cyber environments, or "ranges" for testing and development.
 
 Built on [Proxmox](https://www.proxmox.com/en/), Ludus enables advanced automation while still allowing easy manual modifications or setup of virtual machines and networks.
 
-<p align="center">
+<div align="center">
   <a href="https://ludus.cloud"><img width="1000px" src="docs/static/img/Hero-readme.png" alt="Complex networks"></a>
-</p>
+</div>
 
 ## 📚 Docs
 
@@ -49,8 +50,3 @@ All documentation can be found at [ludus.cloud](https://ludus.cloud) (and `https
 ### Proxmox with a Simple Range Deployed
 
 ![Proxmox](./docs/static/img/screenshots/proxmox.png)
-
-
-
-
-
