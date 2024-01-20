@@ -4,9 +4,9 @@
   <a href="https://ludus.cloud"><img width="500px" src="docs/static/img/ludus-social-card.jpg" alt="Ludus"></a>
 </div>
 
-<p align="center">
+<div align="center">
     <em>🏛️ self-hosted, 🤖 automated, 🚀 fast deployments, 🤯 complex networks, 👥 multi-user, 🧑‍💻 API driven</em>
-</p>
+</div>
 
 ## 🏟️ Ludus
 
