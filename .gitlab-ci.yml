@@ -51,7 +51,7 @@ pages:
   script:
   - cd docs
   # Change the base URL as we are hosting the site straight off the root of the domain
-  - "sed -i 's|baseUrl: \\'/ludus/\\'|baseUrl: \\'/\\'|' docusaurus.config.js"
+  - "sed -i 's|baseUrl: ''/ludus/''|baseUrl: ''/''|' docusaurus.config.js"
   - yarn install
   - yarn build
   - mv ./build ../public
