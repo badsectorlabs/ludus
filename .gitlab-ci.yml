@@ -11,11 +11,6 @@ stages:
   - upload
   - release
 
-# Protect CI by limiting it to a specific GitLab user ID (badsectorlabs)
-default:
-  before_script:
-    - if [[ $GITLAB_USER_ID != "555113" ]]; then exit 1; fi
-
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key 
 .ci-setup: &ci-setup
   - cd binaries

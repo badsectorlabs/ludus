@@ -103,12 +103,12 @@ Type "ludus testing start"
 Sleep 500ms
 Enter
 
-Sleep 25s
+Sleep 45s
 
 Type "ludus testing status"
 Sleep 100ms
 Enter
-Sleep 5s
+Sleep 8s
 
 Type@50ms "echo 'Perhaps we want to allow our VMs under test to reach out to example.com'"
 Sleep 500ms
@@ -117,12 +117,12 @@ Enter
 Type "ludus testing allow -d example.com"
 Sleep 100ms
 Enter
-Sleep 10s
+Sleep 30s
 
 Type "ludus testing status"
 Sleep 100ms
 Enter
-Sleep 5s
+Sleep 8s
 
 Type@50ms "echo 'We exit testing (revert to snapshot and unblock) just as easily'"
 Sleep 500ms
@@ -132,7 +132,7 @@ Type "ludus testing stop"
 Sleep 500ms
 Enter
 
-Sleep 25s
+Sleep 125s
 
 Type "ludus testing status"
 Sleep 100ms

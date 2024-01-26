@@ -137,17 +137,19 @@ This command construct is only required for user add and delete actions. Normal 
 
 :::
 
-Save this API key and move on to building templates.
 
 ## WireGuard
 
-To get the WireGuard configuration file for the user, run the `user wireguard --user <UserID>` command.
+The easiest way to interact with Ludus VMs is directly - via SSH, RDP, or KasmVNC.
+This is possible thanks to a WireGuard VPN hosted on the Ludus server.
+To get the WireGuard configuration file for your user, run the `user wireguard` command.
+Admins can get WireGuard configurations for other users with the `user wireguard --user <UserID>` command.
 
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">
 ```plain title="Terminal 2 (Linux/macOS)"
-local:~$  LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
- ludus user wireguard --user JD --url https://127.0.0.1:8081
+local:~$  LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt' \
+ ludus user wireguard --user JD --url https://127.0.0.1:8081 | tee ludus.conf
 [Interface]
 PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
 Address = 198.51.100.2/32
@@ -161,8 +163,8 @@ PersistentKeepalive = 25
   </TabItem>
   <TabItem value="macos" label="macOS">
 ```plain title="Terminal 2 (Linux/macOS)"
-local:~$  LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
- ludus user wireguard --user JD --url https://127.0.0.1:8081
+local:~$  LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt' \
+ ludus user wireguard --user JD --url https://127.0.0.1:8081 | tee ludus.conf
 [Interface]
 PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
 Address = 198.51.100.2/32
@@ -176,8 +178,8 @@ PersistentKeepalive = 25
   </TabItem>
   <TabItem value="windows" label="Windows">
 ```plain title="Terminal 2 (Windows)"
-PS C:\> $env:LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF'
-PS C:\> .\ludus-client.exe ludus user wireguard --user JD --url https://127.0.0.1:8081
+PS C:\> $env:LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'
+PS C:\> .\ludus-client.exe ludus user wireguard --user JD --url https://127.0.0.1:8081 | Tee-Object -Variable luduswg; $luduswg  | Set-Content -Encoding ASCII ludus.conf
 [Interface]
 PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
 Address = 198.51.100.2/32
@@ -193,5 +195,94 @@ PS C:\> Remove-Item Env:\LUDUS_API_KEY
 ```
   </TabItem>
 </Tabs>
-Import this WireGuard configuration into the [WireGuard client](https://www.wireguard.com/install/) and connect. Once connected, the ludus client's default url (`https://198.51.100.1:8080`)
+Import this WireGuard configuration (`ludus.conf`) into the [WireGuard client](https://www.wireguard.com/install/) and connect. Once connected, the ludus client's default url (`https://198.51.100.1:8080`)
 will work for all future commands.
+
+## Set the API Key
+
+Using the key from the previous step, run `ludus apikey` and provide the user API key.
+
+<Tabs groupId="operating-systems">
+  <TabItem value="linux" label="Linux">
+```plain
+local:~$ ludus apikey
+[INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
+JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
+[INFO]  Ludus API key set successfully
+```
+
+:::tip
+
+On headless Linux systems or Linux systems without a keyring, set the LUDUS_API_KEY environment variable instead
+
+`export LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'`
+
+:::
+</TabItem>
+  <TabItem value="macos" label="macOS">
+```plain
+local:~$ ludus apikey
+[INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
+JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
+[INFO]  Ludus API key set successfully
+```
+
+:::tip
+
+On headless macOS systems or macOS systems without a keyring, set the LUDUS_API_KEY environment variable instead
+
+`export LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'`
+
+:::
+  </TabItem>
+  <TabItem value="windows" label="Windows">
+```plain
+PS C:\> .\ludus-client.exe apikey
+[INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
+JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
+[INFO]  Ludus API key set successfully
+```
+  </TabItem>
+</Tabs>
+
+With the API key set, all user commands are available!
+
+## Get Proxmox Credentials
+
+Ludus is built on top of the [Proxmox](https://www.proxmox.com/en/) hypervisor which has a web interface.
+It is available at `https://<ludus IP>:8006` and the credentials for the web GUI can be retrieved with `ludus user creds get`.
+
+<Tabs groupId="operating-systems">
+  <TabItem value="linux" label="Linux">
+```plain
+local:~$ ludus user creds get
++------------------+----------------------+
+| PROXMOX USERNAME |   PROXMOX PASSWORD   |
++------------------+----------------------+
+| john-doe         | oQjQC76Ny0HQfpNV31zK |
++------------------+----------------------+
+```
+</TabItem>
+  <TabItem value="macos" label="macOS">
+```plain
+local:~$ ludus user creds get
++------------------+----------------------+
+| PROXMOX USERNAME |   PROXMOX PASSWORD   |
++------------------+----------------------+
+| john-doe         | oQjQC76Ny0HQfpNV31zK |
++------------------+----------------------+
+```
+  </TabItem>
+  <TabItem value="windows" label="Windows">
+```plain
+PS C:\> .\ludus-client.exe user creds get
++------------------+----------------------+
+| PROXMOX USERNAME |   PROXMOX PASSWORD   |
++------------------+----------------------+
+| john-doe         | oQjQC76Ny0HQfpNV31zK |
++------------------+----------------------+
+```
+  </TabItem>
+</Tabs>
+
+Now that you've created the user, grabbed your WireGuard config, and obtained your user creds for proxmox, you can build templates!

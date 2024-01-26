@@ -19,11 +19,11 @@ Ludus comes with 6 builtin templates:
 - debian12
 - kali
 - win11-22h2-x64-enterprise
-- win2016-server-x64
-- win2019-server-x64
+- win2022-server-x64
 
 Users can add their own templates to the Ludus server with the Ludus CLI.
-The following additional templates are provided as examples and have been tested to work with Ludus:
+Additional templates are provided in the `templates` directory in the root of the git project as examples and have been tested to work with Ludus.
+These templates include:
 
 - debian10
 - rocky-9-x64-server
@@ -31,14 +31,25 @@ The following additional templates are provided as examples and have been tested
 - win10-21h1-x64-enterprise
 - win11-23h2-x64-enterprise
 - win2012r2-server-x64
-- win2022-server-x64
+- win2016-server-x64
+- win2019-server-x64
 
 ## Adding Templates to Ludus
 
-To add a template to Ludus, use the Ludus CLI to upload the template to the server with `ludus templates add -d <template directory>`.
+To add a template to Ludus, use the Ludus CLI to upload the template directory to the server with `ludus templates add -d <template directory>`.
 
 ```
+local:~$ git clone https://gitlab.com/badsectorlabs/ludus
 local:~$ cd templates
+local:~$ ls -1
+debian10
+manual-setup-required
+rocky-9-x64-server
+ubuntu-22.04-x64-server
+win10-21h1-x64-enterprise
+win11-23h2-x64-enterprise
+win2012r2-server-x64
+win2022-server-x64
 local:~$ ludus templates add -d debian10
 [INFO]  Successfully added template
 local:~$ ludus templates list
@@ -63,10 +74,10 @@ local:~$ ludus templates logs -f
 ...
 ```
 
-## Creating Templates for Ludus
+## Creating Your Own Templates for Ludus
 
 Templates in Ludus must contain certain variables to function correctly.
-To create a new template, copy an existing working template and modify it as necessary.
+To create a new template, copy an [existing working template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates) and modify it as necessary.
 Templates for different Linux flavors and Windows are provided.
 While macOS VMs are supported by Ludus, their automated templating is not (see [Non-Automated OS Template Builds](#non-automated-os-template-builds)).
 
