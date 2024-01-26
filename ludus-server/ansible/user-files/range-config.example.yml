@@ -1,6 +1,6 @@
 ludus:
-  - vm_name: "{{ range_id }}-ad-dc-win2019-server-x64"
-    hostname: "{{ range_id }}-DC01-2019"
+  - vm_name: "{{ range_id }}-ad-dc-win2022-server-x64"
+    hostname: "{{ range_id }}-DC01-2022"
     template: win2022-server-x64-template
     vlan: 10
     ip_last_octet: 11

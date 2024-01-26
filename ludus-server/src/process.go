@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -13,6 +14,10 @@ func findAnsiblePidForUser(username string) (string, error) {
 	// Get the list of all ansible processes
 	out, err := exec.Command("bash", "-c", "ps aux | egrep 'ansibl[e]'").Output()
 	if err != nil {
+		if err.Error() == "exit status 1" {
+			// egrep failed, no ansible running
+			return "", errors.New("no ansible processes are running")
+		}
 		fmt.Println("Error executing command: ", err)
 		return "", err
 	}

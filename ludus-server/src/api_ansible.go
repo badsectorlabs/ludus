@@ -221,7 +221,6 @@ func ActionCollectionFromInternet(c *gin.Context) {
 		Collection string `json:"collection"`
 		Version    string `json:"version"`
 		Force      bool   `json:"force"`
-		Action     string `json:"action"`
 	}
 	var collectionBody CollectionBody
 	c.Bind(&collectionBody)
@@ -236,22 +235,17 @@ func ActionCollectionFromInternet(c *gin.Context) {
 		collectionString = fmt.Sprintf("%s,%s", collectionBody.Collection, collectionBody.Version)
 	}
 
-	if collectionBody.Action != "install" && collectionBody.Action != "remove" {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "action must be one of 'install' or 'remove'"})
-		return
-	}
-
 	var cmd *exec.Cmd
 	if collectionBody.Force {
-		cmd = exec.Command("ansible-galaxy", "collection", collectionBody.Action, collectionString, "-f")
+		cmd = exec.Command("ansible-galaxy", "collection", "install", collectionString, "-f")
 	} else {
-		cmd = exec.Command("ansible-galaxy", "collection", collectionBody.Action, collectionString)
+		cmd = exec.Command("ansible-galaxy", "collection", "install", collectionString)
 	}
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
 	cmdOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to %s the ansible collection %s: %s; Output was: %s", collectionBody.Action, collectionString, err.Error(), string(cmdOutput))})
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to install the ansible collection %s: %s; Output was: %s", collectionString, err.Error(), string(cmdOutput))})
 		return
 	}
 	if strings.Contains(string(cmdOutput), "[WARNING]") {
