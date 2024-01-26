@@ -12,7 +12,7 @@ stages:
   - release
 
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key 
-.ci-setup: &ci-setup
+.ci-setup-admin: &ci-setup-admin
   - cd binaries
   # Update the server to make sure we are running the latest version if a packer or ansible build is not running
   - pgrep -f 'ansible|packer' || sudo ./ludus-server --update
@@ -24,11 +24,29 @@ stages:
   # Start as the ROOT user
   - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
   # Add the CI user if it doesn't already exist, try 5 times since the server just restarted the first might fail
-  - for i in {1..5}; do (ludus --url https://127.0.0.1:8081 users list all | grep -q 'Continuous Integration' || ludus --url https://127.0.0.1:8081 users add -a -n "Continuous Integration" -i CI) && break || sleep 5; done
+  - for i in {1..5}; do (ludus --url https://127.0.0.1:8081 users list all | grep -q 'Continuous Integration Admin' || ludus --url https://127.0.0.1:8081 users add -a -n "Continuous Integration Admin" -i CIA) && break || sleep 5; done
   # Switch to CI user API Key - only request it once, save it to disk
-  - if [ ! -f /opt/ludus/ci/.apikey ]; then ludus --url https://127.0.0.1:8081 --json --user CI users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey; fi
+  - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --url https://127.0.0.1:8081 --json --user CIA users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-admin; fi
   # Set the CI user key as the key for all future ludus operations
-  - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey)
+  - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
+
+.ci-setup-user: &ci-setup-user
+  - cd binaries
+  # Update the server to make sure we are running the latest version if a packer or ansible build is not running
+  - pgrep -f 'ansible|packer' || sudo ./ludus-server --update
+  # Move the latest client to /usr/local/bin for clean commands
+  - sudo cp -f ludus-client_linux-amd64 /usr/local/bin/ludus
+  # Set the config to use the "user" API by default
+  - mkdir -p ~/.config/ludus/
+  - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
+  # Start as the ROOT user
+  - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
+  # Add the CI user if it doesn't already exist, try 5 times since the server just restarted the first might fail
+  - for i in {1..5}; do (ludus --url https://127.0.0.1:8081 users list all | grep -q 'Continuous Integration User' || ludus --url https://127.0.0.1:8081 users add -n "Continuous Integration Admin" -i CIU) && break || sleep 5; done
+  # Switch to CI user API Key - only request it once, save it to disk
+  - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --url https://127.0.0.1:8081 --json --user CIU users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-user; fi
+  # Set the CI user key as the key for all future ludus operations
+  - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
 
 pages:
   stage: pages
@@ -126,7 +144,7 @@ build all:
 install kickoff:
   stage: install
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
   rules:
@@ -151,7 +169,7 @@ install kickoff:
 install check:
   stage: install
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
     - job: install kickoff
@@ -200,9 +218,9 @@ install snapshot:
 client basic-commands:
   stage: client
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
-    - job: build all  
+    - job: build all
     - job: install snapshot
       optional: true
   rules:
@@ -222,7 +240,7 @@ client basic-commands:
     LUDUS_SNAPSHOT_NAME: clean_install
   timeout: 5m
   script:
-    - *ci-setup
+    - *ci-setup-admin
     - ludus version
     - ludus version --verbose
     - ludus users creds get
@@ -237,7 +255,7 @@ client basic-commands:
 templates build:
   stage: templates
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
     - job: install snapshot
@@ -258,14 +276,14 @@ templates build:
     LUDUS_SNAPSHOT_NAME: clean_install
   timeout: 5m
   script:
-    - *ci-setup
+    - *ci-setup-admin
     # Build in parallel to speed up CI
     - ludus templates build --parallel
 
 templates check:
   stage: templates
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
     - job: templates build
@@ -285,7 +303,7 @@ templates check:
   retry:
     max: 2
   script:
-    - *ci-setup
+    - *ci-setup-admin
     # If there is no template building process, start one
     # This may happen on a failed ISO upload
     - pgrep -f 'packer' || ludus templates build 
@@ -296,7 +314,7 @@ templates check:
 templates snapshot:
   stage: templates
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
       artifacts: false
@@ -320,7 +338,7 @@ templates snapshot:
 range deploy:
   stage: range
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
     - job: templates snapshot
@@ -341,7 +359,7 @@ range deploy:
     LUDUS_SNAPSHOT_NAME: templates_built
   timeout: 5m
   script:
-    - *ci-setup
+    - *ci-setup-admin
     - ludus range config get
     - ludus range deploy
 
@@ -369,7 +387,7 @@ range check:
     max: 2
     when: script_failure
   script:
-    - *ci-setup
+    - *ci-setup-admin
     - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
     - ludus range logs
     - ludus range list
@@ -378,7 +396,7 @@ range check:
 range snapshot:
   stage: range
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
       artifacts: false
@@ -394,15 +412,15 @@ range snapshot:
       - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_INSTALL_STEP: take-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built
+    LUDUS_SNAPSHOT_NAME: range_built_admin
   timeout: 5m
   script:
     - echo "Snapshot complete"
 
-post-deploy testing:
+post-deploy testing-as-admin:
   stage: post-deploy
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
     - job: range snapshot
@@ -419,10 +437,10 @@ post-deploy testing:
       - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built
+    LUDUS_SNAPSHOT_NAME: range_built_admin
   timeout: 15m
   script:
-    - *ci-setup
+    - *ci-setup-admin
     - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
     - ludus testing status
     # Validate that WIN10 can reach the internet
@@ -456,18 +474,171 @@ post-deploy testing:
     # Now that testing has stopped, check the VM can reach the internet
     - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
     - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
-    # Power on/off tests
-    - ludus power off -n CI-kali
+
+post-deploy power-as-admin:
+  stage: post-deploy
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: range snapshot
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/power.go
+      - ludus-server/ansible/range-management/power.yml
+      - ludus-server/ansible/range-management/pre-run-checks.yml
+      - ludus-server/ansible/range-management/tasks/proxmox/set-vm-state.yml
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_admin
+  timeout: 15m
+  script:
+    - *ci-setup-admin
+    # Power on/off tests - single VM
+    - ludus power off -n CIA-kali
     - sleep 10
-    - ludus range status | grep 'CI-kali' | grep 'Off'
-    - ludus power on -n CI-kali
+    - ludus range status | grep 'CIA-kali' | grep 'Off'
+    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'On'
+    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'On'
+    - ludus power on -n CIA-kali
     - sleep 10
-    - ludus range status | grep 'CI-kali' | grep 'On'
+    - ludus range status | grep 'CIA-kali' | grep 'On'
+    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'On'
+    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'On'    
+    # Power on/off tests - comma separated
+    - ludus power off -n CIA-kali,CIA-ad-win11-22h2-enterprise-x64-1
+    - sleep 60
+    - ludus range status | grep 'CIA-kali' | grep 'Off'
+    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'Off'
+    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'On'
+    - ludus power on -n CIA-kali,CIA-ad-win11-22h2-enterprise-x64-1
+    - sleep 60
+    - ludus range status | grep 'CIA-kali' | grep 'On'
+    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'On'
+    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'On'
+    # Power on/off tests - "all""
+    - ludus power off -n all
+    - sleep 60
+    - ludus range status | grep 'CIA-kali' | grep 'Off'
+    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'Off'
+    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'Off'
+    - ludus range status | grep 'CIA-router-debian11-x64' | grep 'Off'
+    - ludus power on -n all
+    - sleep 60
+    - ludus range status | grep 'CIA-kali' | grep 'On'
+    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'On'
+    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'On'
+    - ludus range status | grep 'CIA-router-debian11-x64' | grep 'On'
+
+post-deploy ansible-as-admin:
+  stage: post-deploy
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: range snapshot
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/ansible.go
+      - ludus-server/src/ansible.go
+      - ludus-server/src/api_ansible.go
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_admin
+  timeout: 15m
+  script:
+    - *ci-setup-admin
+    # Add and remove a role
+    - ludus ansible role list
+    - ludus ansible role add geerlingguy.docker
+    - ludus ansible role list | grep geerlingguy.docker
+    - ludus ansible role rm geerlingguy.docker
+    - '! ludus ansible role list | grep geerlingguy.docker'
+    # Install a specific version
+    - ludus ansible role add geerlingguy.docker --version 7.0.1
+    - ludus ansible role list | grep geerlingguy.docker | grep 7.0.1
+    # Test the force install
+    - ludus ansible role add geerlingguy.docker 2>&1 | grep 'geerlingguy.docker (7.0.1) is already installed - use --force'
+    - ludus ansible role add geerlingguy.docker --force
+    - ludus ansible role list | grep geerlingguy.docker
+    - '! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1'
+    # Test collections
+    - ludus ansible collection list
+    - ludus ansible collection add maxhoesel.smallstep
+    - ludus ansible collection list | grep maxhoesel.smallstep
+    # Force install a collection
+    - ludus ansible collection add maxhoesel.smallstep --version 0.24.4 --force
+    - ludus ansible collection list | grep maxhoesel.smallstep | grep 0.24.4
+
+post-deploy user-cmds-as-admin:
+  stage: post-deploy
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: range snapshot
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/user.go
+      - ludus-server/src/api_user_management.go
+      - ludus-server/ansible/user-management/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_admin
+  timeout: 15m
+  script:
+    - *ci-setup-admin
+    # Add an admin user
+    - ludus user add -a -n "Test Admin" -i TA
+    - ludus users list all | grep "Test Admin"
+    # Get and set creds
+    - ludus user creds get --user TA
+    - ludus user creds set -i TA -p test-password-123
+    - ludus user creds get --user TA | grep test-password-123
+    # Get wireguard
+    - ludus user wireguard --user TA | grep Endpoint
+    # Remove admin user
+    - ludus user rm -i TA
+    - '! ludus users list all | grep "Test Admin"'
+    # Add a normal user
+    - ludus user add -n "Test User" -i TU
+    - ludus users list all | grep "Test User"
+    # Get and set creds
+    - ludus user creds get --user TU
+    - ludus user creds set -i TU -p test-password-123
+    - ludus user creds get --user TU | grep test-password-123
+    # Get wireguard
+    - ludus user wireguard --user TU | grep Endpoint
+    # Remove normal user
+    - ludus user rm -i TU
+    - '! ludus users list all | grep "Test User"'
+
 
 manual testing:
   stage: manual
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
   rules:
@@ -476,13 +647,13 @@ manual testing:
     LUDUS_BUILD_TYPE: any-built # Just move our code to the most recent CI VM for manual testing
   timeout: 15m
   script:
-    - *ci-setup
+    - *ci-setup-admin
     - echo "manual testing"
 
 upload:
   stage: upload
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
   variables:
@@ -504,7 +675,7 @@ upload:
 release:
   stage: release
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   needs:
     - job: build all
     - job: upload
