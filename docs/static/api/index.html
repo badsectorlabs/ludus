@@ -191,6 +191,22 @@
                       }
                     }
                   },
+                  "409" : {
+                    "description" : "Role not installed",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "- geerlingguy.docker is not installed, skipping."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
                   "500" : {
                     "description" : "Error installing role",
                     "content" : {
@@ -350,6 +366,22 @@
                             "result" : {
                               "type" : "string",
                               "example" : "Successfully installed: maxhoesel.smallstep"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "409" : {
+                    "description" : "Collection already installed",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "Collection already installed. Collections from https://docs.ansible.com/ansible/latest/collections/index.html are installed globally. If you want to reinstall it, consider using `--force`."
                             }
                           }
                         }

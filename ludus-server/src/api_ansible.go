@@ -152,7 +152,15 @@ func ActionRoleFromInternet(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": string(cmdOutput)})
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed: " + roleString})
+	if strings.Contains(string(cmdOutput), "is not installed, skipping.") {
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": string(cmdOutput)})
+		return
+	}
+	if roleBody.Action != "install" {
+		c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed: " + roleString})
+	} else {
+		c.JSON(http.StatusCreated, gin.H{"result": "Successfully removed: " + roleString})
+	}
 
 }
 
@@ -232,7 +240,7 @@ func ActionCollectionFromInternet(c *gin.Context) {
 
 	var collectionString = collectionBody.Collection
 	if collectionBody.Version != "" {
-		collectionString = fmt.Sprintf("%s,%s", collectionBody.Collection, collectionBody.Version)
+		collectionString = fmt.Sprintf("%s:==%s", collectionBody.Collection, collectionBody.Version)
 	}
 
 	var cmd *exec.Cmd
@@ -250,6 +258,10 @@ func ActionCollectionFromInternet(c *gin.Context) {
 	}
 	if strings.Contains(string(cmdOutput), "[WARNING]") {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": string(cmdOutput)})
+		return
+	}
+	if strings.Contains(string(cmdOutput), "Nothing to do. All requested collections are already installed. If you want to reinstall them, consider using `--force`.") {
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "Collection already installed. Collections from https://docs.ansible.com/ansible/latest/collections/index.html are installed globally. If you want to reinstall it, consider using `--force`."})
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed: " + collectionString})
