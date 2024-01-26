@@ -155,6 +155,7 @@
         dest: /etc/ansible/ansible.cfg
         content: |
           [defaults]
+          no_target_syslog = True
           timeout = 60
         mode: '0644'
 
