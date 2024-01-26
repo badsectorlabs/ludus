@@ -21,12 +21,12 @@ variable "vm_cpu_cores" {
 
 variable "vm_disk_size" {
   type    = string
-  default = "60G"
+  default = "250G"
 }
 
 variable "vm_memory" {
   type    = string
-  default = "4096"
+  default = "8192"
 }
 
 variable "vm_name" {
