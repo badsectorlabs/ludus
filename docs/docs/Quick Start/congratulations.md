@@ -15,7 +15,7 @@ Have **5 more minutes**? Take a look at **[configuration](../configuration)** an
 ## What's next?
 
 - Learn about Ludus' [networking](../networking)
-- Read the [API documentation](https://my.ludus.cloud:8080/api-docs/)
+- Read the [API documentation](pathname:///api/index.html)
 - Modify your range [configuration](../configuration)
 - Add a [custom chocolatey package](../configuration) to Windows machines
 - [Sysprep](../configuration) Windows machines

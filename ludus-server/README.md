@@ -9,6 +9,6 @@ To view the API documentation, run ludus-server and browse to https://<ip>:8080/
 ## Building
 
 ```
-go build -trimpath -ldflags "-s -w -X main.GitCommitHash=manual-build" -o ../binaries/ludus-server
+GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=manual-build" -o ludus-server
 ```
 
