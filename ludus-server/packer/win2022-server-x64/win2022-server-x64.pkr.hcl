@@ -144,15 +144,15 @@ build {
   sources = ["source.proxmox-iso.win2022-server-x64"]
 
   provisioner "windows-shell" {
-    scripts = ["scripts/disablewinupdate.bat"]
+    scripts = ["../scripts/disablewinupdate.bat"]
   }
 
   provisioner "powershell" {
-    scripts = ["scripts/disable-hibernate.ps1"]
+    scripts = ["../scripts/disable-hibernate.ps1"]
   }
 
   provisioner "powershell" {
-    scripts = ["scripts/install-virtio-drivers.ps1"]
+    scripts = ["../scripts/install-virtio-drivers.ps1"]
   }
 
 }

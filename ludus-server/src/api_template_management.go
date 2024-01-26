@@ -315,7 +315,7 @@ func templateActions(c *gin.Context, buildTemplates bool, templateName string, p
 
 	go buildVMsFromTemplates(templateStatusArray, user, proxmoxPassword, templateName, parallel, verbose)
 
-	c.JSON(http.StatusOK, gin.H{"result": "Template building started"})
+	c.JSON(http.StatusOK, gin.H{"result": "Template building started - this will take a while"})
 
 }
 

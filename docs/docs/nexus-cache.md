@@ -25,7 +25,7 @@ ludus range logs -f
 ```
 
 Once the deployment has finished, you must manually toggle the chocolatey-proxy repository to Nuget V2 via the web interface!
-1. RDP/Console into a windows box
+1. RDP into a windows box (or use the Proxmox web UI console)
 2. Browse to: http://192.0.2.2:8081
 3. Log in with `admin:<your proxmox password>`
 4. Navigate to Repositories -> chocolatey-proxy

@@ -15,34 +15,6 @@ When testing mode is enabled, both Windows hosts will be snapshotted and blocked
 The configuration for this range is below:
 
 ```yaml
-network:
-  inter_vlan_default: REJECT
-  rules:
-    - name: Only allow windows to kali on 443
-      vlan_src: 10
-      vlan_dst: 99
-      protocol: tcp
-      ports: 443
-      action: ACCEPT
-    - name: Only allow windows to kali on 80
-      vlan_src: 10
-      vlan_dst: 99
-      protocol: tcp
-      ports: 80
-      action: ACCEPT
-    - name: Only allow windows to kali on 8080
-      vlan_src: 10
-      vlan_dst: 99
-      protocol: tcp
-      ports: 8080
-      action: ACCEPT          
-    - name: Allow kali to all windows
-      vlan_src: 99
-      vlan_dst: 10
-      protocol: all
-      ports: all
-      action: ACCEPT
-
 ludus:
   - vm_name: "{{ range_id }}-ad-dc-win2019-server-x64"
     hostname: "{{ range_id }}-DC01-2019"
@@ -81,4 +53,33 @@ ludus:
     testing:
       snapshot: false
       block_internet: false
+
+network:
+  inter_vlan_default: REJECT
+  rules:
+    - name: Only allow windows to kali on 443
+      vlan_src: 10
+      vlan_dst: 99
+      protocol: tcp
+      ports: 443
+      action: ACCEPT
+    - name: Only allow windows to kali on 80
+      vlan_src: 10
+      vlan_dst: 99
+      protocol: tcp
+      ports: 80
+      action: ACCEPT
+    - name: Only allow windows to kali on 8080
+      vlan_src: 10
+      vlan_dst: 99
+      protocol: tcp
+      ports: 8080
+      action: ACCEPT          
+    - name: Allow kali to all windows
+      vlan_src: 99
+      vlan_dst: 10
+      protocol: all
+      ports: all
+      action: ACCEPT
+
 ```

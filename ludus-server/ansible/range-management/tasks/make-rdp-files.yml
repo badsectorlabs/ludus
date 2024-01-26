@@ -11,7 +11,7 @@
     mode: '0770'
 
 - name: Create RDP files for each Windows host for domainuser
-  template:
+  ansible.builtin.template:
     src: RDP.j2
     dest: "{{ ludus_users_dir }}/{{ username }}/rdp/{{ item }}-domainuser.rdp"
   with_inventory_hostnames:
