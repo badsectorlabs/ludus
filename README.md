@@ -20,7 +20,7 @@ Built on [Proxmox](https://www.proxmox.com/en/), Ludus enables advanced automati
 
 ## 📚 Docs
 
-All documentation can be found at [ludus.cloud](https://ludus.cloud) (and `https://<ludus IP>:8080/ludus` once your Ludus server is installed).
+All documentation can be found at [docs.ludus.cloud](https://docs.ludus.cloud) (and `https://<ludus IP>:8080/ludus` once your Ludus server is installed).
 
 ## 🌟 Features
 

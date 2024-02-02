@@ -1,5 +1,4 @@
 stages:
-  - pages
   - documentation
   - build
   - install
@@ -49,7 +48,7 @@ stages:
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
 
 pages:
-  stage: pages
+  stage: documentation
   variables:
     LUDUS_BUILD_TYPE: any-built
   tags:
@@ -483,6 +482,7 @@ post-deploy power-as-admin:
     - job: build all
     - job: range snapshot
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+    - job: testing-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
@@ -545,6 +545,7 @@ post-deploy ansible-as-admin:
     - job: build all
     - job: range snapshot
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+    - job: power-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
@@ -592,6 +593,7 @@ post-deploy user-cmds-as-admin:
     - job: build all
     - job: range snapshot
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+    - job: ansible-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
@@ -633,7 +635,6 @@ post-deploy user-cmds-as-admin:
     # Remove normal user
     - ludus user rm -i TU
     - '! ludus users list all | grep "Test User"'
-
 
 manual testing:
   stage: manual
