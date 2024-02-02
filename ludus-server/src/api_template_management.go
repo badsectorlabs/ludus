@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -177,31 +178,73 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 
 }
 
-func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject, proxmoxPassword string, templateName string, parallel bool, verbose bool) {
-
+func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject, proxmoxPassword string, templateName string, parallel int, verbose bool) error {
+	// Create a WaitGroup to wait for all goroutines to finish.
 	var wg sync.WaitGroup
 
+	// Create a semaphore (buffered channel) to limit the number of concurrent goroutines.
+	sem := make(chan struct{}, parallel)
+
+	// Create a map to track the templates that have already been built.
+	builtTemplates := make(map[string]bool)
+
+	// Iterate over the array of template statuses.
 	for _, templateStatus := range templateStatusArray {
-		if !templateStatus.Built {
-			if templateName == "all" || templateStatus.Name == templateName {
-				wg.Add(1)
-				go buildVMFromTemplateWithPacker(user, proxmoxPassword, templateStatus.FilePath, verbose, &wg)
-				if !parallel {
-					wg.Wait()
-					// If the user has aborted a template build with no arg or "all"
-					// we should respect that and not try to build the next template
-					// so break out of this loop if the canary file is less than 10 seconds old
-					if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername), 10) {
-						break
-					}
+		// Check the canary file before launching a new goroutine.
+		if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername), 10) {
+			log.Println("Canary check failed")
+			break
+		}
+
+		// Determine whether a VM should be built from the template.
+		shouldBuild := !templateStatus.Built && (templateName == "all" || templateStatus.Name == templateName)
+
+		// Check if the template has already been built.
+		if _, exists := builtTemplates[templateStatus.Name]; exists {
+			shouldBuild = false
+		}
+
+		if shouldBuild {
+			// If a VM should be built, increment the WaitGroup counter.
+			wg.Add(1)
+
+			// Mark the template as built.
+			builtTemplates[templateStatus.Name] = true
+
+			// Launch a goroutine to build the VM.
+			go func(ts TemplateStatus) {
+				// Acquire a token from the semaphore.
+				sem <- struct{}{}
+
+				// Ensure that the WaitGroup counter is decremented and the semaphore token is released when the goroutine finishes.
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				// Check the canary file before starting the VM build.
+				if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername), 10) {
+					log.Println("Canary check failed")
+					return
 				}
-			}
+
+				// Sleep for 3 seconds before starting the VM build.
+				time.Sleep(3 * time.Second)
+
+				// Build the VM from the template.
+				buildVMFromTemplateWithPacker(user, proxmoxPassword, ts.FilePath, verbose, &wg)
+
+			}(templateStatus)
 		}
 	}
-	if parallel {
-		wg.Wait()
+
+	// Wait for all goroutines to finish.
+	wg.Wait()
+
+	// Drain the semaphore channel to ensure all tokens are released.
+	for i := 0; i < cap(sem); i++ {
+		sem <- struct{}{}
 	}
 
+	return nil
 }
 
 func getTemplatesStatus(c *gin.Context) []TemplateStatus {
@@ -294,7 +337,11 @@ func getTemplateNameArray(c *gin.Context, onlyBuilt bool) []string {
 	return templateSlice
 }
 
-func templateActions(c *gin.Context, buildTemplates bool, templateName string, parallel bool, verbose bool) {
+func templateActions(c *gin.Context, buildTemplates bool, templateName string, parallel int, verbose bool) {
+
+	if parallel == 0 {
+		parallel = 1
+	}
 
 	templateStatusArray := getTemplatesStatus(c)
 
@@ -315,34 +362,42 @@ func templateActions(c *gin.Context, buildTemplates bool, templateName string, p
 
 	go buildVMsFromTemplates(templateStatusArray, user, proxmoxPassword, templateName, parallel, verbose)
 
-	c.JSON(http.StatusOK, gin.H{"result": "Template building started - this will take a while"})
+	c.JSON(http.StatusOK, gin.H{
+		"result": fmt.Sprintf("Template building started - this will take a while. Creating %d template(s) at a time...", parallel),
+	})
 
 }
 
 // GetTemplates - returns a list of VM templates available for use in Ludus
 func GetTemplates(c *gin.Context) {
-	templateActions(c, false, "", false, false)
+	templateActions(c, false, "", 1, false)
 }
 
 // Build all templates
 func BuildTemplates(c *gin.Context) {
 	type TemplateBody struct {
 		Template string `json:"template"`
-		Parallel bool   `json:"parallel"`
+		Parallel int    `json:"parallel"`
 	}
 	var templateBody TemplateBody
 	c.Bind(&templateBody)
 
+	// Set the default value to all if nothing is presented
 	if templateBody.Template == "" {
 		templateBody.Template = "all"
 	}
 
+	// Set the default value to 1 if nothing is presented
+	if templateBody.Parallel == 0 {
+		templateBody.Parallel = 1
+	}
+
 	verbose := true
-	if templateBody.Parallel {
+	if templateBody.Parallel > 1 {
 		verbose = false
 	}
 
-	if !(templateBody.Template == "all") {
+	if templateBody.Template != "all" {
 		templateArray := getTemplateNameArray(c, false)
 		if !slices.Contains(templateArray, templateBody.Template) {
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Template '%s' not found", templateBody.Template)})

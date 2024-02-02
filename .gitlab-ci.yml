@@ -278,7 +278,7 @@ templates build:
   script:
     - *ci-setup-admin
     # Build in parallel to speed up CI
-    - ludus templates build --parallel
+    - ludus templates build --parallel 6
 
 templates check:
   stage: templates

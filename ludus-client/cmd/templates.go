@@ -19,7 +19,7 @@ var (
 	follow            bool
 	tail              int
 	templateName      string
-	templateParallel  bool
+	templateParallel  int
 	templateDirectory string
 )
 
@@ -85,8 +85,8 @@ var templatesBuildCmd = &cobra.Command{
 
 		requestBody := fmt.Sprintf(`{
 			"template": "%s",
-			"parallel": %s
-		  }`, templateName, strconv.FormatBool(templateParallel))
+			"parallel": %d
+		  }`, templateName, templateParallel)
 
 		if userID != "" {
 			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/templates?userID=%s", userID), requestBody)
@@ -104,8 +104,8 @@ var templatesBuildCmd = &cobra.Command{
 }
 
 func setupTemplatesBuildCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&templateName, "name", "n", "", "the name of the template to build (default: all)")
-	command.Flags().BoolVarP(&templateParallel, "parallel", "p", false, "build templates in parallel. Enabling this will disable all template logging (default: false)")
+	command.Flags().StringVarP(&templateName, "name", "n", "all", "the name of the template to build")
+	command.Flags().IntVarP(&templateParallel, "parallel", "p", 1, "build templates in parallel (speeds things up). Specify what number of templates to build at a time")
 }
 
 var templatesStatusCmd = &cobra.Command{
