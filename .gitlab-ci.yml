@@ -482,7 +482,7 @@ post-deploy power-as-admin:
     - job: build all
     - job: range snapshot
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
-    - job: testing-as-admin # prevent parallel tests
+    - job: post-deploy testing-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
@@ -545,7 +545,7 @@ post-deploy ansible-as-admin:
     - job: build all
     - job: range snapshot
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
-    - job: power-as-admin # prevent parallel tests
+    - job: post-deploy power-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
@@ -593,7 +593,7 @@ post-deploy user-cmds-as-admin:
     - job: build all
     - job: range snapshot
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
-    - job: ansible-as-admin # prevent parallel tests
+    - job: post-deploy ansible-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
