@@ -182,11 +182,8 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 	// Create a WaitGroup to wait for all goroutines to finish.
 	var wg sync.WaitGroup
 
-	// Create a semaphore (buffered channel) to limit the number of concurrent goroutines.
-	sem := make(chan struct{}, parallel)
-
-	// Create a map to track the templates that have already been built.
-	builtTemplates := make(map[string]bool)
+	// Create a semaphore (buffered channel of empty structs) to limit the number of concurrent goroutines.
+	semaphoreChannel := make(chan struct{}, parallel)
 
 	// Iterate over the array of template statuses.
 	for _, templateStatus := range templateStatusArray {
@@ -197,28 +194,19 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 		}
 
 		// Determine whether a VM should be built from the template.
-		shouldBuild := !templateStatus.Built && (templateName == "all" || templateStatus.Name == templateName)
-
-		// Check if the template has already been built.
-		if _, exists := builtTemplates[templateStatus.Name]; exists {
-			shouldBuild = false
-		}
-
-		if shouldBuild {
+		if !templateStatus.Built && (templateName == "all" || templateStatus.Name == templateName) {
 			// If a VM should be built, increment the WaitGroup counter.
 			wg.Add(1)
 
-			// Mark the template as built.
-			builtTemplates[templateStatus.Name] = true
-
-			// Launch a goroutine to build the VM.
+			// Launch a go routine to build the VM.
 			go func(ts TemplateStatus) {
-				// Acquire a token from the semaphore.
-				sem <- struct{}{}
+				// Send an empty struct into the channel, if it is full this will block and we will wait our turn
+				semaphoreChannel <- struct{}{}
 
-				// Ensure that the WaitGroup counter is decremented and the semaphore token is released when the goroutine finishes.
+				// Ensure that the WaitGroup counter is decremented and remove one struct from the channel by reading it when the goroutine finishes.
+				// Since all structs are the same (empty), reading one is the same as removing the one we put in - it frees up a slot for another go routine
 				defer wg.Done()
-				defer func() { <-sem }()
+				defer func() { <-semaphoreChannel }()
 
 				// Check the canary file before starting the VM build.
 				if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername), 10) {
@@ -226,7 +214,7 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 					return
 				}
 
-				// Sleep for 3 seconds before starting the VM build.
+				// Sleep for 3 seconds before starting the VM build so the server isn't flooded with builds all at the same time if the user gives a high number for parallel
 				time.Sleep(3 * time.Second)
 
 				// Build the VM from the template.
@@ -238,11 +226,6 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 
 	// Wait for all goroutines to finish.
 	wg.Wait()
-
-	// Drain the semaphore channel to ensure all tokens are released.
-	for i := 0; i < cap(sem); i++ {
-		sem <- struct{}{}
-	}
 
 	return nil
 }
@@ -363,7 +346,7 @@ func templateActions(c *gin.Context, buildTemplates bool, templateName string, p
 	go buildVMsFromTemplates(templateStatusArray, user, proxmoxPassword, templateName, parallel, verbose)
 
 	c.JSON(http.StatusOK, gin.H{
-		"result": fmt.Sprintf("Template building started - this will take a while. Creating %d template(s) at a time...", parallel),
+		"result": fmt.Sprintf("Template building started - this will take a while. Building %d template(s) at a time.", parallel),
 	})
 
 }
