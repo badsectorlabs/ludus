@@ -710,6 +710,8 @@ range deploy-user:
       optional: true # depend on templates snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
     - job: range snapshot-admin
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
+    - job: post-deploy user-cmds-as-admin
+      optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
@@ -797,6 +799,8 @@ post-deploy testing-as-user:
     - job: build all
     - job: range snapshot-user
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
+    - job: post-deploy testing-as-admin
+      optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
@@ -825,6 +829,8 @@ post-deploy power-as-user:
     - job: range snapshot-user
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy testing-as-user # prevent parallel tests
+      optional: true
+    - job: post-deploy power-as-admin # prevent parallel tests
       optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -858,6 +864,8 @@ post-deploy ansible-as-user:
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy power-as-user # prevent parallel tests
       optional: true
+    - job: post-deploy ansible-as-admin # prevent parallel tests
+      optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
@@ -887,6 +895,8 @@ post-deploy user-cmds-as-user:
     - job: range snapshot-user
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy ansible-as-user # prevent parallel tests
+      optional: true
+    - job: post-deploy user-cmds-as-admin # prevent parallel tests
       optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
