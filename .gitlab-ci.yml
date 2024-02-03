@@ -2,8 +2,8 @@ stages:
   - documentation
   - build
   - install
-  - client
   - templates
+  - client
   - range-admin
   - post-deploy-admin
   - range-user
@@ -335,46 +335,6 @@ install snapshot:
   script:
     - echo "Snapshot complete"
 
-##########
-# CLIENT #
-##########
-client basic-commands:
-  stage: client
-  tags:
-    - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: install snapshot
-      optional: true
-  rules:
-    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[client tests\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
-      when: never
-    - changes:
-      - ludus-client/**/*.go
-      - ludus-server/ansible/range-management/**/*
-      - ludus-server/ansible/user-management/**/*
-      - ludus-server/ansible/user-files/**/*
-  variables:
-    LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: clean_install
-  timeout: 5m
-  script:
-    - *ci-setup-admin
-    - ludus version
-    - ludus version --verbose
-    - ludus users creds get
-    - ludus users wireguard
-    - ludus range list all
-    - ludus range list
-    - ludus range config get
-    - ludus templates list
-    - ludus testing status
-    - ludus range gettags
-
 #############
 # TEMPLATES #
 #############
@@ -460,6 +420,46 @@ templates snapshot:
   timeout: 5m
   script:
     - echo "Snapshot complete"
+
+##########
+# CLIENT #
+##########
+client basic-commands:
+  stage: client
+  tags:
+    - ludus-proxmox-runner
+  needs:
+    - job: build all
+    - job: templates snapshot
+      optional: true
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[client tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/**/*.go
+      - ludus-server/ansible/range-management/**/*
+      - ludus-server/ansible/user-management/**/*
+      - ludus-server/ansible/user-files/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: clean_install
+  timeout: 5m
+  script:
+    - *ci-setup-admin
+    - ludus version
+    - ludus version --verbose
+    - ludus users creds get
+    - ludus users wireguard
+    - ludus range list all
+    - ludus range list
+    - ludus range config get
+    - ludus templates list
+    - ludus testing status
+    - ludus range gettags
 
 #################
 # RANGE - ADMIN #
