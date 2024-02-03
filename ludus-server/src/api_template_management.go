@@ -28,6 +28,8 @@ type TemplateStatus struct {
 
 const templateRegex string = `(?m)[^"]*?-template`
 
+var templateProgressStore sync.Map
+
 // Get all available packer templates from the main packer dir and the user packer dir
 func getAvailableTemplates(user UserObject) ([]string, error) {
 	globalTemplates, err := findFiles(fmt.Sprintf("%s/packer/", ludusInstallPath), ".hcl", ".json")
@@ -94,9 +96,7 @@ func Run(command string, workingDir string, outputLog string) {
 	}
 }
 
-func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, packerFile string, verbose bool, wg *sync.WaitGroup) {
-
-	defer wg.Done()
+func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, packerFile string, verbose bool) {
 
 	// Run the longest, grossest packer command you have ever seen...
 	// There should be a better way to do this, but apparently not: https://devops.stackexchange.com/questions/14181/is-it-possible-to-control-packer-from-golang
@@ -194,12 +194,30 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 		}
 
 		// Determine whether a VM should be built from the template.
+		// Check that:
+		// 1. The template is not already built (proxmox returns this)
+		// 2. The user asked to build this specific template (by passing 'all' or by name)
+		// 3. This template is not already in progress - the user could call this method twice with a parallel value > number of templates,
+		//    and longer running templates would then be built a second time as the have not finished building to return .Built by proxmox
 		if !templateStatus.Built && (templateName == "all" || templateStatus.Name == templateName) {
-			// If a VM should be built, increment the WaitGroup counter.
+			_, ok := templateProgressStore.Load(templateStatus.Name)
+			if ok {
+				// This template is already building or in the queue to be built by a user
+				// skip to the next template instead of queuing this one again
+				continue
+			}
+
+			// If a VM should be built, increment the WaitGroup counter
 			wg.Add(1)
 
+			// Add this template name to the sync map and set its value to true to indicate that it is building or in the queue to build
+			// Have to get a little tricky here, since if two users are building templates and one aborts
+			// we don't want to remove queued templates for the other user
+			// To accomplish this, we store the username of the building user as the value to the key of the template.
+			templateProgressStore.Store(templateStatus.Name, user.ProxmoxUsername)
+
 			// Launch a go routine to build the VM.
-			go func(ts TemplateStatus) {
+			go func(templateStatus TemplateStatus, username string) {
 				// Send an empty struct into the channel, if it is full this will block and we will wait our turn
 				semaphoreChannel <- struct{}{}
 
@@ -207,6 +225,16 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 				// Since all structs are the same (empty), reading one is the same as removing the one we put in - it frees up a slot for another go routine
 				defer wg.Done()
 				defer func() { <-semaphoreChannel }()
+				// When we finish, delete our entry from the sync map
+				defer func() {
+					templateProgressStore.Range(func(key, value interface{}) bool {
+						// If the key matches this template and the value matches this user, delete the key
+						if key == templateStatus.Name && value == username {
+							templateProgressStore.Delete(key)
+						}
+						return true // continue iteration
+					})
+				}()
 
 				// Check the canary file before starting the VM build.
 				if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername), 10) {
@@ -214,13 +242,14 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 					return
 				}
 
-				// Sleep for 3 seconds before starting the VM build so the server isn't flooded with builds all at the same time if the user gives a high number for parallel
-				time.Sleep(3 * time.Second)
-
 				// Build the VM from the template.
-				buildVMFromTemplateWithPacker(user, proxmoxPassword, ts.FilePath, verbose, &wg)
+				buildVMFromTemplateWithPacker(user, proxmoxPassword, templateStatus.FilePath, verbose)
 
-			}(templateStatus)
+			}(templateStatus, user.ProxmoxUsername)
+
+			// Sleep for 3 seconds so the server isn't flooded with builds all at exactly the same time if the user gives a high number for parallel
+			time.Sleep(3 * time.Second)
+
 		}
 	}
 
@@ -471,6 +500,15 @@ func AbortPacker(c *gin.Context) {
 	}
 	// First touch the canary file to prevent more templates being built (in the case of "all" and not parallel)
 	touch(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername))
+
+	// Empty the sync map (queue) of any templates this user was building
+	templateProgressStore.Range(func(key, value interface{}) bool {
+		// If the value matches this user, delete the key
+		if value == user.ProxmoxUsername {
+			templateProgressStore.Delete(key)
+		}
+		return true // continue iteration
+	})
 
 	// Then find and kill any running Packer processes
 	packerPids := findPackerPidsForUser(user.ProxmoxUsername)
