@@ -157,9 +157,9 @@ func ActionRoleFromInternet(c *gin.Context) {
 		return
 	}
 	if roleBody.Action != "install" {
-		c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed: " + roleString})
-	} else {
 		c.JSON(http.StatusCreated, gin.H{"result": "Successfully removed: " + roleString})
+	} else {
+		c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed: " + roleString})
 	}
 
 }

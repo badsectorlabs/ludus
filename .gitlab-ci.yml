@@ -22,11 +22,11 @@ stages:
   - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
   # Start as the ROOT user
   - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
-  # Add the CI user if it doesn't already exist, try 5 times since the server just restarted the first might fail
+  # Add the CIA user if it doesn't already exist, try 5 times since the server just restarted the first might fail
   - for i in {1..5}; do (ludus --url https://127.0.0.1:8081 users list all | grep -q 'Continuous Integration Admin' || ludus --url https://127.0.0.1:8081 users add -a -n "Continuous Integration Admin" -i CIA) && break || sleep 5; done
-  # Switch to CI user API Key - only request it once, save it to disk
+  # Switch to CIA user API Key - only request it once, save it to disk
   - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --url https://127.0.0.1:8081 --json --user CIA users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-admin; fi
-  # Set the CI user key as the key for all future ludus operations
+  # Set the CIA user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
 
 .ci-setup-user: &ci-setup-user
@@ -40,11 +40,11 @@ stages:
   - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
   # Start as the ROOT user
   - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
-  # Add the CI user if it doesn't already exist, try 5 times since the server just restarted the first might fail
+  # Add the CIU user if it doesn't already exist, try 5 times since the server just restarted the first might fail
   - for i in {1..5}; do (ludus --url https://127.0.0.1:8081 users list all | grep -q 'Continuous Integration User' || ludus --url https://127.0.0.1:8081 users add -n "Continuous Integration Admin" -i CIU) && break || sleep 5; done
-  # Switch to CI user API Key - only request it once, save it to disk
+  # Switch to CIU user API Key - only request it once, save it to disk
   - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --url https://127.0.0.1:8081 --json --user CIU users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-user; fi
-  # Set the CI user key as the key for all future ludus operations
+  # Set the CIU user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
 
 pages:
@@ -423,7 +423,7 @@ post-deploy testing-as-admin:
   needs:
     - job: build all
     - job: range snapshot
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
@@ -481,7 +481,7 @@ post-deploy power-as-admin:
   needs:
     - job: build all
     - job: range snapshot
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy testing-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -544,7 +544,7 @@ post-deploy ansible-as-admin:
   needs:
     - job: build all
     - job: range snapshot
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy power-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -573,7 +573,7 @@ post-deploy ansible-as-admin:
     - ludus ansible role add geerlingguy.docker --version 7.0.1
     - ludus ansible role list | grep geerlingguy.docker | grep 7.0.1
     # Test the force install
-    - ludus ansible role add geerlingguy.docker 2>&1 | grep 'geerlingguy.docker (7.0.1) is already installed - use --force'
+    - "{ ludus ansible role add geerlingguy.docker 2>&1 | grep 'geerlingguy.docker (7.0.1) is already installed' }"
     - ludus ansible role add geerlingguy.docker --force
     - ludus ansible role list | grep geerlingguy.docker
     - '! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1'
@@ -592,7 +592,7 @@ post-deploy user-cmds-as-admin:
   needs:
     - job: build all
     - job: range snapshot
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy ansible-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
