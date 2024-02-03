@@ -223,6 +223,15 @@
 
               ██████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 30%
 
+    - name: Update install progress (for next boot)
+      ansible.builtin.include_tasks: tasks/update-install-progress.yml
+      vars:
+        no_bounce_tty: true # Don't bounce, just set up for the next boot by decrementing the reboot message
+        install_message: |-2
+              Ludus is installing and will reboot 1 more time.
+
+              ██████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 30%
+
     - name: Drop a file to indicate stage 1 is complete
       ansible.builtin.file:
         path: "{{ ludus_install_path }}/install/.stage-1-complete"
