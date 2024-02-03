@@ -4,12 +4,17 @@ stages:
   - install
   - client
   - templates
-  - range
-  - post-deploy
+  - range-admin
+  - post-deploy-admin
+  - range-user
+  - post-deploy-user
   - manual
   - upload
   - release
 
+################
+# YAML ANCHORS #
+################
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key 
 .ci-setup-admin: &ci-setup-admin
   - cd binaries
@@ -17,6 +22,7 @@ stages:
   - pgrep -f 'ansible|packer' || sudo ./ludus-server --update
   # Move the latest client to /usr/local/bin for clean commands
   - sudo cp -f ludus-client_linux-amd64 /usr/local/bin/ludus
+  - cd ..
   # Set the config to use the "user" API by default
   - mkdir -p ~/.config/ludus/
   - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
@@ -28,6 +34,8 @@ stages:
   - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --url https://127.0.0.1:8081 --json --user CIA users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-admin; fi
   # Set the CIA user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
+  # Set the config to simple-domain.yml by default
+  - ludus range config set -f ludus-server/ci/configs/simple-domain.yml
 
 .ci-setup-user: &ci-setup-user
   - cd binaries
@@ -35,6 +43,7 @@ stages:
   - pgrep -f 'ansible|packer' || sudo ./ludus-server --update
   # Move the latest client to /usr/local/bin for clean commands
   - sudo cp -f ludus-client_linux-amd64 /usr/local/bin/ludus
+  - cd ..
   # Set the config to use the "user" API by default
   - mkdir -p ~/.config/ludus/
   - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
@@ -46,7 +55,109 @@ stages:
   - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --url https://127.0.0.1:8081 --json --user CIU users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-user; fi
   # Set the CIU user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
+  # Set the config to simple-domain.yml by default
+  - ludus range config set -f ludus-server/ci/configs/simple-domain.yml
 
+.ansible-tests: &ansible-tests
+  # Add and remove a role
+  - ludus ansible role list
+  - ludus ansible role add geerlingguy.docker
+  - ludus ansible role list | grep geerlingguy.docker
+  - ludus ansible role rm geerlingguy.docker
+  - '! ludus ansible role list | grep geerlingguy.docker'
+  # Install a specific version
+  - ludus ansible role add geerlingguy.docker --version 7.0.1
+  - ludus ansible role list | grep geerlingguy.docker | grep 7.0.1
+  # Test the force install
+  - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
+  - ludus ansible role add geerlingguy.docker 2>&1 | grep 'geerlingguy.docker (7.0.1) is already installed'
+  - set -o pipefail
+  - ludus ansible role add geerlingguy.docker --force
+  - ludus ansible role list | grep geerlingguy.docker
+  - '! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1'
+  # Test collections
+  - ludus ansible collection list
+  - ludus ansible collection add maxhoesel.smallstep
+  - ludus ansible collection list | grep maxhoesel.smallstep
+  # Force install a collection
+  - ludus ansible collection add maxhoesel.smallstep --version 0.24.4 --force
+  - ludus ansible collection list | grep maxhoesel.smallstep | grep 0.24.4
+
+.testing-mode-tests: &testing-mode-tests
+  - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
+  - ludus testing status
+  # Validate that WIN10 can reach the internet
+  - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+  - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
+  - ludus testing start
+  - ludus testing status
+  - ludus range list
+  # Validate that WIN10 cannot reach the internet
+  - sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
+  # Sometimes the DNS lookup is cached from the test above, so test for a DNS failure or a connect failure
+  - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
+  - ludus testing allow -i 8.8.8.8
+  - ludus testing status
+  # Validate that WIN10 can get to 8.8.8.8 but not 1.1.1.1
+  - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+  - sudo qm guest exec $WIN11VMID -- ping -n 1 1.1.1.1 | egrep 'Request timed out.|Destination port unreachable.'
+  # Allow google.com and check that google is allowed but example isn't
+  - ludus testing allow -d google.com
+  - ludus testing status
+  # This sometimes takes a few seconds - try 3 times 5 seconds apart
+  - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML') && break || sleep 5; done
+  - sudo qm guest exec $WIN11VMID -- curl https://example.com/ | egrep 'Could not resolve host|Failed to connect to example.com'
+  # Deny google.com and 8.8.8.8 and check that they are not reachable
+  - ludus testing deny -d google.com
+  - ludus testing deny -i 8.8.8.8
+  - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
+  - sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
+  - ludus testing stop
+  - ludus testing status
+  # Now that testing has stopped, check the VM can reach the internet
+  - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+  - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
+
+.power-tests: &power-tests
+  # Power on/off tests - single VM
+  - ludus power off -n ${LUDUS_USER_ID}-kali
+  - sleep 10
+  - ludus range status | grep "${LUDUS_USER_ID}-kali" | grep 'Off'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1" | grep 'On'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'
+  - ludus power on -n ${LUDUS_USER_ID}-kali
+  - sleep 10
+  - ludus range status | grep "${LUDUS_USER_ID}-kali" | grep 'On'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1" | grep 'On'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'    
+  # Power on/off tests - comma separated
+  - ludus power off -n ${LUDUS_USER_ID}-kali,${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1
+  - sleep 60
+  - ludus range status | grep "${LUDUS_USER_ID}-kali" | grep 'Off'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1" | grep 'Off'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'
+  - ludus power on -n ${LUDUS_USER_ID}-kali,${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1
+  - sleep 60
+  - ludus range status | grep "${LUDUS_USER_ID}-kali" | grep 'On'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1" | grep 'On'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'
+  # Power on/off tests - "all"
+  - ludus power off -n all
+  - sleep 60
+  - ludus range status | grep "${LUDUS_USER_ID}-kali" | grep 'Off'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1" | grep 'Off'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'Off'
+  - ludus range status | grep "${LUDUS_USER_ID}-router-debian11-x64" | grep 'Off'
+  - ludus power on -n all
+  - sleep 60
+  - ludus range status | grep "${LUDUS_USER_ID}-kali" | grep 'On'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1" | grep 'On'
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'
+  - ludus range status | grep "${LUDUS_USER_ID}-router-debian11-x64" | grep 'On'
+
+#################
+# DOCUMENTATION #
+#################
 pages:
   stage: documentation
   variables:
@@ -97,6 +208,9 @@ documentation:
     paths:
     - public
 
+#########
+# BUILD #
+#########
 build all:
   stage: build
   tags:
@@ -144,6 +258,9 @@ build all:
     - GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -o ../binaries/ludus-client_windows-arm64.exe
     - echo "Compile complete."
 
+###########
+# INSTALL #
+###########
 install kickoff:
   stage: install
   tags:
@@ -218,6 +335,9 @@ install snapshot:
   script:
     - echo "Snapshot complete"
 
+##########
+# CLIENT #
+##########
 client basic-commands:
   stage: client
   tags:
@@ -255,6 +375,9 @@ client basic-commands:
     - ludus testing status
     - ludus range gettags
 
+#############
+# TEMPLATES #
+#############
 templates build:
   stage: templates
   tags:
@@ -338,8 +461,11 @@ templates snapshot:
   script:
     - echo "Snapshot complete"
 
-range deploy:
-  stage: range
+#################
+# RANGE - ADMIN #
+#################
+range deploy-admin:
+  stage: range-admin
   tags:
     - ludus-proxmox-runner
   needs:
@@ -366,13 +492,13 @@ range deploy:
     - ludus range config get
     - ludus range deploy
 
-range check:
-  stage: range
+range check-admin:
+  stage: range-admin
   tags:
     - ludus-proxmox-runner  
   needs:
     - job: build all
-    - job: range deploy
+    - job: range deploy-admin
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
@@ -396,14 +522,14 @@ range check:
     - ludus range list
     - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
 
-range snapshot:
-  stage: range
+range snapshot-admin:
+  stage: range-admin
   tags:
     - ludus-proxmox-runner
   needs:
     - job: build all
       artifacts: false
-    - job: range check
+    - job: range check-admin
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
@@ -420,17 +546,21 @@ range snapshot:
   script:
     - echo "Snapshot complete"
 
+#######################
+# POST-DEPLOY - ADMIN #
+#######################
 post-deploy testing-as-admin:
-  stage: post-deploy
+  stage: post-deploy-admin
   tags:
     - ludus-proxmox-runner
   needs:
     - job: build all
-    - job: range snapshot
+    - job: range snapshot-admin
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[testing-mode tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
@@ -444,52 +574,21 @@ post-deploy testing-as-admin:
   timeout: 15m
   script:
     - *ci-setup-admin
-    - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
-    - ludus testing status
-    # Validate that WIN10 can reach the internet
-    - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-    - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
-    - ludus testing start
-    - ludus testing status
-    - ludus range list
-    # Validate that WIN10 cannot reach the internet
-    - sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
-    # Sometimes the DNS lookup is cached from the test above, so test for a DNS failure or a connect failure
-    - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
-    - ludus testing allow -i 8.8.8.8
-    - ludus testing status
-    # Validate that WIN10 can get to 8.8.8.8 but not 1.1.1.1
-    - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-    - sudo qm guest exec $WIN11VMID -- ping -n 1 1.1.1.1 | egrep 'Request timed out.|Destination port unreachable.'
-    # Allow google.com and check that google is allowed but example isn't
-    - ludus testing allow -d google.com
-    - ludus testing status
-    # This sometimes takes a few seconds - try 3 times 5 seconds apart
-    - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML') && break || sleep 5; done
-    - sudo qm guest exec $WIN11VMID -- curl https://example.com/ | egrep 'Could not resolve host|Failed to connect to example.com'
-    # Deny google.com and 8.8.8.8 and check that they are not reachable
-    - ludus testing deny -d google.com
-    - ludus testing deny -i 8.8.8.8
-    - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
-    - sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
-    - ludus testing stop
-    - ludus testing status
-    # Now that testing has stopped, check the VM can reach the internet
-    - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-    - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
+    - *testing-mode-tests
 
 post-deploy power-as-admin:
-  stage: post-deploy
+  stage: post-deploy-admin
   tags:
     - ludus-proxmox-runner  
   needs:
     - job: build all
-    - job: range snapshot
+    - job: range snapshot-admin
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy testing-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[power tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
@@ -505,54 +604,22 @@ post-deploy power-as-admin:
   timeout: 15m
   script:
     - *ci-setup-admin
-    # Power on/off tests - single VM
-    - ludus power off -n CIA-kali
-    - sleep 10
-    - ludus range status | grep 'CIA-kali' | grep 'Off'
-    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'On'
-    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'On'
-    - ludus power on -n CIA-kali
-    - sleep 10
-    - ludus range status | grep 'CIA-kali' | grep 'On'
-    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'On'
-    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'On'    
-    # Power on/off tests - comma separated
-    - ludus power off -n CIA-kali,CIA-ad-win11-22h2-enterprise-x64-1
-    - sleep 60
-    - ludus range status | grep 'CIA-kali' | grep 'Off'
-    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'Off'
-    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'On'
-    - ludus power on -n CIA-kali,CIA-ad-win11-22h2-enterprise-x64-1
-    - sleep 60
-    - ludus range status | grep 'CIA-kali' | grep 'On'
-    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'On'
-    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'On'
-    # Power on/off tests - "all""
-    - ludus power off -n all
-    - sleep 60
-    - ludus range status | grep 'CIA-kali' | grep 'Off'
-    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'Off'
-    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'Off'
-    - ludus range status | grep 'CIA-router-debian11-x64' | grep 'Off'
-    - ludus power on -n all
-    - sleep 60
-    - ludus range status | grep 'CIA-kali' | grep 'On'
-    - ludus range status | grep 'CIA-ad-win11-22h2-enterprise-x64-1' | grep 'On'
-    - ludus range status | grep 'CIA-ad-dc-win2022-server-x64' | grep 'On'
-    - ludus range status | grep 'CIA-router-debian11-x64' | grep 'On'
+    - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
+    - *power-tests
 
 post-deploy ansible-as-admin:
-  stage: post-deploy
+  stage: post-deploy-admin
   tags:
     - ludus-proxmox-runner  
   needs:
     - job: build all
-    - job: range snapshot
+    - job: range snapshot-admin
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy power-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[ansible tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
@@ -567,42 +634,21 @@ post-deploy ansible-as-admin:
   timeout: 15m
   script:
     - *ci-setup-admin
-    # Add and remove a role
-    - ludus ansible role list
-    - ludus ansible role add geerlingguy.docker
-    - ludus ansible role list | grep geerlingguy.docker
-    - ludus ansible role rm geerlingguy.docker
-    - '! ludus ansible role list | grep geerlingguy.docker'
-    # Install a specific version
-    - ludus ansible role add geerlingguy.docker --version 7.0.1
-    - ludus ansible role list | grep geerlingguy.docker | grep 7.0.1
-    # Test the force install
-    - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
-    - ludus ansible role add geerlingguy.docker 2>&1 | grep 'geerlingguy.docker (7.0.1) is already installed'
-    - set -o pipefail
-    - ludus ansible role add geerlingguy.docker --force
-    - ludus ansible role list | grep geerlingguy.docker
-    - '! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1'
-    # Test collections
-    - ludus ansible collection list
-    - ludus ansible collection add maxhoesel.smallstep
-    - ludus ansible collection list | grep maxhoesel.smallstep
-    # Force install a collection
-    - ludus ansible collection add maxhoesel.smallstep --version 0.24.4 --force
-    - ludus ansible collection list | grep maxhoesel.smallstep | grep 0.24.4
+    - *ansible-tests
 
 post-deploy user-cmds-as-admin:
-  stage: post-deploy
+  stage: post-deploy-admin
   tags:
     - ludus-proxmox-runner  
   needs:
     - job: build all
-    - job: range snapshot
+    - job: range snapshot-admin
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy ansible-as-admin # prevent parallel tests
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[user tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
@@ -648,6 +694,243 @@ post-deploy user-cmds-as-admin:
     - ludus --url https://127.0.0.1:8081 user rm -i TU
     - '! ludus users list all | grep "Test User"'
 
+################
+# RANGE - USER #
+################
+range deploy-user:
+  stage: range-user
+  tags:
+    - ludus-proxmox-runner
+  needs:
+    - job: build all
+    - job: templates snapshot
+      optional: true # depend on templates snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+    - job: range snapshot-admin
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/range.go
+      - ludus-server/ansible/range-management/**/*
+      - ludus-server/ansible/user-management/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_admin
+  timeout: 5m
+  script:
+    - *ci-setup-admin
+    - ludus power off -n all # Shut down the admin range to save resources
+    - *ci-setup-user
+    - ludus range config get
+    - ludus range deploy
+
+range check-user:
+  stage: range-user
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: range deploy-user
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-server/ansible/range-management/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_admin
+  timeout: 3h
+  retry:
+    max: 2
+    when: script_failure
+  script:
+    - *ci-setup-user
+    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - ludus range logs
+    - ludus range list
+    - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
+
+range snapshot-user:
+  stage: range-user
+  tags:
+    - ludus-proxmox-runner
+  needs:
+    - job: build all
+      artifacts: false
+    - job: range check-user
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-server/ansible/range-management/**/*
+  variables:
+    LUDUS_INSTALL_STEP: take-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_user
+  timeout: 5m
+  script:
+    - echo "Snapshot complete"
+
+#######################
+# POST-DEPLOY - USER #
+#######################
+post-deploy testing-as-user:
+  stage: post-deploy-user
+  tags:
+    - ludus-proxmox-runner
+  needs:
+    - job: build all
+    - job: range snapshot-user
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[testing-mode tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/**/*
+      - ludus-server/ansible/range-management/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_user
+  timeout: 15m
+  script:
+    - *ci-setup-user
+    - *testing-mode-tests
+
+post-deploy power-as-user:
+  stage: post-deploy-user
+  tags:
+    - ludus-proxmox-runner
+  needs:
+    - job: build all
+    - job: range snapshot-user
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
+    - job: post-deploy testing-as-user # prevent parallel tests
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[power tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/power.go
+      - ludus-server/ansible/range-management/power.yml
+      - ludus-server/ansible/range-management/pre-run-checks.yml
+      - ludus-server/ansible/range-management/tasks/proxmox/set-vm-state.yml
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_user
+  timeout: 15m
+  script:
+    - *ci-setup-user
+    - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
+    - *power-tests
+
+post-deploy ansible-as-user:
+  stage: post-deploy-user
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: range snapshot-user
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
+    - job: post-deploy power-as-user # prevent parallel tests
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[ansible tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/ansible.go
+      - ludus-server/src/ansible.go
+      - ludus-server/src/api_ansible.go
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_user
+  timeout: 15m
+  script:
+    - *ci-setup-admin
+    - *ansible-tests
+
+post-deploy user-cmds-as-user:
+  stage: post-deploy-user
+  tags:
+    - ludus-proxmox-runner  
+  needs:
+    - job: build all
+    - job: range snapshot-user
+      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
+    - job: post-deploy ansible-as-user # prevent parallel tests
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[user tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/user.go
+      - ludus-server/src/api_user_management.go
+      - ludus-server/ansible/user-management/**/*
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_user
+  timeout: 15m
+  script:
+    - *ci-setup-user
+    - set +o pipefail # lots of expected fails that we will grep in this job
+    - ludus user list
+    - ludus users list all 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    # Get and set our own creds
+    - ludus user creds get
+    - ludus user creds set -p test-password-123
+    - ludus user creds get | grep test-password-123
+    # Try to get and set other user's creds
+    - ludus user creds get --user CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - ludus user creds set -i CIA -p test-password-123 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    # Get wireguard
+    - ludus user wireguard | grep Endpoint
+    # Try to get other user's wireguard
+    - ludus user wireguard --user CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    # Try to add an admin user
+    - ludus user add -a -n "Test Admin" -i TA 2>&1 | grep "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint"
+    - ludus --url https://127.0.0.1:8081 user add -a -n "Test Admin" -i TA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - '! ludus users list all | grep "Test Admin"'
+    # Try to add a normal user
+    - ludus --url https://127.0.0.1:8081 user add -n "Test User" -i TA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - '! ludus users list all | grep "Test User"'
+    # Try to remove a user
+    - ludus --url https://127.0.0.1:8081 user rm -i CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    # Try to get an api key for another user
+    - ludus user apikey --user CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    # Get a new API for ourselves
+    - ludus user apikey
+
+##########
+# MANUAL #
+##########
 manual testing:
   stage: manual
   tags:
@@ -663,6 +946,9 @@ manual testing:
     - *ci-setup-admin
     - echo "manual testing"
 
+###########
+# RELEASE #
+###########
 upload:
   stage: upload
   tags:

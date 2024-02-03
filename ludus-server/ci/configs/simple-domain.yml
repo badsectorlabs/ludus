@@ -19,9 +19,7 @@ ludus:
     ram_gb: 8
     cpus: 4
     windows:
-      install_additional_tools: true
-      office_version: 2019
-      office_arch: 64bit
+      install_additional_tools: false
     domain:
       fqdn: ludus.domain
       role: member
