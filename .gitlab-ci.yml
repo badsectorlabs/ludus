@@ -346,8 +346,6 @@ templates build:
     - job: build all
     - job: install snapshot
       optional: true # depend on install snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from a clean install
-    - job: client basic-commands
-      optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
