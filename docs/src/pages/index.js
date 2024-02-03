@@ -32,7 +32,7 @@ function HomepageHeader() {
         <div className={styles.buttons}>
           <Link
             className="button button--secondary button--lg"
-            to="docs/category/%EF%B8%8F-quick-start">
+            to="docs/category/quick-start">
             Ludus Quick Start
           </Link>
         </div>

@@ -3,6 +3,7 @@
     "position": 2,
     "link": {
         "type": "generated-index",
-        "description": "Simple steps to get Ludus up and running quickly."
+        "description": "Simple steps to get Ludus up and running quickly",
+        "slug": "category/quick-start"
     }
 }

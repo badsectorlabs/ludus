@@ -57,9 +57,11 @@ pages:
     - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[build pages\]/
-    - if: $CI_COMMIT_BRANCH == "main"
-    - changes:
-      - "docs/**/*"
+    - if: $CI_COMMIT_BRANCH == "main" # Only update public docs in the main branch
+      changes:
+        - "docs/**/*"
+  retry:
+    max: 2
   script:
   - cd docs
   # Change the base URL as we are hosting the site straight off the root of the domain
@@ -84,6 +86,8 @@ documentation:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - changes:
       - "docs/**/*"
+  retry:
+    max: 2
   script:
   - cd docs
   - yarn install
@@ -230,7 +234,7 @@ client basic-commands:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/**/*
+      - ludus-client/**/*.go
       - ludus-server/ansible/range-management/**/*
       - ludus-server/ansible/user-management/**/*
       - ludus-server/ansible/user-files/**/*
@@ -350,7 +354,7 @@ range deploy:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/**/*
+      - ludus-client/cmd/range.go
       - ludus-server/ansible/range-management/**/*
       - ludus-server/ansible/user-management/**/*
   variables:

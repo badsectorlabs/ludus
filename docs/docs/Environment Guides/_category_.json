@@ -3,6 +3,7 @@
     "position": 3,
     "link": {
         "type": "generated-index",
-        "description": "Guides for different network setup scenarios."
+        "description": "Guides for different network setup scenarios.",
+        "slug": "category/environment-guides"
     }
 }
