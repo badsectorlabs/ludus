@@ -619,7 +619,7 @@ post-deploy user-cmds-as-admin:
     - *ci-setup-admin
     # Add an admin user
     - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
-    - ludus user add -a -n "Test Admin" -i TA | grep "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint"
+    - ludus user add -a -n "Test Admin" -i TA 2>&1 | grep "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint"
     - set -o pipefail
     - ludus --url https://127.0.0.1:8081 user add -a -n "Test Admin" -i TA
     - ludus users list all | grep "Test Admin"
@@ -631,7 +631,7 @@ post-deploy user-cmds-as-admin:
     - ludus user wireguard --user TA | grep Endpoint
     # Remove admin user
     - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
-    - ludus user rm -i TA | grep "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint"
+    - ludus user rm -i TA 2>&1 | grep "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint"
     - set -o pipefail
     - ludus --url https://127.0.0.1:8081 user rm -i TA
     - '! ludus users list all | grep "Test Admin"'
