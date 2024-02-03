@@ -573,7 +573,9 @@ post-deploy ansible-as-admin:
     - ludus ansible role add geerlingguy.docker --version 7.0.1
     - ludus ansible role list | grep geerlingguy.docker | grep 7.0.1
     # Test the force install
-    - "{ ludus ansible role add geerlingguy.docker 2>&1 | grep 'geerlingguy.docker (7.0.1) is already installed' }"
+    - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
+    - ludus ansible role add geerlingguy.docker 2>&1 | grep 'geerlingguy.docker (7.0.1) is already installed'
+    - set -o pipefail
     - ludus ansible role add geerlingguy.docker --force
     - ludus ansible role list | grep geerlingguy.docker
     - '! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1'
