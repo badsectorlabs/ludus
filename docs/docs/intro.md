@@ -1,8 +1,11 @@
 ---
 sidebar_position: 1
+title: 🏟️ Ludus Introduction
+description: Ludus is the open-source server for testing infrastructure
+keywords: [introduction, intro, ludus]
 ---
 
-# Ludus Introduction
+# 🏟️ Ludus Introduction
 
 <!-- <img src="img/why.png" alt="A tweet from @hotnops saying '90 percent of security research is getting test environments setup properly'" width="600"/> -->
 

@@ -35,7 +35,7 @@ All documentation can be found at [docs.ludus.cloud](https://docs.ludus.cloud) (
 
 1. Grab the `ludus-server` binary and copy it to a clean Debian 12 host
 2. Run the `ludus-server` binary to convert the Debian 12 host into a Ludus host
-3. Follow the [Quick Start](https://ludus.cloud/docs/category/quick-start) documentation to get templates built and a range deployed
+3. Follow the [Quick Start](https://ludus.cloud/docs/category/%EF%B8%8F-quick-start) documentation to get templates built and a range deployed
 
 ## 📷 Screenshots
 

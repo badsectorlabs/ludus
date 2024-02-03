@@ -32,7 +32,7 @@ function HomepageHeader() {
         <div className={styles.buttons}>
           <Link
             className="button button--secondary button--lg"
-            to="docs/category/quick-start">
+            to="docs/category/%EF%B8%8F-quick-start">
             Ludus Quick Start
           </Link>
         </div>
@@ -49,7 +49,7 @@ export default function Home() {
   return (
     <Layout
       title={`${siteConfig.title}`}
-      description="Documentation for the Ludus cyber ranges project">
+      description="Documentation for the Ludus project">
       <HomepageHeader />
       <main>
         <HomepageFeatures />

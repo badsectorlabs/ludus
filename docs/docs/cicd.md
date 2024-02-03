@@ -1,8 +1,9 @@
 ---
 sidebar_position: 11
+title: "🤖 CI/CD"
 ---
 
-# CI/CD
+# 🤖 CI/CD
 
 ## Requirements
 

@@ -6,9 +6,21 @@ This server controls Ludus user management, template management, range deploymen
 
 To view the API documentation, run ludus-server and browse to https://<ip>:8080/api
 
-## Building
+## Building without docs
 
 ```
-GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=manual-build" -o ludus-server
+export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-no-docs" -o ludus-server
 ```
 
+## Building with docs
+
+```
+export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+cd docs
+yarn install
+yarn build
+mv ./build ../ludus-server/src/docs
+cd ../ludus-server
+GOOS=linux GOARCH=amd64 go build -tags=embeddocs -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-with-docs" -o ludus-server
+```

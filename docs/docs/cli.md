@@ -1,8 +1,9 @@
 ---
 sidebar_position: 4
+title: "🧑‍💻 Ludus CLI"
 ---
 
-# Ludus CLI
+# 🧑‍💻 Ludus CLI
 
 The Ludus CLI is the primary method of interacting with a Ludus server.
 It uses the Ludus REST API to perform actions for the user, and has helpful wrappers designed to aid troubleshooting issues.

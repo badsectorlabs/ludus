@@ -82,7 +82,7 @@ const config = {
           {
             label: 'Quick Start',
             position: 'left',
-            to: 'docs/category/quick-start'
+            to: 'docs/category/%EF%B8%8F-quick-start'
           },
           {
             label: 'Docs', 
@@ -109,7 +109,7 @@ const config = {
             items: [
               {
                 label: 'Quick Start',
-                to: '/docs/category/quick-start',
+                to: '/docs/category/%EF%B8%8F-quick-start',
               },
               {
                 label: 'Docs',

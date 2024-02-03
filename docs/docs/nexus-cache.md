@@ -1,8 +1,9 @@
 ---
 sidebar_position: 9
+title: "🗄️ Nexus Cache"
 ---
 
-# Nexus Cache
+# 🗄️ Nexus Cache
 
 For Ludus servers with more than one user, or frequent environment rebuilds, it is beneficial to cache
 artifacts locally to speed up deployments and prevent rate limits from 3rd party services (i.e. [Chocolatey](https://chocolatey.org/)).

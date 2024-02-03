@@ -1,8 +1,9 @@
 ---
 sidebar_position: 12
+title: "📝 Admin Notes"
 ---
 
-# Admin Notes
+# 📝 Admin Notes
 
 ## Promoting a user to admin
 

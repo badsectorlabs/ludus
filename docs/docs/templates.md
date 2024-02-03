@@ -1,8 +1,9 @@
 ---
 sidebar_position: 7
+title: "📜 Templates"
 ---
 
-# Templates
+# 📜 Templates
 
 Templates are the basis of every VM deployed by Ludus.
 Unlike other solutions, Ludus templates are built from scratch (ISO), and by design don't contain any customization.
