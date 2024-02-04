@@ -67,6 +67,7 @@ The available tags are listed below:
 - `[testing-mode tests]` - runs tests to determine if testing mode functions properly
 - `[ansible tests]` - runs tests to determine if ansible features function properly
 - `[user tests]` - runs tests to determine if the functions related to user management function properly
+- `[template tests]` - runs tests related to adding, building, and removing custom templates
 
 ## Releases
 
