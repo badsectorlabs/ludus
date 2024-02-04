@@ -326,6 +326,30 @@ func setupRangeLogsCmd(command *cobra.Command) {
 	command.Flags().IntVarP(&tail, "tail", "t", 0, "number of lines of the log from the end to print")
 }
 
+var rangeErrorsCmd = &cobra.Command{
+	Use:   "errors",
+	Short: "Parse the latest deploy logs from your range and print any non-ignored fatal errors",
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		var apiString string
+
+		if userID != "" {
+			apiString = fmt.Sprintf("/range/logs?userID=%s", userID)
+		} else {
+			apiString = "/range/logs"
+		}
+		responseJSON, success := rest.GenericGet(client, apiString)
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+		rangeLogs, _ := stringAndCursorFromResult(responseJSON)
+		printFatalErrorsFromString(rangeLogs)
+
+	},
+}
+
 var rangeDeleteCmd = &cobra.Command{
 	Use:     "rm",
 	Short:   "Delete your range (all VMs will be destroyed)",
@@ -517,6 +541,7 @@ func init() {
 	rangeCmd.AddCommand(rangeDeployCmd)
 	setupRangeLogsCmd(rangeLogsCmd)
 	rangeCmd.AddCommand(rangeLogsCmd)
+	rangeCmd.AddCommand(rangeErrorsCmd)
 	rangeCmd.AddCommand(rangeListCmd)
 	setupDeleteCmd(rangeDeleteCmd)
 	rangeCmd.AddCommand(rangeDeleteCmd)

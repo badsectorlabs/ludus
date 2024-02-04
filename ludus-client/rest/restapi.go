@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -72,6 +73,23 @@ func InitClient(url string, apiKey string, proxy string, verify bool, debug bool
 	return client
 }
 
+func checkErrorForAnsibleTemporaryDirectory(errorString string) {
+	searchString := "Failed to create temporary directory. In some cases, you may have been able to authenticate and did not have permissions on the target directory."
+
+	if strings.Contains(errorString, searchString) {
+		regexPattern := regexp.MustCompile(`fatal: ([^:]+): UNREACHABLE!`)
+		match := regexPattern.FindStringSubmatch(errorString)
+		if len(match) > 1 {
+			// The first element (match[0]) is the entire match,
+			// and the second element (match[1]) is the first parenthesized submatch,
+			// which in this case, is the VM name.
+			logger.Logger.Errorf("%s may be unreachable or powered off! Power it on or reboot it and try the command again.\n", match[1])
+		} else {
+			logger.Logger.Error("The VM may be unreachable or powered off. Power it on or reboot it and try the command again.")
+		}
+	}
+}
+
 func prettyPrintError(errorString string) {
 
 	if errorString == "Client sent an HTTP request to an HTTPS server." {
@@ -86,6 +104,8 @@ func prettyPrintError(errorString string) {
 	}
 
 	logger.Logger.Error(parsedError.Error)
+
+	checkErrorForAnsibleTemporaryDirectory(parsedError.Error)
 }
 
 func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {

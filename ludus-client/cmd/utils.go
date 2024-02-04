@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"ludus/logger"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -149,4 +151,45 @@ func findFiles(rootDir, pattern1, pattern2 string) ([]string, error) {
 	})
 
 	return files, err
+}
+
+func printFatalErrorsFromString(input string) {
+	scanner := bufio.NewScanner(strings.NewReader(input))
+	fatalRegex := regexp.MustCompile(`^fatal:.*$|^failed:.*$`)
+	ignoreRegex := regexp.MustCompile(`\.\.\.ignoring$`)
+	errorCount := 0
+
+	var previousLine string
+	for scanner.Scan() {
+		currentLine := scanner.Text()
+		// Check if the current line is an ignoring line and the previous line was a fatal line
+		if ignoreRegex.MatchString(currentLine) && fatalRegex.MatchString(previousLine) {
+			// Skip this fatal line because it's followed by ...ignoring
+			previousLine = "" // Reset previousLine to avoid false positives
+			continue
+		}
+
+		if fatalRegex.MatchString(previousLine) {
+			// This means the previous line was a fatal line not followed by ...ignoring
+			formattedLine := strings.ReplaceAll(previousLine, "\\r\\n", "\n")
+			formattedLine = strings.ReplaceAll(formattedLine, "\\n", "\n")
+			errorCount += 1
+			fmt.Printf("\n******************************************** ERROR %d ********************************************\n", errorCount)
+			fmt.Println(formattedLine)
+			fmt.Println("*************************************************************************************************")
+		}
+
+		// Update previousLine for the next iteration
+		previousLine = currentLine
+	}
+
+	// Check the last line in case the file ends with a fatal line
+	if fatalRegex.MatchString(previousLine) {
+		formattedLine := strings.ReplaceAll(previousLine, "\\r\\n", "\n")
+		formattedLine = strings.ReplaceAll(formattedLine, "\\n", "\n")
+		errorCount += 1
+		fmt.Printf("\n******************************************** ERROR %d ********************************************\n", errorCount)
+		fmt.Println(formattedLine)
+		fmt.Println("*************************************************************************************************")
+	}
 }
