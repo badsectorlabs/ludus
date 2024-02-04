@@ -34,8 +34,8 @@ stages:
   - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --url https://127.0.0.1:8081 --json --user CIA users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-admin; fi
   # Set the CIA user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
-  # Set the config to simple-domain.yml by default
-  - ludus range config set -f ludus-server/ci/configs/simple-domain.yml
+  # Set the config to simple-domain.yml if all templates are built
+  - if [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; then ludus range config set -f ludus-server/ci/configs/simple-domain.yml; fi
 
 .ci-setup-user: &ci-setup-user
   - cd binaries
@@ -55,7 +55,7 @@ stages:
   - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --url https://127.0.0.1:8081 --json --user CIU users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-user; fi
   # Set the CIU user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
-  # Set the config to simple-domain.yml by default
+  # Set the config to simple-domain.yml
   - ludus range config set -f ludus-server/ci/configs/simple-domain.yml
 
 .ansible-tests: &ansible-tests
