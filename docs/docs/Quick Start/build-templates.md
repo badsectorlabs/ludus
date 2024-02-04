@@ -22,8 +22,7 @@ local:~$ ludus templates list
 | debian-12-x64-server-template      | FALSE |
 | kali-x64-desktop-template          | FALSE |
 | win11-22h2-x64-enterprise-template | FALSE |
-| win2016-server-x64-template        | FALSE |
-| win2019-server-x64-template        | FALSE |
+| win2022-server-x64-template        | FALSE |
 +------------------------------------+-------+
 ```
 
@@ -31,7 +30,7 @@ On a fresh install, no templates are built. Ludus will build them from ISO files
 
 ```bash
 local:~$ ludus templates build
-[INFO]  template building started
+[INFO]  Template building started - this will take a while. Building 1 template(s) at a time.
 ```
 
 To check the status of the template build, you can run `templates status`, `templates list` again, or follow the packer logs with 
@@ -48,7 +47,7 @@ local:~$ ludus templates logs -f
 
 :::info
 
-Building templates will take a while (1-2 hours).
+Building templates will take a while (up to a few hours depending on your internet and hardware speed).
 
 :::
 

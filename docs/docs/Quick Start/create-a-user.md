@@ -78,6 +78,8 @@ Open a second terminal.
 
 Now create your first ludus user! This user will be an admin as we specify `--admin`.
 Initials are commonly used for the userID.
+If the user name you specify (converted to lowercase and spaces replaced with `-`) exists
+on the system already, it's password will be changed!
 
 Prepend the LUDUS_API_KEY variable to the command to authenticate properly.
 
@@ -250,7 +252,7 @@ With the API key set, all user commands are available!
 ## Get Proxmox Credentials
 
 Ludus is built on top of the [Proxmox](https://www.proxmox.com/en/) hypervisor which has a web interface.
-It is available at `https://<ludus IP>:8006` and the credentials for the web GUI can be retrieved with `ludus user creds get`.
+It's available at `https://<ludus IP>:8006` and the credentials for the web GUI can be retrieved with `ludus user creds get`.
 
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">

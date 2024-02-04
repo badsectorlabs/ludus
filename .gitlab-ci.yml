@@ -470,6 +470,8 @@ range deploy-admin:
     - job: build all
     - job: templates snapshot
       optional: true # depend on templates snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
+    - job: client basic-commands
+      optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
@@ -662,6 +664,9 @@ post-deploy user-cmds-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
   timeout: 15m
+  retry:
+    max: 2
+    when: script_failure
   script:
     - *ci-setup-admin
     # Add an admin user
@@ -881,7 +886,7 @@ post-deploy ansible-as-user:
     LUDUS_SNAPSHOT_NAME: range_built_user
   timeout: 15m
   script:
-    - *ci-setup-admin
+    - *ci-setup-user
     - *ansible-tests
 
 post-deploy user-cmds-as-user:
@@ -912,6 +917,9 @@ post-deploy user-cmds-as-user:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
   timeout: 15m
+  retry:
+    max: 2
+    when: script_failure
   script:
     - *ci-setup-user
     - set +o pipefail # lots of expected fails that we will grep in this job

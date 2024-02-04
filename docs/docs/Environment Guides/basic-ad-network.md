@@ -6,7 +6,7 @@ The configuration, if deployed without modification, looks like this (for UserID
 
 ![Network Diagram](/img/envs/basic-active-directory-network.png)
 
-This network contains a Domain Controller (`JD-DC01-2019`), and Windows 11 workstation (`JD-WIN11-22H2-1` with Office 2019 64bit, Chrome, Firefox, Burpsuite, VSCode, 7zip, process hacker, ilspy and other useful utilities), and a Kali VM (`JD-Kali`) in a separate network.
+This network contains a Domain Controller (`JD-DC01-2022`) for the domain `ludus.domain`, and Windows 11 workstation (`JD-WIN11-22H2-1` with Office 2019 64bit, Chrome, Firefox, Burpsuite, VSCode, 7zip, process hacker, ilspy and other useful utilities), and a Kali VM (`JD-Kali`) in a separate network.
 The Windows hosts can only reach the Kali VM on tcp/80, tcp/443, and tcp/8080.
 The Kali VM can reach the Windows VM on any protocol and any port.
 
@@ -16,9 +16,9 @@ The configuration for this range is below:
 
 ```yaml
 ludus:
-  - vm_name: "{{ range_id }}-ad-dc-win2019-server-x64"
-    hostname: "{{ range_id }}-DC01-2019"
-    template: win2019-server-x64-template
+  - vm_name: "{{ range_id }}-ad-dc-win2022-server-x64"
+    hostname: "{{ range_id }}-DC01-2022"
+    template: win2022-server-x64-template
     vlan: 10
     ip_last_octet: 11
     ram_gb: 8

@@ -50,3 +50,9 @@ All documentation can be found at [docs.ludus.cloud](https://docs.ludus.cloud) (
 ### Proxmox with a Simple Range Deployed
 
 ![Proxmox](./docs/static/img/screenshots/proxmox.png)
+
+## 🎥 Demos
+
+### Install
+
+![Ludus Install](./docs/static/video/ludus-install.mp4)

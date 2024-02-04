@@ -10,7 +10,7 @@ Ludus has **much more to offer**!
 
 Have **5 more minutes**? Take a look at **[configuration](../configuration)** and the **[Ludus CLI](../cli)**.
 
-<!-- Anything **unclear** or **buggy** in this tutorial? [Please report it!](https://gitlab.com/) -->
+Anything **unclear** or **buggy** in this tutorial? [Please report it!](https://gitlab.com/badsectorlabs/ludus/-/issues)
 
 ## What's next?
 
@@ -20,5 +20,4 @@ Have **5 more minutes**? Take a look at **[configuration](../configuration)** an
 - Add a [custom chocolatey package](../configuration) to Windows machines
 - [Sysprep](../configuration) Windows machines
 - Set up [CI/CD](../cicd)
-<!-- - Add new machines/configurations with [Ludus modules](https://soon) -->
 <!-- - Get involved in the [Ludus Community](https://soon) -->
