@@ -50,7 +50,7 @@ stages:
   # Start as the ROOT user
   - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
   # Add the CIU user if it doesn't already exist, try 5 times since the server just restarted the first might fail
-  - for i in {1..5}; do (ludus --url https://127.0.0.1:8081 users list all | grep -q 'Continuous Integration User' || ludus --url https://127.0.0.1:8081 users add -n "Continuous Integration Admin" -i CIU) && break || sleep 5; done
+  - for i in {1..5}; do (ludus --url https://127.0.0.1:8081 users list all | grep -q 'Continuous Integration User' || ludus --url https://127.0.0.1:8081 users add -n "Continuous Integration User" -i CIU) && break || sleep 5; done
   # Switch to CIU user API Key - only request it once, save it to disk
   - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --url https://127.0.0.1:8081 --json --user CIU users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-user; fi
   # Set the CIU user key as the key for all future ludus operations
@@ -618,6 +618,8 @@ post-deploy ansible-as-admin:
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy power-as-admin # prevent parallel tests
       optional: true
+    - job: post-deploy testing-as-admin # prevent parallel tests
+      optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
@@ -648,6 +650,10 @@ post-deploy user-cmds-as-admin:
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy ansible-as-admin # prevent parallel tests
       optional: true
+    - job: post-deploy power-as-admin
+      optional: true
+    - job: post-deploy testing-as-admin
+      optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
@@ -675,6 +681,11 @@ post-deploy user-cmds-as-admin:
     - set -o pipefail
     - ludus --url https://127.0.0.1:8081 user add -a -n "Test Admin" -i TA
     - ludus users list all | grep "Test Admin"
+    # Try to create a user with the same ID or name
+    - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
+    - ludus --url https://127.0.0.1:8081 user add -n "Test Admin" -i TA2 2>&1 | grep "User with that ID already exists"
+    - ludus --url https://127.0.0.1:8081 user add -n "Test Admin 2" -i TA 2>&1 | grep "User with that name already exists"
+    - set -o pipefail
     # Get and set creds
     - ludus user creds get --user TA
     - ludus user creds set -i TA -p test-password-123
@@ -867,6 +878,8 @@ post-deploy ansible-as-user:
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy power-as-user # prevent parallel tests
       optional: true
+    - job: post-deploy testing-as-user # prevent parallel tests
+      optional: true
     - job: post-deploy ansible-as-admin # prevent parallel tests
       optional: true
   rules:
@@ -898,6 +911,10 @@ post-deploy user-cmds-as-user:
     - job: range snapshot-user
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
     - job: post-deploy ansible-as-user # prevent parallel tests
+      optional: true
+    - job: post-deploy power-as-user # prevent parallel tests
+      optional: true
+    - job: post-deploy testing-as-user # prevent parallel tests
       optional: true
     - job: post-deploy user-cmds-as-admin # prevent parallel tests
       optional: true

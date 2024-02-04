@@ -15,7 +15,7 @@ if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && ("$CUSTOM_ENV_LUDUS_BUILD_TYPE" == 
     if [[ -z "$VM_ID" ]]; then
         echo "Could not find a runner VM, will build one"
     else
-        echo "Using VM: $VM_ID"
+        echo "Using VM: $VM_ID ($VM_IP)"
         SKIP_BUILD="true"
     fi
 elif [[ ! -z "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP" == "take-snapshot" ]]; then
@@ -29,14 +29,14 @@ elif [[ ! -z "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP
     fi
 fi
 
-if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" && "$SKIP_BUILD" == "true" && ! -f /tmp/.ludus-ci-$CUSTOM_ENV_CI_PIPELINE_ID-rolled-back ]]; then
+if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" && "$SKIP_BUILD" == "true" && ! -f /tmp/.ludus-ci-$CUSTOM_ENV_CI_PIPELINE_ID-$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME-rolled-back ]]; then
     # We want to use a snapshot and we have a CI VM that already exists
     qm listsnapshot $VM_ID | grep -q "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME"
     if [[ $? -eq 0 ]]; then
         echo "Rolling back VM $VM_ID to $CUSTOM_ENV_LUDUS_SNAPSHOT_NAME snapshot"
         qm rollback $VM_ID "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" --start
-        # Use a file to track rollbacks for this pipline - only roll back once per pipeline
-        touch /tmp/.ludus-ci-$CUSTOM_ENV_CI_PIPELINE_ID-rolled-back
+        # Use a file to track rollbacks for this pipline - only roll back once per pipeline per snapshot name
+        touch /tmp/.ludus-ci-$CUSTOM_ENV_CI_PIPELINE_ID-$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME-rolled-back
     else
         echo "Failed to rollback VM $VM_ID to snapshot $CUSTOM_ENV_LUDUS_SNAPSHOT_NAME"
         SKIP_BUILD="false"

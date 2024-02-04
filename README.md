@@ -55,4 +55,4 @@ All documentation can be found at [docs.ludus.cloud](https://docs.ludus.cloud) (
 
 ### Install
 
-![](./docs/static/video/ludus-install.mp4){width=85%}
+![](./docs/static/video/ludus-install.mp4){width=100%}

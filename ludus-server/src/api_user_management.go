@@ -42,11 +42,17 @@ func AddUser(c *gin.Context) {
 			var users []UserObject
 			db.First(&users, "user_id = ?", user.UserID)
 			if len(users) > 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "User already exists"})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "User with that ID already exists"})
 				return
 			}
 			// Convert to lower-case, and replace spaces with "-"
 			user.ProxmoxUsername = strings.ReplaceAll(strings.ToLower(user.Name), " ", "-")
+
+			db.First(&users, "proxmox_username = ?", user.ProxmoxUsername)
+			if len(users) > 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "User with that name already exists"})
+				return
+			}
 
 			// Make a range for the user
 			var usersRange RangeObject
