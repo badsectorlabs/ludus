@@ -35,7 +35,7 @@ stages:
   # Set the CIA user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
   # Set the config to simple-domain.yml if all templates are built
-  - if [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; then ludus range config set -f ludus-server/ci/configs/simple-domain.yml; fi
+  - if [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -eq 0 ]; then ludus range config set -f ludus-server/ci/configs/simple-domain.yml; fi
 
 .ci-setup-user: &ci-setup-user
   - cd binaries
