@@ -683,8 +683,8 @@ post-deploy user-cmds-as-admin:
     - ludus users list all | grep "Test Admin"
     # Try to create a user with the same ID or name
     - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
-    - ludus --url https://127.0.0.1:8081 user add -n "Test Admin" -i TA2 2>&1 | grep "User with that ID already exists"
-    - ludus --url https://127.0.0.1:8081 user add -n "Test Admin 2" -i TA 2>&1 | grep "User with that name already exists"
+    - ludus --url https://127.0.0.1:8081 user add -n "Test Admin" -i TA2 2>&1 | grep "User with that name already exists"
+    - ludus --url https://127.0.0.1:8081 user add -n "Test Admin 2" -i TA 2>&1 | grep "User with that ID already exists"
     - set -o pipefail
     # Get and set creds
     - ludus user creds get --user TA

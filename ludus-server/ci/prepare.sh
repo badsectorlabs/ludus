@@ -49,3 +49,6 @@ if [[ "$SKIP_BUILD" == "false" ]]; then
     api_password=$PROXMOX_PASSWORD api_host=$PROXMOX_HOSTNAME node_name=$PROXMOX_NODE ludus_install_path=$LUDUS_DIR \
     runner_vm_name=$RUNNER_VM_NAME skip_build=$SKIP_BUILD" $LUDUS_DIR/ci/prepare.yml
 fi
+
+# Clean up old rollback files (over 2 days old)
+find /tmp/ -name '.ludus-ci*' -type f -mtime +2 -exec rm {} +
