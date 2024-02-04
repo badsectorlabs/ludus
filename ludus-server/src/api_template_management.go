@@ -541,17 +541,6 @@ func DeleteTemplate(c *gin.Context) {
 		return
 	}
 
-	// Check that this is a user template
-	userObject, err := getUserObject(c)
-	if err != nil {
-		return
-	}
-	templateDir := filepath.Dir(templateStatusArray[index].FilePath)
-	if !strings.Contains(templateDir, fmt.Sprintf("%s/users/%s/", ludusInstallPath, userObject.ProxmoxUsername)) {
-		c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("Template '%s' is a system template and cannot be deleted", templateName)})
-		return
-	}
-
 	// If the template is built, remove it from proxmox
 	if templateStatusArray[index].Built {
 		proxmoxClient, err := getProxmoxClientForUser(c)
@@ -568,6 +557,17 @@ func DeleteTemplate(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return
 		}
+	}
+
+	// Check that this is a user template
+	userObject, err := getUserObject(c)
+	if err != nil {
+		return
+	}
+	templateDir := filepath.Dir(templateStatusArray[index].FilePath)
+	if !strings.Contains(templateDir, fmt.Sprintf("%s/users/%s/", ludusInstallPath, userObject.ProxmoxUsername)) {
+		c.JSON(http.StatusOK, gin.H{"error": fmt.Sprintf("Built template removed but template '%s' is a ludus built-in template and cannot be deleted", templateName)})
+		return
 	}
 
 	// Delete the folder that contains the template file
