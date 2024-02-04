@@ -1043,8 +1043,10 @@ post-deploy user-cmds-as-user:
     - ludus users list all 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     # Get and set our own creds
     - ludus user creds get
+    - OG_PW=$(ludus user creds get --json | jq -r '.result.proxmoxPassword')
     - ludus user creds set -p test-password-123
     - ludus user creds get | grep test-password-123
+    - ludus user creds set -p $OG_PW
     # Try to get and set other user's creds
     - ludus user creds get --user CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     - ludus user creds set -i CIA -p test-password-123 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
@@ -1072,15 +1074,17 @@ post-deploy templates-as-user:
     - ludus-proxmox-runner  
   needs:
     - job: build all
-    - job: range snapshot-admin
+    - job: range snapshot-user
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy ansible-as-admin # prevent parallel tests
+    - job: post-deploy ansible-as-user # prevent parallel tests
       optional: true
-    - job: post-deploy power-as-admin
+    - job: post-deploy power-as-user
       optional: true
-    - job: post-deploy testing-as-admin
+    - job: post-deploy testing-as-user
       optional: true
     - job: post-deploy user-cmds-as-user
+      optional: true
+    - job: post-deploy templates-as-admin
       optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -1095,13 +1099,13 @@ post-deploy templates-as-user:
       - ludus-server/src/api_template_management.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_admin
+    LUDUS_SNAPSHOT_NAME: range_built_user
   timeout: 45m
   retry:
     max: 2
     when: script_failure
   script:
-    - *ci-setup-admin
+    - *ci-setup-user
     - *template-tests
 
 ##########

@@ -259,28 +259,27 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 	return nil
 }
 
-func getTemplatesStatus(c *gin.Context) []TemplateStatus {
+func getTemplatesStatus(c *gin.Context) ([]TemplateStatus, error) {
 	var user UserObject
 
 	user, err := getUserObject(c)
 	if err != nil {
-		return nil // JSON set in getUserObject
+		return nil, err // JSON set in getUserObject
 	}
 
 	proxmoxPassword := getProxmoxPasswordForUser(user, c)
 	if proxmoxPassword == "" {
-		return nil // JSON set in getProxmoxPasswordForUser
+		return nil, errors.New("error getting proxmox password for user") // JSON set in getProxmoxPasswordForUser
 	}
 
 	proxmoxClient, err := getProxmoxClientForUser(c)
 	if err != nil {
-		return nil // JSON set in getProxmoxClientForUser
+		return nil, err // JSON set in getProxmoxClientForUser
 	}
 
 	rawVMs, err := proxmoxClient.GetVmList()
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "unable to list VMs"})
-		return nil
+		return nil, err
 	}
 
 	var templates []string
@@ -297,8 +296,7 @@ func getTemplatesStatus(c *gin.Context) []TemplateStatus {
 
 	allTemplates, err := getAvailableTemplates(user)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return nil
+		return nil, err
 	}
 
 	// Check all the .hcl files
@@ -332,12 +330,15 @@ func getTemplatesStatus(c *gin.Context) []TemplateStatus {
 			templateStatusArray = append(templateStatusArray, thisTemplateStatus)
 		}
 	}
-	return templateStatusArray
+	return templateStatusArray, nil
 }
 
-func getTemplateNameArray(c *gin.Context, onlyBuilt bool) []string {
+func getTemplateNameArray(c *gin.Context, onlyBuilt bool) ([]string, error) {
 	// Get a list of all the built templates on the system
-	templateStatusArray := getTemplatesStatus(c)
+	templateStatusArray, err := getTemplatesStatus(c)
+	if err != nil {
+		return nil, err
+	}
 	var templateSlice []string
 	for _, templateStatus := range templateStatusArray {
 		if onlyBuilt && templateStatus.Built {
@@ -346,7 +347,7 @@ func getTemplateNameArray(c *gin.Context, onlyBuilt bool) []string {
 			templateSlice = append(templateSlice, templateStatus.Name)
 		}
 	}
-	return templateSlice
+	return templateSlice, nil
 }
 
 func templateActions(c *gin.Context, buildTemplates bool, templateName string, parallel int, verbose bool) {
@@ -355,7 +356,11 @@ func templateActions(c *gin.Context, buildTemplates bool, templateName string, p
 		parallel = 1
 	}
 
-	templateStatusArray := getTemplatesStatus(c)
+	templateStatusArray, err := getTemplatesStatus(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	if !buildTemplates {
 		c.JSON(http.StatusOK, templateStatusArray)
@@ -410,7 +415,7 @@ func BuildTemplates(c *gin.Context) {
 	}
 
 	if templateBody.Template != "all" {
-		templateArray := getTemplateNameArray(c, false)
+		templateArray, _ := getTemplateNameArray(c, false)
 		if !slices.Contains(templateArray, templateBody.Template) {
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Template '%s' not found", templateBody.Template)})
 			return
@@ -532,7 +537,11 @@ func DeleteTemplate(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Template name not provided"})
 		return
 	}
-	templateStatusArray := getTemplatesStatus(c)
+	templateStatusArray, err := getTemplatesStatus(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	// Get the index of the template we want in the array
 	index := slices.IndexFunc(templateStatusArray, func(t TemplateStatus) bool { return t.Name == templateName })

@@ -148,7 +148,10 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 	}
 
 	// Get a list of all the built templates on the system
-	templateSlice := getTemplateNameArray(c, true)
+	templateSlice, err := getTemplateNameArray(c, true)
+	if err != nil {
+		return err
+	}
 
 	// Check for duplicate vlan and ip_last_octet combinations
 	seenVLANAndIP := make(map[string]bool)
