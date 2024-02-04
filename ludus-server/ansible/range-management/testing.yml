@@ -19,7 +19,7 @@
 
     - name: Collect IPs to action from ansible inventory
       ansible.builtin.set_fact:
-        action_ips_from_inventory: "{{ ((action_ips_from_inventory | default([])) + [ hostvars[item.vm_name]['ansible_host'] ]) | unique }}"
+        action_ips_from_inventory: "{{ ((action_ips_from_inventory | default([])) + [ hostvars[item.vm_name]['ansible_host'] | default('') ]) | unique }}"
       loop: "{{ ludus }}"
       when: item.testing is undefined or (item.testing is defined and item.testing.block_internet is undefined) or (item.testing.block_internet is defined and item.testing.block_internet)
 
@@ -29,13 +29,13 @@
 
     - name: Show IPs to action from config from inventory
       ansible.builtin.debug:
-        var: action_ips        
+        var: action_ips_from_inventory        
 
     - name: Check that IPs are the same in the config and dynamic inventory
       ansible.builtin.assert:
         that:
           - action_ips == action_ips_from_inventory
-        fail_msg: IPs collected from the config do not match the dynamic inventory. If a VM was manually modidified this may be the cause.
+        fail_msg: IPs collected from the config do not match the dynamic inventory. If a VM was manually modidified this may be the cause. Or perhaps the target VM is powered off/unreachable
         success_msg: IPs collected from the config match the dynamic inventory
 
 
