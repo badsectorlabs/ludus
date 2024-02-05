@@ -183,7 +183,7 @@ stages:
   - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
   - ludus templates logs
   - ludus templates list
-  - ludus templates rm -n debian10
+  - ludus templates rm -n debian-10-x64-server-template
   - '! ludus templates list | grep "debian-10-x64-server-template"'
 
 #################
