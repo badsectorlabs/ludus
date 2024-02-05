@@ -173,6 +173,10 @@ stages:
   - ludus templates list
   - set +o pipefail
   - ludus templates add -d debian10 2>&1 | grep 'Template already exists, use --force to overwrite it'
+  - mkdir /tmp/test-template || true
+  - echo "debian-10-x64-server-template" > /tmp/test-template/test.pkr.hcl
+  - 'ludus templates add -d /tmp/test-template/test.pkr.hcl 2>&1 | grep "Error finding .pkr.hcl or .pkr.json template files: the provided path is not a directory"'
+  - ludus templates add -d /tmp/test-template 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
   - set -o pipefail
   - ludus templates add -d debian10 --force
   - ludus templates list
@@ -235,10 +239,10 @@ documentation:
   - cd docs
   - yarn install
   - yarn build
-  - mv ./build ../public
+  - mv ./build ../built-docs
   artifacts:
     paths:
-    - public
+    - built-docs
 
 #########
 # BUILD #
@@ -267,8 +271,8 @@ build all:
     - mkdir binaries
     - cd ludus-server
     - | # If we have docs from the previous stage, embed them, otherwise build without docs
-      if [[ -d ../public ]]; then
-        mv ../public ./src/docs
+      if [[ -d ../built-docs ]]; then
+        mv ../built-docs ./src/docs
         go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -tags=embeddocs -o ../binaries/ludus-server
       else
         go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH" -o ../binaries/ludus-server
@@ -808,7 +812,15 @@ range deploy-user:
       optional: true # depend on templates snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
     - job: range snapshot-admin
       optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
+    - job: post-deploy ansible-as-admin # prevent parallel tests
+      optional: true
+    - job: post-deploy power-as-admin
+      optional: true
+    - job: post-deploy testing-as-admin
+      optional: true
     - job: post-deploy user-cmds-as-admin
+      optional: true
+    - job: post-deploy templates-as-admin
       optional: true
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
