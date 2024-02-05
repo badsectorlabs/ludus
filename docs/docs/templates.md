@@ -82,7 +82,8 @@ To create a new template, copy an [existing working template](https://gitlab.com
 Templates for different Linux flavors and Windows are provided.
 While macOS VMs are supported by Ludus, their automated templating is not (see [Non-Automated OS Template Builds](#non-automated-os-template-builds)).
 
-Every Ludus template is a packer file (`.hcl` and `.json` supported, but `.hcl` preferred), and any supporting files (resources, scripts, etc.).
+Every Ludus template is a packer file (`.pkr.hcl` and `.pkr.json` supported, but `.pkr.hcl` preferred), and any supporting files (resources, scripts, etc.).
+The template file MUST include the `.pkr.` portion of the file name to be recognized as valid by Ludus.
 
 Ludus template packer files *must* include the following variables, which are set dynamically by Ludus during build time:
 
