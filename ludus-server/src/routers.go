@@ -81,7 +81,7 @@ func Index(c *gin.Context) {
 // Ensure the user is an admin, otherwise returns a 401 response
 // Note: the calling handler must return if the return value of this is false
 // otherwise the user may get two JSON blobs (the error and the actual response)
-func isAdmin(c *gin.Context) bool {
+func isAdmin(c *gin.Context, setJSON bool) bool {
 	isAdmin := c.GetBool("isAdmin")
 	if !isAdmin {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "This is an admin only endpoint or you queried another user and are not an admin"})

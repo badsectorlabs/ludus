@@ -19,7 +19,7 @@ var UserIDRegex = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
 // AddUser - adds a user to the system
 func AddUser(c *gin.Context) {
 
-	if !isAdmin(c) {
+	if !isAdmin(c, true) {
 		return
 	}
 
@@ -112,7 +112,7 @@ func AddUser(c *gin.Context) {
 
 // DeleteUser - removes a user to the system
 func DeleteUser(c *gin.Context) {
-	if !isAdmin(c) {
+	if !isAdmin(c, true) {
 		return
 	}
 
@@ -216,7 +216,7 @@ func GetWireguardConfig(c *gin.Context) {
 // ListAllUsers - lists all users
 func ListAllUsers(c *gin.Context) {
 
-	if !isAdmin(c) {
+	if !isAdmin(c, true) {
 		return
 	}
 
@@ -268,7 +268,7 @@ func PostCredentials(c *gin.Context) {
 
 	if credsToUpdate.UserID != "" {
 		// userID provided, make sure the user is an admin
-		if !isAdmin(c) {
+		if !isAdmin(c, true) {
 			return
 		}
 	} else {
