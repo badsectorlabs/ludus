@@ -178,7 +178,7 @@ stages:
   - ludus templates build -n debian-10-x64-server-template
   - ludus templates status
   - ludus templates status | grep debian-10-x64-server-template
-  - ludus templates status | grep continuous-integration-user
+  - ludus templates status | grep continuous-integration-
   # Wait for the template to build
   - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
   - ludus templates logs
@@ -1055,7 +1055,7 @@ post-deploy user-cmds-as-user:
     # Try to get other user's wireguard
     - ludus user wireguard --user CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     # Try to add an admin user
-    - ludus user add -a -n "Test Admin" -i TA 2>&1 | grep "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint"
+    - ludus user add -a -n "Test Admin" -i TA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     - ludus --url https://127.0.0.1:8081 user add -a -n "Test Admin" -i TA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     - '! ludus users list all | grep "Test Admin"'
     # Try to add a normal user

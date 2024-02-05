@@ -140,6 +140,7 @@ Available Commands:
   abort       Kill the ansible process deploying a range
   config      Get or set a range configuration
   deploy      Deploy a range, running specific tags if specified
+  errors      Parse the latest deploy logs from your range and print any non-ignored fatal errors
   etc-hosts   Get an /etc/hosts formatted file for all hosts in the range
   gettags     Get the ansible tags available for use with deploy
   inventory   Get the ansible inventory file for a range
