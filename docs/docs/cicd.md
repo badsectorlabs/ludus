@@ -1,8 +1,9 @@
 ---
 sidebar_position: 11
+title: "🤖 CI/CD"
 ---
 
-# CI/CD
+# 🤖 CI/CD
 
 ## Requirements
 
@@ -55,13 +56,18 @@ The available tags are listed below:
 - `[skip ci]` - this tag skips all CI jobs
 - `[skip build]` - skips the documentation build and the binary build stages
 - `[build docs]` - force a documentation build
+- `[build pages]` - force a documentation build and pages deploy
 - `[full build]` - run every step of the CI pipeline, no matter how small the change to the code base
-- `[manual]` - only run the documentation build (if docs have changed) and binary build, then push the code to an already running CI VM (typically used with the `[VMID-XYZ]` tag)
+- `[manual]` - only run the documentation build (if docs have changed) and binary build, then push the code to an already running CI VM (typically used with the `[VMID-XYZ]` tag, defaults to the runner with least uptime)
 - `[VMID-XYZ]` - run jobs on the specified VM where `XYZ` is the numeric VMID of the CI/CD VM.
 - `[client tests]` - test basic client commands that do not deploy templates or ranges
 - `[template tests]` - run a template build and wait for all templates to complete building
-- `[range tests]` - run a range deploy and wait for it to succeed. This uses the default range config.
-- `[post-deploy tests]` - run tests related to testing mode, allowing and denying domains and IPs, as well as powering on and off a VM
+- `[range tests]` - run a range deploy and wait for it to succeed. This uses the `simple-domain.yml` range config.
+- `[post-deploy tests]` - runs all tests related post-deployment tasks (testing mode, allowing and denying domains and IPs, powering on and off a VM, adding and removing users, etc)
+- `[testing-mode tests]` - runs tests to determine if testing mode functions properly
+- `[ansible tests]` - runs tests to determine if ansible features function properly
+- `[user tests]` - runs tests to determine if the functions related to user management function properly
+- `[template tests]` - runs tests related to adding, building, and removing custom templates
 
 ## Releases
 

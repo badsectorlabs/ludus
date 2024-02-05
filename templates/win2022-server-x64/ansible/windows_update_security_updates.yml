@@ -1,7 +1,0 @@
-- hosts: all
-  tasks:
-  - name: Install security updates
-    win_updates:
-      category_names:
-      - SecurityUpdates
-      reboot: yes

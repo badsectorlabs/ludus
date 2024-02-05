@@ -25,6 +25,20 @@ local:~$ ludus testing status
 +-----------------+--------------------+------------------------+
 ```
 
+## Desktop Wallpaper Indicator (Windows)
+
+While in testing mode, the desktop wallpaper for Windows machines will change from red to green.
+The green wallpaper indicates that network traffic is being blocked.
+This is accomplished by a [powershell script](https://gitlab.com/badsectorlabs/ludus/-/blob/main/ludus-server/ansible/range-management/files/windows/background/set-bg.ps1) that checks if:
+
+1. There is a ping response from 8.8.8.8
+2. There is a 200 response from a GET to http://captive.apple.com
+3. There is a 200 response from a GET to https://google.com
+
+If all checks fail, the background is set to green.
+
+This powershell script is set to run on logon in `HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` as the task `bginfo`.
+
 ## Allowing Domains and IPs During Testing
 
 Sometimes when testing, select internet access is required. In these situations, domains or IPs can be allowed out from machines with `block_internet` set (or testing unset as safety is the default).

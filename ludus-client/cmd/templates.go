@@ -19,7 +19,7 @@ var (
 	follow            bool
 	tail              int
 	templateName      string
-	templateParallel  bool
+	templateParallel  int
 	templateDirectory string
 )
 
@@ -85,8 +85,8 @@ var templatesBuildCmd = &cobra.Command{
 
 		requestBody := fmt.Sprintf(`{
 			"template": "%s",
-			"parallel": %s
-		  }`, templateName, strconv.FormatBool(templateParallel))
+			"parallel": %d
+		  }`, templateName, templateParallel)
 
 		if userID != "" {
 			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/templates?userID=%s", userID), requestBody)
@@ -104,8 +104,8 @@ var templatesBuildCmd = &cobra.Command{
 }
 
 func setupTemplatesBuildCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&templateName, "name", "n", "", "the name of the template to build (default: all)")
-	command.Flags().BoolVarP(&templateParallel, "parallel", "p", false, "build templates in parallel. Enabling this will disable all template logging (default: false)")
+	command.Flags().StringVarP(&templateName, "name", "n", "all", "the name of the template to build")
+	command.Flags().IntVarP(&templateParallel, "parallel", "p", 1, "build templates in parallel (speeds things up). Specify what number of templates to build at a time")
 }
 
 var templatesStatusCmd = &cobra.Command{
@@ -219,9 +219,9 @@ var templateAddCmd = &cobra.Command{
 		var success bool
 		var templateDirectoryPath string
 
-		userProvidedTemplates, err := findFiles(templateDirectory, ".hcl", ".json")
+		userProvidedTemplates, err := findFiles(templateDirectory, ".pkr.hcl", ".pkr.json")
 		if err != nil {
-			logger.Logger.Fatalf("Error finding .hcl or .json template files: %v", err)
+			logger.Logger.Fatalf("Error finding .pkr.hcl or .pkr.json template files: %v", err)
 		}
 		if len(userProvidedTemplates) > 1 {
 			logger.Logger.Fatal("Found more than one .hcl or .json template file in the provided directory. Only add one template directory at a time.")
@@ -287,7 +287,7 @@ var templatesAbortCmd = &cobra.Command{
 var templatesRemoveCmd = &cobra.Command{
 	Use:     "rm",
 	Short:   "Remove a template for the given user (default: calling user)",
-	Long:    "Finds any running packer processes with the given user's username and kills them. It uses a SIGINT signal, which should cause packer to clean up the running VMs",
+	Long:    "Removes any built VM template for the given name as well as the template directory. Will not remove built-in template directories that ship with Ludus.",
 	Args:    cobra.NoArgs,
 	Aliases: []string{"remove", "delete"},
 	Run: func(cmd *cobra.Command, args []string) {

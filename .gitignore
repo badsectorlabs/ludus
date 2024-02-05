@@ -9,12 +9,6 @@
 
 ### Ansible ###
 *.retry
-.requirements-installed
-user-provided-files/*
-!user-provided-files/.git-keep
-vars.yml
-user-management/user-creds/*
-hosts.yml
 
 ### macOS ###
 # General

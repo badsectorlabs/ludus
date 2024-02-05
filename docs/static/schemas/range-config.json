@@ -67,6 +67,18 @@
                     "description": "The domain safe mode password for every Windows domain"
                 }
             },
+            "required": [
+                "ad_domain_admin",
+                "ad_domain_admin_password",
+                "ad_domain_functional_level",
+                "ad_domain_safe_mode_password",
+                "ad_domain_user",
+                "ad_domain_user_password",
+                "ad_forest_functional_level",
+                "router_vm_name",
+                "snapshot_with_RAM",
+                "stale_hours"
+            ],
             "title": "Defaults"
         },
         "Network": {

@@ -332,7 +332,7 @@
       become: true
       lineinfile:
         path: /home/gitlab-runner/.bashrc
-        line: "if [ -f /opt/ludus/ci/.apikey ]; then export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey); fi"
+        line: "if [ -f /opt/ludus/ci/.apikey-admin ]; then export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin); fi"
         create: true
 
 - name: Install Go # Must come after the tasks or ca certificates may not exist

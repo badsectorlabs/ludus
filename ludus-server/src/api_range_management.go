@@ -193,7 +193,7 @@ func ListRange(c *gin.Context) {
 }
 
 func ListAllRanges(c *gin.Context) {
-	if !isAdmin(c) {
+	if !isAdmin(c, true) {
 		return
 	}
 

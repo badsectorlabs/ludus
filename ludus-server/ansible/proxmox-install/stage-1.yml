@@ -155,6 +155,7 @@
         dest: /etc/ansible/ansible.cfg
         content: |
           [defaults]
+          no_target_syslog = True
           timeout = 60
         mode: '0644'
 
@@ -219,6 +220,15 @@
         no_bounce_tty: "{{ in_tty | default('true') }}" # Don't bounce the TTY if we are using it! (var set in go)
         install_message: |-2
               Ludus is installing and will reboot 2 more times.
+
+              ██████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 30%
+
+    - name: Update install progress (for next boot)
+      ansible.builtin.include_tasks: tasks/update-install-progress.yml
+      vars:
+        no_bounce_tty: true # Don't bounce, just set up for the next boot by decrementing the reboot message
+        install_message: |-2
+              Ludus is installing and will reboot 1 more time.
 
               ██████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 30%
 

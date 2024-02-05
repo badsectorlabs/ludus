@@ -104,14 +104,14 @@ func genericRoleCmd(use, short, long string, aliases []string) *cobra.Command {
 			}
 
 			var action string
-			if use == "add" {
-				action = "install"
-			} else {
+			if use == "rm <rolename>" {
 				action = "remove"
+			} else {
+				action = "install"
 			}
 
 			// Given a local dir, tar it up and ship it!
-			if len(args) == 0 && roleDirectory != "" {
+			if len(args) == 0 && roleDirectory != "" && action == "install" {
 				roleTar, err := tarDirectoryInMemory(roleDirectory)
 				if err != nil {
 					logger.Logger.Fatalf("Could not tar directory: %s, error: %s\n", roleDirectory, err.Error())
@@ -149,8 +149,8 @@ func genericRoleCmd(use, short, long string, aliases []string) *cobra.Command {
 	}
 }
 
-var roleAddCmd = genericRoleCmd("add", "Add an ansible role to the ludus host", "Specify a role name (to pull from galaxy.ansible.com), a URL, or a local path to a role directory", []string{})
-var roleRmCmd = genericRoleCmd("rm", "Remove an ansible role from the ludus host", "Specify a role name to remove from the ludus host", []string{"remove", "del"})
+var roleAddCmd = genericRoleCmd("add <rolename | roleurl | -d directory>", "Add an ansible role to the ludus host", "Specify a role name (to pull from galaxy.ansible.com), a URL, or a local path to a role directory", []string{})
+var roleRmCmd = genericRoleCmd("rm <rolename>", "Remove an ansible role from the ludus host", "Specify a role name to remove from the ludus host", []string{"remove", "del"})
 
 func setupRoleCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&roleDirectory, "directory", "d", "", "the path to the local directory of the role to install")

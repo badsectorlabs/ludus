@@ -49,7 +49,7 @@ export default function Home() {
   return (
     <Layout
       title={`${siteConfig.title}`}
-      description="Documentation for the Ludus cyber ranges project">
+      description="Documentation for the Ludus project">
       <HomepageHeader />
       <main>
         <HomepageFeatures />

@@ -77,7 +77,7 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 	defer ansibleLogFile.Close()
 
 	execute := execute.NewDefaultExecute(
-		// For debugging, use a multiwrtier that prints to stdout live as the playbook runs
+		// Use a multiwrtier that saves the output to a buffer and a file
 		execute.WithWrite(io.MultiWriter(buff, ansibleLogFile)),
 		// Also log stderr to the log file and the buff vs stderr (journalctl logs)
 		execute.WithWriteError(io.MultiWriter(buff, ansibleLogFile)),

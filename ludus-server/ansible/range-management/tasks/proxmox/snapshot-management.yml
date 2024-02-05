@@ -22,10 +22,6 @@
   register: snapshot_times
   ignore_errors: true
 
-- name: Display snapshot snapshot
-  ansible.builtin.debug:
-    msg: "{{ snapshot_times }}"
-
 - name: Remove previous clean snapshot
   community.general.proxmox_snap:
     api_user: "{{ api_user }}"

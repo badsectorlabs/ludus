@@ -20,3 +20,4 @@
     # Microsoft.VisualStudio.Workload.NetCoreTools == C#
     package_params: "--add Microsoft.VisualStudio.Workload.NativeDesktop --add Microsoft.VisualStudio.Workload.NetCoreTools --includeRecommended --includeOptional --passive --locale en-US"
     source: "{{ chocolatey_source | default('') }}"
+    timeout: 14400 # 4 hours

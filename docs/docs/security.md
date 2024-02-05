@@ -1,8 +1,9 @@
 ---
 sidebar_position: 10
+title: "🛡️ Security"
 ---
 
-# Security
+# 🛡️ Security
 
 The nature of Ludus, allowing users to add Ansible and Packer templates, presents security risks.
 While efforts have been made to secure Ludus against malicious users, only trusted users should be granted access to Ludus.

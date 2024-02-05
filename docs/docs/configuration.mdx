@@ -1,8 +1,9 @@
 ---
 sidebar_position: 5
+title: "🗒️ Configuration"
 ---
 
-# Configuration
+# 🗒️ Configuration
 
 The Ludus range configuration file is a yaml document that describes the virtual machines and optionally the network rules a user would like to deploy.
 
@@ -92,6 +93,7 @@ network:
 
 # These values control the values Ludus uses when deploying ranges and Windows domains.
 # The values shown here are the defaults that will be set if this key is not defined
+# If you define the defaults key, you must set every value as it overrides the server set defaults dict
 # Users may wish to change these values to emulate environments (functional level, domain admin username and password, etc)
 defaults:
   router_vm_name: "{{ range_id }}-router-debian11-x64" # The name of the router VM deployed by Ludus

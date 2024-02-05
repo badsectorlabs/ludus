@@ -152,7 +152,15 @@ func ActionRoleFromInternet(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": string(cmdOutput)})
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed: " + roleString})
+	if strings.Contains(string(cmdOutput), "is not installed, skipping.") {
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": string(cmdOutput)})
+		return
+	}
+	if roleBody.Action != "install" {
+		c.JSON(http.StatusCreated, gin.H{"result": "Successfully removed: " + roleString})
+	} else {
+		c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed: " + roleString})
+	}
 
 }
 
@@ -221,7 +229,6 @@ func ActionCollectionFromInternet(c *gin.Context) {
 		Collection string `json:"collection"`
 		Version    string `json:"version"`
 		Force      bool   `json:"force"`
-		Action     string `json:"action"`
 	}
 	var collectionBody CollectionBody
 	c.Bind(&collectionBody)
@@ -233,29 +240,28 @@ func ActionCollectionFromInternet(c *gin.Context) {
 
 	var collectionString = collectionBody.Collection
 	if collectionBody.Version != "" {
-		collectionString = fmt.Sprintf("%s,%s", collectionBody.Collection, collectionBody.Version)
-	}
-
-	if collectionBody.Action != "install" && collectionBody.Action != "remove" {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "action must be one of 'install' or 'remove'"})
-		return
+		collectionString = fmt.Sprintf("%s:==%s", collectionBody.Collection, collectionBody.Version)
 	}
 
 	var cmd *exec.Cmd
 	if collectionBody.Force {
-		cmd = exec.Command("ansible-galaxy", "collection", collectionBody.Action, collectionString, "-f")
+		cmd = exec.Command("ansible-galaxy", "collection", "install", collectionString, "-f")
 	} else {
-		cmd = exec.Command("ansible-galaxy", "collection", collectionBody.Action, collectionString)
+		cmd = exec.Command("ansible-galaxy", "collection", "install", collectionString)
 	}
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
 	cmdOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to %s the ansible collection %s: %s; Output was: %s", collectionBody.Action, collectionString, err.Error(), string(cmdOutput))})
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to install the ansible collection %s: %s; Output was: %s", collectionString, err.Error(), string(cmdOutput))})
 		return
 	}
 	if strings.Contains(string(cmdOutput), "[WARNING]") {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": string(cmdOutput)})
+		return
+	}
+	if strings.Contains(string(cmdOutput), "Nothing to do. All requested collections are already installed. If you want to reinstall them, consider using `--force`.") {
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "Collection already installed. Collections from https://docs.ansible.com/ansible/latest/collections/index.html are installed globally. If you want to reinstall it, consider using `--force`."})
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed: " + collectionString})

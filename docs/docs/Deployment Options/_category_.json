@@ -1,8 +1,9 @@
 {
-    "label": "Deployment Options",
+    "label": "🚀 Deployment Options",
     "position": 3,
     "link": {
         "type": "generated-index",
-        "description": "Guides for different deployment scenarios."
+        "description": "Guides for different deployment scenarios.",
+        "slug": "category/deployment-options"
     }
 }

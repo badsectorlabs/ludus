@@ -6,24 +6,10 @@ sidebar_position: 3
 
 Before you can deploy a range, you first must build the template VMs (base VMs without customization) that will be used in your range.
 
-Using the key from the previous step, run `ludus apikey` and provide the user API key.
-
-```
-local:~$ ludus apikey
-[INFO]  Enter your Ludus API Key:
-JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
-[INFO]  Ludus API key set successfully
-```
-
-:::tip
-
-On headless Linux/macOS systems or Linux/macOS systems without a keyring, set the LUDUS_API_KEY environment variable instead
-
-`export LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'`
-
-:::
-
-With the API key set, all user commands are available!
+Templates are the basis of every VM deployed by Ludus.
+Unlike other solutions, Ludus templates are built from scratch (ISO), and by design don't contain any customization.
+This allows users to modify base templates into arbitrary VMs during a deploy without having to maintain a library of stale, customized VMs.
+This focus on infrastructure as code allows Ludus users to create fresh, up to date VMs every deployment.
 
 The first step is to start the template build process. First, we can view the available templates.
 
@@ -36,8 +22,7 @@ local:~$ ludus templates list
 | debian-12-x64-server-template      | FALSE |
 | kali-x64-desktop-template          | FALSE |
 | win11-22h2-x64-enterprise-template | FALSE |
-| win2016-server-x64-template        | FALSE |
-| win2019-server-x64-template        | FALSE |
+| win2022-server-x64-template        | FALSE |
 +------------------------------------+-------+
 ```
 
@@ -45,7 +30,7 @@ On a fresh install, no templates are built. Ludus will build them from ISO files
 
 ```bash
 local:~$ ludus templates build
-[INFO]  template building started
+[INFO]  Template building started - this will take a while. Building 1 template(s) at a time.
 ```
 
 To check the status of the template build, you can run `templates status`, `templates list` again, or follow the packer logs with 
@@ -60,14 +45,23 @@ local:~$ ludus templates logs -f
 ...
 ```
 
+:::info
+
+Building templates will take a while (up to a few hours depending on your internet and hardware speed).
+
+:::
+
 :::note
 
 The "error" `[DEBUG] Error getting SSH address: 500 QEMU guest agent is not running` or `[DEBUG] Error getting WinRM host: 500 QEMU guest agent is not running` is expected and you will see this printed every 8 seconds until the VM has installed the OS and rebooted.
+Don't panic!
 
 :::
 
 Use `control+c` to stop following the logs.
 
-You can also monitor template builds using the Proxmox web GUI. It is available at `http://<ludus IP>:8006` and the credentials for the web GUI can be retrieved with `ludus user creds get`.
+You can also monitor template builds using the Proxmox web GUI. It is available at `https://<ludus IP>:8006` and the credentials for the web GUI can be retrieved with `ludus user creds get`.
 
 Once all the templates have been built, you can deploy a range.
+
+Curious how templates work? Check out the [Templates](../templates) page.

@@ -191,6 +191,22 @@
                       }
                     }
                   },
+                  "409" : {
+                    "description" : "Role not installed",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "- geerlingguy.docker is not installed, skipping."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
                   "500" : {
                     "description" : "Error installing role",
                     "content" : {
@@ -304,7 +320,7 @@
                 "tags" : [ "Ansible Management" ],
                 "summary" : "Install an Ansible collection",
                 "operationId" : "InstallCollection",
-                "description" : "Install an ansible collection by name or URL.\nAdmins can pass a userID parameter to install a collection for other users.\nAnsible collections can only be removed by rm-ing their directories. This is not supported via Ludus due to potential edge cases in naming depnding on how the collection was installed.\n",
+                "description" : "Install an ansible collection by name or URL.\nAdmins can pass a userID parameter to install a collection for other users.\nAnsible collections can only be removed by rm-ing their directories. This is not supported via Ludus due to potential edge cases in naming depending on how the collection was installed.\n",
                 "parameters" : [ {
                   "in" : "query",
                   "name" : "userID",
@@ -350,6 +366,22 @@
                             "result" : {
                               "type" : "string",
                               "example" : "Successfully installed: maxhoesel.smallstep"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "409" : {
+                    "description" : "Collection already installed",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "Collection already installed. Collections from https://docs.ansible.com/ansible/latest/collections/index.html are installed globally. If you want to reinstall it, consider using `--force`."
                             }
                           }
                         }
@@ -417,7 +449,7 @@
                 "tags" : [ "User Management" ],
                 "summary" : "Add a user to the system",
                 "operationId" : "addUser",
-                "description" : "Adds a user to the system. This action is only available to admins. \nNote: this response will contain the plaintext API key for the user. \nIt will not be available again except by reseting it using the /user/apikey endpoint.\n",
+                "description" : "Adds a user to the system. This action is only available to admins. \nNote: this response will contain the plaintext API key for the user. \nIt will not be available again except by resetting it using the /user/apikey endpoint.\n",
                 "responses" : {
                   "201" : {
                     "description" : "user created",
@@ -448,11 +480,9 @@
                     }
                   },
                   "400" : {
-                    "description" : "invalid input, object invalid"
+                    "description" : "Error with request",
+                    "example": "User with that name already exists"
                   },
-                  "409" : {
-                    "description" : "an existing user already exists"
-                  }
                 },
                 "requestBody" : {
                   "content" : {
@@ -681,7 +711,7 @@
                 "tags" : [ "User Management" ],
                 "summary" : "Retrieve a WireGuard configuration file for a user",
                 "operationId" : "getWireguardConfig",
-                "description" : "Returns a WireGuard configuration file with appropreate\nvalues for the user's range\n\n\"WireGuard\" is the registered trademark of Jason A. Donenfeld. \n",
+                "description" : "Returns a WireGuard configuration file with appropriate\nvalues for the user's range\n\n\"WireGuard\" is the registered trademark of Jason A. Donenfeld. \n",
                 "parameters" : [ {
                   "in" : "query",
                   "name" : "userID",
@@ -903,7 +933,7 @@
                           "type" : "object",
                           "properties" : {
                             "result" : {
-                              "example" : "redirector_vm_count: 2\nredirector_domains: [\"test.com\", \"example.com\" ]\nredirector_lane_names: [\"1_http1\", \"1_http2\" ]\nopstation_vm_count: 1\nuse_debian_opstation: false\nsnapshot_with_RAM: yes \nhours_until_snapshot_stale: 1 \nservices:\n  gitlab: true\n  mattermost: true\n  redelk: false\n  nextcloud: true\n  winrunner: true\ntest_range:\n  - vm_name: \"JE-ad-dc-win2019-server-x64\"\n    hostname: \"JE-DC01-2019\"\n    template: win2019-server-x64-template\n    ip_last_octet: 11\n    ram_min_gb: 2 \n    ram_max_gb: 4\n    ram_balloon: true\n    cpus: 2\n    full_clone: false\n    windows:\n      version: 2019\n      domain_controller: true\n  - vm_name: \"JE-ad-win10-21h1-enterprise-x64-1\"\n    hostname: \"JE-WIN10-21H1-1\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 21\n    ram_min_gb: 2 \n    ram_max_gb: 4\n    ram_balloon: true\n    cpus: 2\n    full_clone: false\n    windows:\n      version: 10\n      join_domain: true\n      install_additional_tools: true\n      office_version: 2016\n      office_arch: 64bit\n  - vm_name: \"JE-ad-win10-21h1-enterprise-x64-2\"\n    hostname: \"JE-WIN10-21H1-2\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 22\n    ram_min_gb: 2 \n    ram_max_gb: 4\n    ram_balloon: true \n    cpus: 2\n    full_clone: false \n    windows:\n      version: 10\n      join_domain: true\n      install_additional_tools: true \n      office_version: \"2019\"\n      office_arch: 64bit\n  - vm_name: \"JE-ad-win10-21h1-enterprise-x64-3\"\n    hostname: \"JE-WIN10-21H1-3\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 23\n    ram_min_gb: 2 \n    ram_max_gb: 4\n    ram_balloon: true\n    cpus: 2\n    full_clone: false\n    windows:\n      version: 10\n      join_domain: true\n      install_additional_tools: true \n      office_version: \"2019\"\n      office_arch: 64bit\n      visual_studio_version: \"2019\"\n"
+                              "example" : "ludus:\n  - vm_name: \"JD-ad-dc-win2019-server-x64\"\n    hostname: \"JD-DC01-2019\"\n    template: win2019-server-x64-template\n    ip_last_octet: 11\n    ram_gb: 2 \n     cpus: 2\n    full_clone: false\n    windows:\n     - vm_name: \"JD-ad-win10-21h1-enterprise-x64-1\"\n    hostname: \"JE-WIN10-21H1-1\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 21\n    ram_gb: 2 \n    cpus: 2\n    full_clone: false\n    windows:\n      install_additional_tools: true\n      office_version: 2016\n      office_arch: 64bit\n  - vm_name: \"JD-ad-win10-21h1-enterprise-x64-2\"\n    hostname: \"JD-WIN10-21H1-2\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 22\n    ram_gb: 2 \n    cpus: 2\n    full_clone: false \n    windows:\n      install_additional_tools: true \n      office_version: \"2019\"\n      office_arch: 64bit\n  - vm_name: \"JD-ad-win10-21h1-enterprise-x64-3\"\n    hostname: \"JD-WIN10-21H1-3\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 23\n    ram_gb: 2 \n    ram_max_gb: 4\n    ram_balloon: true\n    cpus: 2\n    full_clone: false\n    windows:\n      install_additional_tools: true \n      office_version: \"2019\"\n      office_arch: 64bit\n      visual_studio_version: \"2019\"\n"
                             }
                           }
                         }
@@ -978,7 +1008,7 @@
                 "tags" : [ "Range Management" ],
                 "summary" : "Deploy the range",
                 "operationId" : "deployRange",
-                "description" : "Deploys a range with ansible. This can be called mulitple times\nwithout issue without changing the range configuration without causing\nissues. The tags value is optional, by default \"all\" is run. The force\nvalue is optional, by default it is false.\n",
+                "description" : "Deploys a range with ansible. This can be called multiple times\nwithout issue without changing the range configuration without causing\nissues. The tags value is optional, by default \"all\" is run. The force\nvalue is optional, by default it is false.\n",
                 "parameters" : [ {
                   "in" : "query",
                   "name" : "userID",
@@ -1098,7 +1128,7 @@
                 "tags" : [ "Range Management" ],
                 "summary" : "Retrieve /etc/hosts file for the range",
                 "operationId" : "getEtcHosts",
-                "description" : "Returns an /etc/hosts file with appropreate values for the user's range\n",
+                "description" : "Returns an /etc/hosts file with appropriate values for the user's range\n",
                 "responses" : {
                   "200" : {
                     "description" : "a range /etc/hosts file",
@@ -1124,7 +1154,7 @@
                 "tags" : [ "Range Management" ],
                 "summary" : "Retrieve a ssh config",
                 "operationId" : "getSSHConfig",
-                "description" : "Returns a ssh configuration file with appropreate values for the user's range\n",
+                "description" : "Returns a ssh configuration file with appropriate values for the user's range\n",
                 "responses" : {
                   "200" : {
                     "description" : "a range SSH configuration file",
@@ -1168,7 +1198,7 @@
                 "tags" : [ "Range Management" ],
                 "summary" : "Retrieve an ansible inventory",
                 "operationId" : "getAnsibleInventory",
-                "description" : "Returns an ansible inventory file with appropreate values for the user's range\n",
+                "description" : "Returns an ansible inventory file with appropriate values for the user's range\n",
                 "responses" : {
                   "200" : {
                     "description" : "an ansible inventory file",
@@ -1642,8 +1672,8 @@
                             "example" : "debian-12-x64-server-template"
                           },
                           "parallel" : {
-                            "type" : "boolean",
-                            "example" : true
+                            "type" : "integer",
+                            "example" : 3
                           },
                           "verbose" : {
                             "type" : "boolean",
@@ -1664,7 +1694,7 @@
                           "properties" : {
                             "result" : {
                               "type" : "string",
-                              "example" : "template builds started"
+                              "example" : "Template building started - this will take a while. Building 3 template(s) at a time."
                             }
                           }
                         }
@@ -2015,7 +2045,7 @@
                 "description" : "Returns a list of templates that are currently being built\n",
                 "responses" : {
                   "200" : {
-                    "description" : "array of templates being built and the users who inidiated the builds",
+                    "description" : "array of templates being built and the users who initiated the builds",
                     "content" : {
                       "application/json" : {
                         "schema" : {
@@ -2242,7 +2272,7 @@
           },
           "servers" : [ {
             "description" : "Public DNS that resolves to 198.51.100.1",
-            "url" : "https://my.ludus.cloud"
+            "url" : "https://my.ludus.cloud:8080"
           } ]
         }
     </script>

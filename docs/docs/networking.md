@@ -1,8 +1,9 @@
 ---
 sidebar_position: 6
+title: "🌐 Networking"
 ---
 
-# Networking
+# 🌐 Networking
 
 !['The Ludus Network'](/img/network/network.png)
 

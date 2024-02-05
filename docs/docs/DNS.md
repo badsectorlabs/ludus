@@ -1,8 +1,9 @@
 ---
 sidebar_position: 8
+title: "📟 DNS"
 ---
 
-# DNS
+# 📟 DNS
 
 DNS inside a Ludus range is provided by the user's router, which is running [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome).
 

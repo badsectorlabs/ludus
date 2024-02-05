@@ -1,8 +1,9 @@
 ---
 sidebar_position: 9
+title: "🗄️ Nexus Cache"
 ---
 
-# Nexus Cache
+# 🗄️ Nexus Cache
 
 For Ludus servers with more than one user, or frequent environment rebuilds, it is beneficial to cache
 artifacts locally to speed up deployments and prevent rate limits from 3rd party services (i.e. [Chocolatey](https://chocolatey.org/)).
@@ -25,7 +26,7 @@ ludus range logs -f
 ```
 
 Once the deployment has finished, you must manually toggle the chocolatey-proxy repository to Nuget V2 via the web interface!
-1. RDP/Console into a windows box
+1. RDP into a windows box (or use the Proxmox web UI console)
 2. Browse to: http://192.0.2.2:8081
 3. Log in with `admin:<your proxmox password>`
 4. Navigate to Repositories -> chocolatey-proxy

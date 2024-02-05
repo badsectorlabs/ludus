@@ -75,15 +75,14 @@ func getUserID(c *gin.Context) (string, bool) {
 		userID = c.GetString("userID")
 	} else {
 		// If the userID was provided and is different from the API key value, make sure the request came from an admin
-		if userID != c.GetString("userID") && !isAdmin(c) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "This endpoint with a different user's ID is only available to admins"})
-			return "", false
+		if userID != c.GetString("userID") && !isAdmin(c, true) {
+			return "", false // JSON set in isAdmin
 		}
 	}
 	if UserIDRegex.MatchString(userID) {
 		return userID, true
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "provided userID does not match ^[A-Z]{2,4}$"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provided userID does not match ^[A-Za-z0-9]{1,20}$"})
 		return "", false
 	}
 }

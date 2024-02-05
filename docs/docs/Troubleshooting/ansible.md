@@ -10,9 +10,8 @@ Just up arrow and hit enter!
 
 But really, Ludus actions are [idempotent](https://en.wikipedia.org/wiki/Idempotence#Computer_science_meaning), and these VMs are complex beasts. Sometimes things don't work on the first try. No harm in trying again!
 
-## Ansible Temporary Directory Error
+## Ansible "Failed to create temporary directory" Error
 
-Error such as:
 ```
 TASK [Gathering Facts] *********************************************************
 fatal: [JD-ad-dc-win2019-server-x64]: UNREACHABLE! => {"changed": false, "msg": 
@@ -27,5 +26,6 @@ echo /home/ludus/.ansible/tmp/ansible-tmp-1704235290.5345225-913183-444150511842
 exited with result 1", "unreachable": true}
 ```
 
-Re-run ansible (`ludus range deploy`). The ansible temporary directory is set for every ansible commands, and yet on rare occasions this error occurs.
-Please submit an issue/pull request if you can figure out why this happens.
+This is a long error message, but the key is `"unreachable": true`.
+
+Check that the VM that failed is powered on and reachable. Power cycle the VM if needed. Re-run the ansible that cause this error.

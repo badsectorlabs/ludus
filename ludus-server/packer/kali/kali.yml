@@ -1,21 +1,8 @@
 ---
-- name: Setup Kali (update, enable SSH, install kasmvnc)
+- name: Setup Kali (install kasmvnc)
   hosts: all
   become_method: sudo
   tasks:
-    - name: Upgrade all packages
-      become: true
-      ansible.builtin.apt:
-        upgrade: full
-        update_cache: true
-
-    - name: Enable ssh
-      become: true
-      ansible.builtin.service:
-        name: ssh
-        state: started
-        enabled: true
-
     - name: Install packages
       become: true
       ansible.builtin.apt:
@@ -32,7 +19,7 @@
           - kali-defaults
           - kali-root-login
           - desktop-base
-          - kali-linux-default
+          # - kali-linux-default # This takes forever (2+ hours) and really slows down template building
         state: present
 
     - name: Installing kasm dependencies
