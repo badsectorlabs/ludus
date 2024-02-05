@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"ludus/logger"
@@ -140,7 +141,15 @@ func didFailOrWantJSON(success bool, responseJSON []byte) bool {
 func findFiles(rootDir, pattern1, pattern2 string) ([]string, error) {
 	var files []string
 
-	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+	fileInfo, err := os.Stat(templateDirectory)
+	if err != nil {
+		return nil, err
+	}
+	if !fileInfo.IsDir() {
+		return nil, errors.New("the provided path is not a directory")
+	}
+
+	err = filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}

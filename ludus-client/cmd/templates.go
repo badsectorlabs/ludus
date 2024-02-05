@@ -219,9 +219,9 @@ var templateAddCmd = &cobra.Command{
 		var success bool
 		var templateDirectoryPath string
 
-		userProvidedTemplates, err := findFiles(templateDirectory, ".hcl", ".json")
+		userProvidedTemplates, err := findFiles(templateDirectory, ".pkr.hcl", ".pkr.json")
 		if err != nil {
-			logger.Logger.Fatalf("Error finding .hcl or .json template files: %v", err)
+			logger.Logger.Fatalf("Error finding .pkr.hcl or .pkr.json template files: %v", err)
 		}
 		if len(userProvidedTemplates) > 1 {
 			logger.Logger.Fatal("Found more than one .hcl or .json template file in the provided directory. Only add one template directory at a time.")
@@ -287,7 +287,7 @@ var templatesAbortCmd = &cobra.Command{
 var templatesRemoveCmd = &cobra.Command{
 	Use:     "rm",
 	Short:   "Remove a template for the given user (default: calling user)",
-	Long:    "Finds any running packer processes with the given user's username and kills them. It uses a SIGINT signal, which should cause packer to clean up the running VMs",
+	Long:    "Removes any built VM template for the given name as well as the template directory. Will not remove built-in template directories that ship with Ludus.",
 	Args:    cobra.NoArgs,
 	Aliases: []string{"remove", "delete"},
 	Run: func(cmd *cobra.Command, args []string) {
