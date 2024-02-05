@@ -32,7 +32,7 @@ var templateProgressStore sync.Map
 
 // Get all available packer templates from the main packer dir and the user packer dir
 func getAvailableTemplates(user UserObject) ([]string, error) {
-	globalTemplates, err := findFiles(fmt.Sprintf("%s/packer/", ludusInstallPath), ".hcl", ".json")
+	globalTemplates, err := findFiles(fmt.Sprintf("%s/packer/", ludusInstallPath), "pkr.hcl", "pkr.json")
 	if err != nil {
 		return nil, errors.New("unable to get global packer templates")
 	}
@@ -334,7 +334,7 @@ func getTemplatesStatus(c *gin.Context) ([]TemplateStatus, error) {
 }
 
 func getTemplateNameArray(c *gin.Context, onlyBuilt bool) ([]string, error) {
-	// Get a list of all the built templates on the system
+	// Get a list of all the templates on the system
 	templateStatusArray, err := getTemplatesStatus(c)
 	if err != nil {
 		return nil, err
@@ -467,6 +467,13 @@ func PutTemplateTar(c *gin.Context) {
 		return // JSON set in getUserObject
 	}
 
+	// Get all the templates on the server before we unpack this one for the name check later
+	currentTemplateNames, err := getTemplateNameArray(c, false)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting template names: %v", err)})
+		return
+	}
+
 	// Save the file to the server
 	os.MkdirAll(fmt.Sprintf("%s/users/%s/packer/tmp", ludusInstallPath, user.ProxmoxUsername), 0755)
 	templateTarPath := fmt.Sprintf("%s/users/%s/packer/tmp/%s", ludusInstallPath, user.ProxmoxUsername, file.Filename)
@@ -494,6 +501,50 @@ func PutTemplateTar(c *gin.Context) {
 		return
 	}
 	os.Remove(templateTarPath)
+
+	// Check the uploaded folder for a packer file
+	uploadedTemplatePackerFiles, err := findFiles(templateDirPath, "pkr.hcl", "pkr.json")
+	if err != nil {
+		removeErr := os.RemoveAll(templateDirPath)
+		if removeErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding *.pkr.hcl or *.pkr.json files in tar AND Error removing '%s': %v", templateDirPath, removeErr)})
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding *.pkr.hcl or *.pkr.json files: %v", err)})
+		return
+	}
+	if len(uploadedTemplatePackerFiles) == 0 {
+		removeErr := os.RemoveAll(templateDirPath)
+		if removeErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("No packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr)})
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "No packer file (*.pkr.hcl or *.pkr.json) found in the tar!"})
+		return
+	} else if len(uploadedTemplatePackerFiles) > 1 {
+		removeErr := os.RemoveAll(templateDirPath)
+		if removeErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr)})
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar!"})
+		return
+	} else {
+		// Check the name of this template to see if it is already on the server - templates must have unique names
+		templateStringRegex, _ := regexp.Compile(templateRegex)
+		// The if else chain above has validated we only have one entry in the uploadedTemplatePackerFiles slice
+		thisTemplateName := extractTemplateNameFromHCL(uploadedTemplatePackerFiles[0], templateStringRegex)
+		if slices.Contains(currentTemplateNames, thisTemplateName) {
+			removeErr := os.RemoveAll(templateDirPath)
+			if removeErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("The uploaded template name is already present on the server. Template names must be unique. AND Error removing '%s': %v", templateDirPath, removeErr)})
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The uploaded template name is already present on the server. Template names must be unique."})
+			return
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"result": "Successfully added template"})
 }
 
@@ -550,6 +601,19 @@ func DeleteTemplate(c *gin.Context) {
 		return
 	}
 
+	// Check that this is a user template
+	userObject, err := getUserObject(c)
+	if err != nil {
+		return
+	}
+	templateDir := filepath.Dir(templateStatusArray[index].FilePath)
+	if !strings.Contains(templateDir, fmt.Sprintf("%s/users/%s/", ludusInstallPath, userObject.ProxmoxUsername)) && !strings.Contains(templateDir, fmt.Sprintf("%s/packer/", ludusInstallPath)) {
+		if !isAdmin(c, false) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("'%s' is a user template that belongs to another user and you are not an Admin (path: %s)", templateName, templateDir)})
+			return
+		}
+	}
+
 	// If the template is built, remove it from proxmox
 	if templateStatusArray[index].Built {
 		proxmoxClient, err := getProxmoxClientForUser(c)
@@ -568,21 +632,15 @@ func DeleteTemplate(c *gin.Context) {
 		}
 	}
 
-	// Check that this is a user template
-	userObject, err := getUserObject(c)
-	if err != nil {
-		return
-	}
-	templateDir := filepath.Dir(templateStatusArray[index].FilePath)
-	if !strings.Contains(templateDir, fmt.Sprintf("%s/users/%s/", ludusInstallPath, userObject.ProxmoxUsername)) {
-		c.JSON(http.StatusOK, gin.H{"error": fmt.Sprintf("Built template removed but template '%s' is a ludus built-in template and cannot be deleted", templateName)})
+	if strings.Contains(templateDir, fmt.Sprintf("%s/packer/", ludusInstallPath)) {
+		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Built template removed but template '%s' is a ludus server included template and cannot be deleted", templateName)})
 		return
 	}
 
 	// Delete the folder that contains the template file
 	err = os.RemoveAll(templateDir)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error removing '%s': %v", templateName, err)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error removing '%s' (path: %s): %v", templateName, templateDir, err)})
 		return
 	}
 
