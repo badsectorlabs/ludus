@@ -473,6 +473,12 @@ func PutTemplateTar(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting template names: %v", err)})
 		return
 	}
+	// Will need this later to check if the potential --force overwrite is allowable
+	templateStatusArray, err := getTemplatesStatus(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting template status array: %v", err)})
+		return
+	}
 
 	// Save the file to the server
 	os.MkdirAll(fmt.Sprintf("%s/users/%s/packer/tmp", ludusInstallPath, user.ProxmoxUsername), 0755)
@@ -535,13 +541,43 @@ func PutTemplateTar(c *gin.Context) {
 		// The if else chain above has validated we only have one entry in the uploadedTemplatePackerFiles slice
 		thisTemplateName := extractTemplateNameFromHCL(uploadedTemplatePackerFiles[0], templateStringRegex)
 		if slices.Contains(currentTemplateNames, thisTemplateName) {
-			removeErr := os.RemoveAll(templateDirPath)
-			if removeErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("The uploaded template name is already present on the server. Template names must be unique. AND Error removing '%s': %v", templateDirPath, removeErr)})
+			// The uploaded template exists on the server, but this could be a `--force` override of a template in the user's packer dir
+			if force {
+				// The user is forcing the upload, so make sure the template they are forcing is one of their own that was previously deleted and overwritten in this function
+				existingTemplateFilePath := ""
+				for _, template := range templateStatusArray {
+					if template.Name == thisTemplateName {
+						existingTemplateFilePath = template.FilePath
+					}
+				}
+				// Path will either be None (other user's template), the install path/packer (built-in templates), or the user's packer dir
+				if !strings.Contains(existingTemplateFilePath, fmt.Sprintf("%s/users/%s/", ludusInstallPath, user.ProxmoxUsername)) {
+					if existingTemplateFilePath != "None" {
+						c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("'%s' is a template that does not belong to you (path: %s)", thisTemplateName, existingTemplateFilePath)})
+					} else {
+						c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("'%s' is a template that does not belong to you", thisTemplateName)})
+					}
+					// We need to remove the untar'd template dir now since the template name is either another user's or built-in
+					removeErr := os.RemoveAll(templateDirPath)
+					if removeErr != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("'%s' is a template that does not belong to you AND Error removing '%s': %v", thisTemplateName, templateDirPath, removeErr)})
+						return
+					}
+					return
+				} else {
+					c.JSON(http.StatusOK, gin.H{"result": "Successfully added template"})
+					return
+				}
+			} else {
+				// The template name exists on the server and it isn't a template this user previously had (would have hit the 'already exists' error above) so remove it from the file system
+				removeErr := os.RemoveAll(templateDirPath)
+				if removeErr != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("The uploaded template name is already present on the server. Template names must be unique. AND Error removing '%s': %v", templateDirPath, removeErr)})
+					return
+				}
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The uploaded template name is already present on the server. Template names must be unique."})
 				return
 			}
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The uploaded template name is already present on the server. Template names must be unique."})
-			return
 		}
 	}
 
