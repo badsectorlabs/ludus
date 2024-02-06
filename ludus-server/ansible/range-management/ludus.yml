@@ -246,10 +246,14 @@
   tags: [dcs]
   hosts: "{{ hostvars['localhost']['alt_dc_vms'] | default([]) }}"
   tasks:
-    - name: Set domain facts
-      set_fact:
+    - name: Set FQDN
+      ansible.builtin.set_fact:
         domain_fqdn: "{{ ((ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn) }}"
-        dc_vm_name: "{{ (ludus | selectattr('domain.fqdn', 'match', domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
+    - name: Set primary DC VM name fact
+      ansible.builtin.set_fact:
+        dc_vm_name: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
+    - name: Set primary DC IP fact
+      ansible.builtin.set_fact:
         dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"
     - name: Congiure Windows VMs (general)
       include_tasks: tasks/windows/configure-windows.yml
@@ -510,7 +514,7 @@
     lastname: "{{ last }}"
     password: "{{ pass }}"
     netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
-    ad_dc_vm_name: "{{ (ludus | selectattr('domain.fqdn', 'match', domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
+    ad_dc_vm_name: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
 
 # ==========================================================
 # Nexus nuget cache
