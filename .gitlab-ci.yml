@@ -177,6 +177,8 @@ stages:
   - echo "debian-10-x64-server-template" > /tmp/test-template/test.pkr.hcl
   - 'ludus templates add -d /tmp/test-template/test.pkr.hcl 2>&1 | grep "Error finding .pkr.hcl or .pkr.json template files: the provided path is not a directory"'
   - ludus templates add -d /tmp/test-template 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
+  - ludus templates add -d ../ludus-server/packer/kali 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
+  - ludus templates add -d ../ludus-server/packer/kali --force 2>&1 | grep "'kali-x64-desktop-template' is a template that does not belong to you"
   - set -o pipefail
   - ludus templates add -d debian10 --force
   - ludus templates list
