@@ -18,6 +18,11 @@ Built on [Proxmox](https://www.proxmox.com/en/), Ludus enables advanced automati
   <a href="https://ludus.cloud"><img width="1000px" src="docs/static/img/Hero-readme.png" alt="Complex networks"></a>
 </div>
 
+<div align="center">
+  <a href="http://www.youtube.com/watch?v=dpuOIbI2OhQ"><img width="1000px" src="docs/static/img/screen.png" alt="Demo reel"></a>
+</div>
+
+
 ## 📚 Docs
 
 All documentation can be found at [docs.ludus.cloud](https://docs.ludus.cloud) (and `https://<ludus IP>:8080/ludus` once your Ludus server is installed).
@@ -47,6 +52,10 @@ All documentation can be found at [docs.ludus.cloud](https://docs.ludus.cloud) (
 
 ![Range Status](./docs/static/img/screenshots/range-status.png)
 
+### All commands support JSON output
+
+![JSON Output](./docs/static/img/screenshots/json.png)
+
 ### Proxmox with a Simple Range Deployed
 
 ![Proxmox](./docs/static/img/screenshots/proxmox.png)
@@ -56,3 +65,19 @@ All documentation can be found at [docs.ludus.cloud](https://docs.ludus.cloud) (
 ### Full Install
 
 ![](./docs/static/video/ludus-install.mp4){width=100%}
+
+### Building Templates
+
+![](./docs/static/video/templates.mp4){width=100%}
+
+### Deploying a Range
+
+![](./docs/static/video/deploy.mp4){width=100%}
+
+### Testing Mode
+
+![](./docs/static/video/testing-mode.mp4){width=100%}
+
+### Testing a new Loader off GitHub
+
+![](./docs/static/video/kali-demo.mp4){width=100%}
