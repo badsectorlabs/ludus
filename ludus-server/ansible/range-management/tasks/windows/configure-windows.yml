@@ -113,6 +113,3 @@
   args:
     chdir: 'c:\ludus\scripts'
   register: disable_telemetry
-
-- name: Clear Event Logs
-  win_shell: "wevtutil el | Select-String -notmatch \"Microsoft-Windows-LiveId\" | Foreach-Object {wevtutil cl \"$_\"}"
