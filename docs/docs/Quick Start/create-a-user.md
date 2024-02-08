@@ -13,7 +13,7 @@ import TabItem from '@theme/TabItem';
 Copy the correct Ludus client binary to a location in your PATH and make it executable.
 
 ```filename="Linux"
-local:~$ sudo cp ludus-client_[OS]-[arch]-[version] /usr/local/bin/ludus
+local:~$ sudo cp ludus-client_linux-[arch]-[version] /usr/local/bin/ludus
 local:~$ chmod +x /usr/local/bin/ludus
 ```
   </TabItem>
@@ -21,7 +21,7 @@ local:~$ chmod +x /usr/local/bin/ludus
 Copy the correct Ludus client binary to a location in your PATH and make it executable.
 
 ```filename="Linux"
-local:~$ sudo cp ludus-client_[OS]-[arch]-[version] /usr/local/bin/ludus
+local:~$ sudo cp ludus-client_macOS-[arch]-[version] /usr/local/bin/ludus
 local:~$ chmod +x /usr/local/bin/ludus
 local:~$ xattr -r -d com.apple.quarantine /usr/local/bin/ludus
 ```
@@ -43,7 +43,7 @@ Copy the correct Ludus client binary to your Windows device.
 `cd` to the directory that contains the binary or move the binary to a location in your PATH.
 
 ```plain filename="Windows"
-PS C:\> .\ludus-client_windows_amd64.exe
+PS C:\> .\ludus-client_windows_[arch]-[version].exe
 Ludus client v1.0.0
 
 Ludus is a CLI application to control a Ludus server

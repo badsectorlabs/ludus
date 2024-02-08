@@ -20,7 +20,13 @@ Ludus can **only** be installed on a host that meets the following requirements:
 - Internet access
 
 To install ludus, copy the ludus-server binary to the machine and run it as root. It will copy all files into /opt/ludus and print the configuration
-values used during install. 
+values used during install.
+
+:::tip[Don't trust the binaries?]
+
+    Ludus binaries are built in CI, but you can always [build them from source](../Developers/building-from-source) yourself.
+
+:::
 
 ```
 local:~$ scp ludus-server user@debian12:
