@@ -17,6 +17,8 @@ stages:
 ################
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key
 .common-setup: &common-setup
+  # Sync time in the event this test is being run after a snapshot rollback
+  - chronyd -q 'pool pool.ntp.org iburst' || chronyc -a makestep
   - cd binaries
   # Update the server to make sure we are running the latest version if a packer or ansible build is not running
   - pgrep -f 'ansible|packer' || sudo ./ludus-server --update
