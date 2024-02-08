@@ -92,16 +92,19 @@ network:
     vlan_dst: 20
     protocol: tcp
     ports: 443
+    action: ACCEPT
   - name: Allow VLAN 20 out to internet using any protocol (and any port) - only useful when external_default is set to REJECT
     vlan_src: 20
     vlan_dst: public
     protocol: all
     ports: all
+    action: ACCEPT
   - name: Allow VLAN 30 to all VLANs using TCP on port 80
     vlan_src: 30
     vlan_dst: all
     protocol: tcp
     ports: 80
+    action: ACCEPT
   - name: Only allow the .21 on VLAN 20 to hit port 445 of the .31 on VLAN 10 using TCP
     vlan_src: 20
     ip_last_octet_src: 21
@@ -109,6 +112,7 @@ network:
     ip_last_octet_dst: 31
     protocol: tcp
     ports: 445
+    action: ACCEPT
   - name: Allow the .21 to .25 machines on VLAN 20 to access the .21 on VLAN 10 using TCP
     vlan_src: 20
     ip_last_octet_src: 21-25
@@ -116,6 +120,7 @@ network:
     ip_last_octet_dst: 21
     protocol: tcp
     ports: 445
+    action: ACCEPT
   - name: Allow the .11 on VLAN 10 to access the .21 to .25 machines on VLAN 20 using TCP port 8080
     vlan_src: 10
     ip_last_octet_src: 11
@@ -123,9 +128,11 @@ network:
     ip_last_octet_dst: 21-25
     protocol: tcp
     ports: 8080
+    action: ACCEPT
   - name: Allow TCP ports 8080 to 8088 from VLAN 10 to VLAN 20
     vlan_src: 10
     vlan_dst: 20
     protocol: tcp
     ports: "8080:8088"
+    action: ACCEPT
 ```
