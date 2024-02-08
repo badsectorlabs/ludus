@@ -10,6 +10,8 @@ Just up arrow and hit enter!
 
 But really, Ludus actions are [idempotent](https://en.wikipedia.org/wiki/Idempotence#Computer_science_meaning), and these VMs are complex beasts. Sometimes things don't work on the first try. No harm in trying again!
 
+Ansible errors can be parsed and made more readable with the `ludus range errors` command.
+
 ## Ansible "Failed to create temporary directory" Error
 
 ```
@@ -28,4 +30,4 @@ exited with result 1", "unreachable": true}
 
 This is a long error message, but the key is `"unreachable": true`.
 
-Check that the VM that failed is powered on and reachable. Power cycle the VM if needed. Re-run the ansible that cause this error.
+Check that the VM that failed is powered on and reachable. Power cycle the VM if needed. Re-run the ansible that caused this error.
