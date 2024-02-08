@@ -90,7 +90,7 @@
           - iptables-persistent
           - sshpass # for ansible provisioner in packer
           - swapspace # helps with machines with low RAM (32GB)
-          - chronyd # Proxmox 7 and 8 install this when using the proxmox ISO, but not when "upgrading" from Debian
+          - chrony # Proxmox 7 and 8 install this when using the proxmox ISO, but not when "upgrading" from Debian
         state: present
         update_cache: true
 
