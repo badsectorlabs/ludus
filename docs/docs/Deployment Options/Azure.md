@@ -1,3 +1,7 @@
+---
+title: Azure
+---
+
 # Azure
 
 Azure supports nested virtualization for some VM types.
