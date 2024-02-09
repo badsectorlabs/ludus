@@ -1158,8 +1158,6 @@ test-everything:
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
-    - changes:
-      - "**/*"
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: templates_built
