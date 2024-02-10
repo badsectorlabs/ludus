@@ -65,10 +65,10 @@
     - name: Create the CI/CD network
       ansible.builtin.blockinfile:
         path: /etc/network/interfaces
-        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR vmbr1 (CI/CD)"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR ludusci (CI/CD)"
         block: |
-          auto vmbr1
-          iface vmbr1 inet static
+          auto ludusci
+          iface ludusci inet static
               address 203.0.113.254/24
               bridge-ports none
               bridge-stp off
@@ -79,19 +79,19 @@
       register: interfaces_status
 
     - name: Enable new interface
-      shell: ADDRFAM=inet ifup vmbr1
+      shell: ADDRFAM=inet ifup ludusci
       when: interfaces_status is changed
       ignore_errors: true
 
-    - name: Create dnsmasq config for CI/CD vmbr1
+    - name: Create dnsmasq config for CI/CD ludusci
       ansible.builtin.blockinfile:
-        path: /etc/dnsmasq.d/dnsmasq-vmbr1.conf
-        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR vmbr1 (CI/CD)"
+        path: /etc/dnsmasq.d/dnsmasq-ludusci.conf
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR ludusci (CI/CD)"
         block: |
           server=203.0.113.254
-          interface=vmbr1
+          interface=ludusci
           dhcp-range=203.0.113.100,203.0.113.250,255.255.255.0,12h
-          dhcp-option=vmbr1,3,203.0.113.254
+          dhcp-option=ludusci,3,203.0.113.254
         create: true
       register: dnsmasq_written
 
@@ -170,7 +170,7 @@
         api_host: "{{ api_host }}"
         vmid: "{{ vm_id }}"
         interface: net0
-        bridge: "vmbr1" # The CI/CD network (to avoid IP conflicts with the normal NAT'd network)
+        bridge: "ludusci" # The CI/CD network (to avoid IP conflicts with the normal NAT'd network)
       when: clone_vm is changed and clone_vm.vmid != -1
 
     - name: Start the VM

@@ -19,9 +19,9 @@ The WireGuard interface, `198.51.100.0/24` on `wg0`, is set up during Ludus inst
 
 The user's router VM only allows traffic in from the user's WireGuard IP. Additionally, the router VM always allows related or established traffic back out to the user's WireGuard IP, regardless of any user defined rules or testing status. This allows a user to RDP, SSH, VNC, or otherwise access VMs at all times.
 
-### NAT'd Network (vmbr0)
+### NAT'd Network (ludus)
 
-There is a single default network for VMs created during install: `192.0.2.0/24`, on interface `vmbr0`. This network has DHCP and DNS thanks to a `dnsmasq` service running on the Ludus host.
+There is a single default network for VMs created during install: `192.0.2.0/24`, on interface `ludus`. This network has DHCP and DNS thanks to a `dnsmasq` service running on the Ludus host.
 This network's "router" is at `.254` and offers DHCP IPs in the range of `.50` to `.100`. This DHCP pool is used for template creation.
 
 Ludus user routers are assigned a static IP in this network where their range number + 100 is the last octet. If a user has range number 2, their router has a "WAN" interface at `192.0.2.102`. This is what limits Ludus to 153 concurrent users, because each user will take one IP from this pool of 100-253. Ludus sets up a static route for the user's /16 through this "WAN" interface, allowing ansible and wireguard clients to access the range VMs.
@@ -32,9 +32,9 @@ If the Nexus cache server was created by a Ludus admin, it has a static IP of `1
 
 The remaining 49 IPs in the `.1 - .50` range are reserved for future use.
 
-### CI/CD Network (vmbr1)
+### CI/CD Network (ludusci)
 
-If the Ludus admin has set up [CI/CD](cicd), the CI/CD network is `203.0.113.0/24` on interface `vmbr1`. This network is necessary because the CI/CD Ludus VMs will themselves set up a `vmbr0` with a range of `192.0.2.0/24` which would conflict with the "public" IP of the CI/CD Ludus VM if it was in the host's `vmbr0` (a DHCP'd `192.0.2.50-100` IP).
+If the Ludus admin has set up [CI/CD](cicd), the CI/CD network is `203.0.113.0/24` on interface `ludusci`. This network is necessary because the CI/CD Ludus VMs will themselves set up a `ludus` with a range of `192.0.2.0/24` which would conflict with the "public" IP of the CI/CD Ludus VM if it was in the host's `ludus` (a DHCP'd `192.0.2.50-100` IP).
 
 ## User Networks
 

@@ -12,9 +12,10 @@ import (
 	"ludus/logger"
 )
 
+var VersionString string
 var GitCommitHash string
 
-var LudusVersion string = "1.0.0+" + GitCommitHash
+var LudusVersion string = VersionString + "+" + GitCommitHash
 
 const (
 	keyringService = "ludus-api"

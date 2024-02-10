@@ -7,7 +7,7 @@ proxmox_default_behavior: compatibility
 ansible_remote_tmp: "{{ '/opt/ludus/ansible/tmp' if (lookup('env', 'USER') != 'root') else '/tmp/.ansible/tmp' }}"
 defaults:
   cpu: "host"
-  net: '{"net0":"virtio,bridge=vmbr0"}'
+  net: '{"net0":"virtio,bridge=ludus"}'
   cores: '2'
   memory: '2048'
   balloon: '2048'

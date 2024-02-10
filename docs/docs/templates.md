@@ -159,7 +159,7 @@ For network hardware, `virtio` is recommended if the guest supports it (see any 
 
 ```
   network_adapters {
-    bridge = "vmbr0"
+    bridge = "ludus"
     model  = "virtio"
   }
 ```

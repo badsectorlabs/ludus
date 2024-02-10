@@ -10,10 +10,6 @@
       ansible.builtin.meta: end_play
       when: stat_result.stat.exists
 
-    - name: Generating admin proxmox password
-      ansible.builtin.set_fact:
-        proxmox_admin_password: "{{ lookup('password', 'proxmox_admin_password length=20 chars=ascii_letters,digits') }}"
-
     - name: Update install progress
       ansible.builtin.include_tasks: tasks/update-install-progress.yml
       vars:
@@ -45,8 +41,6 @@
             - "Datastore.AllocateTemplate"
             - "Datastore.Audit"
       pve_groups:
-        - name: Admins
-          comment: Administrators of this PVE cluster
         - name: ludus_users
           comment: Ludus users
         - name: ludus_admins

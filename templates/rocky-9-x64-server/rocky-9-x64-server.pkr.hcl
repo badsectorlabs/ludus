@@ -109,7 +109,7 @@ source "proxmox-iso" "rocky85" {
   iso_storage_pool         = "${var.iso_storage_pool}"
   memory                   = "${var.vm_memory}"
   network_adapters {
-    bridge = "vmbr0"
+    bridge = "ludus"
     model  = "virtio"
   }
   node                 = "${var.proxmox_host}"
