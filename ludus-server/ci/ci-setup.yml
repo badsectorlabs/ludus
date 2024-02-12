@@ -302,6 +302,7 @@
           - vim # to help with debugging edits
           - tmux
           - htop
+          - jq
         state: present
         update_cache: true
       become: true

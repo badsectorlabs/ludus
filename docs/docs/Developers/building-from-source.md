@@ -10,7 +10,7 @@ The main branch is not guaranteed to be stable. For guaranteed stability, use th
 
 ```
 STABLE_VERSION=$(curl -s https://gitlab.com/api/v4/projects/54052321/releases/ | \
-  jq '.[]' | jq -r '.name' | head -1 | egrep -o 'v\d+\.\d+\.\d+')
+  jq '.[]' | jq -r '.name' | head -1 | egrep -o 'v[0-9]+\.[0-9]+\.[0-9]+')
 git clone https://gitlab.com/badsectorlabs/ludus.git
 cd ludus
 git checkout tags/$STABLE_VERSION
