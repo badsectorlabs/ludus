@@ -97,11 +97,6 @@ If you wish to continue type 'I understand the risks': `)
 					log.Fatal("Exiting")
 				}
 			} else {
-				debainInstallFile, err := os.Create(fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath))
-				if err != nil {
-					log.Fatalf("Failed to create or touch the file %s: %s", fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath), err)
-				}
-				debainInstallFile.Close()
 				log.Printf("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
 				log.Println("!!! Only run Ludus install on a clean Debian 12 machine that will be dedicated to Ludus !!!")
 				log.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
@@ -119,6 +114,14 @@ Do you want to continue? (y/N): `)
 					log.Fatal("Exiting")
 				}
 			}
+		}
+		// We need to write the canary file if no on an existing proxmox install no matter if this is interactive or not
+		if !existingProxmox {
+			debainInstallFile, err := os.Create(fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath))
+			if err != nil {
+				log.Fatalf("Failed to create or touch the file %s: %s", fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath), err)
+			}
+			debainInstallFile.Close()
 		}
 	}
 }
