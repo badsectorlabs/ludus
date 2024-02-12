@@ -83,7 +83,7 @@ func checkRoot() {
 }
 
 func checkForProxmox8() bool {
-	if fileExists("/usr/bin/pveversion") {
+	if fileExists("/usr/bin/pveversion") && !fileExists(fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath)) {
 		pveVersion := Run("pveversion", false, false)
 		if strings.Contains(pveVersion, "pve-manager/8") {
 			return true
