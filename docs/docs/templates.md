@@ -120,6 +120,9 @@ variable "iso_storage_pool" {
 variable "ansible_home" {
   type = string
 }
+variable "ludus_nat_interface" {
+  type = string
+}
 ####
 ```
 
@@ -159,7 +162,7 @@ For network hardware, `virtio` is recommended if the guest supports it (see any 
 
 ```
   network_adapters {
-    bridge = "ludus"
+    bridge = "${var.ludus_nat_interface}"
     model  = "virtio"
   }
 ```

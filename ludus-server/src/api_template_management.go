@@ -114,7 +114,7 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 		`-var 'proxmox_username={{.ProxmoxUsername}}@pam' -var 'proxmox_skip_tls_verify={{.ProxmoxSkipTLSVerify}}' ` +
 		`-var 'proxmox_pool=SHARED' -var 'proxmox_storage_pool={{.ProxmoxVMStoragePool}}' ` +
 		`-var 'proxmox_storage_format={{.ProxmoxVMStorageFormat}}' -var 'iso_storage_pool={{.ProxmoxISOStoragePool}}' ` +
-		`-var 'ansible_home={{.UsersAnsibleDir}}' {{.PackerFile}}`
+		`-var 'ansible_home={{.UsersAnsibleDir}}' -var 'ludus_nat_interface={{.LudusNATInterface}} {{.PackerFile}}`
 
 	var packerVerbose string
 	if verbose {
@@ -138,6 +138,7 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 		ProxmoxISOStoragePool  string
 		UsersAnsibleDir        string
 		PackerFile             string
+		LudusNATInterface      string
 	}{
 		ludusInstallPath,
 		proxmoxPassword,
@@ -153,6 +154,7 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 		ServerConfiguration.ProxmoxISOStoragePool,
 		usersAnsibleDir,
 		packerFile,
+		ServerConfiguration.LudusNATInterface,
 	}
 
 	tmpl, err := template.New("command").Parse(tmplStr)

@@ -6,18 +6,8 @@
         ludus_install_path: "{{ install_path | default('/opt/ludus') }}"
   vars:
     pve_interface: "{{ proxmox_interface | default(ansible_default_ipv4.interface) }}"
-    pve_ip: "{{ proxmox_local_ip }}"
-    pve_gateway: "{{ proxmox_gateway }}"
-    pve_netmask: "{{ proxmox_netmask | default('255.255.255.0') }}"
-    pve_ip_cidr_network: "{{ (proxmox_local_ip + '/' + proxmox_netmask) | ipaddr('network/prefix')  }}"
-    pve_gateway_cidr_network: "{{ (proxmox_gateway + '/' + proxmox_netmask) | ipaddr('network/prefix')  }}"
   serial: 1
   tasks:
-    - name: Check if pve_gateway is in the same network as pve_ip
-      ansible.builtin.assert:
-        that:
-          - (pve_ip_cidr_network | ansible.utils.ipaddr('network')) == (pve_gateway_cidr_network | ansible.utils.ipaddr('network'))
-        fail_msg: "proxmox_gateway is not in the same network as proxmox_local_ip"
     - name: Install bridge-utils, git, python3-pip, dnsmasq, jq, and other required packages
       ansible.builtin.apt:
         name:
@@ -88,8 +78,8 @@
         path: /etc/network/interfaces
         marker: "# LUDUS INTERFACE {mark}"
         block: |
-          auto ludus
-          iface ludus inet static
+          auto {{ ludus_nat_interface }}
+          iface {{ ludus_nat_interface }} inet static
               address 192.0.2.254/24
               bridge-ports none
               bridge-stp off
@@ -103,7 +93,7 @@
       register: interfaces_status
 
     - name: Enable new vmbr interface
-      ansible.builtin.shell: ADDRFAM=inet ifup ludus
+      ansible.builtin.shell: ADDRFAM=inet ifup {{ ludus_nat_interface }}
       when: interfaces_status is changed
 
 - name: Configure Proxmox Stage 2
@@ -284,3 +274,8 @@
         state: touch
         mode: '0644'
 
+    - name: Alert
+      ansible.builtin.pause:
+        prompt: |
+          Ludus install complete.
+        seconds: 1

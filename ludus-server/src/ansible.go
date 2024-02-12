@@ -40,7 +40,7 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 	if err != nil {
 		return "Could not get range", errors.New("could not get range") // JSON set in getRangeObject
 	}
-	userVars := map[string]interface{}{"username": user.ProxmoxUsername, "range_id": user.UserID, "range_second_octet": usersRange.RangeNumber}
+	userVars := map[string]interface{}{"username": user.ProxmoxUsername, "range_id": user.UserID, "range_second_octet": usersRange.RangeNumber, "ludus_nat_interface": ServerConfiguration.LudusNATInterface}
 	// Merge userVars with any extraVars provided
 	maps.Copy(userVars, extraVars)
 

@@ -9,8 +9,8 @@ iface {{ pve_interface }} inet static
     netmask {{ pve_netmask }}
 
 # This is the default Ludus NAT'd network used for VM setup before VMs are moved onto their user interface/VLANs
-auto ludus
-iface ludus inet static
+auto {{ ludus_nat_interface }}
+iface {{ ludus_nat_interface }} inet static
     address 192.0.2.254/24
     bridge-ports none
     bridge-stp off
