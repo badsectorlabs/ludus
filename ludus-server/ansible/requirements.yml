@@ -16,8 +16,6 @@ collections:
 roles:
 - name: lae.proxmox
   version: v1.7.1
-- name: geerlingguy.ntp
-  version: 2.3.3
 - name: geerlingguy.packer
   version: 1.0.2
 - name: ansible-thoteam.nexus3-oss
