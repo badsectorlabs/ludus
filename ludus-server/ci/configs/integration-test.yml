@@ -9,7 +9,7 @@ ludus:
     windows:
       sysprep: true
     domain:
-      fqdn: example.net # Reserved per RFC2606
+      fqdn: ludus.domain
       role: primary-dc
 
   - vm_name: "{{ range_id }}-ad-dc-win2022-server-x64-2"
@@ -22,7 +22,7 @@ ludus:
     windows:
       sysprep: true
     domain:
-      fqdn: example.net
+      fqdn: ludus.domain
       role: alt-dc
 
   - vm_name: "{{ range_id }}-ad-win11-22h2-enterprise-x64-1"
@@ -40,7 +40,7 @@ ludus:
       office_version: 2019
       office_arch: 64bit
     domain:
-      fqdn: example.net
+      fqdn: ludus.domain
       role: member
 
   - vm_name: "{{ range_id }}-redirector"
