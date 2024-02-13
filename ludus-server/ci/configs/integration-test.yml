@@ -144,7 +144,7 @@ network:
       action: REJECT
 
 defaults:
-  router_vm_name: "{{ range_id }}-router"
+  router_vm_name: "{{ range_id }}-router-debian11-x64"
   snapshot_with_RAM: true
   stale_hours: 1
   ad_domain_functional_level: WinThreshold
