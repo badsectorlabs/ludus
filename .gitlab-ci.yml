@@ -1298,7 +1298,6 @@ test-everything:
       sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     all  --  \*      \*       10.[1-9].0.0/16          10.3.0.0/16          /\* User Default: Inter-VLAN Rule \*/ reject-with icmp-port-unreachable'
       sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.3.0.0/16          /\* User Default: External Rule \*/'
 
-
 ##########
 # MANUAL #
 ##########
