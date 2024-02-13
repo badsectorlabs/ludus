@@ -10,7 +10,7 @@
   vars:
     template_vm_name: "debian-11-x64-server-template"
     vm_name: "{{ defaults.router_vm_name }}"
-    vmbr_number: "0" # This is the NAT'd vmbr - the "WAN" side of the router
+    bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - the "WAN" side of the router
     vm_groups: '"{{ range_id }}","{{ range_id }}_router"'
     is_linux: true
     ram: 4

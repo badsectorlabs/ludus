@@ -1,13 +1,30 @@
 stages:
+  - pages
   - documentation
   - build
-  - install
-  - templates
+  - install-kickoff
+  - install-check
+  - install-snapshot
+  - templates-build
+  - templates-check
+  - templates-snapshot
   - client
-  - range-admin
-  - post-deploy-admin
-  - range-user
-  - post-deploy-user
+  - range-admin-deploy
+  - range-admin-check
+  - range-admin-snapshot
+  - post-deploy-admin-testing
+  - post-deploy-admin-power
+  - post-deploy-admin-ansible
+  - post-deploy-admin-user
+  - post-deploy-admin-templates
+  - range-user-deploy
+  - range-user-check
+  - range-user-snapshot
+  - post-deploy-user-testing
+  - post-deploy-user-power
+  - post-deploy-user-ansible
+  - post-deploy-user-user
+  - post-deploy-user-templates
   - integration
   - manual
   - upload
@@ -200,15 +217,15 @@ stages:
 # DOCUMENTATION #
 #################
 pages:
-  stage: documentation
+  stage: pages
   variables:
     LUDUS_BUILD_TYPE: any-built
   tags:
     - ludus-proxmox-runner
   rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[build pages\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
       when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[build pages\]/
     - if: $CI_COMMIT_BRANCH == "main" # Only update public docs in the main branch
       changes:
         - "docs/**/*"
@@ -232,9 +249,11 @@ documentation:
   tags:
     - ludus-proxmox-runner
   rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[build docs\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
       when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[build docs\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at / # Any "start-at" will skip the doc build to speed up CI
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - changes:
       - "docs/**/*"
@@ -304,14 +323,16 @@ build all:
 # INSTALL #
 ###########
 install kickoff:
-  stage: install
+  stage: install-kickoff
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at / # Any "start-at" will skip the install
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -329,15 +350,14 @@ install kickoff:
     - sudo ./ludus-server --no-prompt ludus-$CI_PIPELINE_ID # This causes a reboot, handle it in the run.sh ci script
 
 install check:
-  stage: install
+  stage: install-check
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: install kickoff
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at / # Any "start-at" will skip the install
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -353,16 +373,14 @@ install check:
     - echo "root:$CI_PIPELINE_ID" | sudo chpasswd # allow root login via the web interface for debugging
 
 install snapshot:
-  stage: install
+  stage: install-snapshot
   tags:
-    - ludus-proxmox-runner  
-  needs:
-    - job: build all
-      artifacts: false
-    - job: install check
+    - ludus-proxmox-runner
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at / # Any "start-at" will skip the install
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -381,17 +399,26 @@ install snapshot:
 # TEMPLATES #
 #############
 templates build:
-  stage: templates
+  stage: templates-build
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: install snapshot
-      optional: true # depend on install snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from a clean install
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -407,16 +434,26 @@ templates build:
     - ludus templates build --parallel 6
 
 templates check:
-  stage: templates
+  stage: templates-check
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: templates build
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -438,17 +475,24 @@ templates check:
     - ludus templates list
 
 templates snapshot:
-  stage: templates
+  stage: templates-snapshot
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-      artifacts: false
-    - job: templates check
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -468,14 +512,23 @@ client basic-commands:
   stage: client
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: templates snapshot
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[client tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -505,19 +558,25 @@ client basic-commands:
 # RANGE - ADMIN #
 #################
 range deploy-admin:
-  stage: range-admin
+  stage: range-admin-deploy
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: templates snapshot
-      optional: true # depend on templates snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
-    - job: client basic-commands
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -538,16 +597,25 @@ range deploy-admin:
     - ludus range deploy
 
 range check-admin:
-  stage: range-admin
+  stage: range-admin-check
   tags:
     - ludus-proxmox-runner  
-  needs:
-    - job: build all
-    - job: range deploy-admin
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -568,17 +636,23 @@ range check-admin:
     - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
 
 range snapshot-admin:
-  stage: range-admin
+  stage: range-admin-snapshot
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-      artifacts: false
-    - job: range check-admin
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -598,18 +672,25 @@ range snapshot-admin:
 # POST-DEPLOY - ADMIN #
 #######################
 post-deploy testing-as-admin:
-  stage: post-deploy-admin
+  stage: post-deploy-admin-testing
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: range snapshot-admin
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[testing-mode tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -628,20 +709,25 @@ post-deploy testing-as-admin:
     - *testing-mode-tests
 
 post-deploy power-as-admin:
-  stage: post-deploy-admin
+  stage: post-deploy-admin-power
   tags:
     - ludus-proxmox-runner  
-  needs:
-    - job: build all
-    - job: range snapshot-admin
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy testing-as-admin # prevent parallel tests
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[power tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -662,22 +748,25 @@ post-deploy power-as-admin:
     - *power-tests
 
 post-deploy ansible-as-admin:
-  stage: post-deploy-admin
+  stage: post-deploy-admin-ansible
   tags:
     - ludus-proxmox-runner  
-  needs:
-    - job: build all
-    - job: range snapshot-admin
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy power-as-admin # prevent parallel tests
-      optional: true
-    - job: post-deploy testing-as-admin # prevent parallel tests
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[ansible tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -697,24 +786,25 @@ post-deploy ansible-as-admin:
     - *ansible-tests
 
 post-deploy user-cmds-as-admin:
-  stage: post-deploy-admin
+  stage: post-deploy-admin-user
   tags:
     - ludus-proxmox-runner  
-  needs:
-    - job: build all
-    - job: range snapshot-admin
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy ansible-as-admin # prevent parallel tests
-      optional: true
-    - job: post-deploy power-as-admin
-      optional: true
-    - job: post-deploy testing-as-admin
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[user tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -768,26 +858,25 @@ post-deploy user-cmds-as-admin:
     - '! ludus users list all | grep "Test User"'
 
 post-deploy templates-as-admin:
-  stage: post-deploy-admin
+  stage: post-deploy-admin-templates
   tags:
     - ludus-proxmox-runner  
-  needs:
-    - job: build all
-    - job: range snapshot-admin
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy ansible-as-admin # prevent parallel tests
-      optional: true
-    - job: post-deploy power-as-admin
-      optional: true
-    - job: post-deploy testing-as-admin
-      optional: true
-    - job: post-deploy user-cmds-as-admin
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -809,29 +898,23 @@ post-deploy templates-as-admin:
 # RANGE - USER #
 ################
 range deploy-user:
-  stage: range-user
+  stage: range-user-deploy
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: templates snapshot
-      optional: true # depend on templates snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from templates built
-    - job: range snapshot-admin
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy ansible-as-admin # prevent parallel tests
-      optional: true
-    - job: post-deploy power-as-admin
-      optional: true
-    - job: post-deploy testing-as-admin
-      optional: true
-    - job: post-deploy user-cmds-as-admin
-      optional: true
-    - job: post-deploy templates-as-admin
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -854,16 +937,23 @@ range deploy-user:
     - ludus range deploy
 
 range check-user:
-  stage: range-user
+  stage: range-user-check
   tags:
     - ludus-proxmox-runner  
-  needs:
-    - job: build all
-    - job: range deploy-user
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -884,17 +974,23 @@ range check-user:
     - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
 
 range snapshot-user:
-  stage: range-user
+  stage: range-user-snapshot
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-      artifacts: false
-    - job: range check-user
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -914,20 +1010,23 @@ range snapshot-user:
 # POST-DEPLOY - USER #
 #######################
 post-deploy testing-as-user:
-  stage: post-deploy-user
+  stage: post-deploy-user-testing
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: range snapshot-user
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy testing-as-admin
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[testing-mode tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -946,22 +1045,23 @@ post-deploy testing-as-user:
     - *testing-mode-tests
 
 post-deploy power-as-user:
-  stage: post-deploy-user
+  stage: post-deploy-user-power
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: range snapshot-user
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy testing-as-user # prevent parallel tests
-      optional: true
-    - job: post-deploy power-as-admin # prevent parallel tests
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[power tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -983,24 +1083,23 @@ post-deploy power-as-user:
     - *power-tests
 
 post-deploy ansible-as-user:
-  stage: post-deploy-user
+  stage: post-deploy-user-ansible
   tags:
     - ludus-proxmox-runner  
-  needs:
-    - job: build all
-    - job: range snapshot-user
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy power-as-user # prevent parallel tests
-      optional: true
-    - job: post-deploy testing-as-user # prevent parallel tests
-      optional: true
-    - job: post-deploy ansible-as-admin # prevent parallel tests
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[ansible tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -1020,26 +1119,23 @@ post-deploy ansible-as-user:
     - *ansible-tests
 
 post-deploy user-cmds-as-user:
-  stage: post-deploy-user
+  stage: post-deploy-user-user
   tags:
     - ludus-proxmox-runner  
-  needs:
-    - job: build all
-    - job: range snapshot-user
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy ansible-as-user # prevent parallel tests
-      optional: true
-    - job: post-deploy power-as-user # prevent parallel tests
-      optional: true
-    - job: post-deploy testing-as-user # prevent parallel tests
-      optional: true
-    - job: post-deploy user-cmds-as-admin # prevent parallel tests
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[user tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -1087,28 +1183,23 @@ post-deploy user-cmds-as-user:
     - ludus user apikey
 
 post-deploy templates-as-user:
-  stage: post-deploy-user
+  stage: post-deploy-user-templates
   tags:
     - ludus-proxmox-runner  
-  needs:
-    - job: build all
-    - job: range snapshot-user
-      optional: true # depend on range snapshot job only if that job is in the pipeline (full build), otherwise we'll use a pre-built snapshot from range snapshot
-    - job: post-deploy ansible-as-user # prevent parallel tests
-      optional: true
-    - job: post-deploy power-as-user
-      optional: true
-    - job: post-deploy testing-as-user
-      optional: true
-    - job: post-deploy user-cmds-as-user
-      optional: true
-    - job: post-deploy templates-as-admin
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
@@ -1133,30 +1224,19 @@ test-everything:
   stage: integration
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: templates snapshot
-    - job: post-deploy ansible-as-user
-      optional: true
-    - job: post-deploy power-as-user
-      optional: true
-    - job: post-deploy testing-as-user
-      optional: true
-    - job: post-deploy templates-as-user
-      optional: true
-    - job: post-deploy ansible-as-admin
-      optional: true
-    - job: post-deploy power-as-admin
-      optional: true
-    - job: post-deploy testing-as-admin
-      optional: true
-    - job: post-deploy templates-as-admin
-      optional: true
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[integration test\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
       when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
   variables:
@@ -1225,8 +1305,8 @@ manual testing:
   stage: manual
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
   variables:
@@ -1243,8 +1323,8 @@ upload:
   stage: upload
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
+  dependencies:
+    - build all
   variables:
     LUDUS_BUILD_TYPE: any-built
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
@@ -1265,9 +1345,8 @@ release:
   stage: release
   tags:
     - ludus-proxmox-runner
-  needs:
-    - job: build all
-    - job: upload
+  dependencies:
+    - build all
   variables:
     LUDUS_BUILD_TYPE: any-built
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
