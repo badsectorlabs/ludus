@@ -36,7 +36,7 @@ if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "
         # We know the snapshot we want to roll back to exists, but let's check to see if it was just taken.
         # If the snapshot is less than 2 minutes old, we can asume that the job asking for a rollback is coming directly after the snapshot was taken
         # and therefore we don't actually need to roll it back
-        SNAPTIME=$(echo "$JSON" | jq --arg SNAPNAME "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" '.[] | select(.name == $SNAPNAME) | .snaptime')
+        SNAPTIME=$(pvesh get nodes/$PROXMOX_NODE/qemu/$VM_ID/snapshot --output-format=json | jq --arg SNAPNAME "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" '.[] | select(.name == $SNAPNAME) | .snaptime')
         CURRENT_TIME=$(date +%s)
         DIFF=$(($CURRENT_TIME - $SNAPTIME))
         if [[ "$DIFF" -gt 120 ]]; then

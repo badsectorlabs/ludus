@@ -1262,6 +1262,7 @@ test-everything:
     - while [ "$(ludus range list --json | jq -r '.rangeState')" == "DEPLOYING" ]; do date; sleep 60; done
     - if [[ "$(ludus range list --json | jq -r '.rangeState')" == "ERROR" ]]; then ludus range errors; fi
     - ludus range list
+    - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
     # Check for docker on the redirector
     - export REDIRECTOR_VMID=$(sudo qm list | grep running | grep redirector | head -1 | awk '{print $1}')
     - sudo qm guest exec $REDIRECTOR_VMID -- docker --version | grep 'Docker version'
@@ -1276,8 +1277,8 @@ test-everything:
     - sudo qm guest exec $WIN11_VMID -- cmd /c "echo %userdomain%" | grep ludus
     - sudo qm guest exec $WIN11_VMID -- ipconfig /all | grep ludus.domain
     # Check the dns_rewrites
-    - sudo qm guest exec $WIN11_VMID -- ping -n 1 example.com | egrep 'example.com \[10.3.20.1\]'
-    - sudo qm guest exec $WIN11_VMID -- ping -n 1 abc123.example.com | egrep 'abc123.example.com \[10.3.20.1\]'
+    - sudo qm guest exec $WIN11_VMID -- ping -n 1 example.com | egrep 'example.com \[10.[1-9].20.1\]'
+    - sudo qm guest exec $WIN11_VMID -- ping -n 1 abc123.example.com | egrep 'abc123.example.com \[10.[1-9].20.1\]'
     # Check the custom ansible groups
     - ludus range inventory | grep -A 2 customgroup1 | grep redirector
     - ludus range inventory | grep -A 2 customgroup2 | grep redirector
@@ -1285,17 +1286,17 @@ test-everything:
     - export ROUTER_VMID=$(qm list | grep running | grep router | head -1 | awk '{print $1}')
     - sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g'
     - |
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     tcp  --  \*      \*       10.3.10.0/24         10.3.20.0/24         tcp dpt:22 \/\* User Rule: Block SSH from VLAN 10 to VLAN 20 \*\/ reject-with icmp-port-unreachable'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.3.10.0/24         10.3.20.0/24         tcp dpts:1:80 /\* User Rule: Allow TCP ports 1 to 80 from VLAN 10 to VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 source IP range 10.3.10.11-10.3.10.22 destination IP range 10.3.20.1-10.3.20.2 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 and .2 on VLAN 20 using TCP port 443 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            10.3.20.1            tcp dpt:80 source IP range 10.3.10.11-10.3.10.22 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 on VLAN 20 using TCP port 80 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.3.20.1            10.3.10.21           tcp dpt:445 /\* User Rule: Only allow the .1 on VLAN 20 to hit port 445 of the .21 on VLAN 10 using TCP \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.3.99.0/24         10.3.10.0/24         /\* User Rule: Allow kali to all windows \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.3.10.0/24         10.3.99.0/24         tcp dpt:8080 /\* User Rule: Only allow windows to kali on 8080 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.3.10.0/24         10.3.99.0/24         tcp dpt:80 /\* User Rule: Only allow windows to kali on 80 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.3.10.0/24         10.3.99.0/24         tcp dpt:443 /\* User Rule: Only allow windows to kali on 443 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     all  --  \*      \*       10.3.0.0/16          10.3.0.0/16          /\* User Default: Inter-VLAN Rule \*/ reject-with icmp-port-unreachable'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.3.0.0/16         !10.3.0.0/16          /\* User Default: External Rule \*/'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     tcp  --  \*      \*       10.[1-9].10.0/24         10.3.20.0/24         tcp dpt:22 \/\* User Rule: Block SSH from VLAN 10 to VLAN 20 \*\/ reject-with icmp-port-unreachable'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.3.20.0/24         tcp dpts:1:80 /\* User Rule: Allow TCP ports 1 to 80 from VLAN 10 to VLAN 20 \*/'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 source IP range 10.[1-9].10.11-10.[1-9].10.22 destination IP range 10.[1-9].20.1-10.[1-9].20.2 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 and .2 on VLAN 20 using TCP port 443 \*/'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            10.3.20.1            tcp dpt:80 source IP range 10.[1-9].10.11-10.[1-9].10.22 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 on VLAN 20 using TCP port 80 \*/'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].20.1            10.3.10.21           tcp dpt:445 /\* User Rule: Only allow the .1 on VLAN 20 to hit port 445 of the .21 on VLAN 10 using TCP \*/'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].99.0/24         10.3.10.0/24         /\* User Rule: Allow kali to all windows \*/'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.3.99.0/24         tcp dpt:8080 /\* User Rule: Only allow windows to kali on 8080 \*/'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.3.99.0/24         tcp dpt:80 /\* User Rule: Only allow windows to kali on 80 \*/'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.3.99.0/24         tcp dpt:443 /\* User Rule: Only allow windows to kali on 443 \*/'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     all  --  \*      \*       10.[1-9].0.0/16          10.3.0.0/16          /\* User Default: Inter-VLAN Rule \*/ reject-with icmp-port-unreachable'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.3.0.0/16          /\* User Default: External Rule \*/'
 
 
 ##########
