@@ -90,7 +90,7 @@
     api_host: "{{ api_host }}"
     vmid: "{{ vm_id }}"
     interface: net0
-    bridge: "vmbr{{ vmbr_number }}"
+    bridge: "{{ 'vmbr' + (vmbr_number | string) if vmbr_number is defined else (bridge_interface | default('ludus')) }}"
     tag: "{{ vlan | default(1) }}"
   when: clone_vm is changed
   register: network_change

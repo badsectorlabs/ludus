@@ -92,7 +92,7 @@
         state: present
       register: interfaces_status
 
-    - name: Enable new vmbr interface
+    - name: Enable new ludus NAT interface
       ansible.builtin.shell: ADDRFAM=inet ifup {{ ludus_nat_interface }}
       when: interfaces_status is changed
 

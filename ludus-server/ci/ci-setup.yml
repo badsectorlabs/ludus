@@ -378,7 +378,7 @@
           roles: ["DatastoreUser"]
           users:
             - "gitlab-runner@pam"
-        - path: "/sdn/zones/localnetwork/vmbr1"
+        - path: "/sdn/zones/localnetwork/ludusci"
           roles: ["PVESDNUser"]
           users:
             - "gitlab-runner@pam"
