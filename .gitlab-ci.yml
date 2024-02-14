@@ -1251,7 +1251,7 @@ test-everything:
     # Power cycle the range if this is a retry
     - |
       if [[ $(ludus range list --json  | jq '.VMs[] | select(.name == "CIU-redirector") | .name' | wc -l) -eq 1 ]]; then
-        ludus range power off -n all
+        ludus power off -n all
         timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == false)") == "true" ]]; do sleep 5; done'
         ludus power on -n all
         timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true" ]]; do sleep 5; done'
