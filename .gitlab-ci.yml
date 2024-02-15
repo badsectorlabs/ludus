@@ -36,7 +36,7 @@ stages:
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key
 .common-setup: &common-setup
   # Sync time in the event this test is being run after a snapshot rollback
-  - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -a makestep
+  - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
   - cd binaries
   # Update the server to make sure we are running the latest version if a packer or ansible build is not running
