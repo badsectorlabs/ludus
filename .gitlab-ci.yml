@@ -1248,6 +1248,12 @@ test-everything:
     when: script_failure
   script:
     - *ci-setup-user
+    # Delete the range to start fresh the first time the job is run
+    - |
+      if [[ $(ludus range list --json  | jq '.VMs[] | select(.name == "CIU-redirector") | .name' | wc -l) -eq 0 ]]; then
+        ludus range rm --no-prompt
+        timeout 180 bash -c 'until [[ $(ludus range list --json | jq ".numberOfVMs") == 0 ]]; do sleep 5; done'
+      fi
     # Power cycle the range if this is a retry
     - |
       if [[ $(ludus range list --json  | jq '.VMs[] | select(.name == "CIU-redirector") | .name' | wc -l) -eq 1 ]]; then

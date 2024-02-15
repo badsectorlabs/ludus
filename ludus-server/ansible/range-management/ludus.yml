@@ -254,7 +254,11 @@
         dc_vm_name: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
     - name: Set primary DC IP fact
       ansible.builtin.set_fact:
-        dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"
+        dc_ip: "{{ hostvars[dc_vm_name].ansible_host | default('FAIL') }}"
+    - name: Check that we have a primary DC IP
+      ansible.builtin.fail:
+        msg: "The primary DC does not have an ansible_host value - it is likely unreachable. Reboot the primary DC ({{ dc_vm_name }}) and try again."
+      when: dc_ip == "FAIL"
     - name: Congiure Windows VMs (general)
       include_tasks: tasks/windows/configure-windows.yml
     - name: Configure automatic login for Windows
