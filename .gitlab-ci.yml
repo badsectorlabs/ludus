@@ -37,6 +37,7 @@ stages:
 .common-setup: &common-setup
   # Sync time in the event this test is being run after a snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -a makestep
+  - date
   - cd binaries
   # Update the server to make sure we are running the latest version if a packer or ansible build is not running
   - pgrep -f 'ansible|packer' || sudo ./ludus-server --update
