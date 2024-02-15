@@ -47,6 +47,11 @@
     # "The dependency service or group failed to start.\"\r\n", "reboot_required": true}
     - name: Reboot the Additional DC
       win_reboot:
+    - name: Disable password policy
+      community.windows.win_security_policy:
+        section: System Access
+        key: PasswordComplexity
+        value: 0
     - name: Promote this server to Additional DC
       win_domain_controller:
         dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
