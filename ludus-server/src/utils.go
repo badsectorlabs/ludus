@@ -236,8 +236,8 @@ func updateUsersRangeVMData(c *gin.Context) error {
 	for vmCounter := range vms {
 		vm := vms[vmCounter].(map[string]interface{})
 		// Skip shared templates
-		if vm["pool"] == nil {
-			continue // A vm not in a pool will cause the string conversion to panic
+		if vm["pool"] == nil || vm["name"] == nil || vm["template"] == nil {
+			continue // A vm with these values as nil will cause the conversions to panic
 		}
 		if vm["pool"].(string) != userID ||
 			strings.HasSuffix(vm["name"].(string), "-template") ||
