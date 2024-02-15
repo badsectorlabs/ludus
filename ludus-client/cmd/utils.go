@@ -162,13 +162,30 @@ func findFiles(rootDir, pattern1, pattern2 string) ([]string, error) {
 	return files, err
 }
 
+func checkErrorForAnsibleTemporaryDirectory(errorString string) {
+	searchString := "Failed to create temporary directory. In some cases, you may have been able to authenticate and did not have permissions on the target directory."
+
+	if strings.Contains(errorString, searchString) {
+		regexPattern := regexp.MustCompile(`fatal: ([^:]+): UNREACHABLE!`)
+		match := regexPattern.FindStringSubmatch(errorString)
+		if len(match) > 1 {
+			// The first element (match[0]) is the entire match,
+			// and the second element (match[1]) is the first parenthesized submatch,
+			// which in this case, is the VM name.
+			logger.Logger.Errorf("%s may be unreachable or powered off! Power it on or reboot it and try the command again.\n", match[1])
+		} else {
+			logger.Logger.Error("The VM may be unreachable or powered off. Power it on or reboot it and try the command again.")
+		}
+	}
+}
+
 func formatAndPrintError(errorLine string, errorCount int) {
 	formattedLine := strings.ReplaceAll(errorLine, "\\r\\n", "\n")
 	formattedLine = strings.ReplaceAll(formattedLine, "\\n", "\n")
 	fmt.Printf("\n******************************************** ERROR %d ********************************************\n", errorCount)
 	fmt.Println(formattedLine)
 	fmt.Println("*************************************************************************************************")
-
+	checkErrorForAnsibleTemporaryDirectory(errorLine)
 }
 
 func printFatalErrorsFromString(input string) {
