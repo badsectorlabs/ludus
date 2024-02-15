@@ -45,15 +45,6 @@ local:~$ ludus templates logs -f
 ...
 ```
 
-:::danger[Kali GRUB issue]
-
-As of 2024-02-08, Kali's dpkg package is broken and will cause an error building the template.
-
-Follow [these steps](../Troubleshooting/kali) to fix the error and allow the template to complete successfully.
-
-:::
-
-
 :::info
 
 Building templates will take a while (up to a few hours depending on your internet and hardware speed).

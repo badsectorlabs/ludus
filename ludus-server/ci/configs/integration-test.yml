@@ -73,7 +73,7 @@ ludus:
     vlan: 99
     ip_last_octet: 1
     ram_gb: 6
-    cpus: 4
+    cpus: 2
     linux: true
     testing:
       snapshot: false
