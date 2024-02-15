@@ -153,4 +153,4 @@ defaults:
   ad_domain_admin_password: password123
   ad_domain_user: john-doe
   ad_domain_user_password: password123
-  ad_domain_safe_mode_password: password123
+  ad_domain_safe_mode_password: P@ssword123
