@@ -66,7 +66,7 @@ func getInstallStep(existingProxmox bool) {
 			if existingProxmox {
 				log.Printf("Using the following config:\n%s\n", configStr)
 				log.Print(`
-    ~~~ You are installing Ludus on a an existing Proxmox 8 host - here be dragons ~~~
+    ~~~ You are installing Ludus on an existing Proxmox 8 host - here be dragons ~~~
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!! Ludus will install: ansible, packer, dnsmasq, sshpass, curl, jq, iptables-persistent !!!
 !!!                     gpg-agent, dbus, dbus-user-session, and vim                      !!!

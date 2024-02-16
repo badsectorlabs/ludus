@@ -53,6 +53,7 @@ func automatedConfigGenerator() {
 				f.WriteString("proxmox_vm_storage_format: qcow2\n")
 				f.WriteString("proxmox_iso_storage_pool: local\n")
 				f.WriteString("ludus_nat_interface: ludus\n")
+				return
 			}
 		}
 	}
