@@ -299,6 +299,7 @@ build all:
     - | # If we have docs from the previous stage, embed them, otherwise build without docs
       if [[ -d ../built-docs ]]; then
         mv ../built-docs ./src/docs
+        rm -f ./src/docs/static/video/*
         go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -tags=embeddocs -o ../binaries/ludus-server
       else
         go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -o ../binaries/ludus-server
