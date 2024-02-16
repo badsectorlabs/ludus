@@ -26,10 +26,10 @@ Ludus is an automation overlay on top of Proxmox, not a 100% replacement for man
 
 ## Getting Started
 
-Ludus is *only* compatible with virtualization capable Debian 12. No other environments or hosting solutions will be supported.
+Ludus is *only* compatible with virtualization capable Debian 12 or Proxmox 8. No other environments or hosting solutions will be supported.
 
 ### Requirements
-- A host capable of virtualization running Debian 12 (e.g. "bare metal", Azure Dv3 and Ev3, AWS *.metal, [supported Google Cloud VMs](https://cloud.google.com/compute/docs/instances/nested-virtualization/managing-constraint))
+- A host capable of virtualization running Debian 12 or Proxmox 8 (e.g. "bare metal", Azure Dv3 and Ev3, AWS *.metal, [supported Google Cloud VMs](https://cloud.google.com/compute/docs/instances/nested-virtualization/managing-constraint))
 - at least 32GB RAM per user/range that will be deployed
 - at least 200GB storage for initial templates and at least 50GB per user/range that will be deployed (large, fast NVMe drives recommended)
 - no more than 150 users per Ludus host

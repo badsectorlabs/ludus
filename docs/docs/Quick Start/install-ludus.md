@@ -12,7 +12,7 @@ Ludus will completely take over the machine! It should not be used for other tas
 
 Ludus can **only** be installed on a host that meets the following requirements:
 
-- Debian 12
+- Debian 12 or Proxmox 8
 - Supports virtualization - vmx or svm in /proc/cpuinfo (nested virtualization is supported, but has a performance penalty)
 - Has at least 32 GB of RAM
 - Has at least 200 GB of HDD space

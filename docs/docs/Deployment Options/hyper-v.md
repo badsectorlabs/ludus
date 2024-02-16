@@ -11,3 +11,7 @@ title: Hyper-V
 2. Before booting the VM for the first time, disable `Checkpoints` in VM Settings.
 ![Hyper-V Disable Checkpoints](/img/deployment/hyper-v-disable-checkpoints.png)
 3. Boot the VM and install Debian 12.
+
+## Install
+
+1. Follow [Install Ludus](../Quick%20Start/install-ludus)
