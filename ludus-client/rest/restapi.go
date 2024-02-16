@@ -33,7 +33,7 @@ func InitClient(url string, apiKey string, proxy string, verify bool, debug bool
 		user = "[No API key loaded]"
 	}
 
-	client.SetHeader("User-Agent", fmt.Sprintf("ludus-client/v%s ", versionString))
+	client.SetHeader("User-Agent", fmt.Sprintf("ludus-client/%s ", versionString))
 
 	if apiKey != "" {
 		client.SetHeader("X-API-KEY", apiKey)
