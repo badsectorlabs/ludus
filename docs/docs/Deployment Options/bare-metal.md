@@ -1,3 +1,7 @@
+---
+title: Bare Metal (recommended)
+---
+
 # Bare Metal (recommended)
 
 Ludus works best on a "bare metal" machine. This can be a rented cloud "bare metal" server or a local machine dedicated to Ludus.

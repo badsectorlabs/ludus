@@ -10,8 +10,39 @@ It uses the Ludus REST API to perform actions for the user, and has helpful wrap
 
 The Ludus CLI uses the pattern `ludus COMMAND ARG --FLAG`. Each command has its own help that can be accessed with `ludus [command] --help`.
 
+## Configuration
+
 All global flags can also be set with environment variables in the format `LUDUS_FLAG` where FLAG is the flag long form string in all upper case.
 
+```
+local:~$ LUDUS_URL=https://192.168.1.103:8080
+local:~$ ludus version --verbose
+[DEBUG] 2024/02/09 15:38:31 ludus/cmd.initConfig:root.go:102 Using config file: /Users/user/.config/ludus/config.yml
+[DEBUG] 2024/02/09 15:38:31 ludus/cmd.initConfig:root.go:106 --- Configuration from cli and read from file ---
+[DEBUG] 2024/02/09 15:38:31 ludus/cmd.initConfig:root.go:108 	url = https://10.98.108.2:8080
+[DEBUG] 2024/02/09 15:38:31 ludus/cmd.initConfig:root.go:108 	proxy =
+[DEBUG] 2024/02/09 15:38:31 ludus/cmd.initConfig:root.go:108 	verify = %!s(bool=false)
+[DEBUG] 2024/02/09 15:38:31 ludus/cmd.initConfig:root.go:108 	user =
+[DEBUG] 2024/02/09 15:38:31 ludus/cmd.initConfig:root.go:108 	verbose = %!s(bool=true)
+[DEBUG] 2024/02/09 15:38:31 ludus/cmd.initConfig:root.go:108 	json = %!s(bool=false)
+[DEBUG] 2024/02/09 15:38:31 ludus/cmd.initConfig:root.go:123 ---
+```
+
+The ludus CLI looks for a configuration file at `$HOME/.config/ludus/config.yml`, and if found, uses its values during execution.
+The configuration file values are the lowest precedence, followed by ENV variables, and finally command line flags.
+
+An example configuration file is shown below. You only need to set the values you wish to change.
+The API key cannot be set in the config file and must be set in the system keyring or environment variable `LUDUS_API_KEY`.
+
+```yaml title="config.yml"
+url: https://192.168.1.103:8080
+json: false
+verify: false
+proxy: http://127.0.0.0.1:8000
+user: JD
+```
+
+## Ludus
 
 ```
 Usage:

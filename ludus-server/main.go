@@ -24,7 +24,8 @@ var interactiveInstall bool
 var autoGenerateConfig bool = true
 
 var GitCommitHash string
-var LudusVersion string = "1.0.0+" + GitCommitHash
+var VersionString string
+var LudusVersion string = VersionString + "+" + GitCommitHash
 
 // Embed the ansible directory into the binary for simple distribution
 //
@@ -38,7 +39,7 @@ var embeddedPackerDir embed.FS
 var embeddedCIDir embed.FS
 
 func serve() {
-	log.Printf("Starting Ludus API server v%s\n", LudusVersion)
+	log.Printf("Starting Ludus API server %s\n", LudusVersion)
 	router := ludusapi.NewRouter(LudusVersion)
 	// If we're running as a non-root user, bind to the wireguard IP, else bind to localhost
 	if os.Geteuid() != 0 {
@@ -74,17 +75,20 @@ func main() {
 		serve()
 	}
 
-	log.Printf("Ludus server v%s", LudusVersion)
+	log.Printf("Ludus server %s", LudusVersion)
 
 	// The install hasn't finished, so make sure we're root, then run through the install
 	checkRoot()
 
-	getInstallStep()
+	// If this is a proxmox 8 machine, print some warnings and set the bool
+	existingProxmox := checkForProxmox8()
+
+	getInstallStep(existingProxmox)
 	// Use pip to install ansible because Debian's ansible apt package is 4 versions out of date (2.10, current is 2.14)
 	installAnsibleWithPip()
 	// Make sure we have the ansible galaxy package required for Ludus
 	installAnsibleRequirements()
 	// Run the install playbooks with ansible now that it is installed
-	runInstallPlaybook()
+	runInstallPlaybook(existingProxmox)
 
 }

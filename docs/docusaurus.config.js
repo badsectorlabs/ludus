@@ -72,6 +72,19 @@ const config = {
         disableSwitch: false,
         respectPrefersColorScheme: false,
       },
+      algolia: {
+        // The application ID provided by Algolia
+        appId: 'N1Z8B4158Z',
+        // Public API key: it is safe to commit it
+        apiKey: 'ec0d92a3a2e50ebd46a983c4a52486f0',
+        indexName: 'ludus',
+        contextualSearch: false,
+        searchParameters: {
+            facetFilters: []
+        },
+        // Optional: path for search page that enabled by default (`false` to disable it)
+        searchPagePath: 'search',
+      },
       navbar: {
         title: 'Ludus',
         logo: {

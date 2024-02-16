@@ -68,6 +68,12 @@ The available tags are listed below:
 - `[ansible tests]` - runs tests to determine if ansible features function properly
 - `[user tests]` - runs tests to determine if the functions related to user management function properly
 - `[template tests]` - runs tests related to adding, building, and removing custom templates
+- `[start-at templates]` - run all test starting at the template builds
+- `[start-at range-admin]` - run all test starting at the deployment of the admin user range
+- `[start-at post-deploy-admin]` - run all test starting after the admin range has deployed
+- `[start-at range-user]` - run all test starting at the deployment of the standard user range
+- `[start-at post-deploy-user]` - run all test starting after the deployment of the standard user range
+- `[start-at integration]` - just run the final integration test
 
 ## Releases
 

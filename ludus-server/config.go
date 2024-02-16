@@ -23,6 +23,8 @@ func automatedConfigGenerator() {
 	var nodeName string
 	if len(os.Args) > 2 {
 		nodeName = os.Args[2]
+	} else if fileExists("/usr/bin/pveversion") { // On proxmox installs, the node name is the hostname
+		nodeName = strings.TrimSpace(Run("hostname", false, false))
 	} else {
 		nodeName = "ludus"
 	}
@@ -50,6 +52,7 @@ func automatedConfigGenerator() {
 				f.WriteString("proxmox_vm_storage_pool: local\n")
 				f.WriteString("proxmox_vm_storage_format: qcow2\n")
 				f.WriteString("proxmox_iso_storage_pool: local\n")
+				f.WriteString("ludus_nat_interface: ludus\n")
 			}
 		}
 	}

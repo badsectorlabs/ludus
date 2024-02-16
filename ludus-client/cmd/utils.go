@@ -162,12 +162,40 @@ func findFiles(rootDir, pattern1, pattern2 string) ([]string, error) {
 	return files, err
 }
 
+func checkErrorForAnsibleTemporaryDirectory(errorString string) {
+	searchString := "Failed to create temporary directory. In some cases, you may have been able to authenticate and did not have permissions on the target directory."
+
+	if strings.Contains(errorString, searchString) {
+		regexPattern := regexp.MustCompile(`fatal: ([^:]+): UNREACHABLE!`)
+		match := regexPattern.FindStringSubmatch(errorString)
+		if len(match) > 1 {
+			// The first element (match[0]) is the entire match,
+			// and the second element (match[1]) is the first parenthesized submatch,
+			// which in this case, is the VM name.
+			logger.Logger.Errorf("%s may be unreachable or powered off! Power it on or reboot it and try the command again.\n", match[1])
+		} else {
+			logger.Logger.Error("The VM may be unreachable or powered off. Power it on or reboot it and try the command again.")
+		}
+	}
+}
+
+func formatAndPrintError(errorLine string, errorCount int) {
+	formattedLine := strings.ReplaceAll(errorLine, "\\r\\n", "\n")
+	formattedLine = strings.ReplaceAll(formattedLine, "\\n", "\n")
+	fmt.Printf("\n******************************************** ERROR %d ********************************************\n", errorCount)
+	fmt.Println(formattedLine)
+	fmt.Println("*************************************************************************************************")
+	checkErrorForAnsibleTemporaryDirectory(errorLine)
+}
+
 func printFatalErrorsFromString(input string) {
 	scanner := bufio.NewScanner(strings.NewReader(input))
-	fatalRegex := regexp.MustCompile(`^fatal:.*$|^failed:.*$`)
+	fatalRegex := regexp.MustCompile(`^fatal:.*$|^failed:.*$|^ERROR! .*$`)
 	ignoreRegex := regexp.MustCompile(`\.\.\.ignoring$`)
 	errorCount := 0
 
+	var threeLinesAgo string
+	var twoLinesAgo string
 	var previousLine string
 	for scanner.Scan() {
 		currentLine := scanner.Text()
@@ -180,25 +208,23 @@ func printFatalErrorsFromString(input string) {
 
 		if fatalRegex.MatchString(previousLine) {
 			// This means the previous line was a fatal line not followed by ...ignoring
-			formattedLine := strings.ReplaceAll(previousLine, "\\r\\n", "\n")
-			formattedLine = strings.ReplaceAll(formattedLine, "\\n", "\n")
+			// Check if this is 'TASK [Promote this server to Additional DC 2]' which is known to fail without ...ignoring
+			if strings.Contains(previousLine, "Unhandled exception while executing module: Verification of prerequisites for Domain Controller promotion failed. Role change is in progress or this computer needs to be restarted") && strings.Contains(threeLinesAgo, "TASK [Promote this server to Additional DC 2]") {
+				continue
+			}
 			errorCount += 1
-			fmt.Printf("\n******************************************** ERROR %d ********************************************\n", errorCount)
-			fmt.Println(formattedLine)
-			fmt.Println("*************************************************************************************************")
+			formatAndPrintError(previousLine, errorCount)
 		}
 
-		// Update previousLine for the next iteration
+		// Update previous lines for the next iteration
+		threeLinesAgo = twoLinesAgo
+		twoLinesAgo = previousLine
 		previousLine = currentLine
 	}
 
 	// Check the last line in case the file ends with a fatal line
 	if fatalRegex.MatchString(previousLine) {
-		formattedLine := strings.ReplaceAll(previousLine, "\\r\\n", "\n")
-		formattedLine = strings.ReplaceAll(formattedLine, "\\n", "\n")
 		errorCount += 1
-		fmt.Printf("\n******************************************** ERROR %d ********************************************\n", errorCount)
-		fmt.Println(formattedLine)
-		fmt.Println("*************************************************************************************************")
+		formatAndPrintError(previousLine, errorCount)
 	}
 }

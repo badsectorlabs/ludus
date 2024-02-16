@@ -124,6 +124,13 @@
         cmd: |
           ANSIBLE_HOME={{ ludus_install_path }}/users/root/.ansible ansible-galaxy install https://github.com/lexxxel/ansible-role-proxmox/archive/feature/add_bookworm_and_debian_12_compatibility.tar.gz,pr-230,lae.proxmox --force
 
+    - name: Install chrony # This must come after the proxmox install or chrony will require a reconfigure
+      ansible.builtin.apt:
+        name:
+          - chrony # Proxmox 7 and 8 install this when using the proxmox ISO, but not when "upgrading" from Debian
+        state: present
+        update_cache: true
+
     - name: Remove systemd service file for ludus install
       ansible.builtin.file:
         path: "/etc/systemd/system/ludus-install.service"

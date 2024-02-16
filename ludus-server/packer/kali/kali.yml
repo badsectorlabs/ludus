@@ -3,6 +3,13 @@
   hosts: all
   become_method: sudo
   tasks:
+    # See: https://bugs.kali.org/view.php?id=8628
+    # Should not be needed once 2024.1 drops
+    - name: Fix dpkg
+      become: true
+      ansible.builtin.shell: |
+        echo -e "#!/bin/bash\nexec true" > /sbin/start-stop-daemon && chmod +x /sbin/start-stop-daemon && DEBIAN_FRONTEND=noninteractive apt reinstall -y -qq dpkg
+
     - name: Install packages
       become: true
       ansible.builtin.apt:
@@ -19,8 +26,14 @@
           - kali-defaults
           - kali-root-login
           - desktop-base
+          - wget
+          - kali-linux-core
+          - kali-desktop-xfce
           # - kali-linux-default # This takes forever (2+ hours) and really slows down template building
         state: present
+      register: result
+      retries: 2
+      until: result.failed == false
 
     - name: Installing kasm dependencies
       become: true
@@ -38,7 +51,7 @@
 
     - name: Download kasmvnc deb
       ansible.builtin.get_url:
-        url: https://github.com/kasmtech/KasmVNC/releases/download/v1.2.0/kasmvncserver_kali-rolling_1.2.0_amd64.deb
+        url: https://github.com/kasmtech/KasmVNC/releases/download/v1.3.0/kasmvncserver_kali-rolling_1.3.0_amd64.deb
         dest: /tmp/kasmvncserver_kali-rolling.deb
         mode: '0700'
 

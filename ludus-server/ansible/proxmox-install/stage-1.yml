@@ -145,13 +145,13 @@
               ████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 20%
 
     - name: Ensure /etc/ansible directory exists
-      file:
+      ansible.builtin.file:
         path: /etc/ansible
         state: directory
         mode: '0755'
 
     - name: Set configuration in /etc/ansible/ansible.cfg
-      copy:
+      ansible.builtin.copy:
         dest: /etc/ansible/ansible.cfg
         content: |
           [defaults]

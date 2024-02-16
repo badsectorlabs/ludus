@@ -76,6 +76,9 @@ variable "iso_storage_pool" {
 variable "ansible_home" {
   type =  string
 }
+variable "ludus_nat_interface" {
+  type = string
+}
 ####
 
 locals {
@@ -109,7 +112,7 @@ source "proxmox-iso" "rocky85" {
   iso_storage_pool         = "${var.iso_storage_pool}"
   memory                   = "${var.vm_memory}"
   network_adapters {
-    bridge = "vmbr0"
+    bridge = "${var.ludus_nat_interface}"
     model  = "virtio"
   }
   node                 = "${var.proxmox_host}"

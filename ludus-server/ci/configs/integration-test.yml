@@ -1,0 +1,156 @@
+ludus:
+  - vm_name: "{{ range_id }}-ad-dc-win2022-server-x64-1"
+    hostname: "{{ range_id }}-DC01-2022"
+    template: win2022-server-x64-template
+    vlan: 10
+    ip_last_octet: 11
+    ram_gb: 6
+    cpus: 4
+    windows:
+      sysprep: true
+    domain:
+      fqdn: ludus.domain
+      role: primary-dc
+
+  - vm_name: "{{ range_id }}-ad-dc-win2022-server-x64-2"
+    hostname: "{{ range_id }}-DC02-2022"
+    template: win2022-server-x64-template
+    vlan: 10
+    ip_last_octet: 12
+    ram_gb: 6
+    cpus: 4
+    windows:
+      sysprep: true
+    domain:
+      fqdn: ludus.domain
+      role: alt-dc
+
+  - vm_name: "{{ range_id }}-ad-win11-22h2-enterprise-x64-1"
+    hostname: "{{ range_id }}-WIN11-22H2-1"
+    template: win11-22h2-x64-enterprise-template
+    vlan: 10
+    ip_last_octet: 21
+    ram_gb: 6
+    cpus: 4
+    windows:
+      chocolatey_packages:
+        - vscodium
+      install_additional_tools: true
+      # visual_studio_version: 2019 # This takes so long - its 50+GB...
+      office_version: 2019
+      office_arch: 64bit
+    domain:
+      fqdn: ludus.domain
+      role: member
+
+  - vm_name: "{{ range_id }}-redirector"
+    hostname: "{{ range_id }}-redirector"
+    template: debian-12-x64-server-template
+    vlan: 20
+    ip_last_octet: 1
+    ram_gb: 4
+    cpus: 2
+    linux: true
+    testing:
+      snapshot: false
+      block_internet: false
+    roles:
+      - geerlingguy.docker
+    role_vars:
+      docker_edition: ce
+      docker_users:
+        - localuser
+    ansible_groups:
+      - customgroup1
+      - customgroup2
+    dns_rewrites:
+      - example.com
+      - '*.example.com'
+
+  - vm_name: "{{ range_id }}-kali"
+    hostname: "{{ range_id }}-kali"
+    template: kali-x64-desktop-template
+    vlan: 99
+    ip_last_octet: 1
+    ram_gb: 6
+    cpus: 2
+    linux: true
+    testing:
+      snapshot: false
+      block_internet: false
+
+network:
+  inter_vlan_default: REJECT
+  rules:
+    - name: Only allow windows to kali on 443
+      vlan_src: 10
+      vlan_dst: 99
+      protocol: tcp
+      ports: 443
+      action: ACCEPT
+    - name: Only allow windows to kali on 80
+      vlan_src: 10
+      vlan_dst: 99
+      protocol: tcp
+      ports: 80
+      action: ACCEPT
+    - name: Only allow windows to kali on 8080
+      vlan_src: 10
+      vlan_dst: 99
+      protocol: tcp
+      ports: 8080
+      action: ACCEPT
+    - name: Allow kali to all windows
+      vlan_src: 99
+      vlan_dst: 10
+      protocol: all
+      ports: all
+      action: ACCEPT
+    - name: Only allow the .1 on VLAN 20 to hit port 445 of the .21 on VLAN 10 using TCP
+      vlan_src: 20
+      ip_last_octet_src: 1
+      vlan_dst: 10
+      ip_last_octet_dst: 21
+      protocol: tcp
+      ports: 445
+      action: ACCEPT
+    - name: Allow the .11-.22 on VLAN 10 to access the .1 on VLAN 20 using TCP port 80
+      vlan_src: 10
+      ip_last_octet_src: 11-22
+      vlan_dst: 20
+      ip_last_octet_dst: 1
+      protocol: tcp
+      ports: 80
+      action: ACCEPT
+    - name: Allow the .11-.22 on VLAN 10 to access the .1 and .2 on VLAN 20 using TCP port 443
+      vlan_src: 10
+      ip_last_octet_src: 11-22
+      vlan_dst: 20
+      ip_last_octet_dst: 1-2
+      protocol: tcp
+      ports: 443
+      action: ACCEPT
+    - name: Allow TCP ports 1 to 80 from VLAN 10 to VLAN 20
+      vlan_src: 10
+      vlan_dst: 20
+      protocol: tcp
+      ports: "1:80"
+      action: ACCEPT
+    - name: Block SSH from VLAN 10 to VLAN 20
+      vlan_src: 10
+      vlan_dst: 20
+      protocol: tcp
+      ports: 22
+      action: REJECT
+
+defaults:
+  router_vm_name: "{{ range_id }}-router-debian11-x64"
+  snapshot_with_RAM: true
+  stale_hours: 1
+  ad_domain_functional_level: WinThreshold
+  ad_forest_functional_level: WinThreshold
+  ad_domain_admin: superadmin
+  ad_domain_admin_password: password123
+  ad_domain_user: john-doe
+  ad_domain_user_password: password123
+  ad_domain_safe_mode_password: P@ssword123

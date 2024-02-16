@@ -1,5 +1,5 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema",
+    "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "Ludus",
     "type": "object",
     "additionalProperties": false,
@@ -40,10 +40,12 @@
                 },
                 "ad_domain_functional_level": {
                     "type": "string",
+                    "enum": [ "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold" ],
                     "description": "The functional level of each Windows domain created by Ludus"
                 },
                 "ad_forest_functional_level": {
                     "type": "string",
+                    "enum": [ "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold" ],
                     "description": "The functional level of each Windows forest created by Ludus"
                 },
                 "ad_domain_admin": {
@@ -88,12 +90,12 @@
             "properties": {
                 "inter_vlan_default": {
                     "type": "string",
-                    "pattern": "^(ACCEPT|REJECT|DROP)$",
+                    "enum": [ "ACCEPT", "REJECT", "DROP" ],
                     "description": "The default rule to apply to traffic between VLANs. Default: ACCEPT"
                 },
                 "external_default": {
                     "type": "string",
-                    "pattern": "^(ACCEPT|REJECT|DROP)$",
+                    "enum": [ "ACCEPT", "REJECT", "DROP" ],
                     "description": "The default rule to apply to traffic leaving the range out to the internet. Default: ACCEPT"
                 },
                 "rules": {
@@ -123,10 +125,18 @@
                     "description": "Traffic source VLAN"
                 },
                 "ip_last_octet_src": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 255,
-                    "description": "The single machine from the vlan_src to apply the rule to"
+                    "anyOf": [
+                        {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 255
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^[0-9]{1,3}-[0-9]{1,3}$"
+                        }
+                    ],
+                    "description": "The single machine or range of machines from the vlan_src to apply the rule to"
                 },
                 "vlan_dst": {
                     "anyOf": [
@@ -143,14 +153,22 @@
                     "description": "Traffic destination VLAN"
                 },
                 "ip_last_octet_dst": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 255,
-                    "description": "The single machine from the vlan_dst to apply the rule to"
+                    "anyOf": [
+                        {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 255
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^[0-9]{1,3}-[0-9]{1,3}$"
+                        }
+                    ],
+                    "description": "The single machine or range of machines from the vlan_dst to apply the rule to"
                 },                
                 "protocol": {
                     "type": "string",
-                    "pattern": "^!?(tcp|udp|udplite|icmp|ipv6-icmp|icmpv6|esp|ah|sctp|all)$",
+                    "enum": [ "tcp", "udp", "udplite", "icmp", "ipv6-icmp", "esp", "ah", "sctp", "all" ],
                     "description": "The protocol the rule acts on"
                 },
                 "ports": {
@@ -159,7 +177,7 @@
                 },
                 "action": {
                     "type": "string",
-                    "pattern": "^(ACCEPT|REJECT|DROP)$",
+                    "enum": [ "ACCEPT", "REJECT", "DROP" ],
                     "description": "The action to apply to matching packets"
                 }
             },
@@ -284,7 +302,7 @@
                 },
                 "role": {
                     "type": "string",
-                    "pattern": "^(primary-dc|alt-dc|member)$",
+                    "enum": [ "primary-dc", "alt-dc", "member" ],
                     "description": "The role of the VM in the domain"
                 }
             },
@@ -340,17 +358,17 @@
                 },
                 "office_version": {
                     "type": "integer",
-                    "pattern": "^(2013|2016|2019|2021)$",
-                    "description": "The Microsoft office version you would like installed on this VM (2013|2016|2019|2021). Default: undefined (don't install office)"
+                    "enum": [ 2013, 2016, 2019, 2021 ],
+                    "description": "The Microsoft office version you would like installed on this VM. Default: undefined (don't install office)"
                 },
                 "office_arch": {
                     "type": "string",
-                    "pattern": "^(64bit|32bit)$",
-                    "description": "The architecture for the Microsoft office install (64bit|32bit). Default: undefined (don't install office)"
+                    "enum": [ "64bit", "32bit" ],
+                    "description": "The architecture for the Microsoft office install. Default: undefined (don't install office)"
                 },
                 "visual_studio_version": {
                     "type": "integer",
-                    "pattern": "^(2017|2019|2022)$",
+                    "enum": [ 2017, 2019, 2022 ],
                     "description": "# The version of Microsoft Visual Studio to install (community edition). Note: 2022 cannot target < .NET 4.5. Default: undefined (don't install visual studio)"
                 }
             },

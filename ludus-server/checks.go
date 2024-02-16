@@ -82,6 +82,23 @@ func checkRoot() {
 	}
 }
 
+func checkForProxmox8() bool {
+	if fileExists("/usr/bin/pveversion") && !fileExists(fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath)) {
+		pveVersion := Run("pveversion", false, false)
+		if strings.Contains(pveVersion, "pve-manager/8") {
+			return true
+		} else if strings.Contains(pveVersion, "pve-manager/7") {
+			log.Fatal(`This is a Proxmox host but not proxmox 8.
+Upgrade to Proxmox 8 before using Ludus.
+See: https://pve.proxmox.com/wiki/Upgrade_from_7_to_8
+`)
+		} else {
+			log.Fatal("This is a Proxmox host and is not a supported version. Only Proxmox 8 is supported by Ludus.")
+		}
+	}
+	return false
+}
+
 // check /etc/os-release for Debian 11, throw a fatal error /etc/os-release does not exist or does not contain the Debian 12 string
 func checkDebian12() {
 	if fileExists("/etc/os-release") {

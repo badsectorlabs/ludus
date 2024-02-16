@@ -15,38 +15,38 @@
   register: vlan_mac_command
 
 - name: Show vlan_mac_command
-  debug:
+  ansible.builtin.debug:
     msg: "{{ vlan_mac_command.stdout }}"
 
 - name: Set the vlan_mac variable
-  set_fact:
+  ansible.builtin.set_fact:
     vlan_mac: "{{ vlan_mac_command.stdout }}"
   when: vlan_mac_command.stdout | length != 0
 
 - name: Show VLAN MAC
-  debug:
+  ansible.builtin.debug:
     msg: "{{ vlan_mac }}"
   when: vlan_mac_command.stdout | length != 0
 
 - name: Get interface for MAC of vlan interface
-  shell: |
+  ansible.builtin.shell: |
    curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
   register: interface_name_command
   when: vlan_mac_command.stdout | length != 0
 
 - name: Set the interface_name_command variable
-  set_fact:
+  ansible.builtin.set_fact:
     interface_name: "{{ interface_name_command.stdout }}"
   when: vlan_mac_command.stdout | length != 0
 
 - name: Get the number for the next network interface (starts at 0)
-  shell: |
+  ansible.builtin.shell: |
     curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/config" | jq '.[] | . | keys[] | select(startswith("net"))' | wc -l
   register: next_interface_command
   when: interface_name is undefined or vlan_mac_command.stdout | length == 0
 
 - name: Set the rotuer_net_interface variable
-  set_fact:
+  ansible.builtin.set_fact:
     router_net_interface: "{{ next_interface_command.stdout }}"
   when: interface_name is undefined or vlan_mac_command.stdout | length == 0
 
@@ -70,18 +70,18 @@
   when: network_add is changed
 
 - name: Set the vlan_mac variable
-  set_fact:
+  ansible.builtin.set_fact:
     vlan_mac: "{{ vlan_mac_command.stdout }}"
   when: network_add is changed
 
 - name: Get interface for MAC of vlan interface
-  shell: |
+  ansible.builtin.shell: |
    curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
   register: interface_name_command
   when: network_add is changed
 
 - name: Set the interface_name_command variable
-  set_fact:
+  ansible.builtin.set_fact:
     interface_name: "{{ interface_name_command.stdout }}"
   when: network_add is changed
 
@@ -93,12 +93,12 @@
   when: network_add is changed
 
 - name: Set the router_external_interface variable
-  set_fact:
+  ansible.builtin.set_fact:
     router_external_interface: "{{ wan_interface_command.stdout }}"
   when: network_add is changed
 
 - name: Set up the IP configuration for the new interface
-  blockinfile:
+  ansible.builtin.blockinfile:
     path: /etc/network/interfaces
     marker: "# {mark} ANSIBLE MANAGED BLOCK FOR {{ hostvars['localhost']['interface_name'] }}"
     block: |
@@ -113,13 +113,13 @@
   when: network_add is changed
 
 - name: Enable new interface
-  shell: ifup {{ hostvars['localhost']['interface_name'] }}
+  ansible.builtin.shell: ifup {{ hostvars['localhost']['interface_name'] }}
   delegate_to: "{{ defaults.router_vm_name }}"
   become: true
   when: interfaces_status is changed
 
 - name: Configure dnsmasq (part 1) - setup base config
-  template:
+  ansible.builtin.template:
     src: router-dnsmasq.conf.j2
     dest: /etc/dnsmasq.d/dnsmasq-{{ hostvars['localhost']['interface_name'] }}.conf
   delegate_to: "{{ defaults.router_vm_name }}"
