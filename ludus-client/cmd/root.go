@@ -36,7 +36,7 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "ludus",
 	Short: "An application to control Ludus",
-	Long: `Ludus client v` + LudusVersion + `
+	Long: `Ludus client ` + LudusVersion + `
 
 Ludus is a CLI application to control a Ludus server
 This application can manage users as well as ranges.

@@ -53,7 +53,7 @@ Move the updated binary to a different location and run it with --update to comp
 	// Start ludus and ludus-admin
 	Run("systemctl start ludus", false, true)
 	Run("systemctl start ludus-admin", false, true)
-	fmt.Printf("Ludus updated to v%s\n", LudusVersion)
+	fmt.Printf("Ludus updated to %s\n", LudusVersion)
 }
 
 // recursively extract an embed.FS directory to the ludus install path, skipping the file "config.yml.example"

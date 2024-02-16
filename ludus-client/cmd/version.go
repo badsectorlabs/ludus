@@ -20,7 +20,7 @@ The version includes the SemVer version and the first
 this binary was built from.
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
-		logger.Logger.Info(fmt.Sprintf("Ludus client v%s", LudusVersion))
+		logger.Logger.Info(fmt.Sprintf("Ludus client %s", LudusVersion))
 
 		if verbose {
 			info, ok := debug.ReadBuildInfo()
