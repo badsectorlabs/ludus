@@ -1332,7 +1332,7 @@ upload:
   stage: upload
   tags:
     - ludus-proxmox-runner
-  dependencies:
+  needs:
     - build all
   variables:
     LUDUS_BUILD_TYPE: any-built
@@ -1354,8 +1354,9 @@ release:
   stage: release
   tags:
     - ludus-proxmox-runner
-  dependencies:
+  needs:
     - build all
+    - upload
   variables:
     LUDUS_BUILD_TYPE: any-built
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
