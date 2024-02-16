@@ -238,6 +238,7 @@ pages:
   - "sed -i \"s|baseUrl: '/ludus/'|baseUrl: '/'|\" docusaurus.config.js"
   - yarn install
   - yarn build
+  - rm -f ./build/video/*
   - mv ./build ../public
   artifacts:
     paths:
@@ -264,6 +265,7 @@ documentation:
   - cd docs
   - yarn install
   - yarn build
+  - rm -f ./build/video/*
   - mv ./build ../built-docs
   artifacts:
     paths:
@@ -299,7 +301,6 @@ build all:
     - | # If we have docs from the previous stage, embed them, otherwise build without docs
       if [[ -d ../built-docs ]]; then
         mv ../built-docs ./src/docs
-        rm -f ./src/docs/static/video/*
         go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -tags=embeddocs -o ../binaries/ludus-server
       else
         go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -o ../binaries/ludus-server
@@ -697,7 +698,7 @@ post-deploy testing-as-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/**/*
+      - ludus-client/cmd/testing.go
       - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
@@ -1033,7 +1034,7 @@ post-deploy testing-as-user:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/**/*
+      - ludus-client/cmd/testing.go
       - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
