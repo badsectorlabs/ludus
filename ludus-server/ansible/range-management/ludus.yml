@@ -497,6 +497,40 @@
       loop_control:
         loop_var: role_item
 
+    # Set standard Ludus variables
+    - name: Set standard Ludus variables
+      ansible.builtin.set_fact:
+        ludus_dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+
+    - name: Set Ludus domain variables
+      ansible.builtin.set_fact:
+        ludus_domain_fqdn: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn | default('') }}"
+        ludus_domain_netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] | default('') }}"
+        ludus_domain_fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') | default('') }}"
+      when:
+        - (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain is defined
+
+    - name: Set ludus_dc_vm_name for the primary-dc with the same FQDN as this VM
+      ansible.builtin.set_fact:
+        ludus_dc_vm_name: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', ludus_domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
+      when:
+        - ludus_domain_fqdn is defined
+
+    - name: Set DC IP 
+      ansible.builtin.set_fact:
+        ludus_dc_ip: "{{ hostvars[ludus_dc_vm_name].ansible_host | default('') }}"
+      when:
+        - ludus_dc_vm_name is defined
+        - hostvars[ludus_dc_vm_name] is defined
+        - hostvars[ludus_dc_vm_name].ansible_host is defined
+
+    - name: Set DC Hostname
+      ansible.builtin.set_fact:
+        ludus_dc_hostname: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', ludus_domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].hostname }}"
+      when:
+        - ludus_domain_fqdn is defined
+    # End set standard Ludus variables
+
     - name: Include the user-defined role
       ansible.builtin.include_role:
         name: "{{ item }}"
@@ -533,7 +567,7 @@
       vars:
         template_vm_name: debian-11-x64-server-template
         vm_name: ADMIN-nexus-3-oss
-        vmbr_number: "0" # 192.0.2.0/24
+        bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - 192.0.2.0/24
         vm_groups: '"admin"'
         is_linux: true
         is_windows: false
@@ -552,7 +586,7 @@
     - name: Configure IP and Hostname
       include_tasks: tasks/proxmox/configure-ip-and-hostname.yml
       vars:
-        vmbr_number: "0"
+        bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - 192.0.2.0/24
         static_ip: "192.0.2.2"
         cidr_netmask: "24"
         default_gateway: "192.0.2.254"
