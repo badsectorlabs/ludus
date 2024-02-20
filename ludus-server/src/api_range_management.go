@@ -36,7 +36,7 @@ func DeployRange(c *gin.Context) {
 	}
 
 	// Make sure we aren't already in a "DEPLOYING" state
-	if usersRange.RangeState == "DEPLOYING" {
+	if usersRange.RangeState == "DEPLOYING" && !deployBody.Force {
 		c.JSON(http.StatusConflict, gin.H{"error": "The range has an active deployment running"})
 		return
 	}
