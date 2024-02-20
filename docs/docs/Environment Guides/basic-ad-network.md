@@ -1,3 +1,8 @@
+---
+sidebar_position: 1
+title: "Basic Active Directory Network"
+---
+
 # Basic Active Directory Network
 
 Ludus users are created with a basic Active Directory network as their configuration.
