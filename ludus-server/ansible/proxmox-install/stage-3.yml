@@ -6,6 +6,13 @@
         path: "{{ ludus_install_path }}/install/.stage-3-complete"
       register: stat_result
 
+    - name: Ludus install complete. Run ludus-install-status again to get the ROOT API key.
+      ansible.builtin.pause:
+        prompt: |
+          Ludus install complete. Run ludus-install-status again to get the ROOT API key.
+        seconds: 2
+      when: stat_result.stat.exists
+
     - name: End play if completed
       ansible.builtin.meta: end_play
       when: stat_result.stat.exists

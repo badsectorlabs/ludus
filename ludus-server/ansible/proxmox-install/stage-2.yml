@@ -10,6 +10,64 @@
       ansible.builtin.meta: end_play
       when: stat_result.stat.exists
 
+    - name: Try to upgrade the system
+      block:
+        - name: Perform system upgrades
+          ansible.builtin.apt:
+            update_cache: true
+            cache_valid_time: 3600
+            upgrade: dist
+          retries: 2
+          register: _system_upgrade
+          until: _system_upgrade is succeeded
+      rescue:
+        - name: Check error 1
+          ansible.builtin.pause:
+            prompt: |
+              "GRUB auto-install failed, attempting automatic recoverty. Run `dpkg --configure grub-pc` to manually fix this error."
+            seconds: 1
+          when: '"You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout'
+        
+        - name: Check for sda
+          ansible.builtin.shell: |
+            df | egrep '/$' | grep sda
+          register: sda_check
+          ignore_errors: true
+          when: '"You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout'
+
+        - name: Fail if sda is not the disk
+          ansible.builtin.fail:
+            msg: "Unable to determine boot disk, Run `dpkg --configure grub-pc` to manually fix this error."
+          when: sda_check.failed is true and "You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout 
+
+        - name: Select SDA for grub-pc
+          ansible.builtin.shell: |
+            echo "grub-pc grub-pc/install_devices multiselect /dev/sda" | debconf-set-selections && dpkg --configure grub-pc
+          when: sda_check.failed is false and "You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout
+
+        - name: Check error 2
+          ansible.builtin.debug:
+            msg: "dpkg is stuck, going to reboot"
+          when: '"Another instance of this program is already running." in _system_upgrade.stdout'
+        
+        - name: Alert
+          ansible.builtin.pause:
+            prompt: |
+              Rebooting. Ludus install will continue automatically on reboot.
+            seconds: 1
+          when: '"Another instance of this program is already running." in _system_upgrade.stdout'
+
+        - name: Reboot for for dpkg
+          ansible.builtin.shell: "sleep 5 && /usr/sbin/shutdown -r now 'dpkg is stuck, rebooting'"
+          async: 1
+          poll: 0
+          when: '"Another instance of this program is already running." in _system_upgrade.stdout'
+
+        - name: Pause for reboot
+          ansible.builtin.pause:
+            seconds: 60
+          when: '"Another instance of this program is already running." in _system_upgrade.stdout'
+
     - name: Update install progress
       ansible.builtin.include_tasks: tasks/update-install-progress.yml
       vars:
@@ -21,7 +79,7 @@
   roles:
     - role: lae.proxmox
       pve_group: "{{ proxmox_node }}"
-      pve_run_system_upgrades: true
+      pve_run_system_upgrades: false
       pve_reboot_on_kernel_update: false # Since we are running ansible on localhost, we will do this manually
       pve_cluster_enabled: false
       pve_zfs_enabled: false
@@ -88,4 +146,4 @@
 
     - name: Pause for reboot
       ansible.builtin.pause:
-        seconds: 20
+        seconds: 60

@@ -252,4 +252,4 @@
 
     - name: Pause for reboot
       ansible.builtin.pause:
-        seconds: 20
+        seconds: 60
