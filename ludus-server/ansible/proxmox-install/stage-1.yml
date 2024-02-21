@@ -27,6 +27,7 @@
         that:
           - (pve_ip_cidr_network | ansible.utils.ipaddr('network')) == (pve_gateway_cidr_network | ansible.utils.ipaddr('network'))
         fail_msg: "proxmox_gateway is not in the same network as proxmox_local_ip"
+      when: pve_netmask != "255.255.255.255" # If the netmask is a /32, assume the user knows what they are doing (seen on GCP instances)
 
     - name: Enable SSH banner messages
       ansible.builtin.lineinfile:
