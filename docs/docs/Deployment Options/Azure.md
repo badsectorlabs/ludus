@@ -30,6 +30,8 @@ In order to select the NVMe disk controller, the `Security type` must be set to 
 
 If the task `TASK [lae.proxmox : Perform system upgrades]` fails with the error: `Another instance of this program is already running.` manually reboot the machine by running `reboot` as root. On next boot, the install with continue automatically and should succeed.
 
+As of v1.1.3 this error should automatically be handled.
+
 ## Azure Templates and Parameters
 
 These json files can be used to automate the deployment of a small Ludus compatible VM in Azure (E4bs 4 CPU, 32 GiB RAM, 256 GiB NVMe disk).

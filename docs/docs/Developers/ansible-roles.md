@@ -12,6 +12,12 @@ An example role is [ludus_adcs](https://github.com/bad-sector-labs/ludus_adcs).
 
 ## Ludus specific variables
 
+:::note
+
+Requires Ludus server v1.1.3 or later
+
+:::
+
 When developing a role for Ludus, you may want to access information about a host for use in your role.
 The following variables are available for your use and reflect the values for the specific host that is executing your role:
 
