@@ -144,12 +144,12 @@
     regex_search('^(?!169\.254|172\.17)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') is not none
   retries: 30
   delay: 5
-  when: clone_vm is changed
+  when: clone_vm is changed and not unmanaged
 
 - name: Save off the IP for use with checking on the WinRM/SSH connectivity
   ansible.builtin.set_fact:
     last_deployed_ip: "{{ (nodecheck.stdout | from_json).ansible_host | default('') | ansible.utils.ipaddr }}"
-  when: clone_vm is changed
+  when: clone_vm is changed and not unmanaged
 
 # The VM interface update changes the IP of the VM with DHCP, without this the inventory has the old IP still
 - name: Refresh inventory
@@ -163,7 +163,7 @@
     delay: 3
     state: started
   register: wait_result
-  when: is_windows is defined and is_windows and clone_vm is changed
+  when: is_windows is defined and is_windows and clone_vm is changed and not unmanaged
 
 - name: Wait for the host's control interface (SSH) to come up
   local_action:
@@ -173,4 +173,4 @@
     delay: 3
     state: started
   register: wait_result
-  when: ((is_linux is defined and is_linux) or (is_macos is defined and is_macos)) and clone_vm is changed
+  when: ((is_linux is defined and is_linux) or (is_macos is defined and is_macos)) and clone_vm is changed and not unmanaged
