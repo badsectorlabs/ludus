@@ -123,6 +123,7 @@
         num_vcpus: "{{ item.cpus }}"
         boot_disk: "{{ item.boot_disk | default('sata0') }}"
         full_clone: "{{ item.full_clone | default(false) }}"
+        unmanaged: "{{ item.unmanaged | default(false) }}"
       loop: "{{ ludus }}"
       when:
         - 'item.linux is defined or item.macos is defined or (item.windows is defined and (item.domain is defined and item.domain.role is defined and item.domain.role == "member")) or (item.windows is defined and item.domain is undefined)'
@@ -136,6 +137,7 @@
       set_fact:
         range_vms: "{{ ((range_vms | default([])) + [item.vm_name]) }}"
       loop: "{{ ludus }}"
+      when: item.unmanaged is not defined or (item.unmanaged is defined and not item.unmanaged)
 
 - name: Configure IP and Hostname for all VMs
   tags: [assign-ip]

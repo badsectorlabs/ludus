@@ -258,6 +258,10 @@
                     "type": "boolean",
                     "description": "Set this to true for macOS VMs - leave undefined or false for Windows/Linux VMs"
                 },
+                "unmanaged": {
+                    "type": "boolean",
+                    "description": "Set this to true for VMs that cannot report an IP to ansible via proxmox (no qemu-guest-agent, i.e. EDR appliances). You *must* manually configure this VM to have the IP defined in the config or risk leaking data during testing. Default: false"
+                },
                 "roles": {
                     "type": "array",
                     "description": "User defined Ansible roles to apply to this VM. Roles must be installed on the Ludus host with `ludus ansible role add`.",
