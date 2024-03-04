@@ -16,6 +16,7 @@
     ram: 4
     cpu_cores: 4
     num_vcpus: 4
+    unmanaged: false
 
 # This must come before the VLAN setup to install iptables etc
 - name: Configure the router
@@ -88,6 +89,7 @@
         cpu_cores: "{{ item.cpus }}"
         num_vcpus: "{{ item.cpus }}"
         full_clone: "{{ item.full_clone | default(false) }}"
+        unmanaged: false
       loop: "{{ ludus }}"
       when:
         - 'item.windows is defined'
@@ -580,6 +582,7 @@
         cpu_cores: 4
         num_vcpus: 4
         vm_pool: ADMIN
+        unmanaged: false
 
 - name: Configure Nexus nuget cache VM IP and Hostname
   tags: [never, nexus]
