@@ -29,4 +29,6 @@ Ludus will make the following changes:
 ## Install
 
 1. Copy the ludus-server binary to the Proxmox host and run it as root.
-2. Once the install succeeds, follow the Quick start guide as normal starting at [Create a User](../Quick%20Start/create-a-user).
+2. Once the install succeeds, update the values in `/opt/ludus/config.yml` to reflect the install (proxmox may have set up an lvm-thin datastore vs the default `local`)
+3. Restart the ludus processes with `systemctl restart ludus-admin` and `systemctl restart ludus`.
+4. Follow the Quick start guide as normal starting at [Create a User](../Quick%20Start/create-a-user).
