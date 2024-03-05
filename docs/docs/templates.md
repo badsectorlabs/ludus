@@ -14,7 +14,7 @@ Ludus supports highly customized templates if that is your preferred option, but
 
 ## Builtin Templates
 
-Ludus comes with 6 builtin templates:
+Ludus comes with 5 builtin templates:
 
 - debian11
 - debian12
@@ -179,7 +179,13 @@ Setting `cpu_type = "host"` in your template will essentially "pass through" the
 
 ### Non-Automated OS Template Builds
 
+To manually upload ISO files, click the datastore, then `ISO Images`, then `Upload`.
+
+!['The Ludus Network'](/img/templates/iso-upload.png)
+
 #### Windows 7
+
+If you wish to use VirtIO devices during install, follow [this guide](https://pve.proxmox.com/wiki/Windows_7_guest_best_practices).
 
 1. Download the [Windows 7 ISO](http://care.dlservice.microsoft.com/dl/download/evalx/win7/x64/EN/7600.16385.090713-1255_x64fre_enterprise_en-us_EVAL_Eval_Enterprise-GRMCENXEVAL_EN_DVD.iso) (md5: `1d0d239a252cb53e466d39e752b17c28`)
 2. Create a VM with your desired hardware options
