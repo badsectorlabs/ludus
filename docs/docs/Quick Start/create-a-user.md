@@ -14,7 +14,7 @@ Copy the correct Ludus client binary to a location in your PATH and make it exec
 
 ```
 local:~$ sudo cp ludus-client_linux-[arch]-[version] /usr/local/bin/ludus
-local:~$ chmod +x /usr/local/bin/ludus
+local:~$ sudo chmod +x /usr/local/bin/ludus
 ```
   </TabItem>
   <TabItem value="macos" label="macOS">
@@ -22,7 +22,7 @@ Copy the correct Ludus client binary to a location in your PATH and make it exec
 
 ```
 local:~$ sudo cp ludus-client_macOS-[arch]-[version] /usr/local/bin/ludus
-local:~$ chmod +x /usr/local/bin/ludus
+local:~$ sudo chmod +x /usr/local/bin/ludus
 local:~$ xattr -r -d com.apple.quarantine /usr/local/bin/ludus
 ```
 :::note
@@ -78,8 +78,13 @@ Open a second terminal.
 
 Now create your first ludus user! This user will be an admin as we specify `--admin`.
 Initials are commonly used for the userID.
+
+:::warning
+
 If the user name you specify (converted to lowercase and spaces replaced with `-`) exists
-on the system already, it's password will be changed!
+on the system already, it's PAM password will be changed by Ludus!
+
+:::
 
 Prepend the LUDUS_API_KEY variable to the command to authenticate properly.
 

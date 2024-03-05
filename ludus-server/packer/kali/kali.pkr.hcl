@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "sha256:49f6826e302659378ff0b18eda28121dad7eeab4da3b8d171df034da4996a75e"
+  default = "sha256:c150608cad5f8ec71608d0713d487a563d9b916a0199b1414b6ba09fce788ced"
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
@@ -11,7 +11,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://cdimage.kali.org/kali-2023.4/kali-linux-2023.4-installer-amd64.iso"
+  default = "https://cdimage.kali.org/kali-2024.1/kali-linux-2024.1-installer-amd64.iso"
 }
 
 variable "vm_cpu_cores" {
@@ -82,7 +82,7 @@ variable "ludus_nat_interface" {
 ####
 
 locals {
-  template_description = "Kali Linux template built ${legacy_isotime("2006-01-02 03:04:05")}"
+  template_description = "Kali Linux template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => kali:kali"
 }
 
 source "proxmox-iso" "kali" {
