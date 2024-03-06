@@ -27,7 +27,7 @@ func InitClient(url string, apiKey string, proxy string, verify bool, debug bool
 		client.SetDebug(true)
 		logger.InitLogger(debug)
 	}
-	if len(apiKey) > 0 {
+	if len(apiKey) > 0 && strings.Contains(apiKey, ".") {
 		user = apiKey[:strings.IndexByte(apiKey, '.')]
 	} else {
 		user = "[No API key loaded]"
