@@ -281,17 +281,16 @@ var rangeLogsCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		var apiString string
+		var apiString, apiStringWithCursor string
 		if follow {
 			var newLogs string
 			var cursor int = 0
-			if userID != "" {
-				apiString = fmt.Sprintf("/range/logs?userID=%s", userID)
-			} else {
-				apiString = "/range/logs"
-			}
 			for {
-				apiStringWithCursor := fmt.Sprintf("%s?cursor=%d", apiString, cursor)
+				if userID != "" {
+					apiStringWithCursor = fmt.Sprintf("/range/logs?userID=%s&cursor=%d", userID, cursor)
+				} else {
+					apiStringWithCursor = fmt.Sprintf("/range/logs?cursor=%d", cursor)
+				}
 				responseJSON, success := rest.GenericGet(client, apiStringWithCursor)
 				if didFailOrWantJSON(success, responseJSON) {
 					return
@@ -300,7 +299,6 @@ var rangeLogsCmd = &cobra.Command{
 				if len(newLogs) > 0 {
 					fmt.Print(newLogs)
 				}
-				// compareAndPrint(newLogs)
 				time.Sleep(2 * time.Second)
 			}
 		} else {
