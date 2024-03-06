@@ -306,6 +306,8 @@ var rangeLogsCmd = &cobra.Command{
 				apiString = fmt.Sprintf("/range/logs?userID=%s&tail=%d", userID, tail)
 			} else if tail > 0 {
 				apiString = fmt.Sprintf("/range/logs?tail=%d", tail)
+			} else if userID != "" {
+				apiString = fmt.Sprintf("/range/logs?userID=%s", userID)
 			} else {
 				apiString = "/range/logs"
 			}
