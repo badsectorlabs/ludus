@@ -30,12 +30,14 @@ var rangeCmd = &cobra.Command{
 }
 
 func getRangeStateColor(data RangeObject) tablewriter.Colors {
-	if data.RangeState == "DEPLOYING" {
+	if data.RangeState == "DEPLOYING" || data.RangeState == "DESTROYING" {
 		return tablewriter.Colors{tablewriter.FgYellowColor, tablewriter.Bold, tablewriter.BgBlackColor}
 	} else if data.RangeState == "ERROR" || data.RangeState == "ABORTED" {
 		return tablewriter.Colors{tablewriter.FgHiRedColor, tablewriter.Bold, tablewriter.BgBlackColor}
 	} else if data.RangeState == "SUCCESS" {
 		return tablewriter.Colors{tablewriter.FgBlackColor, tablewriter.Bold, tablewriter.BgGreenColor}
+	} else if data.RangeState == "DESTROYED" {
+		return tablewriter.Colors{tablewriter.FgGreenColor, tablewriter.Bold, tablewriter.BgBlackColor}
 	} else {
 		// Default to normal formatting for "NEVER DEPLOYED"
 		return nil

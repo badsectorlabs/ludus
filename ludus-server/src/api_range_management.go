@@ -65,18 +65,23 @@ func DeleteRange(c *gin.Context) {
 		return // JSON set in getRangeObject
 	}
 
+	// Set range state to "DESTROYING"
+	db.Model(&usersRange).Update("range_state", "DESTROYING")
+
 	// This can take a long time, so run as a go routine and have the user check the status via another endpoint
 	go func() {
 		_, err := RunPlaybookWithTag(c, "power.yml", "stop-range", false)
 		if err != nil {
 			user, _ := getUserObject(c)
 			writeStringToFile(fmt.Sprintf("%s/users/%s/ansible-debug.log", ludusInstallPath, user.ProxmoxUsername), err.Error())
+			db.Model(&usersRange).Update("range_state", "ERROR")
 			return // Don't attempt to destroy if there is a power off error
 		}
 		_, err = RunPlaybookWithTag(c, "power.yml", "destroy-range", false)
 		if err != nil {
 			user, _ := getUserObject(c)
 			writeStringToFile(fmt.Sprintf("%s/users/%s/ansible-debug.log", ludusInstallPath, user.ProxmoxUsername), err.Error())
+			db.Model(&usersRange).Update("range_state", "ERROR")
 			return // Don't reset testing if destroy fails
 		}
 		// The user is rm-ing their range with testing enabled, so after all VMs are destroyed exit testing
@@ -87,7 +92,8 @@ func DeleteRange(c *gin.Context) {
 			usersRange.AllowedIPs = []string{}
 			db.Save(&usersRange)
 		}
-
+		// Set range state to "SUCCESS"
+		db.Model(&usersRange).Update("range_state", "DESTROYED")
 	}()
 
 	c.JSON(http.StatusOK, gin.H{"result": "Range destroy in progress"})
