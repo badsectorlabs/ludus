@@ -92,7 +92,7 @@ func DeleteRange(c *gin.Context) {
 			usersRange.AllowedIPs = []string{}
 			db.Save(&usersRange)
 		}
-		// Set range state to "SUCCESS"
+		// Set range state to "DESTROYED"
 		db.Model(&usersRange).Update("range_state", "DESTROYED")
 	}()
 
