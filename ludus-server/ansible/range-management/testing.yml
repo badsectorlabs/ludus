@@ -150,10 +150,10 @@
   hosts: "{{ range_id }}_test_range_dc"
   tasks:
     - name: Find FQDN for role member
-      set_fact:
+      ansible.builtin.set_fact:
         domain_fqdn: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn }}"
     - name: Set dc_vm_name for the primary-dc with the same FQDN
-      set_fact:
+      ansible.builtin.set_fact:
         dc_vm_name: "{{ item.vm_name }}"
       loop: "{{ ludus }}"
       when:
@@ -161,7 +161,7 @@
         - item.domain.role == 'primary-dc'
         - item.domain.fqdn == domain_fqdn
     - name: Set DC IP 
-      set_fact:
+      ansible.builtin.set_fact:
         dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"  
     - name: Set the NTP server to NIST
       ansible.windows.win_shell: |
@@ -191,11 +191,11 @@
     dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
   tasks:
     - name: Find FQDN for role member
-      set_fact:
+      ansible.builtin.set_fact:
         domain_fqdn: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn }}"
       when: (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain is defined and (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain.fqdn is defined
     - name: Set dc_vm_name for the primary-dc with the same FQDN
-      set_fact:
+      ansible.builtin.set_fact:
         dc_vm_name: "{{ item.vm_name }}"
       loop: "{{ ludus }}"
       when:
@@ -205,7 +205,7 @@
         - item.domain.role == 'primary-dc'
         - item.domain.fqdn == domain_fqdn
     - name: Set DC IP 
-      set_fact:
+      ansible.builtin.set_fact:
         dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"
       when: (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain is defined and (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain.fqdn is defined
     - name: Set the NTP server to NIST
