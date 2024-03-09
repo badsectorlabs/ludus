@@ -266,6 +266,19 @@
   # https://github.com/ansible/ansible/blob/d10100968890d85602099c153b71a23c416930b4/lib/ansible/module_utils/facts/system/distribution.py#L543
   when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux']
 
+- name: Check for "new" static IP files on (Linux-RedHat/CentOS/Alma/Rocky) > 8
+  ansible.builtin.stat:
+    path: "/etc/NetworkManager/system-connections/{{ interface_name }}.nmconnection"
+  register: readhat_stat_result
+  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux']
+
+- name: Remove "new" static IP file (Linux-RedHat/CentOS/Alma/Rocky) > 8
+  become: true
+  ansible.builtin.file:
+    path: "/etc/NetworkManager/system-connections/{{ interface_name }}.nmconnection"
+    state: absent
+  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux'] and readhat_stat_result.stat.exists
+
 - name: Enable new interface (Linux)
   become: true
   ansible.builtin.shell: ifup {{ interface_name }}
