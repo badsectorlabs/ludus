@@ -4,19 +4,13 @@ title: "ADCS"
 
 # Active Directory Certificate Services Lab
 
-1. Clone down the [ludus_adcs](https://github.com/bad-sector-labs/ludus_adcs) ansible role from github (soon to be published on Ansible Galaxy).
+1. Add the ludus_adcs role to your Ludus server
 
 ```
-local:~$ git clone https://github.com/bad-sector-labs/ludus_adcs
+local:~$ ludus ansible roles add -d badsectorlabs.ludus_adcs
 ```
 
-2. Add the ludus_adcs role to your Ludus server
-
-```
-local:~$ ludus ansible roles add -d ludus_adcs
-```
-
-3. Modify your ludus config to add the role to a Windows server VM
+2. Modify your ludus config to add the role to a Windows server VM
 
 ```
 local:~$ ludus range config get > config.yml
@@ -46,12 +40,12 @@ ludus:
 local:~$ ludus range config set -f config.yml
 ```
 
-4. Deploy the range
+3. Deploy the range
 
 ```
 local:~$ ludus range deploy
 ```
 
-5. Enjoy your ESC1,2,3,4,6,8, and 13 attack paths!
+4. Enjoy your ESC1,2,3,4,6,8, and 13 attack paths!
 
 ![ESC Templates](/img/envs/adcs-templates.png)
