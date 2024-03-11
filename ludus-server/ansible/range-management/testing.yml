@@ -76,7 +76,7 @@
         that:
           - ips_in_inventory_but_not_config | length == 0
           - ips_in_config_but_not_inventory_to_check | length == 0
-        fail_msg: IPs collected from the config do not match the dynamic inventory. If a VM was manually modidified this may be the cause. Or perhaps the target VM is powered off/unreachable
+        fail_msg: IPs collected from the config do not match the dynamic inventory. If a VM was manually modified this may be the cause. Or perhaps the target VM is powered off/unreachable
         success_msg: IPs collected from the config match the dynamic inventory
 
 # All actions below are performed against "action_ips" which is built from the range config
