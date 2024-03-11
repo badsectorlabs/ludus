@@ -117,6 +117,10 @@ local:~$ ludus range logs -f
 # Wait for all updates to be installed. 
 # Be patient, this will take a long time.
 # This required for the IIS install to work during GOAD setup.
+
+# When you see the following, the updates are complete:
+localhost                  : ok=5    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+JD-GOAD-SRV02              : ok=8    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0 
 ```
 
 ### 4. Install ansible and its requirements for GOAD on your local machine
