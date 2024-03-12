@@ -243,6 +243,20 @@ This will take a few hours. You'll know it is done when you see:
 your lab is successfully setup ! have fun ;)
 ```
 
+:::tip It's always DNS...
+
+If you encounter errors with `TASK [groups_domains : synchronizes all domains]` or similar, manually remove the `10.ID.10.254` entry from the DNS servers for the host. You can do this via the GUI (Network and Internet -> Change Adaptor Options -> Right-click -> Properties -> Internet Protocol Version 4 (TCP/IPv4) -> Properties) or via Powershell:
+
+```powershell
+# Run this on the failing host
+$adapter = Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPAddress -ne $null }
+$dnsServers = $adapter.DNSServerSearchOrder
+$newDnsServers = $dnsServers | Where-Object { $_ -notmatch ".*\.254$" }
+$adapter.SetDNSServerSearchOrder($newDnsServers)
+```
+
+:::
+
 ### 7. Snapshot VMs
 
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following

@@ -139,7 +139,7 @@ const config = {
             //   },
               {
                 label: 'Discord',
-                href: 'https://discord.gg/4yWfWDzV',
+                href: 'https://discord.gg/HryzhdUSYT',
               },
             //   {
             //     label: 'Twitter',
