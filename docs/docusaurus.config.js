@@ -132,20 +132,20 @@ const config = {
           },
           {
             title: 'Community',
-            // items: [
+            items: [
             //   {
             //     label: 'Stack Overflow',
             //     href: 'https://stackoverflow.com/questions/tagged/docusaurus',
             //   },
-            //   {
-            //     label: 'Discord',
-            //     href: 'https://discordapp.com/invite/docusaurus',
-            //   },
+              {
+                label: 'Discord',
+                href: 'https://discord.gg/4yWfWDzV',
+              },
             //   {
             //     label: 'Twitter',
             //     href: 'https://twitter.com/docusaurus',
             //   },
-            // ],
+            ],
           },
           {
             title: 'More',
