@@ -7,7 +7,7 @@ title: "ADCS"
 1. Add the ludus_adcs role to your Ludus server
 
 ```
-local:~$ ludus ansible roles add -d badsectorlabs.ludus_adcs
+local:~$ ludus ansible roles add badsectorlabs.ludus_adcs
 ```
 
 2. Modify your ludus config to add the role to a Windows server VM
