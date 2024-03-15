@@ -96,6 +96,25 @@
       ansible.builtin.shell: ADDRFAM=inet ifup {{ ludus_nat_interface }}
       when: interfaces_status is changed
 
+    - name: Allow root/ludus to touch all built ranges
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        destination: "10.0.0.0/8"
+        uid_owner: "{{ item }}"
+        jump: ACCEPT
+      with_items:
+        - 0
+        - "{{ created_user.uid }}" # ludus
+
+    - name: Block other access to ranges, except by default user
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        destination: "10.0.0.0/8"
+        jump: DROP
+
+    - name: Save iptables rules
+      ansible.builtin.shell: iptables-save > /etc/iptables/rules.v4
+
 - name: Configure Proxmox Stage 2
   hosts: localhost
   pre_tasks:

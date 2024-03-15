@@ -98,6 +98,7 @@
           - ludus
           - www-data # required to read the proxmox SSL cert
         append: true
+      register: created_user
 
     - name: Create the ludus users directory
       ansible.builtin.file:
@@ -115,6 +116,27 @@
       ansible.builtin.file:
         path: "{{ ludus_install_path }}/users/root"
         state: directory
+
+    - name: Allow root/ludus to touch all built ranges
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        destination: "10.0.0.0/8"
+        uid_owner: "{{ item }}"
+        jump: ACCEPT
+        comment: "Ludus: default allow ludus/root access to all user ranges"
+      with_items:
+        - 0
+        - "{{ created_user.uid }}"
+
+    - name: Block other access to ranges, except by default user
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        destination: "10.0.0.0/8"
+        jump: DROP
+        comment: "Ludus: default deny access to user ranges"
+
+    - name: Save iptables rules
+      ansible.builtin.shell: iptables-save > /etc/iptables/rules.v4
 
     - name: Install collections and roles together for the root user (used to create other users)
       # community.general.ansible_galaxy_install:

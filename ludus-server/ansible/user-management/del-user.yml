@@ -15,6 +15,11 @@
         path: "{{ ludus_users_dir }}/{{ username }}"
         state: absent
 
+    - name: Grab this user's UID before removal
+      ansible.builtin.user:
+        name: "{{ username }}"
+      register: removed_user
+
     - name: Remove the user from the remote host
       ansible.builtin.user:
         name: "{{ username }}"
@@ -75,6 +80,34 @@
         - state_var: absent
       loop:
         - 1
+
+    - name: Remove this user's iptables rules (1)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        destination: "10.0.0.0/8"
+        uid_owner: "{{ removed_user.uid }}"
+        jump: ACCEPT
+        state: absent
+
+    - name: Remove this user's iptables rules (2)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        destination: "10.{{ second_octet }}.0.0/16"
+        uid_owner: "{{ removed_user.uid }}"
+        jump: ACCEPT
+        state: absent
+
+    - name: Remove this user's iptables rules (3)
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: wg0
+        source: "!198.51.100.{{ second_octet }}/32"
+        destination: "10.{{ second_octet }}.0.0/16"
+        jump: DROP
+        state: absent
+
+    - name: Save iptables rules
+      ansible.builtin.shell: iptables-save > /etc/iptables/rules.v4
 
 - hosts: localhost
   become: true

@@ -64,6 +64,7 @@
         shell: /bin/bash
         groups:
           - pveusers
+      register: created_user
 
     - name: Deploy SSH key for user
       authorized_key:
@@ -180,6 +181,37 @@
         - state_var: present
       loop:
         - 1
+
+    - name: Allow new user to reach their range from ludus/ssh
+      ansible.builtin.iptables:
+        action: "insert"
+        chain: OUTPUT
+        destination: "10.{{ second_octet }}.0.0/16"
+        uid_owner: "{{ created_user.uid }}"
+        jump: ACCEPT
+        comment: "Allow {{ username }} to reach their range"
+
+    - name: Allow admin user to reach all ranges
+      ansible.builtin.iptables:
+        action: "insert"
+        chain: OUTPUT
+        destination: "10.0.0.0/8"
+        uid_owner: "{{ created_user.uid }}"
+        jump: ACCEPT
+        comment: "Allow admin {{ username }} to reach all ranges"
+      when: user_is_admin is defined and user_is_admin
+
+    - name: Stop other users from reaching this range via wg
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: wg0
+        source: "!198.51.100.{{ second_octet }}/32"
+        destination: "10.{{ second_octet }}.0.0/16"
+        jump: DROP
+        comment: "Allow {{ username }} to reach their range"
+
+    - name: Save iptables rules
+      ansible.builtin.shell: iptables-save > /etc/iptables/rules.v4
 
 - name: Add user to proxmox
   hosts: localhost
