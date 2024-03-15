@@ -94,7 +94,7 @@ func tarDirectoryInMemory(dirPath string) (bytes.Buffer, error) {
 		}
 
 		// Skip if not in the base directory
-		if !strings.Contains(file, baseDir+"/") {
+		if !strings.Contains(file, baseDir+string(os.PathSeparator)) {
 			return nil
 		}
 
@@ -104,7 +104,7 @@ func tarDirectoryInMemory(dirPath string) (bytes.Buffer, error) {
 		}
 
 		// Modify the header name to only include the base directory and its contents
-		header.Name = filepath.ToSlash(strings.TrimPrefix(file, filepath.Dir(dirPath)+"/"))
+		header.Name = filepath.ToSlash(strings.TrimPrefix(file, filepath.Dir(dirPath)+string(os.PathSeparator)))
 		err = tw.WriteHeader(header)
 		if err != nil {
 			return err
