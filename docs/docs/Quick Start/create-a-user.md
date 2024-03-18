@@ -1,6 +1,7 @@
 ---
 sidebar_position: 2
 ---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -16,6 +17,7 @@ Copy the correct Ludus client binary to a location in your PATH and make it exec
 local:~$ sudo cp ludus-client_linux-[arch]-[version] /usr/local/bin/ludus
 local:~$ sudo chmod +x /usr/local/bin/ludus
 ```
+
   </TabItem>
   <TabItem value="macos" label="macOS">
 Copy the correct Ludus client binary to a location in your PATH and make it executable.
@@ -25,13 +27,14 @@ local:~$ sudo cp ludus-client_macOS-[arch]-[version] /usr/local/bin/ludus
 local:~$ sudo chmod +x /usr/local/bin/ludus
 local:~$ xattr -r -d com.apple.quarantine /usr/local/bin/ludus
 ```
+
 :::note
 
 macOS users need to remove the "quarantine" attribute as the ludus client binary is not (currently) signed
 
 :::
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 :::note
 
 This documentation assumes the use of the Windows Terminal and Powershell (not cmd.exe and batch).
@@ -50,14 +53,13 @@ Ludus is a CLI application to control a Ludus server
 This application can manage users as well as ranges.
 ...
 ```
+
   </TabItem>
 </Tabs>
 
-
-
 ## Using the Ludus client to create a Ludus user
 
-To perform user related actions, which modify the Ludus host as root, we must connect to the 
+To perform user related actions, which modify the Ludus host as root, we must connect to the
 admin service which only listens on localhost. To do this we will create an SSH tunnel.
 
 ```plain title="Terminal 1 (Linux/macOS/Windows)"
@@ -69,7 +71,7 @@ API key.
 
 ```plain title="Terminal 1"
 user@ludus:~$ sudo su -
-root@ludus:~# ludus-install-status 
+root@ludus:~# ludus-install-status
 Ludus install completed successfully
 Root API key: ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF
 ```
@@ -96,6 +98,7 @@ Adding a space at the beginning of this command will prevent it from being writt
 shell's history file in most common shells.
 
 :::
+
 ```plain title="Terminal 2 (Linux/macOS)"
 local:~$  LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
  ludus user add --name "John Doe" --userid JD --admin --url https://127.0.0.1:8081
@@ -105,6 +108,7 @@ local:~$  LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
 | JD     | john-doe         | true  | JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt |
 +--------+------------------+-------+---------------------------------------------+
 ```
+
   </TabItem>
   <TabItem value="macos" label="macOS">
 :::tip
@@ -113,6 +117,7 @@ Adding a space at the beginning of this command will prevent it from being writt
 shell's history file in most common shells.
 
 :::
+
 ```plain title="Terminal 2 (Linux/macOS)"
 local:~$  LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
  ludus user add --name "John Doe" --userid JD --admin --url https://127.0.0.1:8081
@@ -122,6 +127,7 @@ local:~$  LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
 | JD     | john-doe         | true  | JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt |
 +--------+------------------+-------+---------------------------------------------+
 ```
+
   </TabItem>
   <TabItem value="windows" label="Windows">
 ```plain title="Terminal 2 (Windows)"
@@ -134,8 +140,10 @@ PS C:\> .\ludus-client.exe user add --name "John Doe" --userid JD --admin --url 
 +--------+------------------+-------+---------------------------------------------+
 
 # Remove the LUDUS_API_KEY environment variable set in the previous command
+
 PS C:\> Remove-Item Env:\LUDUS_API_KEY
-```
+
+````
   </TabItem>
 </Tabs>
 :::info
@@ -166,7 +174,8 @@ PublicKey = 5nlDO6gtqVXI89xQNkd2c2L0US7RnPinbAlfiyWHHBM=
 Endpoint = 10.2.99.240:51820
 AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
 PersistentKeepalive = 25
-```
+````
+
   </TabItem>
   <TabItem value="macos" label="macOS">
 ```plain title="Terminal 2 (Linux/macOS)"
@@ -181,7 +190,8 @@ PublicKey = 5nlDO6gtqVXI89xQNkd2c2L0US7RnPinbAlfiyWHHBM=
 Endpoint = 10.2.99.240:51820
 AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
 PersistentKeepalive = 25
-```
+
+````
   </TabItem>
   <TabItem value="windows" label="Windows">
 ```plain title="Terminal 2 (Windows)"
@@ -199,7 +209,8 @@ PersistentKeepalive = 25
 
 # Remove the LUDUS_API_KEY environment variable set in the previous command
 PS C:\> Remove-Item Env:\LUDUS_API_KEY
-```
+````
+
   </TabItem>
 </Tabs>
 Import this WireGuard configuration (`ludus.conf`) into the [WireGuard client](https://www.wireguard.com/install/) and connect. Once connected, the ludus client's default url (`https://198.51.100.1:8080`)
@@ -226,7 +237,8 @@ On headless Linux systems or Linux systems without a keyring, set the LUDUS_API_
 
 :::
 </TabItem>
-  <TabItem value="macos" label="macOS">
+<TabItem value="macos" label="macOS">
+
 ```plain
 local:~$ ludus apikey
 [INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
@@ -241,14 +253,16 @@ On headless macOS systems or macOS systems without a keyring, set the LUDUS_API_
 `export LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'`
 
 :::
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
+
 ```plain
 PS C:\> .\ludus-client.exe apikey
 [INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
 JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
 [INFO]  Ludus API key set successfully
 ```
+
   </TabItem>
 </Tabs>
 
@@ -291,5 +305,11 @@ PS C:\> .\ludus-client.exe user creds get
 ```
   </TabItem>
 </Tabs>
+
+:::info
+
+As a reminder, you can still log into the proxmox console as the `root` user for more advanced configurations such as adding a disk to your Proxmox server or adding a separate NIC to a virtual machine. Careful not to break anything!
+
+:::
 
 Now that you've created the user, grabbed your WireGuard config, and obtained your user creds for proxmox, you can build templates!
