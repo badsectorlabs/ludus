@@ -107,6 +107,9 @@ local:~$ vim config.yml
 # paste in the config above (adjust cpus and ram_gb values if you have the resources to allocate more)
 local:~$ ludus range config set -f config.yml
 local:~$ ludus range deploy
+# Wait for the range to successfully deploy
+# You can watch the logs with `ludus range logs -f`
+# Or check the status with `ludus range status`
 ```
 
 ### 3. Update the SRV02 machine
