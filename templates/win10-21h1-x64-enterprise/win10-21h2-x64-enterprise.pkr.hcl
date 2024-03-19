@@ -81,7 +81,7 @@ variable "ludus_nat_interface" {
 ####
 
 locals {
-  template_description = "Windows 10 21H2 Enterprise 64-bit template built ${legacy_isotime("2006-01-02 03:04:05")}"
+  template_description = "Windows 10 21H2 Enterprise 64-bit template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => localuser:password"
 }
 
 source "proxmox-iso" "win10-21h2-x64-enterprise" {
