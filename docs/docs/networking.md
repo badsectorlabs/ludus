@@ -137,4 +137,4 @@ network:
       action: ACCEPT
 ```
 
-To see more details about the range config scheme (which includes the network object) [here](https://docs.ludus.cloud/docs/configuration)
+See more details about the range config schema (which includes the network object) [here](https://docs.ludus.cloud/docs/configuration).

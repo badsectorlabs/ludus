@@ -142,8 +142,7 @@ PS C:\> .\ludus-client.exe user add --name "John Doe" --userid JD --admin --url 
 # Remove the LUDUS_API_KEY environment variable set in the previous command
 
 PS C:\> Remove-Item Env:\LUDUS_API_KEY
-
-````
+```
   </TabItem>
 </Tabs>
 :::info
@@ -174,7 +173,7 @@ PublicKey = 5nlDO6gtqVXI89xQNkd2c2L0US7RnPinbAlfiyWHHBM=
 Endpoint = 10.2.99.240:51820
 AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
 PersistentKeepalive = 25
-````
+```
 
   </TabItem>
   <TabItem value="macos" label="macOS">
@@ -190,8 +189,7 @@ PublicKey = 5nlDO6gtqVXI89xQNkd2c2L0US7RnPinbAlfiyWHHBM=
 Endpoint = 10.2.99.240:51820
 AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
 PersistentKeepalive = 25
-
-````
+```
   </TabItem>
   <TabItem value="windows" label="Windows">
 ```plain title="Terminal 2 (Windows)"
@@ -209,11 +207,11 @@ PersistentKeepalive = 25
 
 # Remove the LUDUS_API_KEY environment variable set in the previous command
 PS C:\> Remove-Item Env:\LUDUS_API_KEY
-````
+```
 
   </TabItem>
 </Tabs>
-Import this WireGuard configuration (`ludus.conf`) into the [WireGuard client](https://www.wireguard.com/install/) and connect. Once connected, the ludus client's default url (`https://198.51.100.1:8080`)
+Import this WireGuard configuration (`ludus.conf`) into the [WireGuard GUI client](https://www.wireguard.com/install/) or on the command line with [wg-quick](https://manpages.ubuntu.com/manpages/jammy/man8/wg-quick.8.html) and connect. `wg setconf` is not supported by this configuration. Once connected, the ludus client's default url (`https://198.51.100.1:8080`)
 will work for all future commands.
 
 ## Set the API Key
@@ -236,8 +234,8 @@ On headless Linux systems or Linux systems without a keyring, set the LUDUS_API_
 `export LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'`
 
 :::
-</TabItem>
-<TabItem value="macos" label="macOS">
+  </TabItem>
+  <TabItem value="macos" label="macOS">
 
 ```plain
 local:~$ ludus apikey
@@ -253,8 +251,8 @@ On headless macOS systems or macOS systems without a keyring, set the LUDUS_API_
 `export LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'`
 
 :::
-</TabItem>
-<TabItem value="windows" label="Windows">
+  </TabItem>
+  <TabItem value="windows" label="Windows">
 
 ```plain
 PS C:\> .\ludus-client.exe apikey

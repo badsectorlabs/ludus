@@ -14,7 +14,7 @@ Some example roles:
 - [ludus_bloodhound_ce](https://github.com/badsectorlabs/ludus_bloudhound_ce)
 - [ludus_vulhub](https://github.com/badsectorlabs/ludus_vulhub)
 
-If you've build a cool role you'd like to share with us, let us know [directly](mailto:info@badsectorlabs.com) or ping us in our [Discord](https://discord.gg/pZRTXjgEts) server!
+If you've build a cool role you'd like to share with us, let us know [via email](mailto:info@badsectorlabs.com), ping us on X ([@badsectorlabs](https://twitter.com/badsectorlabs)), or in our [Discord](https://discord.gg/HryzhdUSYT) server!
 
 ## Ludus specific variables
 
