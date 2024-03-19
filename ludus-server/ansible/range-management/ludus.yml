@@ -539,6 +539,7 @@
       ansible.builtin.include_role:
         name: "{{ item }}"
       loop: "{{ custom_roles_list }}"
+      when: (only_roles is undefined or only_roles is none) or (only_roles is defined and item in only_roles)
 
 # ==========================================================
 # User management
