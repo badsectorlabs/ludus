@@ -14,10 +14,9 @@ Anything **unclear** or **buggy** in this tutorial? [Please report it!](https://
 
 ## What's next?
 
+- Modify your range [configuration](../configuration) to sysprep Windows machine, install custom chocolatey packages, and more
 - Learn about Ludus' [networking](../networking)
+- Learn about how [DNS](../DNS) works in a Ludus range
 - Read the [API documentation](pathname:///api/index.html)
-- Modify your range [configuration](../configuration)
-- Add a [custom chocolatey package](../configuration) to Windows machines
-- [Sysprep](../configuration) Windows machines
-- Set up [CI/CD](../cicd)
-<!-- - Get involved in the [Ludus Community](https://soon) -->
+- Get to know the power of [ansible roles](https://docs.ludus.cloud/docs/Developers/ansible-roles/) and checkout out our [public roles](https://github.com/badsectorlabs)
+- Get involved in the Ludus Community and join our [Discord Server](https://discord.gg/HryzhdUSYT)
