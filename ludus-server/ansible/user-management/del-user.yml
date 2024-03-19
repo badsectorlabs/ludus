@@ -88,6 +88,7 @@
         uid_owner: "{{ removed_user.uid }}"
         jump: ACCEPT
         state: absent
+        numeric: true
 
     - name: Remove this user's iptables rules (2)
       ansible.builtin.iptables:
@@ -96,6 +97,7 @@
         uid_owner: "{{ removed_user.uid }}"
         jump: ACCEPT
         state: absent
+        numeric: true
 
     - name: Remove this user's iptables rules (3)
       ansible.builtin.iptables:
@@ -105,9 +107,12 @@
         destination: "10.{{ second_octet }}.0.0/16"
         jump: DROP
         state: absent
+        numeric: true
 
-    - name: Save iptables rules
-      ansible.builtin.shell: iptables-save > /etc/iptables/rules.v4
+    - name: Save current state of the firewall to a file
+      community.general.iptables_state:
+        state: saved
+        path: /etc/iptables/rules.v4
 
 - hosts: localhost
   become: true

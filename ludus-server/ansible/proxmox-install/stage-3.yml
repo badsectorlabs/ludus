@@ -124,7 +124,8 @@
         uid_owner: "{{ item }}"
         jump: ACCEPT
         comment: "Ludus: default allow ludus/root access to all user ranges"
-      with_items:
+        numeric: true
+      loop:
         - 0
         - "{{ created_user.uid }}"
 
@@ -134,9 +135,12 @@
         destination: "10.0.0.0/8"
         jump: DROP
         comment: "Ludus: default deny access to user ranges"
+        numeric: true
 
-    - name: Save iptables rules
-      ansible.builtin.shell: iptables-save > /etc/iptables/rules.v4
+    - name: Save current state of the firewall to a file
+      community.general.iptables_state:
+        state: saved
+        path: /etc/iptables/rules.v4
 
     - name: Install collections and roles together for the root user (used to create other users)
       # community.general.ansible_galaxy_install:
