@@ -22,6 +22,7 @@ var (
 	outputPath     string
 	noPrompt       bool
 	onlyRoles      string
+	limit          string
 )
 
 var rangeCmd = &cobra.Command{
@@ -245,6 +246,7 @@ type DeployBody struct {
 	Force     bool     `json:"force"`
 	Verbose   bool     `json:"verbose"`
 	OnlyRoles []string `json:"only_roles"`
+	Limit     string   `json:"limit"`
 }
 
 var rangeDeployCmd = &cobra.Command{
@@ -264,6 +266,7 @@ var rangeDeployCmd = &cobra.Command{
 			Force:     force,
 			Verbose:   rangeVerbose,
 			OnlyRoles: strings.Split(onlyRoles, ","),
+			Limit:     limit,
 		}
 
 		if userID != "" {
@@ -284,6 +287,7 @@ func setupRangeDeployCmd(command *cobra.Command) {
 	command.Flags().BoolVar(&force, "force", false, "force the deployment if testing is enabled (default: false)")
 	command.Flags().BoolVarP(&rangeVerbose, "verbose-ansible", "v", false, "enable verbose output from ansible during the deploy (default: false)")
 	command.Flags().StringVar(&onlyRoles, "only-roles", "", "limit the user defined roles to be run to this comma separated list of roles")
+	command.Flags().StringVarP(&limit, "limit", "l", "", "limit the deploy to VM that match the specified pattern (must include localhost or no plays will run)")
 }
 
 var rangeLogsCmd = &cobra.Command{

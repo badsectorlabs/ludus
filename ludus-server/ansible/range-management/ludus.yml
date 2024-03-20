@@ -789,7 +789,7 @@
         src: etc-hosts.j2
         dest: "{{ ludus_install_path }}/users/{{ username }}/etc-hosts"
       # Skip this when doing a destroy-range, but run for every other tag
-      when: "'destroy-range' not in ansible_run_tags"
+      when: "'destroy-range' not in ansible_run_tags and ansible_limit is undefined"
 
 # ==========================================================
 # Alert the user on failed office install

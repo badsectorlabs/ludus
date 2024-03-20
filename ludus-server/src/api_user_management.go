@@ -79,7 +79,7 @@ func AddUser(c *gin.Context) {
 				"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
 				"user_is_admin":     user.IsAdmin,
 			}
-			output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false)
+			output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 				// Remove the range record since creation failed
@@ -143,7 +143,7 @@ func DeleteUser(c *gin.Context) {
 
 	playbook := []string{ludusInstallPath + "/ansible/user-management/del-user.yml"}
 	extraVars := map[string]interface{}{"username": user.ProxmoxUsername, "user_range_id": user.UserID, "second_octet": usersRange.RangeNumber}
-	output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false)
+	output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 		return

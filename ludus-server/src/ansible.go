@@ -18,7 +18,7 @@ import (
 
 // Runs an ansible playbook with an arbitrary amount of extraVars
 // Returns a tuple of the playbook output and an error
-func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool) (string, error) {
+func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
 
 	var err error
 
@@ -56,6 +56,7 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 		Inventory:     ludusInstallPath + "/ansible/range-management/proxmox.py",
 		ExtraVarsFile: append(serverAndUserConfigs, extraVarsFiles...),
 		ExtraVars:     userVars,
+		Limit:         limit,
 		Tags:          tags,
 		Verbose:       verbose,
 	}
@@ -114,7 +115,7 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 }
 
 // A helper to keep function calls clean
-func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, onlyRoles []string) (string, error) {
+func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, onlyRoles []string, limit string) (string, error) {
 	usersRange, err := getRangeObject(c)
 	if err != nil {
 		return "", errors.New("unable to get users range") // JSON error is set in getRangeObject
@@ -124,7 +125,7 @@ func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, 
 	extraVars := map[string]interface{}{"only_roles": onlyRolesArray}
 
 	// Run the deploy
-	output, err := RunAnsiblePlaybookWithVariables(c, nil, nil, extraVars, tag, verbose)
+	output, err := RunAnsiblePlaybookWithVariables(c, nil, nil, extraVars, tag, verbose, limit)
 
 	if err != nil {
 		db.Model(&usersRange).Update("range_state", "ERROR")
@@ -137,5 +138,5 @@ func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, 
 // A helper to keep function calls clean
 func RunPlaybookWithTag(c *gin.Context, playbook string, tag string, verbose bool) (string, error) {
 	playbookPathArray := []string{fmt.Sprintf("%s/ansible/range-management/%s", ludusInstallPath, playbook)}
-	return RunAnsiblePlaybookWithVariables(c, playbookPathArray, nil, nil, tag, verbose)
+	return RunAnsiblePlaybookWithVariables(c, playbookPathArray, nil, nil, tag, verbose, "")
 }
