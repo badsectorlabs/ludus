@@ -212,6 +212,7 @@
         chain: OUTPUT
         destination: "10.0.0.0/8"
         uid_owner: "{{ item }}"
+        out_interface: "! {{ pve_interface }}"
         jump: ACCEPT
         numeric: true
       loop:
@@ -222,6 +223,7 @@
       ansible.builtin.iptables:
         chain: OUTPUT
         destination: "10.0.0.0/8"
+        out_interface: "! {{ pve_interface }}"
         jump: DROP
         numeric: true
 
