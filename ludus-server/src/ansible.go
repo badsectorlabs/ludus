@@ -49,7 +49,7 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), userDir + "range-config.yml"}
 	// root has no range config
 	if user.UserID == "ROOT" {
-		serverAndUserConfigs = []string{fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
+		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
 	}
 
 	ansiblePlaybookOptions := &playbook.AnsiblePlaybookOptions{
