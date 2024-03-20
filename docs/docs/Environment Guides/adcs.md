@@ -33,7 +33,7 @@ ludus:
     // highlight-next-line
     roles:
     // highlight-next-line
-      - ludus_adcs
+      - badsectorlabs.ludus_adcs
 ```
 
 ```
