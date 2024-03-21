@@ -154,6 +154,7 @@
 # The VM interface update changes the IP of the VM with DHCP, without this the inventory has the old IP still
 - name: Refresh inventory
   ansible.builtin.meta: refresh_inventory
+  when: clone_vm is changed and not unmanaged
 
 - name: Wait for the host's control interface (WinRM via HTTPS) to come up
   local_action:

@@ -79,7 +79,7 @@ func AddUser(c *gin.Context) {
 				"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
 				"user_is_admin":     user.IsAdmin,
 			}
-			output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false)
+			output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 				// Remove the range record since creation failed
@@ -154,7 +154,7 @@ func DeleteUser(c *gin.Context) {
 		"second_octet":  usersRange.RangeNumber,
 		"user_is_admin": user.IsAdmin,
 	}
-	output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false)
+	output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 		return

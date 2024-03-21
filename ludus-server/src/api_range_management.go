@@ -19,6 +19,7 @@ func DeployRange(c *gin.Context) {
 		Force     bool     `json:"force"`
 		Verbose   bool     `json:"verbose"`
 		OnlyRoles []string `json:"only_roles"`
+		Limit     string   `json:"limit"`
 	}
 	var deployBody DeployBody
 	c.Bind(&deployBody)
@@ -51,7 +52,7 @@ func DeployRange(c *gin.Context) {
 	db.Model(&usersRange).Update("range_state", "DEPLOYING")
 
 	// This can take a long time, so run as a go routine and have the user check the status via another endpoint
-	go RunRangeManagementAnsibleWithTag(c, tags, deployBody.Verbose, deployBody.OnlyRoles)
+	go RunRangeManagementAnsibleWithTag(c, tags, deployBody.Verbose, deployBody.OnlyRoles, deployBody.Limit)
 
 	// Update the deployment time in the DB
 	db.Model(&usersRange).Update("last_deployment", time.Now())
@@ -149,7 +150,7 @@ func GetRDP(c *gin.Context) {
 	extraVars := map[string]interface{}{
 		"username": user.ProxmoxUsername,
 	}
-	output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "generate-rdp", false)
+	output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "generate-rdp", false, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 		return
