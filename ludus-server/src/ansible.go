@@ -114,14 +114,17 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 }
 
 // A helper to keep function calls clean
-func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool) (string, error) {
+func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, onlyRoles []string) (string, error) {
 	usersRange, err := getRangeObject(c)
 	if err != nil {
 		return "", errors.New("unable to get users range") // JSON error is set in getRangeObject
 	}
 
+	onlyRolesArray := removeEmptyStrings(onlyRoles)
+	extraVars := map[string]interface{}{"only_roles": onlyRolesArray}
+
 	// Run the deploy
-	output, err := RunAnsiblePlaybookWithVariables(c, nil, nil, nil, tag, verbose)
+	output, err := RunAnsiblePlaybookWithVariables(c, nil, nil, extraVars, tag, verbose)
 
 	if err != nil {
 		db.Model(&usersRange).Update("range_state", "ERROR")

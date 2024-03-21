@@ -82,7 +82,7 @@ variable "ludus_nat_interface" {
 ####
 
 locals {
-  template_description = "Debian 11 template built ${legacy_isotime("2006-01-02 03:04:05")}"
+  template_description = "Debian 11 template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => debian:debian"
 }
 
 source "proxmox-iso" "debian11" {

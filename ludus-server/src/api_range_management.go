@@ -15,9 +15,10 @@ import (
 func DeployRange(c *gin.Context) {
 
 	type DeployBody struct {
-		Tags    string `json:"tags"`
-		Force   bool   `json:"force"`
-		Verbose bool   `json:"verbose"`
+		Tags      string   `json:"tags"`
+		Force     bool     `json:"force"`
+		Verbose   bool     `json:"verbose"`
+		OnlyRoles []string `json:"only_roles"`
 	}
 	var deployBody DeployBody
 	c.Bind(&deployBody)
@@ -50,7 +51,7 @@ func DeployRange(c *gin.Context) {
 	db.Model(&usersRange).Update("range_state", "DEPLOYING")
 
 	// This can take a long time, so run as a go routine and have the user check the status via another endpoint
-	go RunRangeManagementAnsibleWithTag(c, tags, deployBody.Verbose)
+	go RunRangeManagementAnsibleWithTag(c, tags, deployBody.Verbose, deployBody.OnlyRoles)
 
 	// Update the deployment time in the DB
 	db.Model(&usersRange).Update("last_deployment", time.Now())

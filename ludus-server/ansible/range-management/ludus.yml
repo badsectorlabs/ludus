@@ -535,10 +535,17 @@
         - ludus_domain_fqdn is defined
     # End set standard Ludus variables
 
+    - name: Show roles that will be executed
+      ansible.builtin.debug:
+        msg: "{{ item }}"
+      loop: "{{ custom_roles_list }}"
+      when: (only_roles is undefined or only_roles is none) or (only_roles is defined and item in only_roles)
+
     - name: Include the user-defined role
       ansible.builtin.include_role:
         name: "{{ item }}"
       loop: "{{ custom_roles_list }}"
+      when: (only_roles is undefined or only_roles is none) or (only_roles is defined and item in only_roles)
 
 # ==========================================================
 # User management

@@ -1029,11 +1029,21 @@
                         "properties" : {
                           "tags" : {
                             "type" : "string",
-                            "example" : "all"
+                            "example" : "all",
+                            "description" : "the ansible tags to run for this deploy (default: all)"
                           },
                           "force" : {
                             "type" : "boolean",
-                            "example" : false
+                            "example" : false,
+                            "description" : "force the deployment if testing is enabled (default: false)"
+                          },
+                          "only_roles" : {
+                            "type" : "array",
+                            "items" : {
+                              "type" : "string",
+                              "example": "badsectorlabs.ludus_bloodhound_ce"
+                            },
+                            "description" : "limit the user defined roles to be run to this comma separated list of roles"
                           }
                         }
                       }
