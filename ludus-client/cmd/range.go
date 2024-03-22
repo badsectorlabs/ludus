@@ -21,6 +21,8 @@ var (
 	rangeVerbose   bool
 	outputPath     string
 	noPrompt       bool
+	onlyRoles      string
+	limit          string
 )
 
 var rangeCmd = &cobra.Command{
@@ -239,6 +241,14 @@ func setupRangeConfigSet(command *cobra.Command) {
 	_ = command.MarkFlagRequired("file")
 }
 
+type DeployBody struct {
+	Tags      string   `json:"tags"`
+	Force     bool     `json:"force"`
+	Verbose   bool     `json:"verbose"`
+	OnlyRoles []string `json:"only_roles"`
+	Limit     string   `json:"limit"`
+}
+
 var rangeDeployCmd = &cobra.Command{
 	Use:     "deploy",
 	Short:   "Deploy a range, running specific tags if specified",
@@ -251,16 +261,18 @@ var rangeDeployCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		requestBody := fmt.Sprintf(`{
-			"tags": "%s",
-			"force": %s,
-			"verbose": %s
-		  }`, tags, strconv.FormatBool(force), strconv.FormatBool(rangeVerbose))
+		deployBody := DeployBody{
+			Tags:      tags,
+			Force:     force,
+			Verbose:   rangeVerbose,
+			OnlyRoles: strings.Split(onlyRoles, ","),
+			Limit:     limit,
+		}
 
 		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/range/deploy?userID=%s", userID), requestBody)
+			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/range/deploy?userID=%s", userID), deployBody)
 		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/range/deploy", requestBody)
+			responseJSON, success = rest.GenericJSONPost(client, "/range/deploy", deployBody)
 		}
 
 		if didFailOrWantJSON(success, responseJSON) {
@@ -274,6 +286,8 @@ func setupRangeDeployCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&tags, "tags", "t", "", "the ansible tags to run for this deploy (default: all)")
 	command.Flags().BoolVar(&force, "force", false, "force the deployment if testing is enabled (default: false)")
 	command.Flags().BoolVarP(&rangeVerbose, "verbose-ansible", "v", false, "enable verbose output from ansible during the deploy (default: false)")
+	command.Flags().StringVar(&onlyRoles, "only-roles", "", "limit the user defined roles to be run to this comma separated list of roles")
+	command.Flags().StringVarP(&limit, "limit", "l", "", "limit the deploy to VM that match the specified pattern (must include localhost or no plays will run)")
 }
 
 var rangeLogsCmd = &cobra.Command{

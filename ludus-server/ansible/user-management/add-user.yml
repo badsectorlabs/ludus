@@ -64,6 +64,7 @@
         shell: /bin/bash
         groups:
           - pveusers
+      register: created_user
 
     - name: Deploy SSH key for user
       authorized_key:
@@ -177,9 +178,49 @@
     - name: Add the vmbr interface for this user
       ansible.builtin.include_tasks: vmbr-management.yml
       vars:
-        - state_var: present
+        state_var: present
       loop:
         - 1
+
+    - name: Allow new user to reach their range from ludus/ssh
+      ansible.builtin.iptables:
+        action: insert
+        chain: OUTPUT
+        destination: "10.{{ second_octet }}.0.0/16"
+        uid_owner: "{{ created_user.uid }}"
+        out_interface: "!{{ proxmox_interface }}"
+        jump: ACCEPT
+        comment: "Allow {{ username }} to reach their range"
+        numeric: true
+      when: user_is_admin is undefined or (user_is_admin is defined and not user_is_admin)
+
+    - name: Allow admin user to reach all ranges
+      ansible.builtin.iptables:
+        action: insert
+        chain: OUTPUT
+        destination: "10.0.0.0/8"
+        uid_owner: "{{ created_user.uid }}"
+        out_interface: "!{{ proxmox_interface }}"
+        jump: ACCEPT
+        comment: "Allow admin {{ username }} to reach all ranges"
+        numeric: true
+      when: user_is_admin is defined and user_is_admin
+
+    - name: Stop other users from reaching this range via wg
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: wg0
+        source: "!198.51.100.{{ second_octet }}/32"
+        destination: "10.{{ second_octet }}.0.0/16"
+        out_interface: "!{{ proxmox_interface }}"
+        jump: DROP
+        comment: "Allow only {{ username }} to reach their range via wg"
+        numeric: true
+
+    - name: Save current state of the firewall to a file
+      community.general.iptables_state:
+        state: saved
+        path: /etc/iptables/rules.v4
 
 - name: Add user to proxmox
   hosts: localhost

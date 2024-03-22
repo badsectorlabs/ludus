@@ -143,7 +143,7 @@ func GenericGet(client *resty.Client, apiPath string) ([]byte, bool) {
 	return processRESTResult(resp, err)
 }
 
-func GenericJSONPost(client *resty.Client, apiPath string, data string) ([]byte, bool) {
+func GenericJSONPost(client *resty.Client, apiPath string, data any) ([]byte, bool) {
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
