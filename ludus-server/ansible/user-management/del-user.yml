@@ -86,7 +86,7 @@
         chain: OUTPUT
         destination: "10.0.0.0/8"
         uid_owner: "{{ removed_user.uid }}"
-        out_interface: "! {{ proxmox_interface }}"
+        out_interface: "!{{ proxmox_interface }}"
         jump: ACCEPT
         state: absent
         numeric: true
@@ -97,7 +97,7 @@
         chain: OUTPUT
         destination: "10.{{ second_octet }}.0.0/16"
         uid_owner: "{{ removed_user.uid }}"
-        out_interface: "! {{ proxmox_interface }}"
+        out_interface: "!{{ proxmox_interface }}"
         jump: ACCEPT
         state: absent
         numeric: true
@@ -109,7 +109,7 @@
         in_interface: wg0
         source: "!198.51.100.{{ second_octet }}/32"
         destination: "10.{{ second_octet }}.0.0/16"
-        out_interface: "! {{ proxmox_interface }}"
+        out_interface: "!{{ proxmox_interface }}"
         jump: DROP
         state: absent
         numeric: true

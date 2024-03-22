@@ -188,7 +188,7 @@
         chain: OUTPUT
         destination: "10.{{ second_octet }}.0.0/16"
         uid_owner: "{{ created_user.uid }}"
-        out_interface: "! {{ proxmox_interface }}"
+        out_interface: "!{{ proxmox_interface }}"
         jump: ACCEPT
         comment: "Allow {{ username }} to reach their range"
         numeric: true
@@ -200,7 +200,7 @@
         chain: OUTPUT
         destination: "10.0.0.0/8"
         uid_owner: "{{ created_user.uid }}"
-        out_interface: "! {{ proxmox_interface }}"
+        out_interface: "!{{ proxmox_interface }}"
         jump: ACCEPT
         comment: "Allow admin {{ username }} to reach all ranges"
         numeric: true
@@ -212,7 +212,7 @@
         in_interface: wg0
         source: "!198.51.100.{{ second_octet }}/32"
         destination: "10.{{ second_octet }}.0.0/16"
-        out_interface: "! {{ proxmox_interface }}"
+        out_interface: "!{{ proxmox_interface }}"
         jump: DROP
         comment: "Allow only {{ username }} to reach their range via wg"
         numeric: true
