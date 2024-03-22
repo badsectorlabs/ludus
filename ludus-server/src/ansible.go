@@ -47,13 +47,18 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 	// Always include the ludus, server, and user configs
 	userDir := fmt.Sprintf("@%s/users/%s/", ludusInstallPath, user.ProxmoxUsername)
 	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), userDir + "range-config.yml"}
-	// root has no range config
+	// root has no range config and cannot use the dynamic inventory
+	var inventory string
 	if user.UserID == "ROOT" {
 		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
+		inventory = "127.0.0.1"
+	} else {
+		// For regular Ludus users, provide the dynamic inventory
+		inventory = ludusInstallPath + "/ansible/range-management/proxmox.py"
 	}
 
 	ansiblePlaybookOptions := &playbook.AnsiblePlaybookOptions{
-		Inventory:     ludusInstallPath + "/ansible/range-management/proxmox.py",
+		Inventory:     inventory,
 		ExtraVarsFile: append(serverAndUserConfigs, extraVarsFiles...),
 		ExtraVars:     userVars,
 		Limit:         limit,

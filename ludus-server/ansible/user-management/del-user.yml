@@ -84,9 +84,10 @@
     - name: Remove this user's iptables rules (1)
       ansible.builtin.iptables:
         chain: OUTPUT
-        destination: "10.0.0.0/8"
+        destination: "10.{{ second_octet }}.0.0/16"
         uid_owner: "{{ removed_user.uid }}"
         out_interface: "!{{ proxmox_interface }}"
+        comment: "Allow {{ username }} to reach their range"
         jump: ACCEPT
         state: absent
         numeric: true
@@ -95,9 +96,10 @@
     - name: Remove this user's iptables rules (2)
       ansible.builtin.iptables:
         chain: OUTPUT
-        destination: "10.{{ second_octet }}.0.0/16"
+        destination: "10.0.0.0/8"
         uid_owner: "{{ removed_user.uid }}"
         out_interface: "!{{ proxmox_interface }}"
+        comment: "Allow admin {{ username }} to reach all ranges"
         jump: ACCEPT
         state: absent
         numeric: true
@@ -110,6 +112,7 @@
         source: "!198.51.100.{{ second_octet }}/32"
         destination: "10.{{ second_octet }}.0.0/16"
         out_interface: "!{{ proxmox_interface }}"
+        comment: "Allow only {{ username }} to reach their range via wg"
         jump: DROP
         state: absent
         numeric: true
