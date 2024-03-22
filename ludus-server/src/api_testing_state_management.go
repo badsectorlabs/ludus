@@ -67,7 +67,7 @@ func Allow(c *gin.Context) {
 				continue
 			}
 			extraVars := map[string]interface{}{"domain": domain, "domainIP": domainIP}
-			output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-domain", false)
+			output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-domain", false, "")
 			if err != nil {
 				errorArray = append(errorArray, errorStruct{domain, output})
 				continue
@@ -91,7 +91,7 @@ func Allow(c *gin.Context) {
 						continue
 					}
 					extraVars := map[string]interface{}{"domain": crlDomain, "domainIP": domainIP}
-					output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-domain", false)
+					output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-domain", false, "")
 					if err != nil {
 						errorArray = append(errorArray, errorStruct{crlDomain, output})
 						continue
@@ -109,7 +109,7 @@ func Allow(c *gin.Context) {
 			errorArray = append(errorArray, errorStruct{ip, "already allowed"})
 		} else {
 			extraVars := map[string]interface{}{"action_ip": ip}
-			output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-ip", false)
+			output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-ip", false, "")
 			if err != nil {
 				errorArray = append(errorArray, errorStruct{ip, output})
 				continue
@@ -161,7 +161,7 @@ func Deny(c *gin.Context) {
 			// Extract the pinned IP from the AllowedDomains string that contains this domain
 			domainIP := getDomainIPString(usersRange.AllowedDomains, domain)
 			extraVars := map[string]interface{}{"domain": domain, "domainIP": domainIP}
-			output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "deny-domain", false)
+			output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "deny-domain", false, "")
 			if err != nil {
 				errorArray = append(errorArray, errorStruct{domain, output})
 				continue
@@ -181,7 +181,7 @@ func Deny(c *gin.Context) {
 			returnArray = append(returnArray, fmt.Sprintf("%s NOT denied as it is not allowed", ip))
 		} else {
 			extraVars := map[string]interface{}{"action_ip": ip}
-			output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "deny-ip", false)
+			output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "deny-ip", false, "")
 			if err != nil {
 				errorArray = append(errorArray, errorStruct{ip, output})
 				continue
@@ -209,7 +209,7 @@ func StartTesting(c *gin.Context) {
 		return
 	}
 
-	output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, nil, "start-testing", false)
+	output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, nil, "start-testing", false, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 		return
@@ -239,7 +239,7 @@ func StopTesting(c *gin.Context) {
 	c.Bind(&stopTestingBody) // If this errors Force will have the zero value which is false - which is what we want as a default
 
 	extraVars := map[string]interface{}{"force_stop": stopTestingBody.Force}
-	output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "stop-testing", false)
+	output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "stop-testing", false, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 		return
@@ -277,7 +277,7 @@ func UpdateVMs(c *gin.Context) {
 	}
 
 	extraVars := map[string]interface{}{"update_host": thisUpdatePayload.Name}
-	go RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/update.yml"}, nil, extraVars, "update", false)
+	go RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/update.yml"}, nil, extraVars, "update", false, "")
 
 	c.JSON(http.StatusOK, gin.H{"result": "update process started"})
 }

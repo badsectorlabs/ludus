@@ -15,6 +15,11 @@
         path: "{{ ludus_users_dir }}/{{ username }}"
         state: absent
 
+    - name: Grab this user's UID before removal
+      ansible.builtin.user:
+        name: "{{ username }}"
+      register: removed_user
+
     - name: Remove the user from the remote host
       ansible.builtin.user:
         name: "{{ username }}"
@@ -72,9 +77,50 @@
     - name: Remove the vmbr interface for this user
       ansible.builtin.include_tasks: vmbr-management.yml
       vars:
-        - state_var: absent
+        state_var: absent
       loop:
         - 1
+
+    - name: Remove this user's iptables rules (1)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        destination: "10.{{ second_octet }}.0.0/16"
+        uid_owner: "{{ removed_user.uid }}"
+        out_interface: "!{{ proxmox_interface }}"
+        comment: "Allow {{ username }} to reach their range"
+        jump: ACCEPT
+        state: absent
+        numeric: true
+      when: user_is_admin is defined and user_is_admin
+
+    - name: Remove this user's iptables rules (2)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        destination: "10.0.0.0/8"
+        uid_owner: "{{ removed_user.uid }}"
+        out_interface: "!{{ proxmox_interface }}"
+        comment: "Allow admin {{ username }} to reach all ranges"
+        jump: ACCEPT
+        state: absent
+        numeric: true
+      when: user_is_admin is undefined or (user_is_admin is defined and not user_is_admin)
+
+    - name: Remove this user's iptables rules (3)
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: wg0
+        source: "!198.51.100.{{ second_octet }}/32"
+        destination: "10.{{ second_octet }}.0.0/16"
+        out_interface: "!{{ proxmox_interface }}"
+        comment: "Allow only {{ username }} to reach their range via wg"
+        jump: DROP
+        state: absent
+        numeric: true
+
+    - name: Save current state of the firewall to a file
+      community.general.iptables_state:
+        state: saved
+        path: /etc/iptables/rules.v4
 
 - hosts: localhost
   become: true

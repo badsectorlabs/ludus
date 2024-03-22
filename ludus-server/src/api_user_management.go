@@ -79,7 +79,7 @@ func AddUser(c *gin.Context) {
 				"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
 				"user_is_admin":     user.IsAdmin,
 			}
-			output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false)
+			output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 				// Remove the range record since creation failed
@@ -127,6 +127,12 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 
+	// Deleting yourself fails as it removes the ansible home directory before the play ends and thus modules are not available to finish the play
+	if userID == c.GetString("userID") {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "You cannot remove yourself"})
+		return
+	}
+
 	var user UserObject
 	result := db.First(&user, "user_id = ?", userID)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -142,8 +148,13 @@ func DeleteUser(c *gin.Context) {
 	}
 
 	playbook := []string{ludusInstallPath + "/ansible/user-management/del-user.yml"}
-	extraVars := map[string]interface{}{"username": user.ProxmoxUsername, "user_range_id": user.UserID, "second_octet": usersRange.RangeNumber}
-	output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false)
+	extraVars := map[string]interface{}{
+		"username":      user.ProxmoxUsername,
+		"user_range_id": user.UserID,
+		"second_octet":  usersRange.RangeNumber,
+		"user_is_admin": user.IsAdmin,
+	}
+	output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 		return

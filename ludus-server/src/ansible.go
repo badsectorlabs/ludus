@@ -18,7 +18,7 @@ import (
 
 // Runs an ansible playbook with an arbitrary amount of extraVars
 // Returns a tuple of the playbook output and an error
-func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool) (string, error) {
+func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
 
 	var err error
 
@@ -47,15 +47,21 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 	// Always include the ludus, server, and user configs
 	userDir := fmt.Sprintf("@%s/users/%s/", ludusInstallPath, user.ProxmoxUsername)
 	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), userDir + "range-config.yml"}
-	// root has no range config
+	// root has no range config and cannot use the dynamic inventory
+	var inventory string
 	if user.UserID == "ROOT" {
-		serverAndUserConfigs = []string{fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
+		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
+		inventory = "127.0.0.1"
+	} else {
+		// For regular Ludus users, provide the dynamic inventory
+		inventory = ludusInstallPath + "/ansible/range-management/proxmox.py"
 	}
 
 	ansiblePlaybookOptions := &playbook.AnsiblePlaybookOptions{
-		Inventory:     ludusInstallPath + "/ansible/range-management/proxmox.py",
+		Inventory:     inventory,
 		ExtraVarsFile: append(serverAndUserConfigs, extraVarsFiles...),
 		ExtraVars:     userVars,
+		Limit:         limit,
 		Tags:          tags,
 		Verbose:       verbose,
 	}
@@ -114,14 +120,17 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 }
 
 // A helper to keep function calls clean
-func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool) (string, error) {
+func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, onlyRoles []string, limit string) (string, error) {
 	usersRange, err := getRangeObject(c)
 	if err != nil {
 		return "", errors.New("unable to get users range") // JSON error is set in getRangeObject
 	}
 
+	onlyRolesArray := removeEmptyStrings(onlyRoles)
+	extraVars := map[string]interface{}{"only_roles": onlyRolesArray}
+
 	// Run the deploy
-	output, err := RunAnsiblePlaybookWithVariables(c, nil, nil, nil, tag, verbose)
+	output, err := RunAnsiblePlaybookWithVariables(c, nil, nil, extraVars, tag, verbose, limit)
 
 	if err != nil {
 		db.Model(&usersRange).Update("range_state", "ERROR")
@@ -134,5 +143,5 @@ func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool) 
 // A helper to keep function calls clean
 func RunPlaybookWithTag(c *gin.Context, playbook string, tag string, verbose bool) (string, error) {
 	playbookPathArray := []string{fmt.Sprintf("%s/ansible/range-management/%s", ludusInstallPath, playbook)}
-	return RunAnsiblePlaybookWithVariables(c, playbookPathArray, nil, nil, tag, verbose)
+	return RunAnsiblePlaybookWithVariables(c, playbookPathArray, nil, nil, tag, verbose, "")
 }
