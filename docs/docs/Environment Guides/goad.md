@@ -18,7 +18,7 @@ Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to
 
 ```plain
 local:~$ git clone https://gitlab.com/badsectorlabs/ludus
-local:~$ cd templates
+local:~$ cd ludus/templates
 local:~$ ludus templates add -d win2016-server-x64
 [INFO]  Successfully added template
 local:~$ ludus templates add -d win2019-server-x64
