@@ -194,7 +194,7 @@ PersistentKeepalive = 25
   <TabItem value="windows" label="Windows">
 ```plain title="Terminal 2 (Windows)"
 PS C:\> $env:LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'
-PS C:\> .\ludus-client.exe ludus user wireguard --user JD --url https://127.0.0.1:8081 | Tee-Object -Variable luduswg; $luduswg  | Set-Content -Encoding ASCII ludus.conf
+PS C:\> .\ludus-client.exe user wireguard --user JD --url https://127.0.0.1:8081 | Tee-Object -Variable luduswg; $luduswg  | Set-Content -Encoding ASCII ludus.conf
 [Interface]
 PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
 Address = 198.51.100.2/32
