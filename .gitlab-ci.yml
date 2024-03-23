@@ -593,7 +593,9 @@ range deploy-admin:
   timeout: 5m
   retry:
     max: 2
-    when: script_failure
+    when: 
+      - script_failure
+      - job_execution_timeout
   script:
     - *ci-setup-admin
     - ludus range config get
