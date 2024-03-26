@@ -13,7 +13,7 @@
     rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
     comment: "Ludus Testing: Deny internet traffic for {{ item }}"
     numeric: true
-  loop: "{{ action_ips }}"
+  loop: "{{ action_ips | default([]) }}"
 
 - name: Reset the conntrack entries to prevent previously allowed traffic to continue
   ansible.builtin.shell: conntrack -F
@@ -35,7 +35,7 @@
     action: insert
     comment: "Ludus Testing: Deny internet traffic for {{ item }}"
     numeric: true
-  loop: "{{ action_ips }}"
+  loop: "{{ action_ips | default([]) }}"
   when: testing_action == "allow"
 
 - name: Remove site specific IP allow rules now that testing is done - Get iptables rules
@@ -71,7 +71,7 @@
     rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
     comment: "Ludus Testing: Allow specific IP - {{ ip }}"
     numeric: true
-  loop: "{{ action_ips }}"
+  loop: "{{ action_ips | default([]) }}"
   when: testing_action == "open"
 
 # ==========================================================
@@ -112,7 +112,7 @@
     rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
     comment: "Ludus Testing: Allow {{ domain }}"
     numeric: true
-  loop: "{{ action_ips }}"
+  loop: "{{ action_ips | default([]) }}"
   when: testing_action == "allow-domain"
 
 # ==========================================================
@@ -129,7 +129,7 @@
     action: insert
     comment: "Ludus Testing: Allow {{ domain }}"
     numeric: true
-  loop: "{{ action_ips }}"
+  loop: "{{ action_ips | default([]) }}"
   when: testing_action == "deny-domain"
 
 - name: Reset the conntrack entries to prevent previously allowed traffic to continue

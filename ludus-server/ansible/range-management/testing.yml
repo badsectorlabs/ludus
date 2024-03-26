@@ -25,11 +25,11 @@
 
     - name: Find IPs defined in the user's range config but not present in ansible inventory
       ansible.builtin.set_fact:
-        ips_in_config_but_not_inventory: "{{ action_ips | difference(action_ips_from_inventory) | reject('==', '') | list }}"
+        ips_in_config_but_not_inventory: "{{ action_ips | default([]) | difference(action_ips_from_inventory | default([])) | reject('==', '') | list }}"
 
     - name: Find IPs in ansible inventory that are not in the user's range config
       ansible.builtin.set_fact:
-        ips_in_inventory_but_not_config: "{{ action_ips_from_inventory | difference(action_ips) | reject('==', '') | list }}"
+        ips_in_inventory_but_not_config: "{{ action_ips_from_inventory | default([]) | difference(action_ips | default([])) | reject('==', '') | list }}"
 
     - name: Find IPs of unmanaged VMs
       ansible.builtin.set_fact:
@@ -175,9 +175,8 @@
         dns_servers: 
         - "1.1.1.1"
     - name: Check if the Windows evaluation is expiring/expired
-      ansible.windows.win_powershell:
-        script: |
-          . c:\ludus\scripts\fix-windows-expiration.ps1
+      ansible.builtin.include_tasks:
+        file: rearm.yml
     - name: Set DNS (Windows)
       ansible.windows.win_dns_client:
         adapter_names: '*'
@@ -220,9 +219,8 @@
         dns_servers: 
         - "1.1.1.1"
     - name: Check if the Windows evaluation is expiring/expired
-      ansible.windows.win_powershell:
-        script: |
-          . c:\ludus\scripts\fix-windows-expiration.ps1
+      ansible.builtin.include_tasks:
+        file: rearm.yml
     - name: Set DNS (Windows)
       ansible.windows.win_dns_client:
         adapter_names: '*'

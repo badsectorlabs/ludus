@@ -3,7 +3,7 @@
 # ==========================================================
 - name: Create block_rules list
   ansible.builtin.set_fact:
-    block_rules: "{{ action_ips | map('regex_replace', '^(.*)$', '/.*/$client=\\1/32') | list }}"
+    block_rules: "{{ action_ips | default([]) | map('regex_replace', '^(.*)$', '/.*/$client=\\1/32') | list }}"
   when: testing_action == "block"
 
 - name: Block VMs from using any DNS
@@ -86,7 +86,7 @@
 - name: Populate the rules array for DNS with new domains, skipping already allowed domains
   ansible.builtin.set_fact:
     rules: "{{ rules | default([]) + ['@@||' + domain + '^$client=' + item + '/32'] }}"
-  loop: "{{ action_ips }}"
+  loop: "{{ action_ips | default([]) }}"
   when: testing_action == "allow-domain" and ('@@||' + domain + '^$client=' + item + '/32') not in (rules | join(" "))
 
 - name: Allow DNS for a domain
