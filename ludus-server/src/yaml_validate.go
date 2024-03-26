@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -157,14 +158,20 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 		return err
 	}
 
+	usersRange, err := getRangeObject(c)
+	if err != nil {
+		return err
+	}
+
 	// Check for duplicate vlan and ip_last_octet combinations
 	seenVLANAndIP := make(map[string]bool)
 	// Check that all vm_names and hostnames are unique
 	seenVMNames := make(map[string]bool)
 	seenHostnames := make(map[string]bool)
-	// Check that sAMAccountnames are unique per domain
-	seenSAMnames := make(map[string]string)
-	var SAMnameKey string
+	// Check that NETBIOS are unique per domain
+	seenNETBIOSnames := make(map[string]string)
+	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
+	var NETBIOSnameKey string
 	for _, vm := range config.Ludus {
 		vlanIPKey := fmt.Sprintf("vlan: %d, ip_last_octet: %d", vm.VLAN, vm.IPLastOctet)
 		vmNameKey := vm.VMName
@@ -178,22 +185,28 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 		if seenHostnames[vmHostnameKey] {
 			return fmt.Errorf("duplicate hostname name found: %s", vmHostnameKey)
 		}
-		// "Windows doesn't permit computer names that exceed 15 characters"
-		// https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/naming-conventions-for-computer-domain-site-ou
-		if len(vm.Hostname) >= 15 {
-			SAMnameKey = vm.Hostname[:15]
-		} else {
-			SAMnameKey = vm.Hostname
-		}
+		// We only care about this for VMs in a domain
 		if vm.Domain.FQDN != "" {
-			if seenSAMnames[vm.Domain.FQDN] == SAMnameKey {
+			// "Windows doesn't permit computer names that exceed 15 characters"
+			// https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/naming-conventions-for-computer-domain-site-ou
+			// First we have to replace any range_id template strings
+			hostname := rangeIDTemplateRegex.ReplaceAllString(vm.Hostname, usersRange.UserID)
+			// If the hostname is more than 15 chars, chop it down
+			if len(hostname) >= 15 {
+				NETBIOSnameKey = hostname[:15]
+			} else {
+				NETBIOSnameKey = hostname
+			}
+			// Check to see if we have seen this 15 char or less hostname in this domain
+			if seenNETBIOSnames[vm.Domain.FQDN] == NETBIOSnameKey {
 				return fmt.Errorf("duplicate Windows hostname name found: %s\nWindows hostnames are truncated to 15 characters so the first 15 characters must be unique", vm.Hostname)
 			}
+			// Store this hostname for this domain to check against in the future
+			seenNETBIOSnames[vm.Domain.FQDN] = NETBIOSnameKey
 		}
 		seenVLANAndIP[vlanIPKey] = true
 		seenHostnames[vmHostnameKey] = true
 		seenVMNames[vmNameKey] = true
-		seenSAMnames[vm.Domain.FQDN] = SAMnameKey
 		// Check the template
 		if !slices.Contains(templateSlice, vm.Template) {
 			return fmt.Errorf("template not found our built on this server: %s for VM: %s", vm.Template, vm.VMName)
