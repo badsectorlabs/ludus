@@ -29,7 +29,7 @@
 # The specified argument 'CreateDNSDelegation' was not recognized
 # https://github.com/ansible-collections/ansible.windows/issues/252
 - name: Create domain
-  ansible.windows.win_domain:
+  microsoft.ad.domain:
     create_dns_delegation: false
     dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
     domain_netbios_name: "{{ netbios_name }}"
@@ -51,7 +51,7 @@
   when: domain_creation is changed
 
 - name: Configure default OUs
-  community.windows.win_domain_ou:
+  microsoft.ad.ou:
     name: "{{ item }}"
     path: "DC={{ netbios_name }},DC={{ fqdn_tail.split('.') | join(',DC=') }}"
     state: present
@@ -71,25 +71,25 @@
       Restart-Service DNS
 
 - name: Configure DC with raw Commands
-  win_shell: "{{ item }}"
+  ansible.windows.win_shell: "{{ item }}"
   with_items:
     - "wevtutil el | Select-String -notmatch \"Microsoft-Windows-LiveId\" | Foreach-Object {wevtutil cl \"$_\"}"
     - "Set-SmbServerConfiguration -AuditSmb1Access $true -Force"
 
 - name: Disable Telemetry
-  win_shell: ".\\disable-telemetry.ps1"
+  ansible.windows.win_shell: ".\\disable-telemetry.ps1"
   args:
     chdir: 'c:\ludus\scripts'
   register: disable_telemetry
 
 - name: Disable password complexity
-  win_security_policy:
+  community.windows.win_security_policy:
     section: System Access
     key: PasswordComplexity
     value: 0
 
 - name: Create a domain user
-  community.windows.win_domain_user:
+  microsoft.ad.user:
     name: "{{ defaults.ad_domain_user }}"
     firstname: Domain
     surname: User
@@ -97,11 +97,11 @@
     state: present
     password_never_expires: true
     groups:
-      - Remote Desktop Users
-    groups_action: add
+      add:
+        - Remote Desktop Users
 
 - name: Create a Domain Admin user
-  community.windows.win_domain_user:
+  microsoft.ad.user:
     name: "{{ defaults.ad_domain_admin }}"
     firstname: Domain
     surname: Admin
@@ -109,9 +109,9 @@
     state: present
     password_never_expires: true
     groups:
-      - Domain Admins
-      - Remote Desktop Users
-    groups_action: add
+      add:
+        - Domain Admins
+        - Remote Desktop Users
 
 - name: Allow the domain user and domain admin to RDP
   ansible.windows.win_user_right:

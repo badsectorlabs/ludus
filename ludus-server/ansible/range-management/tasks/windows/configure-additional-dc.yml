@@ -27,7 +27,7 @@
 - name: Promoted the server to a DC
   block:
     - name: Promote this server to Additional DC 1
-      win_domain_controller:
+      microsoft.ad.domain_controller:
         dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
         domain_admin_user: "{{ domain_admin }}@{{ netbios_name }}.{{ fqdn_tail }}"
         domain_admin_password: "{{ domain_admin_password }}"
@@ -35,7 +35,7 @@
         state: domain_controller
   # Why do you have to run this twice to actually have it take effect? No idea.
     - name: Promote this server to Additional DC 2
-      win_domain_controller:
+      microsoft.ad.domain_controller:
         dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
         domain_admin_user: "{{ domain_admin }}@{{ netbios_name }}.{{ fqdn_tail }}"
         domain_admin_password: "{{ domain_admin_password }}"
@@ -46,14 +46,14 @@
     # DFS Replication: The dependency service or group failed to start. \r\n\r\n\
     # "The dependency service or group failed to start.\"\r\n", "reboot_required": true}
     - name: Reboot the Additional DC
-      win_reboot:
+      ansible.windows.win_reboot:
     - name: Disable password policy
       community.windows.win_security_policy:
         section: System Access
         key: PasswordComplexity
         value: 0
     - name: Promote this server to Additional DC
-      win_domain_controller:
+      microsoft.ad.domain_controller:
         dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
         domain_admin_user: "{{ domain_admin }}@{{ netbios_name }}.{{ fqdn_tail }}"
         domain_admin_password: "{{ domain_admin_password }}"
