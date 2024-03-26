@@ -134,6 +134,10 @@ type VM struct {
 	Template    string `json:"template"`
 	VLAN        int    `json:"vlan"`
 	IPLastOctet int    `json:"ip_last_octet"`
+	Domain      struct {
+		FQDN string `json:"fqdn"`
+		Role string `json:"role"`
+	} `json:"domain"`
 }
 type LudusConfig struct {
 	Ludus []VM `json:"ludus"`
@@ -158,6 +162,9 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 	// Check that all vm_names and hostnames are unique
 	seenVMNames := make(map[string]bool)
 	seenHostnames := make(map[string]bool)
+	// Check that sAMAccountnames are unique per domain
+	seenSAMnames := make(map[string]string)
+	var SAMnameKey string
 	for _, vm := range config.Ludus {
 		vlanIPKey := fmt.Sprintf("vlan: %d, ip_last_octet: %d", vm.VLAN, vm.IPLastOctet)
 		vmNameKey := vm.VMName
@@ -171,9 +178,22 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 		if seenHostnames[vmHostnameKey] {
 			return fmt.Errorf("duplicate hostname name found: %s", vmHostnameKey)
 		}
+		// "Windows doesn't permit computer names that exceed 15 characters"
+		// https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/naming-conventions-for-computer-domain-site-ou
+		if len(vm.Hostname) >= 15 {
+			SAMnameKey = vm.Hostname[:15]
+		} else {
+			SAMnameKey = vm.Hostname
+		}
+		if vm.Domain.FQDN != "" {
+			if seenSAMnames[vm.Domain.FQDN] == SAMnameKey {
+				return fmt.Errorf("duplicate Windows hostname name found: %s\nWindows hostnames are truncated to 15 characters so the first 15 characters must be unique", vm.Hostname)
+			}
+		}
 		seenVLANAndIP[vlanIPKey] = true
 		seenHostnames[vmHostnameKey] = true
 		seenVMNames[vmNameKey] = true
+		seenSAMnames[vm.Domain.FQDN] = SAMnameKey
 		// Check the template
 		if !slices.Contains(templateSlice, vm.Template) {
 			return fmt.Errorf("template not found our built on this server: %s for VM: %s", vm.Template, vm.VMName)
