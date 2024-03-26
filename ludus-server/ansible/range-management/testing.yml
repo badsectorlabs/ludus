@@ -169,19 +169,9 @@
     - name: Resync the time
       ansible.windows.win_shell: |
         w32tm /resync /rediscover
-    - name: Set DNS to public DNS before we try to reset the Windows evaluation
-      ansible.windows.win_dns_client:
-        adapter_names: '*'
-        dns_servers: 
-        - "1.1.1.1"
     - name: Check if the Windows evaluation is expiring/expired
       ansible.builtin.include_tasks:
-        file: rearm.yml
-    - name: Set DNS (Windows)
-      ansible.windows.win_dns_client:
-        adapter_names: '*'
-        dns_servers: 
-        - "{{ dc_ip }}"
+        file: tasks/windows/rearm.yml
 
 - name: Set the time and check expiration of Windows endpoints/servers
   tags: [never, stop-testing]
@@ -213,19 +203,9 @@
     - name: Resync the time
       ansible.windows.win_shell: |
         w32tm /resync /rediscover
-    - name: Set DNS to public DNS before we try to reset the Windows evaluation
-      ansible.windows.win_dns_client:
-        adapter_names: '*'
-        dns_servers: 
-        - "1.1.1.1"
     - name: Check if the Windows evaluation is expiring/expired
       ansible.builtin.include_tasks:
-        file: rearm.yml
-    - name: Set DNS (Windows)
-      ansible.windows.win_dns_client:
-        adapter_names: '*'
-        dns_servers: 
-        - "{{ dc_ip if dc_ip is defined else dns_server }}"
+        file: tasks/windows/rearm.yml
 
 # ==========================================================
 # Firewall management
