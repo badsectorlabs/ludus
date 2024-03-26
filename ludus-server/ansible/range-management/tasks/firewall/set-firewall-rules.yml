@@ -57,6 +57,11 @@
   ansible.builtin.set_fact:
     router_external_interface: "{{ wan_interface_command.stdout }}"
 
+- name: Create the LUDUS_DEFAULTS chain
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    chain_management: true
+
 - name: Deny all other traffic from the external interface
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
