@@ -267,12 +267,6 @@
         cmd: |
           ANSIBLE_HOME={{ ludus_install_path }}/users/root/.ansible ansible-galaxy install -r {{ ludus_install_path }}/ansible/requirements.yml
 
-    - name: TMP install the lae.proxmox role that supports proxmox 8
-      # We must set the ANSIBLE_HOME correctly, so use the shell
-      ansible.builtin.shell:
-        cmd: |
-          ANSIBLE_HOME={{ ludus_install_path }}/users/root/.ansible ansible-galaxy install https://github.com/lexxxel/ansible-role-proxmox/archive/feature/add_bookworm_and_debian_12_compatibility.tar.gz,pr-230,lae.proxmox --force
-
     - name: Create systemd service file for ludus admin
       ansible.builtin.template:
         src: ludus-admin.service.j2

@@ -182,7 +182,7 @@ func installAnsibleWithPip() {
 		log.Println("  Installing python3-pip...")
 		Run("DEBIAN_FRONTEND=noninteractive apt-get -qqy install python3-pip", false, true)
 		log.Println("  Installing ansible with pip...")
-		Run("python3 -m pip install ansible==8.4.0 netaddr==0.9.0 --break-system-packages", false, true)
+		Run("python3 -m pip install ansible==9.3.0 netaddr==1.2.1 --break-system-packages", false, true)
 		log.Println("  Printing ansible version...")
 		Run("ansible --version", true, true)
 	}
