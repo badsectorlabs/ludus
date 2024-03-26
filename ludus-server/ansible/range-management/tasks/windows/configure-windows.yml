@@ -26,16 +26,9 @@
       $sh = New-Object -ComObject "Shell.Application"
       $sh.Namespace(17).Items() | Where-Object { $_.Type -eq "CD Drive" } | foreach { $_.InvokeVerb("Eject") }
 
-- name: Set DNS to public DNS before we try to reset the Windows evaluation
-  ansible.windows.win_dns_client:
-    adapter_names: '*'
-    dns_servers:
-      - "1.1.1.1"
-
 - name: Check if the Windows evaluation is expiring/expired
-  ansible.windows.win_powershell:
-    script: |
-      . c:\ludus\scripts\fix-windows-expiration.ps1
+  ansible.builtin.include_tasks:
+    file: rearm.yml
 
 # See https://github.com/PowerShell/PowerShell/issues/2138 for more info
 - name: Disable the Invoke-WebRequest download progress bar globally for speed improvements
