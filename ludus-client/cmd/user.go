@@ -292,7 +292,7 @@ var usersAddCmd = &cobra.Command{
 }
 
 func setupUsersAddCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the new user (2-4 chars)")
+	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the new user (2-20 chars, typically capitalized initials)")
 	command.Flags().StringVarP(&userName, "name", "n", "", "the name of the user (typically 'first last')")
 	command.Flags().BoolVarP(&userIsAdmin, "admin", "a", false, "set this flag to make the user an admin of Ludus")
 
