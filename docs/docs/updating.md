@@ -35,6 +35,12 @@ Ludus files extracted successfully
 Ludus updated to v1.0.2+6a96b3ef
 ```
 
+:::note
+
+    If you are updating from < 1.3.0 see UPDATING.md
+
+:::
+
 :::warning
 
     The Ludus server binary will refuse to update if any `ansible` or `packer` processes are active on the machine to prevent possible interruption to active range or template activity.
