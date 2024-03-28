@@ -38,10 +38,14 @@ gcloud compute instances create ludus \
 
 ## Deploying Debian 12 Using Terraform
 
-You will need to replace `{InstanceName}`, `{Zone}`, `{ProjectID}` and `{SSH KEY}`.
+You will need to replace `{InstanceName}`, `{region}`, `{Zone}`, `{project_id}`, `{SSH_User} and `{SSH_KEY}`.
+This will install a new Debian 12 server with 24 cores, 82GB Memory, 500GB SSD and nested virtualization enabled (on Intel Haswell chip)
 
 ```
-# This code is compatible with Terraform 4.25.0 and versions that are backwards compatible to 4.25.0.
+provider "google" {
+  region = "{region}"
+  project = "{project_id}"
+}
 
 resource "google_compute_instance" "{InstanceName}" {
   boot_disk {
@@ -65,10 +69,11 @@ resource "google_compute_instance" "{InstanceName}" {
     goog-ec-src = "vm_add-tf"
   }
 
-  machine_type = "e2-custom-16-73728"
+  machine_type     = "custom-24-81920"
+  min_cpu_platform = "Intel Haswell"
 
   metadata = {
-    ssh-keys = "{SSH KEY}"
+    ssh-keys = "{SSH_USER}:{SSH KEY}"
   }
 
   name = "{InstanceName}"
@@ -80,7 +85,7 @@ resource "google_compute_instance" "{InstanceName}" {
 
     queue_count = 0
     stack_type  = "IPV4_ONLY"
-    subnetwork  = "projects/{ProjectID}/regions/{Zone}/subnetworks/default"
+    subnetwork  = "projects/{project_id}/regions/{region}/subnetworks/default"
   }
 
   scheduling {
@@ -98,11 +103,10 @@ resource "google_compute_instance" "{InstanceName}" {
   }
 
   zone = "{Zone}"
-}
-
   advanced_machine_features {
     enable_nested_virtualization   = true
   }
+}
 ```
 
 ## Install
