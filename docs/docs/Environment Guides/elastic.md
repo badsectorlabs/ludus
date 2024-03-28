@@ -89,6 +89,6 @@ You can set the token and URL manually using role_vars if you wish. See [the rea
 local:~$ ludus range deploy
 ```
 
-4. Enjoy your Elastic Security server with agents enrolled and detections enabled!
+4. Enjoy your Elastic Security server with agents enrolled and detections enabled! You can access the elastic web interface via HTTPS on port 5601 or the VM with the `badsectorlabs.ludus_elastic_container` role. The creds are `elastic:elasticpassword` unless you set the password with role variables.
 
 ![Elastic agents](/img/envs/elastic.png)
