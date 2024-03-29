@@ -1,26 +1,24 @@
 ---
-title: "Game of Active Directory (GOAD)"
+title: "GOAD - SCCM"
 ---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# Game of Active Directory (GOAD)
+# Game of Active Directory (GOAD) - SCCM
 
 :::success Props!
 
-Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to create GOAD!
+Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to create GOAD SCCM, and Errorix404 on the [Ludus Discord](https://discord.gg/HryzhdUSYT) for getting GOAD SCCM to work with Ludus!
 
 :::
 
-![GOAD Network Map](https://raw.githubusercontent.com/Orange-Cyberdefense/GOAD/main/docs/img/GOAD_schema.png)
+![GOAD SCCM Network Map](https://raw.githubusercontent.com/Orange-Cyberdefense/GOAD/main/docs/img/SCCMLAB_overview.png)
 
-### 1. Add the Windows 2019 and 2016 server templates to Ludus
+### 1. Add the Windows 2019 template to Ludus
 
 ```plain
 local:~$ git clone https://gitlab.com/badsectorlabs/ludus
 local:~$ cd ludus/templates
-local:~$ ludus templates add -d win2016-server-x64
-[INFO]  Successfully added template
 local:~$ ludus templates add -d win2019-server-x64
 [INFO]  Successfully added template
 local:~$ ludus templates build
@@ -36,7 +34,6 @@ local:~$ ludus templates list
 | win11-22h2-x64-enterprise-template     | TRUE  |
 | win2022-server-x64-template            | TRUE  |
 | win2019-server-x64-template            | TRUE  |
-| win2016-server-x64-template            | TRUE  |
 +----------------------------------------+-------+
 ```
 
@@ -44,47 +41,38 @@ local:~$ ludus templates list
 
 ```plain title="config.yml"
 ludus:
-  - vm_name: "{{ range_id }}-GOAD-DC01"
+  - vm_name: "{{ range_id }}-SCCM-DC"
     hostname: "{{ range_id }}-DC01"
     template: win2019-server-x64-template
     vlan: 10
-    ip_last_octet: 10
+    ip_last_octet: 40
     ram_gb: 4
     cpus: 2
     windows:
       sysprep: true
-  - vm_name: "{{ range_id }}-GOAD-DC02"
-    hostname: "{{ range_id }}-DC02"
+  - vm_name: "{{ range_id }}-SCCM-MECM"
+    hostname: "{{ range_id }}-SRV01"
     template: win2019-server-x64-template
     vlan: 10
-    ip_last_octet: 11
+    ip_last_octet: 41
     ram_gb: 4
     cpus: 2
     windows:
       sysprep: true
-  - vm_name: "{{ range_id }}-GOAD-DC03"
-    hostname: "{{ range_id }}-DC03"
-    template: win2016-server-x64-template
-    vlan: 10
-    ip_last_octet: 12
-    ram_gb: 4
-    cpus: 2
-    windows:
-      sysprep: true
-  - vm_name: "{{ range_id }}-GOAD-SRV02"
+  - vm_name: "{{ range_id }}-SCCM-MSSQL"
     hostname: "{{ range_id }}-SRV02"
     template: win2019-server-x64-template
     vlan: 10
-    ip_last_octet: 22
+    ip_last_octet: 42
     ram_gb: 4
-    cpus: 2
+    cpus: 4
     windows:
       sysprep: true
-  - vm_name: "{{ range_id }}-GOAD-SRV03"
-    hostname: "{{ range_id }}-SRV03"
+  - vm_name: "{{ range_id }}-SCCM-CLIENT"
+    hostname: "{{ range_id }}-WS01"
     template: win2019-server-x64-template
     vlan: 10
-    ip_last_octet: 23
+    ip_last_octet: 43
     ram_gb: 4
     cpus: 2
     windows:
@@ -95,7 +83,7 @@ ludus:
     vlan: 99
     ip_last_octet: 1
     ram_gb: 4
-    cpus: 2
+    cpus: 4
     linux: true
     testing:
       snapshot: false
@@ -112,21 +100,8 @@ local:~$ ludus range deploy
 # Or check the status with `ludus range status`
 ```
 
-### 3. Update the SRV02 machine
 
-```plain
-local:~$ ludus testing update -n JD-GOAD-SRV02 # replace "JD" with your range ID
-local:~$ ludus range logs -f
-# Wait for all updates to be installed. 
-# Be patient, this will take a long time.
-# This required for the IIS install to work during GOAD setup.
-
-# When you see the following, the updates are complete:
-localhost                  : ok=5    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
-JD-GOAD-SRV02              : ok=8    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0 
-```
-
-### 4. Install ansible and its requirements for GOAD on your local machine
+### 3. Install ansible and its requirements for GOAD on your local machine
 
 ```
 # You can use a virtualenv here if you would like
@@ -137,43 +112,29 @@ local:~$ cd GOAD/ansible
 local:~/GOAD/ansible$ ansible-galaxy install -r requirements.yml
 ```
 
-### 5. Create the following inventory file and replace RANGENUMBER with your range number with sed (commands provided below)
+### 4. Create the following inventory file and replace RANGENUMBER with your range number with sed (commands provided below)
 
 ```plain title="inventory.yml"
 [default]
 ; Note: ansible_host *MUST* be an IPv4 address or setting things like DNS
 ; servers will break.
 ; ------------------------------------------------
-; sevenkingdoms.local
+; sccm.lab
 ; ------------------------------------------------
-dc01 ansible_host=10.RANGENUMBER.10.10 dns_domain=dc01 dict_key=dc01
-;ws01 ansible_host=10.RANGENUMBER.10.30 dns_domain=dc01 dict_key=ws01
-; ------------------------------------------------
-; north.sevenkingdoms.local
-; ------------------------------------------------
-dc02 ansible_host=10.RANGENUMBER.10.11 dns_domain=dc01 dict_key=dc02
-srv02 ansible_host=10.RANGENUMBER.10.22 dns_domain=dc02 dict_key=srv02
-; ------------------------------------------------
-; essos.local
-; ------------------------------------------------
-dc03 ansible_host=10.RANGENUMBER.10.12 dns_domain=dc03 dict_key=dc03
-srv03 ansible_host=10.RANGENUMBER.10.23 dns_domain=dc03 dict_key=srv03
+dc01 ansible_host=10.RANGENUMBER.10.40 dns_domain=dc01 dict_key=dc01
+srv01 ansible_host=10.RANGENUMBER.10.41 dns_domain=dc01 dict_key=srv01
+srv02 ansible_host=10.RANGENUMBER.10.42 dns_domain=dc01 dict_key=srv02
+ws01 ansible_host=10.RANGENUMBER.10.43 dns_domain=dc01 dict_key=ws01
 
 [all:vars]
-; domain_name : folder inside ad/
-domain_name=GOAD
-
 force_dns_server=yes
 dns_server=10.RANGENUMBER.10.254
 
 two_adapters=no
-; adapter created by vagrant and virtualbox (comment if you use vmware)
+; adapter created by proxmox (change them if you get an error)
+; to get the name connect to one vm and run ipconfig it will show you the adapters name
 nat_adapter=Ethernet
 domain_adapter=Ethernet
-
-; adapter created by vagrant and vmware (uncomment if you use vmware)
-; nat_adapter=Ethernet0
-; domain_adapter=Ethernet1
 
 ; winrm connection (windows)
 ansible_user=localuser
@@ -182,11 +143,6 @@ ansible_connection=winrm
 ansible_winrm_server_cert_validation=ignore
 ansible_winrm_operation_timeout_sec=400
 ansible_winrm_read_timeout_sec=500
-
-; proxy settings (the lab need internet for some install, if you are behind a proxy you should set the proxy here)
-enable_http_proxy=no
-ad_http_proxy=http://x.x.x.x:xxxx
-ad_https_proxy=http://x.x.x.x:xxxx
 ```
 
 <Tabs groupId="operating-systems">
@@ -210,6 +166,23 @@ local:~/GOAD/ansible$ sed -i '' "s/RANGENUMBER/$RANGENUMBER/g" inventory.yml
   </TabItem>
 </Tabs>
 
+### 5. A little manual work
+
+Until [this pull request](https://github.com/Orange-Cyberdefense/GOAD/pull/206) is merged, you'll need to make the following changes:
+
+1. Edit the IIS install task to start the windows update service
+
+```
+local:~/GOAD/ansible$ vim roles/sccm/install/iis/tasks/main.yml
+
+# Add the following at line 24 (between the 'Reboot if installing windows feature requires it' task and the 'install .NET Framework 3.5 with DISM' task)
+- name: Enable update service
+  ansible.windows.win_service:
+    name: Windows Update
+    state: started
+    start_mode: auto
+```
+
 ### 6. Deploy GOAD
 
 :::note
@@ -223,8 +196,8 @@ You must be connected to your Ludus wireguard VPN for these commands to work
 ```
 local:~/GOAD/ansible$ vim build.yml
 # Edit the keyboard layout to your preferred layout (or remove that whole line)
-local:~/GOAD/ansible$ export ANSIBLE_COMMAND="ansible-playbook -i ../ad/GOAD/data/inventory -i ./inventory.yml"
-local:~/GOAD/ansible$ export LAB="GOAD"
+local:~/GOAD/ansible$ export ANSIBLE_COMMAND="ansible-playbook -i ../ad/SCCM/data/inventory -i ./inventory.yml"
+local:~/GOAD/ansible$ export LAB="SCCM"
 local:~/GOAD/ansible$ ../scripts/provisionning.sh
 ```
   </TabItem>
@@ -232,8 +205,8 @@ local:~/GOAD/ansible$ ../scripts/provisionning.sh
 ```
 local:~/GOAD/ansible$ vim build.yml
 # Edit the keyboard layout to your preferred layout (or remove that whole line)
-local:~/GOAD/ansible$ export ANSIBLE_COMMAND="ansible-playbook -i ../ad/GOAD/data/inventory -i ./inventory.yml"
-local:~/GOAD/ansible$ export LAB="GOAD"
+local:~/GOAD/ansible$ export ANSIBLE_COMMAND="ansible-playbook -i ../ad/SCCM/data/inventory -i ./inventory.yml"
+local:~/GOAD/ansible$ export LAB="SCCM"
 local:~/GOAD/ansible$ export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 local:~/GOAD/ansible$ ../scripts/provisionning.sh
 ```
@@ -245,22 +218,9 @@ Now you wait. `[WARNING]` lines are ok, and some steps may take a long time, don
 This will take a few hours. You'll know it is done when you see:
 
 ```
-your lab: GOAD is successfully setup ! have fun ;)
+your lab : SCCM is successfully setup ! have fun ;)
 ```
 
-:::tip It's always DNS...
-
-If you encounter errors with `TASK [groups_domains : synchronizes all domains]` or similar, manually remove the `10.ID.10.254` entry from the DNS servers for the host. You can do this via the GUI (Network and Internet -> Change Adaptor Options -> Right-click -> Properties -> Internet Protocol Version 4 (TCP/IPv4) -> Properties) or via Powershell:
-
-```powershell
-# Run this on the failing host
-$adapter = Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPAddress -ne $null }
-$dnsServers = $adapter.DNSServerSearchOrder
-$newDnsServers = $dnsServers | Where-Object { $_ -notmatch ".*\.254$" }
-$adapter.SetDNSServerSearchOrder($newDnsServers)
-```
-
-:::
 
 ### 7. Snapshot VMs
 
@@ -268,8 +228,8 @@ Take snapshots via the proxmox web UI or SSH into ludus and as root run the foll
 
 ```
 export RANGEID=JD # <= change to your ID
-vms=("$RANGEID-GOAD-DC01" "$RANGEID-GOAD-DC02" "$RANGEID-GOAD-DC03" "$RANGEID-GOAD-SRV02" "$RANGEID-GOAD-SRV03")
-COMMENT="Clean GOAD setup after ansible run"
+vms=("$RANGEID-SCCM-DC" "$RANGEID-SCCM-MECM" "$RANGEID-SCCM-MSSQL" "$RANGEID-SCCM-CLIENT")
+COMMENT="Clean GOAD SCCM setup after ansible run"
 # Loop over the array
 for vm in "${vms[@]}"
 do
@@ -283,5 +243,3 @@ done
 ### 8. Hack!
 
 Access your Kali machine at `http://10.RANGENUMBER.99.1:8444` using the creds `kali:password`.
-
-Follow [the GOAD guide](https://mayfly277.github.io/posts/GOADv2-pwning_part1/) or explore the network on your own.
