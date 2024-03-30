@@ -59,6 +59,10 @@ func AddUser(c *gin.Context) {
 			usersRange.UserID = user.UserID
 			usersRange.NumberOfVMs = 0
 			usersRange.TestingEnabled = false
+
+			// Find the next available range number for the new user
+			usersRange.RangeNumber = findNextAvailableRangeNumber(db)
+
 			db.Create(&usersRange)
 			// Query the DB to get the autoincremented rangeID
 			db.First(&usersRange, "user_id = ?", user.UserID)

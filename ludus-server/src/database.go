@@ -82,3 +82,33 @@ func InitDb() *gorm.DB {
 
 	return db
 }
+
+// findNextAvailableRangeNumber finds the smallest positive integer that is not
+// present in the RangeNumber column of the RangeObject table. This function
+// assumes that the RangeNumber values are positive integers and that there can
+// be gaps or non-sequential values in the column.
+//
+// The function takes a *gorm.DB as an argument, which should be a valid GORM
+// database connection.
+//
+// Returns:
+//
+//	int32 - The smallest positive integer that is not present in the
+//	        RangeNumber column of the RangeObject table.
+func findNextAvailableRangeNumber(db *gorm.DB) int32 {
+	var rangeNumbers []int32
+	db.Model(&RangeObject{}).Select("range_number").Order("range_number").Scan(&rangeNumbers)
+
+	for i := int32(1); ; i++ {
+		found := false
+		for _, num := range rangeNumbers {
+			if num == i {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return i
+		}
+	}
+}
