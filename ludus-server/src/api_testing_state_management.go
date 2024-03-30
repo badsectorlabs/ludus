@@ -141,13 +141,13 @@ func Deny(c *gin.Context) {
 	}
 
 	if !usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "testing not enabled for range " + usersRange.UserID})
+		c.JSON(http.StatusConflict, gin.H{"error": "Testing not enabled for range " + usersRange.UserID})
 		return
 	}
 
 	err = c.BindJSON(&thisDenyPayload)
 	if err != nil {
-		c.JSON(http.StatusNoContent, gin.H{"error": "improperly formatted deny payload"})
+		c.JSON(http.StatusNoContent, gin.H{"error": "Improperly formatted deny payload"})
 		return
 	}
 
@@ -205,7 +205,7 @@ func StartTesting(c *gin.Context) {
 	}
 
 	if usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"result": "testing already enabled"})
+		c.JSON(http.StatusConflict, gin.H{"result": "Testing already enabled"})
 		return
 	}
 
@@ -217,7 +217,7 @@ func StartTesting(c *gin.Context) {
 	// Update the testing state in the DB
 	db.Model(&usersRange).Update("testing_enabled", true)
 
-	c.JSON(http.StatusOK, gin.H{"result": "testing started"})
+	c.JSON(http.StatusOK, gin.H{"result": "Testing started"})
 }
 
 // StopTesting - revert and exit testing state
@@ -228,7 +228,7 @@ func StopTesting(c *gin.Context) {
 	}
 
 	if !usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "testing not enabled"})
+		c.JSON(http.StatusConflict, gin.H{"error": "Testing not enabled"})
 		return
 	}
 
@@ -250,7 +250,7 @@ func StopTesting(c *gin.Context) {
 	usersRange.AllowedIPs = []string{}
 	db.Save(&usersRange)
 
-	c.JSON(http.StatusOK, gin.H{"result": "testing stopped"})
+	c.JSON(http.StatusOK, gin.H{"result": "Testing stopped"})
 }
 
 // UpdateVMs - update a VM/group of VMs based on a name provided in the POST body
