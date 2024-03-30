@@ -74,7 +74,7 @@
     node: "{{ node_name }}"
     vmid: "{{ vm_id }}"
     bootdisk: "{{ boot_disk | default('sata0') }}" # Boot from sata0 unless specified
-    balloon: "{{ (balloon_size | default('0') | int) * 1024 }}" # Default to no balloon
+    balloon: "{{ ((balloon_size | default('0') | float) * 1024) | int }}" # Default to no balloon
     ide: {} # remove install CD
     tablet: "{{ use_tablet_pointer | default('false') }}" # Set this to 'true' for windows and macOS VMs
     memory: "{{ (ram | default('8') | int) * 1024 }}"
