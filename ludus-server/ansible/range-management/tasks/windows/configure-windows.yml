@@ -56,23 +56,23 @@
 - name: Get bginfo.exe if needed
   run_once: true
   block:
-    - name: Create /opt/ludus/resources/windows directory if it doesn't exist
+    - name: "Create {{ ludus_install_path }}/resources/windows directory if it doesn't exist"
       ansible.builtin.file:
-        path: /opt/ludus/resources/windows
+        path: "{{ ludus_install_path }}/resources/windows"
         state: directory
         recurse: true
       delegate_to: localhost
 
     - name: Check if bginfo.exe exists
       ansible.builtin.stat:
-        path: /opt/ludus/resources/windows/bginfo.exe
+        path: "{{ ludus_install_path }}/resources/windows/bginfo.exe"
       delegate_to: localhost
       register: bginfo_exists
 
     - name: Download bginfo.exe
       ansible.builtin.get_url:
         url: https://live.sysinternals.com/bginfo.exe
-        dest: /opt/ludus/resources/windows/bginfo.exe
+        dest: "{{ ludus_install_path }}/resources/windows/bginfo.exe"
       delegate_to: localhost
       when: not bginfo_exists.stat.exists
 
@@ -90,7 +90,7 @@
 
 - name: Copy bginfo.exe to windows host
   win_copy:
-    src: /opt/ludus/resources/windows/bginfo.exe
+    src: "{{ ludus_install_path }}/resources/windows/bginfo.exe"
     dest: C:\ludus\background\bginfo.exe
   when: not bginfo_stat.stat.exists
 
