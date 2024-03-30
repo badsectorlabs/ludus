@@ -29,6 +29,13 @@
         fail_msg: "proxmox_gateway is not in the same network as proxmox_local_ip"
       when: pve_netmask != "255.255.255.255" # If the netmask is a /32, assume the user knows what they are doing (seen on GCP instances)
 
+    - name: Install SSH
+      ansible.builtin.apt:
+        name:
+          - openssh-server
+        state: present
+        update_cache: true
+
     - name: Enable SSH banner messages
       ansible.builtin.lineinfile:
         path: /etc/ssh/sshd_config
