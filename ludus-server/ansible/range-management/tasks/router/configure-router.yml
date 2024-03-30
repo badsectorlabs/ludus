@@ -17,7 +17,7 @@
     reload: true
 
 - name: Install dnsmasq, ca-certificates, and iptables-persistent
-  apt:
+  ansible.builtin.apt:
     name:
       - dnsmasq
       - iptables-persistent
@@ -28,7 +28,7 @@
     state: present
 
 - name: Disable DNS in dnsmasq (only use it for DHCP)
-  lineinfile:
+  ansible.builtin.lineinfile:
     path: /etc/dnsmasq.conf
     line: 'port=0'
     create: true
@@ -45,7 +45,7 @@
   failed_when: adguard_install.rc != 0 and (adguard_install.rc == 1 and 'the existing AdGuard Home installation is detected' not in adguard_install.stderr)
 
 - name: Configure AdGuardHome
-  template:
+  ansible.builtin.template:
     src: AdGuardHome.yaml.j2
     dest: /opt/AdGuardHome/AdGuardHome.yaml
   when: adguard_install.rc == 0
