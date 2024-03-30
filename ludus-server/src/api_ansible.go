@@ -125,6 +125,11 @@ func ActionRoleFromInternet(c *gin.Context) {
 		return // JSON set in getUserObject
 	}
 
+	if !isAdmin(c, false) && ServerConfiguration.PreventUserAnsibleAdd {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to perform this ansible action"})
+		return
+	}
+
 	var roleString = roleBody.Role
 	if roleBody.Version != "" {
 		roleString = fmt.Sprintf("%s,%s", roleBody.Role, roleBody.Version)
@@ -166,6 +171,11 @@ func ActionRoleFromInternet(c *gin.Context) {
 
 // InstallRoleFromTar - installs an ansible role from a user uploaded tar file
 func InstallRoleFromTar(c *gin.Context) {
+	if !isAdmin(c, false) && ServerConfiguration.PreventUserAnsibleAdd {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to perform this ansible action"})
+		return
+	}
+
 	// Parse the multipart form
 	if err := c.Request.ParseMultipartForm(1073741824); err != nil { // allow 1GB
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -232,6 +242,11 @@ func ActionCollectionFromInternet(c *gin.Context) {
 	}
 	var collectionBody CollectionBody
 	c.Bind(&collectionBody)
+
+	if !isAdmin(c, false) && ServerConfiguration.PreventUserAnsibleAdd {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to perform this ansible action"})
+		return
+	}
 
 	user, err := getUserObject(c)
 	if err != nil {

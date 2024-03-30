@@ -20,6 +20,7 @@ type Configuration struct {
 	ProxmoxVMStorageFormat string `mapstructure:"proxmox_vm_storage_format" yaml:"proxmox_vm_storage_format"`
 	ProxmoxISOStoragePool  string `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
 	LudusNATInterface      string `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
+	PreventUserAnsibleAdd  bool   `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
 }
 
 var ServerConfiguration Configuration
@@ -44,6 +45,7 @@ func ParseConfig() {
 	viper.SetDefault("proxmox_vm_storage_format", "qcow2")
 	viper.SetDefault("proxmox_iso_storage_pool", "local")
 	viper.SetDefault("ludus_nat_interface", "vmbr0") // Backwards compatibility for < v1.0.4
+	viper.SetDefault("prevent_user_ansible_add", false)
 
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)
