@@ -84,7 +84,9 @@ func Index(c *gin.Context) {
 func isAdmin(c *gin.Context, setJSON bool) bool {
 	isAdmin := c.GetBool("isAdmin")
 	if !isAdmin {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "This is an admin only endpoint or you queried another user and are not an admin"})
+		if setJSON {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "This is an admin only endpoint or you queried another user and are not an admin"})
+		}
 		return false
 	}
 	return true
@@ -305,6 +307,20 @@ var routes = Routes{
 		http.MethodPost,
 		"/testing/allow",
 		Allow,
+	},
+
+	{
+		"RangeAccessAction",
+		http.MethodPost,
+		"/range/access",
+		RangeAccessAction,
+	},
+
+	{
+		"RangeAccessList",
+		http.MethodGet,
+		"/range/access",
+		RangeAccessList,
 	},
 
 	{
