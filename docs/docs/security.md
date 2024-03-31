@@ -24,10 +24,35 @@ sudo /sbin/iptables-save > /etc/iptables/rules.v4
 
 You may also wish to limit access to the Proxmox web interface (tcp/8006) in the same way.
 
+## SSH Access
+
+Users that have SSH access to the Ludus host can interact with any deployed VM if they tunnel traffic through the Ludus host, or initiate connections with utilities on the Ludus host.
+For this reason, only trusted users should have SSH access to the Ludus host. The easiest way to prevent user access via SSH is to use [key-only authentication](https://www.server-world.info/en/note?os=Debian_12&p=ssh&f=4).
+
+You may set the following iptables rules to limit access to the range routers from the ludus host to only system processes and the `ludus` user.
+
+```
+# For each user
+iptables -A OUTPUT -d 10.5.0.0/16 ! -o ens18 -m owner --uid-owner {{ UID }} -m comment --comment "Allow {{ USERNAME }} to reach their range" -j ACCEPT
+
+# After all user rules have been added
+iptables -A OUTPUT -d 10.0.0.0/8 ! -o ens18 -m owner --uid-owner 0-999 -m comment --comment "Ludus: allow system processes to 10/8" -j ACCEPT
+iptables -A OUTPUT -d 10.0.0.0/8 ! -o ens18 -m owner --uid-owner {{ LUDUS USER UID }} -m comment --comment "Ludus: default allow ludus access to all user ranges" -j ACCEPT
+iptables -A OUTPUT -d 10.0.0.0/8 ! -o ens18 -m comment --comment "Ludus: default deny access to user ranges" -j DROP
+
+iptables-save /etc/iptables/rules.v4
+```
+
 ## Malicious Users
 
 Giving users the ability to add arbitrary Ansible roles is effectively allowing for remote code execution, as a role could simply be a reverse shell executed on host `localhost` (the Ludus host).
 The flexibility offered by arbitrary Ansible roles is worth the security trade off for nearly all use cases.
+
+To prevent non-admin users from adding Ansible roles or collections, set the following option in the Ludus config file.
+
+```yaml title="/opt/ludus/config.yml"
+prevent_user_ansible_add: true
+```
 
 The Ludus server process (port 8080), is heavily sandboxed (i.e. all files outside of /opt/ludus are read only), however there are likely still methods of privilege escalation.
 

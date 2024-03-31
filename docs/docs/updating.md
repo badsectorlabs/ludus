@@ -37,7 +37,7 @@ Ludus updated to v1.0.2+6a96b3ef
 
 :::note
 
-    If you are updating from < 1.3.0 see UPDATING.md
+    If you are updating from < 1.3.0 see [UPDATING.md](https://gitlab.com/badsectorlabs/ludus/-/blob/main/UPDATING.md?ref_type=heads)
 
 :::
 
