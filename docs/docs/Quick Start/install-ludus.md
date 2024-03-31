@@ -10,6 +10,12 @@ Ludus will completely take over the machine! It should not be used for other tas
 
 :::
 
+:::danger
+
+Ludus is not supported on hosts that are connected to the network via WiFi. Please connect via ethernet.
+
+:::
+
 Ludus can **only** be installed on a host that meets the following requirements:
 
 - Debian 12 or Proxmox 8
