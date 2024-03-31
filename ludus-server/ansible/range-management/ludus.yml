@@ -13,9 +13,10 @@
     bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - the "WAN" side of the router
     vm_groups: '"{{ range_id }}","{{ range_id }}_router"'
     is_linux: true
-    ram: 4
-    cpu_cores: 4
-    num_vcpus: 4
+    ram: 2
+    balloon_size: 0.5
+    cpu_cores: 2
+    num_vcpus: 2
     unmanaged: false
 
 # This must come before the VLAN setup to install iptables etc
@@ -66,6 +67,8 @@
   tasks:
     - name: Set any user defined firewall rules
       ansible.builtin.include_tasks: tasks/firewall/set-firewall-rules.yml
+  vars:
+    range_access_grants_array: "{{ access_grants_array | default([]) }}" # for some reason underscores cause the loop to fail in set-firewall-rules?
 
 - name: Deploy DC VMs
   tags: [vm-deploy]
