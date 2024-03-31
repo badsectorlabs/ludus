@@ -19,7 +19,7 @@
 # Shut down the entire environment to preserve resources
 # ==========================================================
 - name: Shut down VMs
-  tags: [never, stop-range]
+  tags: [never, stop-range, destroy-range]
   hosts: localhost
   tasks:
     - name: Set VM State
