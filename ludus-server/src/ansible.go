@@ -14,6 +14,7 @@ import (
 	"github.com/apenella/go-ansible/pkg/playbook"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/exp/maps"
+	"gorm.io/gorm"
 )
 
 // Runs an ansible playbook with an arbitrary amount of extraVars
@@ -34,13 +35,23 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 	}
 	user, err := getUserObject(c)
 	if err != nil {
-		return "Could not get user", errors.New("could not get user") // JSON set in getUserObject
+		return "Could not get user", err // JSON set in getUserObject
 	}
 	usersRange, err := getRangeObject(c)
 	if err != nil {
 		return "Could not get range", errors.New("could not get range") // JSON set in getRangeObject
 	}
-	userVars := map[string]interface{}{"username": user.ProxmoxUsername, "range_id": user.UserID, "range_second_octet": usersRange.RangeNumber, "ludus_nat_interface": ServerConfiguration.LudusNATInterface}
+
+	accessGrantsArray := getAccessGrantsForUser(user.UserID)
+	userVars := map[string]interface{}{
+		"username":           user.ProxmoxUsername,
+		"range_id":           user.UserID,
+		"range_second_octet": usersRange.RangeNumber,
+		// We have to send this in the even this deploy is a fresh deploy AFTER a user has been granted access to this
+		// range, which means there is a fresh router deployed with no knowledge of the access grants
+		"access_grants_array": accessGrantsArray,
+	}
+
 	// Merge userVars with any extraVars provided
 	maps.Copy(userVars, extraVars)
 
@@ -144,4 +155,27 @@ func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, 
 func RunPlaybookWithTag(c *gin.Context, playbook string, tag string, verbose bool) (string, error) {
 	playbookPathArray := []string{fmt.Sprintf("%s/ansible/range-management/%s", ludusInstallPath, playbook)}
 	return RunAnsiblePlaybookWithVariables(c, playbookPathArray, nil, nil, tag, verbose, "")
+}
+
+type AccessGrantStruct struct {
+	SecondOctet int32  `json:"second_octet"`
+	Username    string `json:"username"`
+}
+
+// Get the access grants for the provided user ID and return an array of {second_octet, username} objects
+func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
+	var accessGrants RangeAccessObject
+	result := db.First(&accessGrants, "target_user_id = ?", targetUserId)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	var returnArray []AccessGrantStruct
+	for _, sourceUserID := range accessGrants.SourceUserIDs {
+		var sourceUser UserObject
+		db.First(&sourceUser, "user_id = ?", sourceUserID)
+		var sourceRange RangeObject
+		db.First(&sourceRange, "user_id = ?", sourceUserID)
+		returnArray = append(returnArray, AccessGrantStruct{sourceRange.RangeNumber, sourceUser.ProxmoxUsername})
+	}
+	return returnArray
 }

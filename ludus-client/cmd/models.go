@@ -39,3 +39,8 @@ type UserObject struct {
 	IsAdmin         bool      `json:"isAdmin"`
 	ProxmoxUsername string    `json:"proxmoxUsername"`
 }
+
+type RangeAccessObject struct {
+	TargetUserID  string   `json:"targetUserID"`
+	SourceUserIDs []string `json:"sourceUserIDs"`
+}

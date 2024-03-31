@@ -76,7 +76,7 @@ func InitDb() *gorm.DB {
 		// has been written
 		if os.Geteuid() == 0 {
 			// Migrate any updates from the models to an existing DB
-			db.AutoMigrate(&UserObject{}, &RangeObject{}, &VmObject{})
+			db.AutoMigrate(&UserObject{}, &RangeObject{}, &VmObject{}, &RangeAccessObject{})
 		}
 	})
 

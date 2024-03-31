@@ -23,6 +23,8 @@ var (
 	noPrompt       bool
 	onlyRoles      string
 	limit          string
+	targetUserID   string
+	sourceUserID   string
 )
 
 var rangeCmd = &cobra.Command{
@@ -549,6 +551,93 @@ var rangeEtcHostsGET = &cobra.Command{
 	},
 }
 
+var rangeAccessCmd = &cobra.Command{
+	Use:   "access",
+	Short: "Grant or revoke access to a range",
+	Long:  ``,
+}
+
+type RangeAccessActionPayload struct {
+	AccessActionVerb string `json:"action"`
+	TargetUserID     string `json:"targetUserID"`
+	SourceUserID     string `json:"sourceUserID"`
+}
+
+func genericRangeActionCmd(use string, short string, aliases []string) *cobra.Command {
+
+	return &cobra.Command{
+		Use:     use,
+		Short:   short,
+		Long:    ``,
+		Args:    cobra.ExactArgs(0),
+		Aliases: aliases,
+		Run: func(cmd *cobra.Command, args []string) {
+			var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+			var responseJSON []byte
+			var success bool
+
+			accessBody := RangeAccessActionPayload{
+				AccessActionVerb: use,
+				TargetUserID:     targetUserID,
+				SourceUserID:     sourceUserID,
+			}
+
+			responseJSON, success = rest.GenericJSONPost(client, "/range/access", accessBody)
+
+			if didFailOrWantJSON(success, responseJSON) {
+				return
+			}
+			handleGenericResult(responseJSON)
+		},
+	}
+}
+
+var accessGrantCmd = genericRangeActionCmd("grant", "grant access to a target range from a source user", []string{"share"})
+var accessRevokeCmd = genericRangeActionCmd("revoke", "revoke access to a target range from a source user", []string{"unshare"})
+
+func setupGenericRangeActionCmd(command *cobra.Command) {
+	command.Flags().StringVarP(&targetUserID, "target", "t", "", "the userID of the range to grant/revoke access to/from")
+	command.Flags().StringVarP(&sourceUserID, "source", "s", "", "the userID of the user to gaining or losing access")
+}
+
+var accessListCmd = &cobra.Command{
+	Use:     "list",
+	Short:   "List the status of all active cross-range accesses",
+	Args:    cobra.ExactArgs(0),
+	Aliases: []string{"status", "get"},
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		var responseJSON []byte
+		var success bool
+		responseJSON, success = rest.GenericGet(client, "/range/access")
+		if !success {
+			return
+		}
+		var rangeAccessObjects []RangeAccessObject
+		err := json.Unmarshal(responseJSON, &rangeAccessObjects)
+		if err != nil {
+			logger.Logger.Fatal(err.Error())
+		}
+		if jsonFormat {
+			fmt.Printf("%s\n", responseJSON)
+			return
+		}
+		// Create table
+		table := tablewriter.NewWriter(os.Stdout)
+		table.SetAlignment(tablewriter.ALIGN_CENTER)
+		table.SetHeader([]string{"Target Range User ID", "Source User IDs"})
+
+		for _, item := range rangeAccessObjects {
+			table.Append([]string{item.TargetUserID, strings.Join(item.SourceUserIDs, ",")})
+		}
+
+		table.Render()
+
+	},
+}
+
 func init() {
 	rangeConfigCmd.AddCommand(rangeConfigGet)
 	setupRangeConfigSet(rangeConfigSet)
@@ -568,6 +657,12 @@ func init() {
 	setupRangeRDPGET(rangeRDPGET)
 	rangeCmd.AddCommand(rangeRDPGET)
 	rangeCmd.AddCommand(rangeEtcHostsGET)
+	rangeAccessCmd.AddCommand(accessListCmd)
+	rangeAccessCmd.AddCommand(accessGrantCmd)
+	rangeAccessCmd.AddCommand(accessRevokeCmd)
+	setupGenericRangeActionCmd(accessGrantCmd)
+	setupGenericRangeActionCmd(accessRevokeCmd)
+	rangeCmd.AddCommand(rangeAccessCmd)
 	rootCmd.AddCommand(rangeCmd)
 
 }

@@ -1,14 +1,19 @@
 package ludusapi
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // DeployRange - deploys the range according to the range config
@@ -71,18 +76,14 @@ func DeleteRange(c *gin.Context) {
 	db.Model(&usersRange).Update("range_state", "DESTROYING")
 
 	// This can take a long time, so run as a go routine and have the user check the status via another endpoint
-	go func() {
-		_, err := RunPlaybookWithTag(c, "power.yml", "stop-range", false)
-		if err != nil {
-			user, _ := getUserObject(c)
-			writeStringToFile(fmt.Sprintf("%s/users/%s/ansible-debug.log", ludusInstallPath, user.ProxmoxUsername), err.Error())
-			db.Model(&usersRange).Update("range_state", "ERROR")
-			return // Don't attempt to destroy if there is a power off error
-		}
+	go func(c *gin.Context) {
 		_, err = RunPlaybookWithTag(c, "power.yml", "destroy-range", false)
 		if err != nil {
-			user, _ := getUserObject(c)
-			writeStringToFile(fmt.Sprintf("%s/users/%s/ansible-debug.log", ludusInstallPath, user.ProxmoxUsername), err.Error())
+			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
+			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "Error with destroy-range\n")
+			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), fmt.Sprintf("%v\n", c))
+			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), fmt.Sprintf("%s\n", err.Error()))
+			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
 			db.Model(&usersRange).Update("range_state", "ERROR")
 			return // Don't reset testing if destroy fails
 		}
@@ -96,7 +97,7 @@ func DeleteRange(c *gin.Context) {
 		}
 		// Set range state to "DESTROYED"
 		db.Model(&usersRange).Update("range_state", "DESTROYED")
-	}()
+	}(c)
 
 	c.JSON(http.StatusOK, gin.H{"result": "Range destroy in progress"})
 }
@@ -323,5 +324,132 @@ func AbortAnsible(c *gin.Context) {
 	db.Model(&usersRange).Update("range_state", "ABORTED")
 
 	c.JSON(http.StatusOK, gin.H{"result": "Ansible process aborted"})
+}
 
+// Grant or revoke access to a range - admin only endpoint
+func RangeAccessAction(c *gin.Context) {
+
+	type RangeAccessActionPayload struct {
+		AccessActionVerb string `json:"action"`
+		TargetUserID     string `json:"targetUserID"`
+		SourceUserID     string `json:"sourceUserID"`
+	}
+	var thisRangeAccessActionPayload RangeAccessActionPayload
+
+	err := c.BindJSON(&thisRangeAccessActionPayload)
+	if err != nil {
+		c.JSON(http.StatusNoContent, gin.H{"error": "Improperly formatted range access payload"})
+		return
+	}
+
+	if !isAdmin(c, true) {
+		return
+	}
+
+	if thisRangeAccessActionPayload.AccessActionVerb != "grant" && thisRangeAccessActionPayload.AccessActionVerb != "revoke" {
+		c.JSON(http.StatusNoContent, gin.H{"error": "Only 'grant' and 'revoke' are supported as actions"})
+		return
+	}
+
+	var targetUserObject UserObject
+	targetResult := db.First(&targetUserObject, "user_id = ?", thisRangeAccessActionPayload.TargetUserID)
+	if errors.Is(targetResult.Error, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s user not found", thisRangeAccessActionPayload.TargetUserID)})
+		return
+	}
+
+	var sourceUserObject UserObject
+	sourceResult := db.First(&sourceUserObject, "user_id = ?", thisRangeAccessActionPayload.SourceUserID)
+	if errors.Is(sourceResult.Error, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s user not found", thisRangeAccessActionPayload.SourceUserID)})
+		return
+	}
+
+	// Check if this is a revoke for access that doesn't exist
+	var rangeAccessObject RangeAccessObject
+	noRangeAccessResultFound := false
+	rangeAccessResult := db.First(&rangeAccessObject, "target_user_id = ?", thisRangeAccessActionPayload.TargetUserID)
+	if errors.Is(rangeAccessResult.Error, gorm.ErrRecordNotFound) {
+		noRangeAccessResultFound = true
+	}
+	if noRangeAccessResultFound && thisRangeAccessActionPayload.AccessActionVerb == "revoke" {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s has no existing access grants", thisRangeAccessActionPayload.TargetUserID)})
+		return
+	}
+	if thisRangeAccessActionPayload.AccessActionVerb == "revoke" && !slices.Contains(rangeAccessObject.SourceUserIDs, thisRangeAccessActionPayload.SourceUserID) {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s does not have access to %s", thisRangeAccessActionPayload.SourceUserID, thisRangeAccessActionPayload.TargetUserID)})
+		return
+	}
+	// Check if the user already has access
+	if thisRangeAccessActionPayload.AccessActionVerb == "grant" && slices.Contains(rangeAccessObject.SourceUserIDs, thisRangeAccessActionPayload.SourceUserID) {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s already has access to %s", thisRangeAccessActionPayload.SourceUserID, thisRangeAccessActionPayload.TargetUserID)})
+		return
+	}
+
+	var targetUserRangeObject RangeObject
+	db.First(&targetUserRangeObject, "user_id = ?", thisRangeAccessActionPayload.TargetUserID)
+
+	var sourceUserRangeObject RangeObject
+	db.First(&sourceUserRangeObject, "user_id = ?", thisRangeAccessActionPayload.SourceUserID)
+
+	extraVars := map[string]interface{}{
+		"target_username":           targetUserObject.ProxmoxUsername,
+		"target_range_id":           targetUserObject.UserID,
+		"target_range_second_octet": targetUserRangeObject.RangeNumber,
+		"source_username":           sourceUserObject.ProxmoxUsername,
+		"source_range_id":           sourceUserObject.UserID,
+		"source_range_second_octet": sourceUserRangeObject.RangeNumber,
+	}
+	output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, thisRangeAccessActionPayload.AccessActionVerb, false, "")
+	if err != nil {
+		routerWANFatalRegex := regexp.MustCompile(`fatal:.*?192\.0\.2\\"`)
+		if strings.Contains(output, "Target router is not up") && thisRangeAccessActionPayload.AccessActionVerb == "grant" {
+			c.JSON(http.StatusOK, gin.H{"result": `WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!
+The target range router VM is inaccessible!
+If the target range router is deployed, no firewall changes have taken place.
+If the VM is not deployed yet, the rule will be added when it is deployed and you can ignore this.
+WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`})
+		} else if routerWANFatalRegex.MatchString(output) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "The target range router is inaccessible. To revoke access, the target range router must be up and accessible."})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": output})
+		}
+		return
+	}
+
+	if thisRangeAccessActionPayload.AccessActionVerb == "grant" {
+		// If this is the first grant, create a record
+		if noRangeAccessResultFound {
+			rangeAccessObject.TargetUserID = targetUserObject.UserID
+			rangeAccessObject.SourceUserIDs = []string{sourceUserObject.UserID}
+			db.Create(&rangeAccessObject)
+		} else {
+			// Not the first grant for this range, update the record
+			rangeAccessObject.SourceUserIDs = append(rangeAccessObject.SourceUserIDs, sourceUserObject.UserID)
+			db.Save(&rangeAccessObject)
+		}
+		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Range access to %s's range granted to %s. Have %s pull an updated wireguard config.",
+			targetUserObject.ProxmoxUsername,
+			sourceUserObject.ProxmoxUsername,
+			sourceUserObject.ProxmoxUsername)})
+	} else {
+		rangeAccessObject.SourceUserIDs = removeStringExact(rangeAccessObject.SourceUserIDs, sourceUserObject.UserID)
+		db.Save(&rangeAccessObject)
+		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Range access to %s's range revoked from %s.",
+			targetUserObject.ProxmoxUsername,
+			sourceUserObject.ProxmoxUsername)})
+	}
+}
+
+// Return the current state of range access grants - admin only endpoint
+func RangeAccessList(c *gin.Context) {
+	if !isAdmin(c, true) {
+		return
+	}
+	var rangeAccessObjects []RangeAccessObject
+	result := db.Find(&rangeAccessObjects)
+	if result.Error != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, result.Error)
+	}
+	c.JSON(http.StatusOK, rangeAccessObjects)
 }

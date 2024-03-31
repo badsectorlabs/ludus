@@ -58,7 +58,7 @@ type UserCredentialObject struct {
 type UserObject struct {
 	Name string `json:"name" gorm:"not null"`
 
-	// Must be a unique 2-4 letter uppercase string.  Initials are commonly used.
+	// Must be a unique 2-20 letter uppercase string. Initials are commonly used.
 	UserID string `json:"userID" gorm:"primaryKey"`
 
 	DateCreated time.Time `gorm:"autoCreateTime" json:"dateCreated"`
@@ -84,4 +84,10 @@ type VmObject struct {
 	PoweredOn bool `json:"poweredOn"`
 
 	IP string `json:"ip,omitempty"`
+}
+
+type RangeAccessObject struct {
+	TargetUserID string `json:"targetUserID" gorm:"primaryKey"`
+
+	SourceUserIDs SQLiteStringArray `json:"sourceUserIDs"`
 }

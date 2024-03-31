@@ -86,6 +86,20 @@
     comment: "Default: WireGuard Client access rule"
     numeric: true
 
+# Make sure any existing access grants are set up (in the event the range is destroied and then rebuilt after an access grant)
+- name: Modify router firewall to allow WireGuard IP's for access grants to this range
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    source: "198.51.100.{{ item.second_octet }}"
+    in_interface: "{{ router_external_interface }}"
+    protocol: all
+    jump: ACCEPT
+    state: present
+    action: insert
+    comment: "Access Grant: WireGuard client access rule for {{ item.username }}"
+    numeric: true
+  loop: "{{ range_access_grants_array | list | default([]) }}"
+
 - name: Allow the Ludus IP to hit this router from the outside for ansible
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS

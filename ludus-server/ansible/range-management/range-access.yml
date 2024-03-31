@@ -1,0 +1,161 @@
+# Required vars:
+# target_username - username to be modified, required to get router VM details
+# target_range_id - range ID to be modified, required to get router VM details
+# target_range_second_octet - range to grant/revoke access to
+# source_range_second_octet - user getting or losing access
+# source_username - user getting or losing access
+# source_range_id - needed to create WG file path
+
+# Tags:
+# grant - grant user access to a range
+# revoke - revoke user access from a range
+
+- name: Pre-run checks
+  ansible.builtin.import_playbook: pre-run-checks.yml
+
+# ==========================================================
+# Common
+# ==========================================================
+- name: Ludus host common tasks
+  tags: [always]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Set facts
+      ansible.builtin.set_fact:
+        action_ip_range: "10.{{ target_range_second_octet }}.0.0/16"
+        wg_conf_file: "{{ ludus_users_dir }}/{{ source_username }}/{{ source_range_id }}_client.conf"
+
+    - name: Read wg.conf file
+      ansible.builtin.slurp:
+        src: "{{ wg_conf_file }}"
+      register: wg_conf_contents
+
+    - name: Check if allowed_ip is present
+      ansible.builtin.set_fact:
+        action_ip_range_present: "{{ action_ip_range in wg_conf_contents['content'] | b64decode | regex_replace('\\n', ' ') }}"
+
+    - name: Get range config for range being actioned
+      ansible.builtin.slurp:
+        src: "{{ ludus_users_dir }}/{{ target_username }}/range-config.yml"
+      register: range_config_contents
+
+    - name: Determine if the user has set defaults
+      ansible.builtin.set_fact:
+        user_set_defaults: "{{ 'defaults:' in range_config_contents['content'] | b64decode | regex_replace('\\n', ' ') }}"
+
+    - name: Set the router VM name from server defaults
+      ansible.builtin.set_fact:
+        router_vm_name_to_action: "{{ target_range_id }}-router-debian11-x64" # Must match the default in server-config.yml
+      when: not user_set_defaults
+
+    - name: Set the router VM name from user defined defaults
+      ansible.builtin.set_fact:
+        router_vm_name_to_action: "{{ (range_config_contents['content'] | b64decode | from_yaml).defaults.router_vm_name | regex_replace('{{\\s*range_id\\s*}}', target_range_id) }}" # I wish there was an 'eval' or 'render' filter
+      when: user_set_defaults
+
+    - name: Get the VM id of the router via Proxmox API
+      ansible.builtin.shell: |
+        curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ router_vm_name_to_action }}").vmid'
+      register: router_id_command
+
+    - name: Set the router_vm_id from API lookup
+      ansible.builtin.set_fact:
+        router_vm_id: "{{ router_id_command.stdout }}"
+
+    - name: Get the interface with a 192.0.2.x ip (WAN)
+      ansible.builtin.shell: |
+        curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
+      register: wan_interface_command
+      failed_when: wan_interface_command.rc != 0 and "grant" not in ansible_run_tags
+
+    - name: Set the router_external_interface variable
+      ansible.builtin.set_fact:
+        router_external_interface: "{{ wan_interface_command.stdout }}"
+      when: wan_interface_command.rc == 0
+
+# ==========================================================
+# Grant
+# ==========================================================
+- name: Ludus host grant tasks
+  tags: [grant]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: "Add {{ action_ip_range }} to wg.conf"
+      ansible.builtin.lineinfile:
+        path: "{{ wg_conf_file }}"
+        regexp: "^AllowedIPs = (.*)$"
+        backrefs: true
+        line: "AllowedIPs = \\1, {{ action_ip_range }}"
+      when: not action_ip_range_present
+
+    - name: Alert the user
+      ansible.builtin.debug:
+        msg: "{{ action_ip_range }} is already present in {{ wg_conf_file }}"
+      when: action_ip_range_present
+
+    - name: Fail if the target router is not up
+      ansible.builtin.fail:
+        msg: "Target router is not up - Warn the user"
+      when: router_external_interface is not defined
+
+- name: Router grant task
+  tags: [grant]
+  hosts: "{{ hostvars['localhost']['router_vm_name_to_action'] }}"
+  tasks:
+    - name: Modify router firewall to allow new user's WireGuard IP
+      ansible.builtin.iptables:
+        chain: LUDUS_DEFAULTS
+        source: "198.51.100.{{ source_range_second_octet }}"
+        in_interface: "{{ hostvars['localhost']['router_external_interface'] }}"
+        protocol: all
+        jump: ACCEPT
+        state: present
+        action: insert
+        comment: "Access Grant: WireGuard client access rule for {{ source_username }}"
+        numeric: true
+
+# ==========================================================
+# Revoke
+# ==========================================================
+- name: Ludus host grant tasks
+  tags: [revoke]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: "Remove {{ action_ip_range }} from wg.conf"
+      ansible.builtin.lineinfile:
+        path: "{{ wg_conf_file }}"
+        regexp: "^AllowedIPs = (.*?){{ action_ip_range }}(,? ?)(.*?$)"
+        backrefs: true
+        line: "AllowedIPs = \\1\\3"
+      when: action_ip_range_present
+
+    - name: Remove trailing comma from AllowedIPs line
+      ansible.builtin.replace:
+        path: "{{ wg_conf_file }}"
+        regexp: '(AllowedIPs = .*?),\s*$'
+        replace: '\1'
+      when: action_ip_range_present
+
+    - name: Alert the user
+      ansible.builtin.debug:
+        msg: "{{ action_ip_range }} is not present in {{ wg_conf_file }}"
+      when: not action_ip_range_present
+
+- name: Router revoke task
+  tags: [revoke]
+  hosts: "{{ hostvars['localhost']['router_vm_name_to_action'] }}"
+  tasks:
+    - name: Modify router firewall to allow new user's WireGuard IP
+      ansible.builtin.iptables:
+        chain: LUDUS_DEFAULTS
+        source: "198.51.100.{{ source_range_second_octet }}"
+        in_interface: "{{ hostvars['localhost']['router_external_interface'] }}"
+        protocol: all
+        jump: ACCEPT
+        state: absent
+        action: insert
+        comment: "Access Grant: WireGuard client access rule for {{ source_username }}"
+        numeric: true
