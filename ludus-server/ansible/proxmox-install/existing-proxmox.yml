@@ -207,40 +207,6 @@
         append: true
       register: created_user
 
-    - name: Allow system processes to 10/8 (this machine may have a 10/8 address)
-      ansible.builtin.iptables:
-        chain: OUTPUT
-        destination: "10.0.0.0/8"
-        uid_owner: "0-999"
-        out_interface: "!{{ proxmox_interface }}"
-        jump: ACCEPT
-        comment: "Ludus: allow system processes to 10/8"
-        numeric: true
-
-    - name: Allow ludus to touch all built ranges
-      ansible.builtin.iptables:
-        chain: OUTPUT
-        destination: "10.0.0.0/8"
-        uid_owner: "{{ created_user.uid }}"
-        out_interface: "!{{ proxmox_interface }}"
-        jump: ACCEPT
-        comment: "Ludus: default allow ludus access to all user ranges"
-        numeric: true
-
-    - name: Block other access to ranges, except by default user
-      ansible.builtin.iptables:
-        chain: OUTPUT
-        destination: "10.0.0.0/8"
-        out_interface: "!{{ proxmox_interface }}"
-        jump: DROP
-        comment: "Ludus: default deny access to user ranges"
-        numeric: true
-
-    - name: Save current state of the firewall to a file
-      community.general.iptables_state:
-        state: saved
-        path: /etc/iptables/rules.v4
-
     - name: Create the ludus users directory
       ansible.builtin.file:
         path: "{{ ludus_install_path }}/users"

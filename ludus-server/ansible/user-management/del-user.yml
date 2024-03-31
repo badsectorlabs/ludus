@@ -81,39 +81,6 @@
       loop:
         - 1
 
-    - name: Remove this user's iptables rules (1)
-      ansible.builtin.iptables:
-        chain: OUTPUT
-        destination: "10.{{ second_octet }}.0.0/16"
-        uid_owner: "{{ removed_user.uid }}"
-        out_interface: "!{{ proxmox_interface }}"
-        jump: ACCEPT
-        state: absent
-        numeric: true
-      when: user_is_admin is defined and user_is_admin
-
-    - name: Remove this user's iptables rules (2)
-      ansible.builtin.iptables:
-        chain: OUTPUT
-        destination: "10.0.0.0/8"
-        uid_owner: "{{ removed_user.uid }}"
-        out_interface: "!{{ proxmox_interface }}"
-        jump: ACCEPT
-        state: absent
-        numeric: true
-      when: user_is_admin is undefined or (user_is_admin is defined and not user_is_admin)
-
-    - name: Remove this user's iptables rules (3)
-      ansible.builtin.iptables:
-        chain: FORWARD
-        in_interface: wg0
-        source: "!198.51.100.{{ second_octet }}/32"
-        destination: "10.{{ second_octet }}.0.0/16"
-        out_interface: "!{{ proxmox_interface }}"
-        jump: DROP
-        state: absent
-        numeric: true
-
     - name: Save current state of the firewall to a file
       community.general.iptables_state:
         state: saved
