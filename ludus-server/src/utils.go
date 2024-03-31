@@ -155,18 +155,21 @@ func getProxmoxPasswordForUser(user UserObject, c *gin.Context) string {
 }
 
 // Gets a user object from the query string (if the user is an admin) or from
-// API key context. Sets the return status and message when returning and error
+// API key context. Sets the return status and message when returning an error
 func getUserObject(c *gin.Context) (UserObject, error) {
 	var user UserObject
 
 	userID, success := getUserID(c)
 	if !success {
-		return user, gorm.ErrRecordNotFound // Status and JSON set in getUserID
+		return user, errors.New("could not get userID from request content") // Status and JSON set in getUserID
 	}
 
 	result := db.First(&user, "user_id = ?", userID)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		// Must check if the header status has already been written for this request before writing to avoid a panic
+		if c.Writer.Status() == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		}
 		return user, gorm.ErrRecordNotFound
 	}
 	return user, nil
