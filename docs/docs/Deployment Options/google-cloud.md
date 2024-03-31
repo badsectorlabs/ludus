@@ -38,7 +38,7 @@ gcloud compute instances create ludus \
 
 ## Deploying Debian 12 Using Terraform
 
-You will need to replace `{InstanceName}`, `{region}`, `{Zone}`, `{project_id}`, `{SSH_User} and `{SSH_KEY}`.
+You will need to replace `{InstanceName}`, `{region}`, `{Zone}`, `{project_id}`, `{SSH_User}` and `{SSH_Key}`.
 This will install a new Debian 12 server with 24 cores, 82GB Memory, 500GB SSD and nested virtualization enabled (on Intel Haswell chip)
 
 ```
