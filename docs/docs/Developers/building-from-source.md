@@ -55,7 +55,7 @@ git clone https://gitlab.com/badsectorlabs/ludus.git
 export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
 export VERSION=$(git rev-parse --abbrev-ref HEAD)
 cd ludus-client
-go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual"
+go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual -X main.VersionString=$VERSION"
 ```
 
 ### Building for all OS/Archs

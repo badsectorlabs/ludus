@@ -13,19 +13,24 @@ import TabItem from '@theme/TabItem';
   <TabItem value="linux" label="Linux">
 Copy the correct Ludus client binary to a location in your PATH and make it executable.
 
-```
-local:~$ sudo cp ludus-client_linux-[arch]-[version] /usr/local/bin/ludus
-local:~$ sudo chmod +x /usr/local/bin/ludus
+```shell
+# terminal-command-local
+sudo cp ludus-client_linux-[arch]-[version] /usr/local/bin/ludus
+# terminal-command-local
+sudo chmod +x /usr/local/bin/ludus
 ```
 
   </TabItem>
   <TabItem value="macos" label="macOS">
 Copy the correct Ludus client binary to a location in your PATH and make it executable.
 
-```
-local:~$ sudo cp ludus-client_macOS-[arch]-[version] /usr/local/bin/ludus
-local:~$ sudo chmod +x /usr/local/bin/ludus
-local:~$ xattr -r -d com.apple.quarantine /usr/local/bin/ludus
+```shell
+# terminal-command-local
+sudo cp ludus-client_macOS-[arch]-[version] /usr/local/bin/ludus
+# terminal-command-local
+sudo chmod +x /usr/local/bin/ludus
+# terminal-command-local
+xattr -r -d com.apple.quarantine /usr/local/bin/ludus
 ```
 
 :::note
@@ -45,8 +50,9 @@ Copy the correct Ludus client binary to your Windows device.
 
 `cd` to the directory that contains the binary or move the binary to a location in your PATH.
 
-```plain
-PS C:\> .\ludus-client_windows_[arch]-[version].exe
+```shell-session
+# terminal-command-powershell
+.\ludus-client_windows_[arch]-[version].exe
 Ludus client v1.0.0
 
 Ludus is a CLI application to control a Ludus server
@@ -69,8 +75,10 @@ ssh -L 8081:127.0.0.1:8081 user@<Ludus IP>
 From a root shell run `ludus-install-status` which will print the root
 API key.
 
-```plain title="Terminal 1"
-user@ludus:~$ sudo su -
+```shell-session title="Terminal 1"
+#terminal-command-ludus
+sudo su -
+#terminal-command-ludus-root
 root@ludus:~# ludus-install-status
 Ludus install completed successfully
 Root API key: ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF
@@ -99,8 +107,9 @@ shell's history file in most common shells.
 
 :::
 
-```plain title="Terminal 2 (Linux/macOS)"
-local:~$  LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
+```shell-session title="Terminal 2 (Linux/macOS)"
+#terminal-command-local
+LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
  ludus user add --name "John Doe" --userid JD --admin --url https://127.0.0.1:8081
 +--------+------------------+-------+---------------------------------------------+
 | USERID | PROXMOX USERNAME | ADMIN |                   API KEY                   |
@@ -118,8 +127,9 @@ shell's history file in most common shells.
 
 :::
 
-```plain title="Terminal 2 (Linux/macOS)"
-local:~$  LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
+```shell-session title="Terminal 2 (Linux/macOS)"
+#terminal-command-local
+LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
  ludus user add --name "John Doe" --userid JD --admin --url https://127.0.0.1:8081
 +--------+------------------+-------+---------------------------------------------+
 | USERID | PROXMOX USERNAME | ADMIN |                   API KEY                   |
@@ -130,9 +140,11 @@ local:~$  LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
 
   </TabItem>
   <TabItem value="windows" label="Windows">
-```plain title="Terminal 2 (Windows)"
-PS C:\> $env:LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF'
-PS C:\> .\ludus-client.exe user add --name "John Doe" --userid JD --admin --url https://127.0.0.1:8081
+```shell-session title="Terminal 2 (Windows)"
+#terminal-command-powershell
+$env:LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF'
+#terminal-command-powershell
+.\ludus-client.exe user add --name "John Doe" --userid JD --admin --url https://127.0.0.1:8081
 +--------+------------------+-------+---------------------------------------------+
 | USERID | PROXMOX USERNAME | ADMIN |                   API KEY                   |
 +--------+------------------+-------+---------------------------------------------+
@@ -140,8 +152,8 @@ PS C:\> .\ludus-client.exe user add --name "John Doe" --userid JD --admin --url 
 +--------+------------------+-------+---------------------------------------------+
 
 # Remove the LUDUS_API_KEY environment variable set in the previous command
-
-PS C:\> Remove-Item Env:\LUDUS_API_KEY
+#terminal-command-powershell
+Remove-Item Env:\LUDUS_API_KEY
 ```
   </TabItem>
 </Tabs>
@@ -161,8 +173,9 @@ Admins can get WireGuard configurations for other users with the `user wireguard
 
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">
-```plain title="Terminal 2 (Linux/macOS)"
-local:~$  LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt' \
+```shell-session title="Terminal 2 (Linux/macOS)"
+#terminal-command-local
+ LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt' \
  ludus user wireguard --user JD --url https://127.0.0.1:8081 | tee ludus.conf
 [Interface]
 PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
@@ -177,8 +190,9 @@ PersistentKeepalive = 25
 
   </TabItem>
   <TabItem value="macos" label="macOS">
-```plain title="Terminal 2 (Linux/macOS)"
-local:~$  LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt' \
+```shell-session title="Terminal 2 (Linux/macOS)"
+#terminal-command-local
+ LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt' \
  ludus user wireguard --user JD --url https://127.0.0.1:8081 | tee ludus.conf
 [Interface]
 PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
@@ -192,9 +206,11 @@ PersistentKeepalive = 25
 ```
   </TabItem>
   <TabItem value="windows" label="Windows">
-```plain title="Terminal 2 (Windows)"
-PS C:\> $env:LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'
-PS C:\> .\ludus-client.exe user wireguard --user JD --url https://127.0.0.1:8081 | Tee-Object -Variable luduswg; $luduswg  | Set-Content -Encoding ASCII ludus.conf
+```shell-session title="Terminal 2 (Windows)"
+#terminal-command-powershell
+$env:LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'
+#terminal-command-powershell
+.\ludus-client.exe user wireguard --user JD --url https://127.0.0.1:8081 | Tee-Object -Variable luduswg; $luduswg  | Set-Content -Encoding ASCII ludus.conf
 [Interface]
 PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
 Address = 198.51.100.2/32
@@ -206,7 +222,8 @@ AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
 PersistentKeepalive = 25
 
 # Remove the LUDUS_API_KEY environment variable set in the previous command
-PS C:\> Remove-Item Env:\LUDUS_API_KEY
+#terminal-command-powershell
+Remove-Item Env:\LUDUS_API_KEY
 ```
 
   </TabItem>
@@ -220,8 +237,9 @@ Using the key from the previous step, run `ludus apikey` and provide the user AP
 
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">
-```plain
-local:~$ ludus apikey
+```shell-session
+#terminal-command-local
+ludus apikey
 [INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
 JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
 [INFO]  Ludus API key set successfully
@@ -237,8 +255,9 @@ On headless Linux systems or Linux systems without a keyring, set the LUDUS_API_
   </TabItem>
   <TabItem value="macos" label="macOS">
 
-```plain
-local:~$ ludus apikey
+```shell-session
+#terminal-command-local
+ludus apikey
 [INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
 JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
 [INFO]  Ludus API key set successfully
@@ -254,8 +273,9 @@ On headless macOS systems or macOS systems without a keyring, set the LUDUS_API_
   </TabItem>
   <TabItem value="windows" label="Windows">
 
-```plain
-PS C:\> .\ludus-client.exe apikey
+```shell-session
+#terminal-command-powershell
+.\ludus-client.exe apikey
 [INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
 JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
 [INFO]  Ludus API key set successfully
@@ -273,8 +293,9 @@ It's available at `https://<ludus IP>:8006` and the credentials for the web GUI 
 
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">
-```plain
-local:~$ ludus user creds get
+```shell-session
+#terminal-command-local
+ludus user creds get
 +------------------+----------------------+
 | PROXMOX USERNAME |   PROXMOX PASSWORD   |
 +------------------+----------------------+
@@ -283,8 +304,9 @@ local:~$ ludus user creds get
 ```
 </TabItem>
   <TabItem value="macos" label="macOS">
-```plain
-local:~$ ludus user creds get
+```shell-session
+#terminal-command-local
+ludus user creds get
 +------------------+----------------------+
 | PROXMOX USERNAME |   PROXMOX PASSWORD   |
 +------------------+----------------------+
@@ -293,8 +315,9 @@ local:~$ ludus user creds get
 ```
   </TabItem>
   <TabItem value="windows" label="Windows">
-```plain
-PS C:\> .\ludus-client.exe user creds get
+```shell-session
+#terminal-command-powershell
+.\ludus-client.exe user creds get
 +------------------+----------------------+
 | PROXMOX USERNAME |   PROXMOX PASSWORD   |
 +------------------+----------------------+

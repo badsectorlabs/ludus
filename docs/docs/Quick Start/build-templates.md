@@ -13,8 +13,9 @@ This focus on infrastructure as code allows Ludus users to create fresh, up to d
 
 The first step is to start the template build process. First, we can view the available templates.
 
-```bash
-local:~$ ludus templates list
+```shell-session
+#terminal-command-local
+ludus templates list
 +------------------------------------+-------+
 |              TEMPLATE              | BUILT |
 +------------------------------------+-------+
@@ -28,15 +29,17 @@ local:~$ ludus templates list
 
 On a fresh install, no templates are built. Ludus will build them from ISO files (with checksums) with the following command.
 
-```bash
-local:~$ ludus templates build
+```shell-session
+#terminal-command-local
+ludus templates build
 [INFO]  Template building started - this will take a while. Building 1 template(s) at a time.
 ```
 
 To check the status of the template build, you can run `templates status`, `templates list` again, or follow the packer logs with 
 
-```
-local:~$ ludus templates logs -f
+```shell-session
+#terminal-command-local
+ludus templates logs -f
 2023/12/01 22:00:47 [INFO] Packer version: 1.9.4 [go1.20.7 linux amd64]
 2023/12/01 22:00:47 [TRACE] discovering plugins in /opt/ludus/resources/packer/plugins
 2023/12/01 22:00:47 [INFO] Discovered potential plugin: proxmox = /opt/ludus/resources/packer/plugins/github.com/hashicorp/proxmox/packer-plugin-proxmox_v1.1.6_x5.0_linux_amd64

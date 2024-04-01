@@ -162,7 +162,39 @@ const config = {
       prism: {
         theme: prismThemes.github,
         darkTheme: prismThemes.dracula,
-        additionalLanguages: ['bash', 'powershell', 'yaml'],
+        additionalLanguages: ['bash', 'powershell', 'yaml', 'shell-session'],
+        magicComments: [
+          // Remember to extend the default highlight class name as well!
+          {
+            className: 'theme-code-block-highlighted-line',
+            line: 'highlight-next-line',
+            block: {start: 'highlight-start', end: 'highlight-end'},
+          },
+          {
+            className: 'code-block-terminal-command-local',
+            line: 'terminal-command-local',
+          },
+          {
+            className: 'code-block-terminal-command-ludus',
+            line: 'terminal-command-ludus',
+          },
+          {
+            className: 'code-block-terminal-command-user1',
+            line: 'terminal-command-user1',
+          },
+          {
+            className: 'code-block-terminal-command-user-at-debian',
+            line: 'terminal-command-user-at-debian',
+          },
+          {
+            className: 'code-block-terminal-command-powershell',
+            line: 'terminal-command-powershell',
+          },
+          {
+            className: 'code-block-terminal-command-ludus-root',
+            line: 'terminal-command-ludus-root',
+          },
+        ],
       },
     }),
 };

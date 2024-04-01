@@ -34,11 +34,15 @@ values used during install.
 
 :::
 
-```
-local:~$ scp ludus-server user@debian12:
-local:~$ ssh user@debian12
-user@debian12:~$ chmod +x ludus-server
-user@debian12:~$ sudo ./ludus-server
+```shell-session
+# terminal-command-local
+scp ludus-server user@debian12:
+# terminal-command-local
+ssh user@debian12
+# terminal-command-user-at-debian
+chmod +x ludus-server
+# terminal-command-user-at-debian
+sudo ./ludus-server
 
 Ludus server v0.9.2+e35d94d
 No config.yml found. Generating a config at /home/debian/config.yml. Please check that it contains the correct values.

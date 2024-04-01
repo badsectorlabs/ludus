@@ -18,15 +18,15 @@ import TabItem from '@theme/TabItem';
 
 Updating a Ludus server is easy:
 
-1. Download the release binary (or build from source) the version you wish to update to.
+1. Download the server [release binary](https://gitlab.com/badsectorlabs/ludus/-/releases) (or build from source) of the version you wish to update to.
 1. Copy the Ludus server binary to the Ludus server host
 1. Run the Ludus server binary as root with the `--update` flag.
 
 ```
-local:~$ scp ludus-server user@debian12:
-local:~$ ssh user@debian12
-user@debian12:~$ chmod +x ludus-server
-user@debian12:~$ sudo ./ludus-server --update
+local:~$ scp ludus-server user@ludus:
+local:~$ ssh user@ludus
+user@ludus:~$ chmod +x ludus-server
+user@ludus:~$ sudo ./ludus-server --update
 Backed up /opt/ludus/ansible to /opt/ludus/previous-versions/1707349133263620491/ansible
 Backed up /opt/ludus/packer to /opt/ludus/previous-versions/1707349133263620491/packer
 Backed up /opt/ludus/ci to /opt/ludus/previous-versions/1707349133263620491/ci
@@ -48,6 +48,8 @@ Ludus updated to v1.0.2+6a96b3ef
 :::
 
 ## Updating the Ludus client
+
+Download the client [release binary](https://gitlab.com/badsectorlabs/ludus/-/releases) (or build from source) of the version you wish to update to.
 
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">

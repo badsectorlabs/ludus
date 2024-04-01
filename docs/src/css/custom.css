@@ -31,3 +31,40 @@
 .footer__copyright {
   font-size: small;
 }
+
+.code-block-terminal-command-local:before {
+  content: 'local:~$';
+  margin-right: 10px;
+  color: rgb(202, 168, 71);
+}
+
+.code-block-terminal-command-ludus:before {
+  content: 'user@ludus:~$';
+  margin-right: 10px;
+  color: rgb(202, 168, 71);
+}
+
+.code-block-terminal-command-ludus-root:before {
+  content: 'root@ludus:~$';
+  margin-right: 10px;
+  color: rgb(202, 168, 71);
+}
+
+.code-block-terminal-command-user1:before {
+  content: 'user1:~$';
+  margin-right: 10px;
+  color: rgb(202, 168, 71);
+}
+
+.code-block-terminal-command-user-at-debian:before {
+  content: 'user@debian12:~$';
+  margin-right: 10px;
+  color: rgb(202, 168, 71);
+}
+
+.code-block-terminal-command-powershell:before {
+  content: 'PS C:\>';
+  margin-right: 10px;
+  color: rgb(202, 168, 71);
+}
+

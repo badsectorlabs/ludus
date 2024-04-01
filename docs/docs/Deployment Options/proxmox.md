@@ -32,3 +32,5 @@ Ludus will make the following changes:
 2. Once the install succeeds, update the values in `/opt/ludus/config.yml` to reflect the install (proxmox may have set up an lvm-thin datastore vs the default `local`)
 3. Restart the ludus processes with `systemctl restart ludus-admin` and `systemctl restart ludus`.
 4. Follow the Quick start guide as normal starting at [Create a User](../Quick%20Start/create-a-user).
+
+If you encounter networking issues like VMs not getting IP addresses or having internet access, see [this guide](../Troubleshooting/network.md).
