@@ -6,28 +6,15 @@
 As root on the Ludus host run the following commands:
 
 ```
+# Upgrade ansible and netaddr for the whole system
 python3 -m pip install ansible==9.3.0 netaddr==1.2.1 --break-system-packages
+# Upgrade ansible roles/collections for root
 ANSIBLE_HOME=/opt/ludus/users/root/.ansible ansible-galaxy install -r /opt/ludus/ansible/requirements.yml --force
+
+# For all users, make sure all roles are owned by the user (lae.proxmox was previously installed by root), then upgrade them for all users, as the ludus user
 cd /opt/ludus/users
+for USERS in $(ls .); do if [[ "$USERS" == "root" ]]; then continue; else chown -R ludus:users /opt/ludus/users/$USERS/.ansible/roles; fi; done
 su ludus -
 for USERS in $(ls .); do if [[ "$USERS" == "root" ]]; then continue; else ANSIBLE_HOME=/opt/ludus/users/$USERS/.ansible ansible-galaxy install -r /opt/ludus/ansible/requirements.yml --force; fi; done
 exit
-```
-
-3. OPTIONAL - Set the firewall:
-
-Existing users will not be prevented from accessing other's ranges if they have SSH access to the Ludus host.
-
-To prevent this, as root on the Ludus host run the following commands:
-
-```
-# For each user
-iptables -A OUTPUT -d 10.5.0.0/16 ! -o ens18 -m owner --uid-owner {{ UID }} -m comment --comment "Allow {{ USERNAME }} to reach their range" -j ACCEPT
-
-# After all user rules have been added
-iptables -A OUTPUT -d 10.0.0.0/8 ! -o ens18 -m owner --uid-owner 0-999 -m comment --comment "Ludus: allow system processes to 10/8" -j ACCEPT
-iptables -A OUTPUT -d 10.0.0.0/8 ! -o ens18 -m owner --uid-owner {{ LUDUS USER UID }} -m comment --comment "Ludus: default allow ludus access to all user ranges" -j ACCEPT
-iptables -A OUTPUT -d 10.0.0.0/8 ! -o ens18 -m comment --comment "Ludus: default deny access to user ranges" -j DROP
-
-iptables-save /etc/iptables/rules.v4
 ```
