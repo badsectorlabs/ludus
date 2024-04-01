@@ -23,13 +23,13 @@
             "version" : "1.0.0",
             "title" : "Ludus API",
             "license" : {
-              "name" : "AGPLv3",
-              "url" : "https://www.gnu.org/licenses/agpl-3.0.en.html"
+              "name" : "GNU AGPLv3",
+              "url" : "https://www.gnu.org/licenses/agpl-3.0.txt/"
             }
           },
           "externalDocs" : {
             "description" : "Find out more about Ludus",
-            "url" : "https://gitlab.com/badsectorlabs/ludus"
+            "url" : "https://ludus.cloud"
           },
           "security" : [ {
             "ApiKeyAuth" : [ ]
@@ -191,8 +191,8 @@
                       }
                     }
                   },
-                  "409" : {
-                    "description" : "Role not installed",
+                  "403" : {
+                    "description" : "Unauthorized",
                     "content" : {
                       "application/json" : {
                         "schema" : {
@@ -200,7 +200,7 @@
                           "properties" : {
                             "error" : {
                               "type" : "string",
-                              "example" : "- geerlingguy.docker is not installed, skipping."
+                              "example" : "You are not authorized to perform this ansible action"
                             }
                           }
                         }
@@ -290,6 +290,22 @@
                             "error" : {
                               "type" : "string",
                               "example" : "Invalid boolean value"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "403" : {
+                    "description" : "Unauthorized",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "You are not authorized to perform this ansible action"
                             }
                           }
                         }
@@ -450,6 +466,16 @@
                 "summary" : "Add a user to the system",
                 "operationId" : "addUser",
                 "description" : "Adds a user to the system. This action is only available to admins. \nNote: this response will contain the plaintext API key for the user. \nIt will not be available again except by resetting it using the /user/apikey endpoint.\n",
+                "requestBody" : {
+                  "content" : {
+                    "application/json" : {
+                      "schema" : {
+                        "$ref" : "#/components/schemas/UserObject"
+                      }
+                    }
+                  },
+                  "description" : "User to add"
+                },
                 "responses" : {
                   "201" : {
                     "description" : "user created",
@@ -481,18 +507,20 @@
                   },
                   "400" : {
                     "description" : "Error with request",
-                    "example": "User with that name already exists"
-                  }
-                },
-                "requestBody" : {
-                  "content" : {
-                    "application/json" : {
-                      "schema" : {
-                        "$ref" : "#/components/schemas/UserObject"
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "User with that name already exists"
+                            }
+                          }
+                        }
                       }
                     }
-                  },
-                  "description" : "User to add"
+                  }
                 }
               }
             },
@@ -933,7 +961,7 @@
                           "type" : "object",
                           "properties" : {
                             "result" : {
-                              "example" : "ludus:\n  - vm_name: \"JD-ad-dc-win2019-server-x64\"\n    hostname: \"JD-DC01-2019\"\n    template: win2019-server-x64-template\n    ip_last_octet: 11\n    ram_gb: 2 \n     cpus: 2\n    full_clone: false\n    windows:\n     - vm_name: \"JD-ad-win10-21h1-enterprise-x64-1\"\n    hostname: \"JE-WIN10-21H1-1\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 21\n    ram_gb: 2 \n    cpus: 2\n    full_clone: false\n    windows:\n      install_additional_tools: true\n      office_version: 2016\n      office_arch: 64bit\n  - vm_name: \"JD-ad-win10-21h1-enterprise-x64-2\"\n    hostname: \"JD-WIN10-21H1-2\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 22\n    ram_gb: 2 \n    cpus: 2\n    full_clone: false \n    windows:\n      install_additional_tools: true \n      office_version: \"2019\"\n      office_arch: 64bit\n  - vm_name: \"JD-ad-win10-21h1-enterprise-x64-3\"\n    hostname: \"JD-WIN10-21H1-3\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 23\n    ram_gb: 2 \n    ram_max_gb: 4\n    ram_balloon: true\n    cpus: 2\n    full_clone: false\n    windows:\n      install_additional_tools: true \n      office_version: \"2019\"\n      office_arch: 64bit\n      visual_studio_version: \"2019\"\n"
+                              "example" : "ludus:\n  - vm_name: \"JD-ad-dc-win2019-server-x64\"\n    hostname: \"JD-DC01-2019\"\n    template: win2019-server-x64-template\n    ip_last_octet: 11\n    ram_gb: 2\n     cpus: 2\n    full_clone: false\n    windows:\n  - vm_name: \"JD-ad-win10-21h1-enterprise-x64-1\"\n    hostname: \"JE-WIN10-21H1-1\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 21\n    ram_gb: 2 \n    cpus: 2\n    full_clone: false\n    windows:\n      install_additional_tools: true\n      office_version: 2016\n      office_arch: 64bit\n  - vm_name: \"JD-ad-win10-21h1-enterprise-x64-2\"\n    hostname: \"JD-WIN10-21H1-2\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 22\n    ram_gb: 2 \n    cpus: 2\n    full_clone: false \n    windows:\n      install_additional_tools: true \n      office_version: \"2019\"\n      office_arch: 64bit\n  - vm_name: \"JD-ad-win10-21h1-enterprise-x64-3\"\n    hostname: \"JD-WIN10-21H1-3\"\n    template: win10-21h1-x64-enterprise-template\n    ip_last_octet: 23\n    ram_gb: 2 \n    ram_max_gb: 4\n    ram_balloon: true\n    cpus: 2\n    full_clone: false\n    windows:\n      install_additional_tools: true \n      office_version: \"2019\"\n      office_arch: 64bit\n      visual_studio_version: \"2019\"\n"
                             }
                           }
                         }
@@ -1041,7 +1069,7 @@
                             "type" : "array",
                             "items" : {
                               "type" : "string",
-                              "example": "badsectorlabs.ludus_bloodhound_ce"
+                              "example" : "badsectorlabs.ludus_bloodhound_ce"
                             },
                             "description" : "limit the user defined roles to be run to this comma separated list of roles"
                           },
@@ -1225,6 +1253,140 @@
                             "result" : {
                               "type" : "string",
                               "example" : "all:\n  children:\n    ADMIN:\n      hosts:\n    JD:\n      hosts:\n        JD-ad-dc-win2019-server-x64:\n          ansible_connection: winrm\n          ansible_host: 10.2.10.11\n          ansible_password: password\n          ansible_user: localuser\n          ansible_winrm_scheme: https            \n"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "/range/access" : {
+              "get" : {
+                "tags" : [ "Range Management" ],
+                "summary" : "Retrieve an array of current range access settings",
+                "operationId" : "rangeAccessList",
+                "description" : "Returns an array of the current state of cross-range access on the Ludus host - Admin only endpoint\n",
+                "responses" : {
+                  "200" : {
+                    "description" : "an array of range access settings",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "array",
+                          "items" : {
+                            "type" : "object",
+                            "properties" : {
+                              "targetUserID" : {
+                                "type" : "string",
+                                "example" : "JD"
+                              },
+                              "sourceUserIDs" : {
+                                "type" : "array",
+                                "items" : {
+                                  "type" : "string",
+                                  "example" : "JS"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "403" : {
+                    "description" : "forbidden",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "This is an admin only endpoint or you queried another user and are not an admin"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "post" : {
+                "tags" : [ "Range Management" ],
+                "summary" : "Grant or revoke range access",
+                "operationId" : "rangeAccessAction",
+                "description" : "Grant or revoke range access from one user to another - Admin only endpoint\n",
+                "requestBody" : {
+                  "content" : {
+                    "application/json" : {
+                      "schema" : {
+                        "type" : "object",
+                        "properties" : {
+                          "action" : {
+                            "type" : "string",
+                            "example" : "grant",
+                            "description" : "the action to take (must be either 'grant' or 'revoke')"
+                          },
+                          "targetUserID" : {
+                            "type" : "string",
+                            "example" : "JD",
+                            "description" : "the userID of the range that will be granting/revoking access to/from"
+                          },
+                          "sourceUserID" : {
+                            "type" : "string",
+                            "example" : "JS",
+                            "description" : "the userID of the user that will be gaining/losing access"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses" : {
+                  "200" : {
+                    "description" : "succesfuly granted or revoked access",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "result" : {
+                              "type" : "string",
+                              "example" : "Range access to john doe's range granted to jane smith. Have jane smith pull an updated wireguard config."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "403" : {
+                    "description" : "forbidden",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "This is an admin only endpoint or you queried another user and are not an admin"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "404" : {
+                    "description" : "not found",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "JS does not have access to JD"
                             }
                           }
                         }
