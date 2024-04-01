@@ -33,7 +33,7 @@ You may set the following iptables rules to limit access to the range routers fr
 
 ```
 # For each user
-iptables -A OUTPUT -d 10.5.0.0/16 ! -o ens18 -m owner --uid-owner {{ UID }} -m comment --comment "Allow {{ USERNAME }} to reach their range" -j ACCEPT
+iptables -A OUTPUT -d 10.{{ USER RANGE SECOND OCTET }}.0.0/16 ! -o ens18 -m owner --uid-owner {{ UID }} -m comment --comment "Allow {{ USERNAME }} to reach their range" -j ACCEPT
 
 # After all user rules have been added
 iptables -A OUTPUT -d 10.0.0.0/8 ! -o ens18 -m owner --uid-owner 0-999 -m comment --comment "Ludus: allow system processes to 10/8" -j ACCEPT
