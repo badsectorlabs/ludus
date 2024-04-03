@@ -162,7 +162,7 @@ const config = {
       prism: {
         theme: prismThemes.github,
         darkTheme: prismThemes.dracula,
-        additionalLanguages: ['bash', 'powershell', 'yaml', 'shell-session'],
+        additionalLanguages: ['bash', 'powershell', 'yaml', 'shell-session', 'ini'],
         magicComments: [
           // Remember to extend the default highlight class name as well!
           {
@@ -193,6 +193,10 @@ const config = {
           {
             className: 'code-block-terminal-command-ludus-root',
             line: 'terminal-command-ludus-root',
+          },
+          {
+            className: 'code-block-terminal-command-goad',
+            line: 'terminal-command-goad',
           },
         ],
       },

@@ -8,15 +8,18 @@ This guide will create an [Elastic Security](https://www.elastic.co/security) se
 
 1. Add the `badsectorlabs.ludus_elastic_container` and `badsectorlabs.ludus_elastic_agent` roles to your Ludus server
 
-```
-local:~$ ludus ansible roles add badsectorlabs.ludus_elastic_container
+```shell-session
+#terminal-command-local
+ludus ansible roles add badsectorlabs.ludus_elastic_container
+#terminal-command-local
 local:~$ ludus ansible roles add badsectorlabs.ludus_elastic_agent
 ```
 
 2. Modify your ludus config to add the `badsectorlabs.ludus_elastic_container` role to a Debian or Ubuntu VM and the `badsectorlabs.ludus_elastic_agent` on Debian-based or Windows VMs
 
-```
-local:~$ ludus range config get > config.yml
+```shell-session
+#terminal-command-local
+ludus range config get > config.yml
 ```
 
 ```yaml title="config.yml"
@@ -72,8 +75,9 @@ ludus:
       - badsectorlabs.ludus_elastic_agent
 ```
 
-```
-local:~$ ludus range config set -f config.yml
+```shell-session
+#terminal-command-local
+ludus range config set -f config.yml
 ```
 
 :::note
@@ -85,8 +89,9 @@ You can set the token and URL manually using role_vars if you wish. See [the rea
 
 3. Deploy the range
 
-```
-local:~$ ludus range deploy
+```shell-session
+#terminal-command-local
+ludus range deploy
 ```
 
 4. Enjoy your Elastic Security server with agents enrolled and detections enabled! You can access the elastic web interface via HTTPS on port 5601 or the VM with the `badsectorlabs.ludus_elastic_container` role. The creds are `elastic:elasticpassword` unless you set the password with role variables.

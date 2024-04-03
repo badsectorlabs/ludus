@@ -6,7 +6,8 @@ title: "Vulhub"
 
 1. Add the [vulhub role](https://github.com/badsectorlabs/ludus_vulhub) to your Ludus server
 
-```
+```shell-session
+#terminal-command-local
 ludus ansible roles add badsectorlabs.ludus_vulhub
 ```
 
@@ -39,10 +40,13 @@ ludus:
         - airflow/CVE-2020-11978
 ```
 
-```
+```shell-session
+#terminal-command-local
 ludus ansible roles add badsectorlabs.ludus_vulhub
+#terminal-command-local
 ludus range config get > config.yml
 # Edit config to add the role to the VMs you wish to install vulhub on and define your desired vulhub_envs (see above)
+#terminal-command-local
 ludus range config set -f config.yml
 ```
 
@@ -55,6 +59,7 @@ you can always run a "full deploy" without any -t argument if you wish, but it w
 
 :::
 
-```
+```shell-session
+#terminal-command-local
 ludus range deploy -t user-defined-roles
 ```

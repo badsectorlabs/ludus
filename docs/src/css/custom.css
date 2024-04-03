@@ -38,6 +38,12 @@
   color: rgb(202, 168, 71);
 }
 
+.code-block-terminal-command-goad:before {
+  content: 'local:~/GOAD/ansible$';
+  margin-right: 10px;
+  color: rgb(202, 168, 71);
+}
+
 .code-block-terminal-command-ludus:before {
   content: 'user@ludus:~$';
   margin-right: 10px;

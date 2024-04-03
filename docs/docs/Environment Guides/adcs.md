@@ -6,14 +6,16 @@ title: "ADCS"
 
 1. Add the ludus_adcs role to your Ludus server
 
-```
-local:~$ ludus ansible roles add badsectorlabs.ludus_adcs
+```shell-session
+#terminal-command-local
+ludus ansible roles add badsectorlabs.ludus_adcs
 ```
 
 2. Modify your ludus config to add the role to a Windows server VM
 
-```
-local:~$ ludus range config get > config.yml
+```shell-session
+#terminal-command-local
+ludus range config get > config.yml
 ```
 
 ```yaml title="config.yml"
@@ -36,14 +38,16 @@ ludus:
       - badsectorlabs.ludus_adcs
 ```
 
-```
-local:~$ ludus range config set -f config.yml
+```shell-session
+#terminal-command-local
+ludus range config set -f config.yml
 ```
 
 3. Deploy the range
 
-```
-local:~$ ludus range deploy
+```shell-session
+#terminal-command-local
+ludus range deploy
 ```
 
 4. Enjoy your ESC1,2,3,4,6,8, and 13 attack paths!
