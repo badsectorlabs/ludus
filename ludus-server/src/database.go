@@ -124,7 +124,7 @@ func checkDBOwnership() {
 	// Check file ownership
 	owner, err := getFileOwner(filename)
 	if err != nil {
-		fmt.Println("Error:", err)
+		log.Println("Error getting ownership of ludus.db:", err)
 		return
 	}
 
@@ -132,7 +132,7 @@ func checkDBOwnership() {
 	if owner != desiredOwner {
 		err := changeFileOwner(filename, desiredOwner)
 		if err != nil {
-			fmt.Println("Error:", err)
+			log.Println("Error changing ownership of ludus.db:", err)
 			return
 		}
 		log.Printf("%s ownership changed to %s\n", filename, desiredOwner)
