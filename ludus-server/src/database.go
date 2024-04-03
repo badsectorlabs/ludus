@@ -77,6 +77,7 @@ func InitDb() *gorm.DB {
 		if os.Geteuid() == 0 {
 			// Migrate any updates from the models to an existing DB
 			db.AutoMigrate(&UserObject{}, &RangeObject{}, &VmObject{}, &RangeAccessObject{})
+			checkDBOwnership()
 		}
 	})
 
@@ -110,5 +111,32 @@ func findNextAvailableRangeNumber(db *gorm.DB) int32 {
 		if !found {
 			return i
 		}
+	}
+}
+
+// checkDBOwnership makes sure the ludus.db is owned by ludus and not root
+// In rare cases the DB can become owned by root if it is removed and the services
+// are started out of order
+func checkDBOwnership() {
+	filename := fmt.Sprintf("%s/ludus.db", ludusInstallPath)
+	desiredOwner := "ludus:ludus"
+
+	// Check file ownership
+	owner, err := getFileOwner(filename)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	// If file is not owned by ludus:ludus, change ownership
+	if owner != desiredOwner {
+		err := changeFileOwner(filename, desiredOwner)
+		if err != nil {
+			fmt.Println("Error:", err)
+			return
+		}
+		log.Printf("%s ownership changed to %s\n", filename, desiredOwner)
+	} else {
+		log.Printf("%s is owned by %s\n", filename, desiredOwner)
 	}
 }

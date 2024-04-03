@@ -7,8 +7,11 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -155,4 +158,58 @@ func touch(filePath string) error {
 	}
 	currentTime := time.Now().Local()
 	return os.Chtimes(filePath, currentTime, currentTime)
+}
+
+func getFileOwner(filename string) (string, error) {
+	// Get file information
+	fileInfo, err := os.Stat(filename)
+	if err != nil {
+		return "", err
+	}
+
+	// Get file ownership information
+	fileStat := fileInfo.Sys().(*syscall.Stat_t)
+	uid := strconv.Itoa(int(fileStat.Uid))
+	gid := strconv.Itoa(int(fileStat.Gid))
+
+	// Look up username and groupname from UID and GID
+	username, err := getUsername(uid)
+	if err != nil {
+		return "", err
+	}
+
+	groupname, err := getGroupname(gid)
+	if err != nil {
+		return "", err
+	}
+
+	// Return username:groupname
+	return username + ":" + groupname, nil
+}
+
+func getUsername(uid string) (string, error) {
+	cmd := exec.Command("getent", "passwd", uid)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	parts := strings.SplitN(string(output), ":", 4)
+	return parts[0], nil
+}
+
+func getGroupname(gid string) (string, error) {
+	cmd := exec.Command("getent", "group", gid)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	parts := strings.SplitN(string(output), ":", 4)
+	return parts[0], nil
+}
+
+func changeFileOwner(filename, owner string) error {
+	// Execute chown command
+	cmd := exec.Command("chown", owner, filename)
+	err := cmd.Run()
+	return err
 }
