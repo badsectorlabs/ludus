@@ -116,6 +116,11 @@
         comment: "Access Grant: WireGuard client access rule for {{ source_username }}"
         numeric: true
 
+    - name: Save current state of the firewall to a file
+      community.general.iptables_state:
+        state: saved
+        path: /etc/iptables/rules.v4
+
 # ==========================================================
 # Revoke
 # ==========================================================
@@ -159,3 +164,8 @@
         action: insert
         comment: "Access Grant: WireGuard client access rule for {{ source_username }}"
         numeric: true
+
+    - name: Save current state of the firewall to a file
+      community.general.iptables_state:
+        state: saved
+        path: /etc/iptables/rules.v4
