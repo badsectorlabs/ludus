@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -44,15 +45,15 @@ func NewRouter(ludusVersion string) *gin.Engine {
 	for _, route := range routes {
 		switch route.Method {
 		case http.MethodGet:
-			router.GET(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, route.HandlerFunc)
+			router.GET(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		case http.MethodPost:
-			router.POST(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, route.HandlerFunc)
+			router.POST(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		case http.MethodPut:
-			router.PUT(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, route.HandlerFunc)
+			router.PUT(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		case http.MethodPatch:
-			router.PATCH(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, route.HandlerFunc)
+			router.PATCH(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		case http.MethodDelete:
-			router.DELETE(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, route.HandlerFunc)
+			router.DELETE(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		}
 	}
 	ParseConfig()
@@ -143,6 +144,14 @@ func validateAPIKey(c *gin.Context) {
 	} else {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication failed"})
 		c.Abort()
+		return
+	}
+}
+
+// This function makes sure the request is to a user endpoint if the server is running as root (i.e. :8081)
+func limitRootEndpoints(c *gin.Context) {
+	if os.Geteuid() == 0 && !strings.HasPrefix(c.Request.URL.Path, "/user") {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The :8081 endpoint can only be used for user actions. Use the :8080 endpoint for all other actions."})
 		return
 	}
 }
