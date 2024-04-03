@@ -117,7 +117,11 @@ func genericRoleCmd(use, short, long string, aliases []string) *cobra.Command {
 					logger.Logger.Fatalf("Could not tar directory: %s, error: %s\n", roleDirectory, err.Error())
 				}
 				filename := filepath.Base(roleDirectory)
-				responseJSON, success = rest.PostFileAndForce(client, "/ansible/role/fromtar", roleTar.Bytes(), filename, ansibleForce)
+				if userID != "" {
+					responseJSON, success = rest.PostFileAndForce(client, fmt.Sprintf("/ansible/role/fromtar?userID=%s", userID), roleTar.Bytes(), filename, ansibleForce)
+				} else {
+					responseJSON, success = rest.PostFileAndForce(client, "/ansible/role/fromtar", roleTar.Bytes(), filename, ansibleForce)
+				}
 
 				if didFailOrWantJSON(success, responseJSON) {
 					return
