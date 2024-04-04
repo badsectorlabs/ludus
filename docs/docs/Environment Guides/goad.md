@@ -98,8 +98,8 @@ ludus:
   - vm_name: "{{ range_id }}-kali"
     hostname: "{{ range_id }}-kali"
     template: kali-x64-desktop-template
-    vlan: 99
-    ip_last_octet: 1
+    vlan: 10
+    ip_last_octet: 99
     ram_gb: 4
     cpus: 2
     linux: true
@@ -313,6 +313,6 @@ done
 
 ### 8. Hack!
 
-Access your Kali machine at `http://10.RANGENUMBER.99.1:8444` using the creds `kali:password`.
+Access your Kali machine at `http://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
 
 Follow [the GOAD guide](https://mayfly277.github.io/posts/GOADv2-pwning_part1/) or explore the network on your own.

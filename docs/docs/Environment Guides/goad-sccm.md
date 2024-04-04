@@ -85,8 +85,8 @@ ludus:
   - vm_name: "{{ range_id }}-kali"
     hostname: "{{ range_id }}-kali"
     template: kali-x64-desktop-template
-    vlan: 99
-    ip_last_octet: 1
+    vlan: 10
+    ip_last_octet: 99
     ram_gb: 4
     cpus: 4
     linux: true
@@ -185,25 +185,8 @@ sed -i '' "s/RANGENUMBER/$RANGENUMBER/g" inventory.yml
   </TabItem>
 </Tabs>
 
-### 5. A little manual work
 
-Until [this pull request](https://github.com/Orange-Cyberdefense/GOAD/pull/206) is merged, you'll need to make the following changes:
-
-1. Edit the IIS install task to start the windows update service
-
-```bash
-#terminal-command-goad
-vim roles/sccm/install/iis/tasks/main.yml
-
-# Add the following at line 24 (between the 'Reboot if installing windows feature requires it' task and the 'install .NET Framework 3.5 with DISM' task)
-- name: Enable update service
-  ansible.windows.win_service:
-    name: Windows Update
-    state: started
-    start_mode: auto
-```
-
-### 6. Deploy GOAD
+### 5. Deploy GOAD
 
 :::note
 
@@ -251,7 +234,7 @@ your lab : SCCM is successfully setup ! have fun ;)
 ```
 
 
-### 7. Snapshot VMs
+### 6. Snapshot VMs
 
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
@@ -269,6 +252,6 @@ do
 done
 ```
 
-### 8. Hack!
+### 7. Hack!
 
-Access your Kali machine at `http://10.RANGENUMBER.99.1:8444` using the creds `kali:password`.
+Access your Kali machine at `http://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
