@@ -169,6 +169,7 @@ Usage:
 
 Available Commands:
   abort       Kill the ansible process deploying a range
+  access      Grant or revoke access to a range
   config      Get or set a range configuration
   deploy      Deploy a range, running specific tags if specified
   errors      Parse the latest deploy logs from your range and print any non-ignored fatal errors
@@ -250,5 +251,5 @@ The version includes the SemVer version and the first 8 character of the git com
 
 ```
 Usage:
-  ludus version [flags]
+  ludus version [--verbose]
 ```
