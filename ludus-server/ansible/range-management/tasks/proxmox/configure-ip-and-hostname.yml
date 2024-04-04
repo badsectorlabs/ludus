@@ -87,7 +87,7 @@
 # Static IP - Windows
 - name: Set up static IP address (Windows)
   # Windows sometimes screws up and sets a static IP but thinks it still needs DHCP. Kicking the adapter fixes it
-  win_shell: |
+  ansible.windows.win_shell: |
     $eAdapter = Get-NetIpAddress -InterfaceAlias 'Ethernet*'
     $eAdapter | New-NetIpAddress -IpAddress {{ static_ip }} -PrefixLength {{ cidr_netmask }} -DefaultGateway {{ default_gateway }}
     Disable-NetAdapter -Name $eAdapter -Confirm: $false
@@ -127,13 +127,13 @@
 
 # Hostname - Windows
 - name: Hostname change (Windows)
-  win_hostname:
+  ansible.windows.win_hostname:
     name: "{{ vm_hostname }}"
   register: res
   when: ansible_os_family == "Windows"
 
 - name: Reboot
-  win_reboot:
+  ansible.windows.win_reboot:
   when: ansible_os_family == "Windows" and res.reboot_required
 
 - name: Wait for the host's control interface (WinRM via HTTPS) to come up
@@ -179,6 +179,7 @@
     state: touch
   when:
     - ansible_distribution == "Ubuntu"
+    - cloud_dir.stat.exists
     - cloud_dir.stat.isdir
   become: true
 
