@@ -6,7 +6,7 @@ title: Proxmox
 
 :::warning
 
-Using an existing Proxmox installation may cause issues with existing customizations as it is impossible for Ludus to account for every Proxmox setup. If starting from scratch the Debian 12 install is recommended.
+Using an existing Proxmox installation may cause issues with existing customizations as it is impossible for Ludus to account for every Proxmox setup. If starting from scratch the [bare metal Debian 12 install](./bare-metal) is recommended.
 
 :::
 
