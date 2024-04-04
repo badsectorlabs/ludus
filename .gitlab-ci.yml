@@ -67,7 +67,7 @@ stages:
   # Add the CIA user if it doesn't already exist, try 5 times since the server just restarted the first might fail
   - for i in {1..5}; do (ludus --url https://127.0.0.1:8081 users list all | grep -q 'Continuous Integration Admin' || ludus --url https://127.0.0.1:8081 users add -a -n "Continuous Integration Admin" -i CIA) && break || sleep 5; done
   # Switch to CIA user API Key - only request it once, save it to disk
-  - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --url https://127.0.0.1:8081 --json --user CIA users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-admin; fi
+  - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --url https://127.0.0.1:8081 --json --user CIA users apikey --no-prompt | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-admin; fi
   # Set the CIA user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
@@ -80,7 +80,7 @@ stages:
   # Add the CIU user if it doesn't already exist, try 5 times since the server just restarted the first might fail
   - for i in {1..5}; do (ludus --url https://127.0.0.1:8081 users list all | grep -q 'Continuous Integration User' || ludus --url https://127.0.0.1:8081 users add -n "Continuous Integration User" -i CIU) && break || sleep 5; done
   # Switch to CIU user API Key - only request it once, save it to disk
-  - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --url https://127.0.0.1:8081 --json --user CIU users apikey  | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-user; fi
+  - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --url https://127.0.0.1:8081 --json --user CIU users apikey --no-prompt | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-user; fi
   # Set the CIU user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
@@ -1183,9 +1183,9 @@ post-deploy user-cmds-as-user:
     # Try to remove a user
     - ludus --url https://127.0.0.1:8081 user rm -i CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     # Try to get an api key for another user
-    - ludus user apikey --user CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - ludus user apikey --user CIA --no-prompt 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     # Get a new API for ourselves
-    - ludus user apikey
+    - ludus user apikey --no-prompt
 
 post-deploy templates-as-user:
   stage: post-deploy-user-templates

@@ -7,6 +7,7 @@ import (
 	"ludus/rest"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
@@ -148,13 +149,26 @@ var usersAPIKeyCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
+		if userID == "" {
+			userID = strings.Split(apiKey, ".")[0]
+		}
+
+		if !noPrompt {
+			var choice string
+			logger.Logger.Warnf(`
+!!! This will create a new API key for user ID: %s !!!
+         The old key will no longer work
+
+Do you want to continue? (y/N): `, userID)
+			fmt.Scanln(&choice)
+			if choice != "Y" && choice != "y" {
+				logger.Logger.Fatal("Bailing!")
+			}
+		}
+
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/user/apikey?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/user/apikey")
-		}
+		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/user/apikey?userID=%s", userID))
 		if !success {
 			return
 		}
@@ -197,6 +211,10 @@ var usersAPIKeyCmd = &cobra.Command{
 		table.Render()
 
 	},
+}
+
+func setupAPIKeyCmd(command *cobra.Command) {
+	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
 }
 
 var usersWireguardCmd = &cobra.Command{
@@ -356,6 +374,7 @@ func setupUsersCredsSetCmd(command *cobra.Command) {
 
 func init() {
 	usersCmd.AddCommand(usersListCmd)
+	setupAPIKeyCmd(usersAPIKeyCmd)
 	usersCmd.AddCommand(usersAPIKeyCmd)
 	usersCmd.AddCommand(usersWireguardCmd)
 	setupUsersAddCmd(usersAddCmd)
