@@ -6,7 +6,7 @@ sidebar_position: 6
 
 You have just learned the **basics of Ludus** and and worked with the **default configuration**.
 
-Ludus has **much more to offer**!
+Ludus has **much more to offer**! You should review the **[security](../security)** page to understand what is exposed.
 
 Have **5 more minutes**? Take a look at **[configuration](../configuration)** and the **[Ludus CLI](../cli)**.
 
