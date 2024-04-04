@@ -32,7 +32,7 @@
     node: "{{ node_name }}"
     state: "{{ new_vm_state }}"
     vmid: "{{ item }}"
-    force: "{{ true if new_vm_state == 'stopped' else omit }}"
+    force: "{{ true if new_vm_state == 'stopped' or new_vm_state == 'absent' else omit }}"
     timeout: "{{ 120 if new_vm_state != 'stopped' else 30 }}"
   with_items:
     - "{{ vmids_to_change }}"
