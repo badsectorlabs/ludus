@@ -10,6 +10,8 @@ To determine if nested virtualization is supported, navigate to [this support pa
 Ludus has been successfully deployed on a `Standard E4bs v5 (4 vcpus, 32 GiB memory)` with NVMe disk controller and a 250GB disk. 
 This instance costs ~$260/month (with disk and network costs).
 
+However, this configuration will only be functional for basic labs (~4 VMs). For anything larger, use a larger instance size.
+
 In order to select the NVMe disk controller, the `Security type` must be set to `Standard`.
 
 ![Azure VM Options](/img/deployment/azure-vm-deploy.png)
