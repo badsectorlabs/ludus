@@ -66,7 +66,7 @@ proxmox_vm_storage_pool: local
 proxmox_vm_storage_format: qcow2
 proxmox_iso_storage_pool: local
 ludus_nat_interface: ludus
-
+prevent_user_ansible_add: false
 
 Ludus install will cause the machine to reboot twice. Install will continue
 automatically after each reboot. Check the progress of the install by running:
@@ -105,4 +105,5 @@ proxmox_vm_storage_pool: local    # The name of the VM storage pool - can be cha
 proxmox_vm_storage_format: qcow2  # The VM storage format - can be changed after install (i.e. raw)
 proxmox_iso_storage_pool: local   # The storage pool used to store ISOs as they are downloaded for templates - can be changed after install
 ludus_nat_interface: ludus        # The name of the interface Ludus will create on the proxmox host that Ludus will use as the "WAN" for range routers
+prevent_user_ansible_add: false   # Set this to true to prevent non-admin users from adding Ansible roles or collections to the server
 ```
