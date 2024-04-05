@@ -226,8 +226,16 @@ func PutConfig(c *gin.Context) {
 		return // JSON set in getRangeObject
 	}
 
-	if usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "Testing is enabled; to prevent conflicts, the config cannot be updated while testing is enabled"})
+	// Retrieve the 'force' field and convert it to boolean
+	forceStr := c.Request.FormValue("force")
+	force, err := strconv.ParseBool(forceStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid boolean value"})
+		return
+	}
+
+	if usersRange.TestingEnabled && !force {
+		c.JSON(http.StatusConflict, gin.H{"error": "Testing is enabled; to prevent conflicts, the config cannot be updated while testing is enabled. Use --force to override."})
 		return
 	}
 

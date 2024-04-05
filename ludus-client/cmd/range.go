@@ -226,9 +226,9 @@ var rangeConfigSet = &cobra.Command{
 			logger.Logger.Fatalf("Could not read: %s, error: %s\n", configFilePath, err.Error())
 		}
 		if userID != "" {
-			responseJSON, success = rest.GenericPutFile(client, fmt.Sprintf("/range/config?userID=%s", userID), configFileContent)
+			responseJSON, success = rest.PostFileAndForce(client, fmt.Sprintf("/range/config?userID=%s", userID), configFileContent, "file", force)
 		} else {
-			responseJSON, success = rest.GenericPutFile(client, "/range/config", configFileContent)
+			responseJSON, success = rest.PostFileAndForce(client, "/range/config", configFileContent, "file", force)
 		}
 
 		if didFailOrWantJSON(success, responseJSON) {
@@ -241,6 +241,7 @@ var rangeConfigSet = &cobra.Command{
 func setupRangeConfigSet(command *cobra.Command) {
 	command.Flags().StringVarP(&configFilePath, "file", "f", "", "the range configuration file")
 	_ = command.MarkFlagRequired("file")
+	command.Flags().BoolVar(&force, "force", false, "force the configuration to be updated, even with testing enabled")
 }
 
 type DeployBody struct {
