@@ -195,8 +195,4 @@ func installAnsibleRequirements() {
 		Run(fmt.Sprintf("ansible-galaxy install -r %s/ansible/requirements.yml", ludusInstallPath), true, true)
 		os.Create(fmt.Sprintf("%s/install/.ansible-requirements-installed", ludusInstallPath))
 	}
-	// Temporary to support debian 12/proxmox 8 until the pull request is merged in
-	// https://github.com/lae/ansible-role-proxmox/pull/230
-	log.Print("Running a one-off ansible-galaxy command to support debian 12 and proxmox 8")
-	Run("ansible-galaxy install https://github.com/lexxxel/ansible-role-proxmox/archive/feature/add_bookworm_and_debian_12_compatibility.tar.gz,pr-230,lae.proxmox --force", true, true)
 }
