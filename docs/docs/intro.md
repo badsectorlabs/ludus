@@ -34,7 +34,7 @@ Ludus is *only* compatible with virtualization capable Debian 12 or Proxmox 8. N
 - at least 32GB RAM per user/range that will be deployed
 - at least 200GB storage for initial templates and at least 50GB per user/range that will be deployed (large, fast NVMe drives recommended)
 - no more than 150 users per Ludus host
-- Internet connected
+- Internet connected (not via WiFi)
 - Root shell access
 - If you want to access Ludus across the internet
     - 1 public IP address

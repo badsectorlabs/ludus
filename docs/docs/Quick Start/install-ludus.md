@@ -24,7 +24,7 @@ Ludus can **only** be installed on a host that meets the following requirements:
 - Has at least 32 GB of RAM
 - Has at least 200 GB of HDD space
 - Root access
-- Internet access
+- Internet access (not via WiFi)
 
 To install ludus, copy the ludus-server binary to the machine and run it as root. It will copy all files into /opt/ludus and print the configuration
 values used during install.
@@ -48,8 +48,6 @@ sudo ./ludus-server
 Ludus server v0.9.2+e35d94d
 No config.yml found. Generating a config at /home/debian/config.yml. Please check that it contains the correct values.
 Extracting ludus to /opt/ludus...
-Downloading proxmox.py...
-Proxmox.py downloaded successfully
 Ludus files extracted successfully
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
