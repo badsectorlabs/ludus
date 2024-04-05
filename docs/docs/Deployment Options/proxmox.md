@@ -12,7 +12,7 @@ Using an existing Proxmox installation may cause issues with existing customizat
 
 Existing Proxmox 8 servers can install Ludus without a reboot.
 
-Ludus will make the following changes:
+Ludus will make the following changes - **do NOT do any actions below yourself before running the binary**:
 
 - Extract files to `/opt/ludus`
 - Install the following packages to the Proxmox host: ansible, packer, dnsmasq, sshpass, curl, jq, iptables-persistent, gpg-agent, dbus, dbus-user-session, and vim

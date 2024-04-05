@@ -18,6 +18,7 @@ Ludus is not supported on hosts that are connected to the network via WiFi. Plea
 
 Ludus can **only** be installed on a host that meets the following requirements:
 
+- x86_64 (aka amd64 aka 64-bit "Intel") CPU
 - Debian 12 or Proxmox 8
 - Supports virtualization - vmx or svm in /proc/cpuinfo (nested virtualization is supported, but has a performance penalty)
 - Has at least 32 GB of RAM
