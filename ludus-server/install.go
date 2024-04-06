@@ -75,7 +75,7 @@ func getInstallStep(existingProxmox bool) {
 !!! Ludus will create the proxmox groups ludus_users and ludus_admins                    !!!
 !!! Ludus will create the proxmox pools SHARED and ADMIN                                 !!!
 !!! Ludus will create a wireguard server wg0 with IP range 198.51.100.0/24               !!!
-!!! Ludus will create an interface 'ludus' with IP range 192.0.2.0/24 that NATs traffic  !!!
+!!! Ludus will create an interface 'vmbr1000' with IP range 192.0.2.0/24 that NATs       !!!
 !!! Ludus will create user ranges with IPs in the 10.0.0.0/16 network                    !!!
 !!! Ludus will create user interfaces starting at vmbr1001 incrementing for each user    !!!
 !!! Ludus will create the pam user 'ludus' and pam users for all Ludus users added       !!!
@@ -175,7 +175,7 @@ func runInstallPlaybook(existingProxmox bool) {
 }
 
 func installAnsibleWithPip() {
-	if strings.Contains(Run("ansible --version", false, false), "command not found") {
+	if !fileExists("/usr/local/bin/ansible") {
 		log.Println("Installing ansible with pip")
 		log.Println("  Updating apt cache...")
 		Run("apt update", false, true)
