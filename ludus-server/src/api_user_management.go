@@ -63,7 +63,11 @@ func AddUser(c *gin.Context) {
 			// Find the next available range number for the new user
 			usersRange.RangeNumber = findNextAvailableRangeNumber(db)
 
-			db.Create(&usersRange)
+			result := db.Create(&usersRange)
+			if result.Error != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating user's range object (range number %d): %v", usersRange.RangeNumber, result.Error)})
+				return
+			}
 			// Query the DB to get the autoincremented rangeID
 			db.First(&usersRange, "user_id = ?", user.UserID)
 
