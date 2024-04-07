@@ -14,11 +14,6 @@ variable "iso_url" {
   default = "https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66751/22621.525.220925-0207.ni_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso"
 }
 
-variable "iso_storage_pool" {
-  type    = string
-  default = "local"
-}
-
 variable "vm_cpu_cores" {
   type    = string
   default = "2"
@@ -73,6 +68,9 @@ variable "proxmox_skip_tls_verify" {
   type = bool
 }
 variable "proxmox_pool" {
+  type = string
+}
+variable "iso_storage_pool" {
   type = string
 }
 variable "ansible_home" {
