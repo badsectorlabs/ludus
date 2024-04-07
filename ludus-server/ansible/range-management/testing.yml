@@ -149,26 +149,14 @@
   tags: [never, stop-testing]
   hosts: "{{ range_id }}_test_range_dc"
   tasks:
-    - name: Find FQDN for role member
-      ansible.builtin.set_fact:
-        domain_fqdn: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn }}"
-    - name: Set dc_vm_name for the primary-dc with the same FQDN
-      ansible.builtin.set_fact:
-        dc_vm_name: "{{ item.vm_name }}"
-      loop: "{{ ludus }}"
-      when:
-        - item.domain is defined
-        - item.domain.role == 'primary-dc'
-        - item.domain.fqdn == domain_fqdn
-    - name: Set DC IP 
-      ansible.builtin.set_fact:
-        dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"  
-    - name: Set the NTP server to NIST
+    - name: Try to set the NTP server to NIST
       ansible.windows.win_shell: |
         w32tm /config /manualpeerlist:"time.nist.gov" /syncfromflags:manual /update
-    - name: Resync the time
+      ignore_errors: true
+    - name: Try to resync the time
       ansible.windows.win_shell: |
         w32tm /resync /rediscover
+      ignore_errors: true
     - name: Check if the Windows evaluation is expiring/expired
       ansible.builtin.include_tasks:
         file: tasks/windows/rearm.yml
@@ -179,30 +167,14 @@
   vars:
     dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
   tasks:
-    - name: Find FQDN for role member
-      ansible.builtin.set_fact:
-        domain_fqdn: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn }}"
-      when: (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain is defined and (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain.fqdn is defined
-    - name: Set dc_vm_name for the primary-dc with the same FQDN
-      ansible.builtin.set_fact:
-        dc_vm_name: "{{ item.vm_name }}"
-      loop: "{{ ludus }}"
-      when:
-        - (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain is defined
-        - (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain.fqdn is defined
-        - item.domain is defined
-        - item.domain.role == 'primary-dc'
-        - item.domain.fqdn == domain_fqdn
-    - name: Set DC IP 
-      ansible.builtin.set_fact:
-        dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"
-      when: (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain is defined and (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain.fqdn is defined
-    - name: Set the NTP server to NIST
+    - name: Try to set the NTP server to NIST
       ansible.windows.win_shell: |
         w32tm /config /manualpeerlist:"time.nist.gov" /syncfromflags:manual /update
-    - name: Resync the time
+      ignore_errors: true
+    - name: Try to resync the time
       ansible.windows.win_shell: |
         w32tm /resync /rediscover
+      ignore_errors: true
     - name: Check if the Windows evaluation is expiring/expired
       ansible.builtin.include_tasks:
         file: tasks/windows/rearm.yml
