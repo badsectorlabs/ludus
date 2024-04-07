@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -25,6 +26,29 @@ func automatedConfigGenerator() {
 		nodeName = os.Args[2]
 	} else if fileExists("/usr/bin/pveversion") { // On proxmox installs, the node name is the hostname
 		nodeName = strings.TrimSpace(Run("hostname", false, false))
+		// Make sure vmbr1000 is not currently in use
+		type InterfaceConfig struct {
+			Iface string `json:"iface"`
+			// Other fields omitted for brevity
+		}
+		ifaceJSONString := strings.TrimSpace(Run(fmt.Sprintf("pvesh get /nodes/%s/network --output-format json", nodeName), false, false))
+		var configs []InterfaceConfig
+		err := json.Unmarshal([]byte(ifaceJSONString), &configs)
+		if err != nil {
+			log.Fatal("Error unmarshaling JSON while getting networks:", err)
+		}
+
+		vmbr1000Found := false
+		for _, config := range configs {
+			if strings.EqualFold(config.Iface, "vmbr1000") {
+				vmbr1000Found = true
+				break
+			}
+		}
+
+		if vmbr1000Found {
+			log.Fatal("The 'vmbr1000' interface was found on this server already. Specify a nonexistent vmbr value for 'ludus_nat_interface' in /opt/ludus/config.yml")
+		}
 	} else {
 		nodeName = "ludus"
 	}
@@ -52,7 +76,7 @@ func automatedConfigGenerator() {
 				f.WriteString("proxmox_vm_storage_pool: local\n")
 				f.WriteString("proxmox_vm_storage_format: qcow2\n")
 				f.WriteString("proxmox_iso_storage_pool: local\n")
-				f.WriteString("ludus_nat_interface: ludus\n")
+				f.WriteString("ludus_nat_interface: vmbr1000\n")
 				f.WriteString("prevent_user_ansible_add: false\n")
 				return
 			}
