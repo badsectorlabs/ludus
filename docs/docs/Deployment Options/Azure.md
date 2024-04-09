@@ -26,6 +26,7 @@ In order to select the NVMe disk controller, the `Security type` must be set to 
 5. Run `/opt/ludus/ludus-server` and agree to the prompt to start the install.
 6. When the VM reboots, SSH back in and run `ludus-install-status` as root to monitor the install.
 7. Once the install succeeds, follow the Quick start guide as normal starting at [Create a User](../Quick%20Start/create-a-user).
+8. Make sure port 51820 UDP is open on the Azure firewall for the Ludus instance in order to use WireGuard.
 
 
 ## Troubleshooting
