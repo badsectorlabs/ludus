@@ -233,6 +233,23 @@ This will take a few hours. You'll know it is done when you see:
 your lab : SCCM is successfully setup ! have fun ;)
 ```
 
+:::tip Install .Net Framework 3.5 with DISM Error
+
+If you encounter errors with `TASK [sccm/install/iis : Install .Net Framework 3.5 with DISM]` or similar, update the failing machine with ludus:
+
+```shell-sessions
+#terminal-command-local
+ludus testing update -n JD-SCCM-MECM # Replace JD with your UserID
+# Wait for all updates to be installed. 
+# Be patient, this will take a long time.
+
+# When you see the following, the updates are complete:
+localhost                  : ok=5    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+JD-SCCM-MECM               : ok=8    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0 
+```
+
+:::
+
 
 ### 6. Snapshot VMs
 
