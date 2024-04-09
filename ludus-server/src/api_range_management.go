@@ -227,9 +227,10 @@ func PutConfig(c *gin.Context) {
 	}
 
 	// Retrieve the 'force' field and convert it to boolean
+	var force = false
 	forceStr := c.Request.FormValue("force")
-	force, err := strconv.ParseBool(forceStr)
-	if err != nil {
+	force, err = strconv.ParseBool(forceStr)
+	if forceStr != "" && err != nil { // Empty string (unset) => force is false
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid boolean value"})
 		return
 	}
