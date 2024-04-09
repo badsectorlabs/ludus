@@ -305,7 +305,7 @@
     - name: Configure automatic login for Windows
       include_tasks: tasks/windows/configure-autologon.yml
     - name: Get Firewall Status
-      ansible.builtin.include_tasks: tasks/windows/get-firwall-status.yml
+      ansible.builtin.include_tasks: tasks/windows/get-firewall-status.yml
     - name: Enable RDP
       include_tasks: tasks/windows/enable-rdp.yml
     - name: Enable SMB
