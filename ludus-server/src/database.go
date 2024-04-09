@@ -40,6 +40,7 @@ func InitDb() *gorm.DB {
 			db.Migrator().CreateTable(&UserObject{})
 			db.Migrator().CreateTable(&RangeObject{})
 			db.Migrator().CreateTable(&VmObject{})
+			db.Migrator().CreateTable(&RangeAccessObject{})
 
 			// Create a root user
 			var user UserObject
