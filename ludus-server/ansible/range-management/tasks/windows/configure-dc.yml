@@ -43,7 +43,7 @@
     - "domain_creation.msg is defined and \"The specified argument 'CreateDNSDelegation' was not recognized\" not in domain_creation.msg"
 
 - name: Reboot After Domain Creation
-  win_reboot:
+  ansible.windows.win_reboot:
     msg: "Installing AD. Rebooting..."
     pre_reboot_delay: 15
     reboot_timeout: 600

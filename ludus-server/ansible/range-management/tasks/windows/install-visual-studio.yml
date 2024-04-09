@@ -13,7 +13,7 @@
   when: not choco_test.failed
 
 - name: "Install Visual Studio {{ visual_studio_version }}"
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name: "visualstudio{{ visual_studio_version }}community"
     # See here for packages: https://docs.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-community?view=vs-2019
     # Microsoft.VisualStudio.Workload.NativeDesktop == C++

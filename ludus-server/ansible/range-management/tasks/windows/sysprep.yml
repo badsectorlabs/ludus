@@ -1,5 +1,5 @@
 - name: Check if sysprepd file exists
-  win_stat:
+  ansible.windows.win_stat:
     path: C:\ludus\sysprep\sysprepd
   register: sysprepd_file
 
@@ -8,28 +8,28 @@
   when: sysprepd_file.stat.exists
 
 - name: Create C:\Windows\Setup\Scripts directory
-  win_file:
+  ansible.windows.win_file:
     path: C:\Windows\Setup\Scripts
     state: directory
 
 - name: Copy SetupComplete.cmd to C:\Windows\Setup\Scripts
-  win_copy:
+  ansible.windows.win_copy:
     src: windows/sysprep/SetupComplete.cmd
     dest: C:\Windows\Setup\Scripts\SetupComplete.cmd
 
 - name: Create C:\ludus\sysprep directory
-  win_file:
+  ansible.windows.win_file:
     path: C:\ludus\sysprep
     state: directory
     recursive: true
 
 - name: Copy oob-disable.xml to C:\ludus\sysprep
-  win_copy:
+  ansible.windows.win_copy:
     src: windows/sysprep/oob-disable.xml
     dest: C:\ludus\sysprep\oob-disable.xml
 
 - name: Run Sysprep
-  win_shell: C:\Windows\System32\Sysprep\sysprep.exe /generalize /quiet /reboot /oobe /unattend:C:\ludus\sysprep\oob-disable.xml
+  ansible.windows.win_shell: C:\Windows\System32\Sysprep\sysprep.exe /generalize /quiet /reboot /oobe /unattend:C:\ludus\sysprep\oob-disable.xml
 
 - name: Wait for 60 seconds for sysprep to finish
   ansible.builtin.pause:
@@ -63,12 +63,12 @@
     state: touch
 
 - name: Hostname change after sysprep
-  win_hostname:
+  ansible.windows.win_hostname:
     name: "{{ vm_hostname }}"
   register: res
 
 - name: Reboot
-  win_reboot:
+  ansible.windows.win_reboot:
   when: res.reboot_required
 
 - name: Wait for the host's control interface (WinRM via HTTPS) to come up

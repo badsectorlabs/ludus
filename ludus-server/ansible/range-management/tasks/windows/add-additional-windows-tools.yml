@@ -39,7 +39,7 @@
     source: "{{ chocolatey_source | default('') }}"
 
 - name: Install Google Chrome
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name:
       - googlechrome
       # We have to ignore checksums here because: "This package always installs the latest version of Google Chrome,
@@ -52,7 +52,7 @@
     source: "{{ chocolatey_source | default('') }}"
 
 - name: Install sysinternals to C:\Tools
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name: sysinternals
     package_params: /InstallDir:C:\Tools
     ignore_checksums: "{{ true if ignore_chocolatey_checksums is defined and ignore_chocolatey_checksums else false }}"

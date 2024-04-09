@@ -15,14 +15,14 @@
 
 # https://github.com/chocolatey/chocolatey-ansible/issues/18
 - name: Bootstrap chocolatey by hand
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name:
       - chocolatey
     source: http://192.0.2.2:8081/repository/raw/install.ps1
   when: not choco_test.failed
 
 - name: Install custom chocolatey packages
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name: "{{ item }}"
     state: present
     source: "{{ chocolatey_source | default('') }}"

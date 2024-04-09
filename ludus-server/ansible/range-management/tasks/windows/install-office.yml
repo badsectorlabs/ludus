@@ -15,7 +15,7 @@
 
 # https://github.com/chocolatey/chocolatey-ansible/issues/18
 - name: Bootstrap chocolatey by hand
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name:
       - chocolatey
     source: http://192.0.2.2:8081/repository/raw/install.ps1
@@ -32,14 +32,14 @@
   when: office_version != "2013"
 
 - name: Install Office Pro Plus 2013 32 bit
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name: officeproplus2013
     package_params: "--version=15.0.4747"
     source: "{{ chocolatey_source | default('') }}"
   when: office_version == "2013" and office_arch == "32bit"
 
 - name: Install Office Pro Plus 2016 64 bit
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name: microsoft-office-deployment
     package_params: "/64bit /Product:ProPlusRetail /Exclude:Lync,Groove"
     source: "{{ chocolatey_source | default('') }}"
@@ -49,7 +49,7 @@
   failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
 
 - name: Install Office Pro Plus 2016 32 bit
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name: microsoft-office-deployment
     package_params: "/Product:ProPlusRetail /Exclude:Lync,Groove"
     source: "{{ chocolatey_source | default('') }}"
@@ -59,7 +59,7 @@
   failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
 
 - name: Install Office Pro Plus 2019 64 bit
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name: microsoft-office-deployment
     package_params: "/64bit /Product:ProPlus2019Volume /Exclude:Publisher,Lync,Groove"
     source: "{{ chocolatey_source | default('') }}"
@@ -69,7 +69,7 @@
   failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
 
 - name: Install Office Pro Plus 2019 32 bit
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name: microsoft-office-deployment
     package_params: "/Product:ProPlus2019Volume /Exclude:Lync,Groove"
     source: "{{ chocolatey_source | default('') }}"
@@ -79,7 +79,7 @@
   failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
 
 - name: Install Office Pro Plus 2021 64 bit
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name: microsoft-office-deployment
     package_params: "/64bit /Product:ProPlus2021Volume /Exclude:Lync,Groove"
     source: "{{ chocolatey_source | default('') }}"
@@ -89,7 +89,7 @@
   failed_when: result.rc != 0 and "'microsoft-office-deployment' is already installed" not in result.stderr
 
 - name: Install Office Pro Plus 2021 32 bit
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name: microsoft-office-deployment
     package_params: "/Product:ProPlus2021Volume /Exclude:Lync,Groove"
     source: "{{ chocolatey_source | default('') }}"
