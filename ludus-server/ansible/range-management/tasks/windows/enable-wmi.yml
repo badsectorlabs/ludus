@@ -1,6 +1,7 @@
 ---
 - name: Enable default WMI allow rule
-  win_firewall_rule:
+  community.windows.win_firewall_rule:
     name: Windows Management Instrumentation (WMI-In)
     action: allow
     state: present
+  when: firewall_service_running

@@ -1,0 +1,68 @@
+---
+- name: Gather Windows service facts
+  ansible.windows.win_service_info:
+    name: MpsSvc
+  register: firewall_status
+  when: firewall_status is undefined
+
+- name: Set fact for firewall service status
+  ansible.builtin.set_fact:
+    firewall_service_running: "{{ (firewall_status.services | selectattr('name', 'eq', 'mpssvc') | first).state == 'started' }}"
+  when:
+    - firewall_service_running is undefined
+    - firewall_status is defined
+    - firewall_status.services is defined
+    - firewall_status.services | length > 0
+
+- name: Get Domain Firewall status
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\DomainProfile
+  register: domain_profile
+  when: domain_profile is undefined
+
+- name: Set fact for Domain firewall enabled status
+  ansible.builtin.set_fact:
+    domain_firewall_enabled: "{{ domain_profile.properties.EnableFirewall.value | int == 1 }}"
+  when:
+    - domain_firewall_enabled is undefined
+    - domain_profile is defined
+    - domain_profile.properties is defined
+    - domain_profile.properties | length > 0
+
+- name: Get Public Firewall status
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile
+  register: public_profile
+  when: public_profile is undefined
+
+- name: Set fact for Public firewall enabled status
+  ansible.builtin.set_fact:
+    public_firewall_enabled: "{{ public_profile.properties.EnableFirewall.value | int == 1 }}"
+  when:
+    - public_firewall_enabled is undefined
+    - public_profile is defined
+    - public_profile.properties is defined
+    - public_profile.properties | length > 0
+
+- name: Get Standard Firewall status
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\StandardProfile
+  register: standard_profile
+  when: standard_profile is undefined
+
+- name: Set fact for Standard firewall enabled status
+  ansible.builtin.set_fact:
+    standard_firewall_enabled: "{{ standard_profile.properties.EnableFirewall.value | int == 1 }}"
+  when:
+    - standard_firewall_enabled is undefined
+    - standard_profile is defined
+    - standard_profile.properties is defined
+    - standard_profile.properties | length > 0
+
+- name: Show Firewall Status
+  ansible.builtin.debug:
+    msg: |
+      Firewall service is {{ 'running' if firewall_service_running else 'not running' }}
+      Domain firewall is {{ 'enabled' if domain_firewall_enabled else 'disabled' }}
+      Public firewall is {{ 'enabled' if public_firewall_enabled else 'disabled' }}
+      Standard firewall is {{ 'enabled' if standard_firewall_enabled else 'disabled' }}
