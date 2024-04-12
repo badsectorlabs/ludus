@@ -7,12 +7,18 @@
 
 - name: Set fact for firewall service status
   ansible.builtin.set_fact:
-    firewall_service_running: "{{ (firewall_status.services | selectattr('name', 'eq', 'mpssvc') | first).state == 'started' }}"
+    firewall_service_running: "{{ (firewall_status.services | selectattr('name', 'eq', 'mpssvc') | first | default('')).state == 'started' }}"
   when:
     - firewall_service_running is undefined
     - firewall_status is defined
     - firewall_status.services is defined
     - firewall_status.services | length > 0
+
+- name: Set fact for firewall service status if it cannot be determined (assume false)
+  ansible.builtin.set_fact:
+    firewall_service_running: false
+  when:
+    - firewall_service_running is undefined
 
 - name: Get Domain Firewall status
   ansible.windows.win_reg_stat:
@@ -29,6 +35,12 @@
     - domain_profile.properties is defined
     - domain_profile.properties | length > 0
 
+- name: Set fact for firewall Domain firewall enabled status if it cannot be determined (assume false)
+  ansible.builtin.set_fact:
+    domain_firewall_enabled: false
+  when:
+    - domain_firewall_enabled is undefined
+
 - name: Get Public Firewall status
   ansible.windows.win_reg_stat:
     path: HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile
@@ -44,6 +56,12 @@
     - public_profile.properties is defined
     - public_profile.properties | length > 0
 
+- name: Set fact for firewall Public firewall enabled status if it cannot be determined (assume false)
+  ansible.builtin.set_fact:
+    public_firewall_enabled: false
+  when:
+    - public_firewall_enabled is undefined
+
 - name: Get Standard Firewall status
   ansible.windows.win_reg_stat:
     path: HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\StandardProfile
@@ -58,6 +76,12 @@
     - standard_profile is defined
     - standard_profile.properties is defined
     - standard_profile.properties | length > 0
+
+- name: Set fact for firewall Standard firewall enabled status if it cannot be determined (assume false)
+  ansible.builtin.set_fact:
+    standard_firewall_enabled: false
+  when:
+    - standard_firewall_enabled is undefined
 
 - name: Show Firewall Status
   ansible.builtin.debug:
