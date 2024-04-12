@@ -224,6 +224,7 @@ pages:
   tags:
     - ludus-proxmox-runner
   rules:
+    - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_MESSAGE =~ /\[build pages\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
       when: never
@@ -251,6 +252,7 @@ documentation:
   tags:
     - ludus-proxmox-runner
   rules:
+    - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_MESSAGE =~ /\[build docs\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
       when: never
@@ -281,6 +283,7 @@ build all:
   dependencies:
     - documentation
   rules:
+    - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
       when: never
     - changes:
@@ -332,6 +335,8 @@ install kickoff:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
       when: never
@@ -357,6 +362,8 @@ install check:
   tags:
     - ludus-proxmox-runner
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
       when: never
@@ -380,6 +387,8 @@ install snapshot:
   tags:
     - ludus-proxmox-runner
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
       when: never
@@ -408,6 +417,8 @@ templates build:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -443,6 +454,8 @@ templates check:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -482,6 +495,8 @@ templates snapshot:
   tags:
     - ludus-proxmox-runner
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -518,6 +533,8 @@ client basic-commands:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[client tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -567,6 +584,8 @@ range deploy-admin:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -608,6 +627,8 @@ range check-admin:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -645,6 +666,8 @@ range snapshot-admin:
   tags:
     - ludus-proxmox-runner
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -683,6 +706,8 @@ post-deploy testing-as-admin:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[testing-mode tests\]/
@@ -720,6 +745,8 @@ post-deploy power-as-admin:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[power tests\]/
@@ -759,6 +786,8 @@ post-deploy ansible-as-admin:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[ansible tests\]/
@@ -797,6 +826,8 @@ post-deploy user-cmds-as-admin:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[user tests\]/
@@ -869,6 +900,8 @@ post-deploy templates-as-admin:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
@@ -909,6 +942,8 @@ range deploy-user:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -948,6 +983,8 @@ range check-user:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -985,6 +1022,8 @@ range snapshot-user:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -1021,6 +1060,8 @@ post-deploy testing-as-user:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[testing-mode tests\]/
@@ -1056,6 +1097,8 @@ post-deploy power-as-user:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[power tests\]/
@@ -1094,6 +1137,8 @@ post-deploy ansible-as-user:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[ansible tests\]/
@@ -1130,6 +1175,8 @@ post-deploy user-cmds-as-user:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[user tests\]/
@@ -1194,6 +1241,8 @@ post-deploy templates-as-user:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
@@ -1232,6 +1281,8 @@ test-everything:
   dependencies:
     - build all
   rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[integration test\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -1339,7 +1390,6 @@ upload:
   variables:
     LUDUS_BUILD_TYPE: any-built
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
-  when: manual
   rules:
     - if: $CI_COMMIT_TAG
   script:
