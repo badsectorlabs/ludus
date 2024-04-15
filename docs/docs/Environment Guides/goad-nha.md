@@ -195,25 +195,25 @@ ad_https_proxy=http://x.x.x.x:xxxx
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">
 ```bash
-#terminal-command-nha
+#terminal-command-goad
 vim inventory.yml
 # paste in the inventory file above
-#terminal-command-nha
+#terminal-command-goad
 export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
 # `sudo apt install jq` if you don't have jq
-#terminal-command-nha
+#terminal-command-goad
 sed -i "s/RANGENUMBER/$RANGENUMBER/g" inventory.yml
 ```
   </TabItem>
   <TabItem value="macos" label="macOS">
 ```bash
-#terminal-command-nha
+#terminal-command-goad
 vim inventory.yml
 # paste in the inventory file above
-#terminal-command-nha
+#terminal-command-goad
 export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
 # `brew install jq` if you don't have jq
-#terminal-command-nha
+#terminal-command-goad
 sed -i '' "s/RANGENUMBER/$RANGENUMBER/g" inventory.yml
 ```
   </TabItem>
@@ -231,10 +231,10 @@ You must be connected to your Ludus wireguard VPN for these commands to work
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">
 ```bash
-#terminal-command-nha
+#terminal-command-goad
 vim build.yml
 # Edit the keyboard layout to your preferred layout (or remove that whole line)
-#terminal-command-nha
+#terminal-command-goad
 export ANSIBLE_COMMAND="ansible-playbook -i ../ad/NHA/data/inventory -i ./inventory.yml"
 #terminal-command-goad
 export LAB="NHA"
@@ -244,16 +244,16 @@ export LAB="NHA"
   </TabItem>
   <TabItem value="macos" label="macOS">
 ```bash
-#terminal-command-nha
+#terminal-command-goad
 vim build.yml
 # Edit the keyboard layout to your preferred layout (or remove that whole line)
-#terminal-command-nha
+#terminal-command-goad
 export ANSIBLE_COMMAND="ansible-playbook -i ../ad/NHA/data/inventory -i ./inventory.yml"
-#terminal-command-nha
+#terminal-command-goad
 export LAB="NHA"
-#terminal-command-nha
+#terminal-command-goad
 export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
-#terminal-command-nha
+#terminal-command-goad
 ../scripts/provisionning.sh
 ```
   </TabItem>
