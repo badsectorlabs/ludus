@@ -83,8 +83,6 @@ ludus:
     cpus: 2
     windows:
       sysprep: true
-    roles:
-      - badsectorlabs.ludus_elastic_agent
   - vm_name: "{{ range_id }}-NHA-SRV02"
     hostname: "{{ range_id }}-SRV02"
     template: win2019-server-x64-template
