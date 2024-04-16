@@ -24,6 +24,13 @@ Obviously do not cheat by looking at the passwords and flags in the recipe files
 
 :::
 
+### For the eager beavers who want to breeze through the installation and automation, here's a one-liner that'll make you feel like a wizard
+```bash
+
+wget https://raw.githubusercontent.com/aleemladha/Ludus-Lab-Auto-Deployment/main/ludus_autodeploy_nha_lab.sh && chmod +x ludus_autodeploy_nha_lab.sh && ./ludus_autodeploy_nha_lab.sh
+
+```
+
 ### 1. Add the Windows 2019 template to Ludus
 
 ```bash
