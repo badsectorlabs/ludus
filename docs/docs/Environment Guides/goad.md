@@ -125,7 +125,11 @@ ludus range deploy
 
 ```bash
 #terminal-command-local
-ludus testing update -n JD-GOAD-SRV02 # replace "JD" with your range ID
+userID=$(ludus range list --json | jq -r '.userID')
+#terminal-command-local
+updatesrv02="ludus testing update -n ${userID}-GOAD-SRV02"
+#terminal-command-local
+$updatesrv02
 #terminal-command-local
 ludus range logs -f
 # Wait for all updates to be installed. 
