@@ -12,4 +12,6 @@
     remoteip: any
     profiles: domain,private,public
     state: present
-  when: firewall_service_running
+  when:
+    - firewall_service_running is defined
+    - firewall_service_running
