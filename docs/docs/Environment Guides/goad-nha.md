@@ -1,29 +1,43 @@
 ---
-title: "Game of Active Directory (GOAD)"
+title: "GOAD - NHA - NINJA HACKER ACADEMY "
 ---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# Game of Active Directory (GOAD)
+# Game of Active Directory (GOAD) - NHA - NINJA HACKER ACADEMY
 
 :::success Props!
 
-Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to create GOAD!
+Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to create GOAD NHA, and [@ladhaAleem](https://twitter.com/LadhaAleem) for getting GOAD NHA to work with Ludus!
+
+NINJA HACKER ACADEMY (NHA) is written as a training challenge where GOAD was written as a lab with a maximum of vulns.
+
+You should find your way in to get domain admin on the 2 domains (academy.ninja.lan and ninja.hack)
+
+Starting point is on srv01 : "WEB"
+
+Flags are disposed on each machine, try to grab all. Be careful all the machines are up to date with defender enabled.
+
+Some exploits needs to modify path so this lab is not very multi-players compliant (unless you do it as a team ;))
+
+Obviously do not cheat by looking at the passwords and flags in the recipe files, the lab must start without user to full compromise.
 
 :::
 
-![GOAD Network Map](https://raw.githubusercontent.com/Orange-Cyberdefense/GOAD/main/docs/img/GOAD_schema.png)
+### For the eager beavers who want to breeze through the installation and automation, here's a one-liner that'll make you feel like a wizard
+```bash
 
-### 1. Add the Windows 2019 and 2016 server templates to Ludus
+wget https://raw.githubusercontent.com/aleemladha/Ludus-Lab-Auto-Deployment/main/ludus_autodeploy_nha_lab.sh && chmod +x ludus_autodeploy_nha_lab.sh && ./ludus_autodeploy_nha_lab.sh
+
+```
+
+### 1. Add the Windows 2019 template to Ludus
 
 ```bash
 #terminal-command-local
 git clone https://gitlab.com/badsectorlabs/ludus
 #terminal-command-local
 cd ludus/templates
-#terminal-command-local
-ludus templates add -d win2016-server-x64
-[INFO]  Successfully added template
 #terminal-command-local
 ludus templates add -d win2019-server-x64
 [INFO]  Successfully added template
@@ -42,7 +56,6 @@ ludus templates list
 | win11-22h2-x64-enterprise-template     | TRUE  |
 | win2022-server-x64-template            | TRUE  |
 | win2019-server-x64-template            | TRUE  |
-| win2016-server-x64-template            | TRUE  |
 +----------------------------------------+-------+
 ```
 
@@ -50,47 +63,47 @@ ludus templates list
 
 ```yaml title="config.yml"
 ludus:
-  - vm_name: "{{ range_id }}-GOAD-DC01"
+  - vm_name: "{{ range_id }}-NHA-DC01"
     hostname: "{{ range_id }}-DC01"
     template: win2019-server-x64-template
     vlan: 10
-    ip_last_octet: 10
+    ip_last_octet: 30
     ram_gb: 4
     cpus: 2
     windows:
       sysprep: true
-  - vm_name: "{{ range_id }}-GOAD-DC02"
+  - vm_name: "{{ range_id }}-NHA-DC02"
     hostname: "{{ range_id }}-DC02"
     template: win2019-server-x64-template
     vlan: 10
-    ip_last_octet: 11
+    ip_last_octet: 31
     ram_gb: 4
     cpus: 2
     windows:
       sysprep: true
-  - vm_name: "{{ range_id }}-GOAD-DC03"
-    hostname: "{{ range_id }}-DC03"
-    template: win2016-server-x64-template
+  - vm_name: "{{ range_id }}-NHA-SRV01"
+    hostname: "{{ range_id }}-SRV01"
+    template: win2019-server-x64-template
     vlan: 10
-    ip_last_octet: 12
+    ip_last_octet: 32
     ram_gb: 4
     cpus: 2
     windows:
       sysprep: true
-  - vm_name: "{{ range_id }}-GOAD-SRV02"
+  - vm_name: "{{ range_id }}-NHA-SRV02"
     hostname: "{{ range_id }}-SRV02"
     template: win2019-server-x64-template
     vlan: 10
-    ip_last_octet: 22
+    ip_last_octet: 33
     ram_gb: 4
     cpus: 2
     windows:
       sysprep: true
-  - vm_name: "{{ range_id }}-GOAD-SRV03"
+  - vm_name: "{{ range_id }}-NHA-SRV03"
     hostname: "{{ range_id }}-SRV03"
     template: win2019-server-x64-template
     vlan: 10
-    ip_last_octet: 23
+    ip_last_octet: 34
     ram_gb: 4
     cpus: 2
     windows:
@@ -101,11 +114,11 @@ ludus:
     vlan: 10
     ip_last_octet: 99
     ram_gb: 4
-    cpus: 2
+    cpus: 4
     linux: true
     testing:
       snapshot: false
-      block_internet: false
+      block_internet: false	  
 ```
 
 ```bash
@@ -121,29 +134,10 @@ ludus range deploy
 # Or check the status with `ludus range status`
 ```
 
-### 3. Update the SRV02 machine
 
-```bash
-#terminal-command-local
-userID=$(ludus range list --json | jq -r '.userID')
-#terminal-command-local
-updatesrv02="ludus testing update -n ${userID}-GOAD-SRV02"
-#terminal-command-local
-$updatesrv02
-#terminal-command-local
-ludus range logs -f
-# Wait for all updates to be installed. 
-# Be patient, this will take a long time.
-# This required for the IIS install to work during GOAD setup.
+### 3. Install ansible and its requirements for GOAD on your local machine
 
-# When you see the following, the updates are complete:
-localhost                  : ok=5    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
-JD-GOAD-SRV02              : ok=8    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0 
-```
-
-### 4. Install ansible and its requirements for GOAD on your local machine
-
-```bash
+```shell-session
 # You can use a virtualenv here if you would like
 #terminal-command-local
 python3 -m pip install ansible-core
@@ -157,31 +151,25 @@ cd GOAD/ansible
 ansible-galaxy install -r requirements.yml
 ```
 
-### 5. Create the following inventory file and replace RANGENUMBER with your range number with sed (commands provided below)
+### 4. Create the following inventory file and replace RANGENUMBER with your range number with sed (commands provided below)
 
 ```ini title="inventory.yml"
 [default]
 ; Note: ansible_host *MUST* be an IPv4 address or setting things like DNS
 ; servers will break.
 ; ------------------------------------------------
-; sevenkingdoms.local
+; ninja.local
 ; ------------------------------------------------
-dc01 ansible_host=10.RANGENUMBER.10.10 dns_domain=dc01 dict_key=dc01
-;ws01 ansible_host=10.RANGENUMBER.10.30 dns_domain=dc01 dict_key=ws01
-; ------------------------------------------------
-; north.sevenkingdoms.local
-; ------------------------------------------------
-dc02 ansible_host=10.RANGENUMBER.10.11 dns_domain=dc01 dict_key=dc02
-srv02 ansible_host=10.RANGENUMBER.10.22 dns_domain=dc02 dict_key=srv02
-; ------------------------------------------------
-; essos.local
-; ------------------------------------------------
-dc03 ansible_host=10.RANGENUMBER.10.12 dns_domain=dc03 dict_key=dc03
-srv03 ansible_host=10.RANGENUMBER.10.23 dns_domain=dc03 dict_key=srv03
+dc01 ansible_host=10.RANGENUMBER.10.30 dns_domain=dc01 dns_domain=dc02 dict_key=dc01
+dc02 ansible_host=10.RANGENUMBER.10.31 dns_domain=dc02 dict_key=dc02
+srv01 ansible_host=10.RANGENUMBER.10.32 dns_domain=dc02 dict_key=srv01
+srv02 ansible_host=10.RANGENUMBER.10.33 dns_domain=dc02 dict_key=srv02
+srv03 ansible_host=10.RANGENUMBER.10.34 dns_domain=dc02 dict_key=srv03
+
 
 [all:vars]
 ; domain_name : folder inside ad/
-domain_name=GOAD
+domain_name=NHA
 
 force_dns_server=yes
 dns_server=10.RANGENUMBER.10.254
@@ -236,7 +224,8 @@ sed -i '' "s/RANGENUMBER/$RANGENUMBER/g" inventory.yml
   </TabItem>
 </Tabs>
 
-### 6. Deploy GOAD
+
+### 5. Deploy GOAD - NINJA HACKER ACADEMY 
 
 :::note
 
@@ -251,9 +240,9 @@ You must be connected to your Ludus wireguard VPN for these commands to work
 vim build.yml
 # Edit the keyboard layout to your preferred layout (or remove that whole line)
 #terminal-command-goad
-export ANSIBLE_COMMAND="ansible-playbook -i ../ad/GOAD/data/inventory -i ./inventory.yml"
+export ANSIBLE_COMMAND="ansible-playbook -i ../ad/NHA/data/inventory -i ./inventory.yml"
 #terminal-command-goad
-export LAB="GOAD"
+export LAB="NHA"
 #terminal-command-goad
 ../scripts/provisionning.sh
 ```
@@ -264,9 +253,9 @@ export LAB="GOAD"
 vim build.yml
 # Edit the keyboard layout to your preferred layout (or remove that whole line)
 #terminal-command-goad
-export ANSIBLE_COMMAND="ansible-playbook -i ../ad/GOAD/data/inventory -i ./inventory.yml"
+export ANSIBLE_COMMAND="ansible-playbook -i ../ad/NHA/data/inventory -i ./inventory.yml"
 #terminal-command-goad
-export LAB="GOAD"
+export LAB="NHA"
 #terminal-command-goad
 export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 #terminal-command-goad
@@ -280,31 +269,18 @@ Now you wait. `[WARNING]` lines are ok, and some steps may take a long time, don
 This will take a few hours. You'll know it is done when you see:
 
 ```
-your lab: GOAD is successfully setup ! have fun ;)
+your lab : NHA is successfully setup ! have fun ;)
 ```
 
-:::tip It's always DNS...
-
-If you encounter errors with `TASK [groups_domains : synchronizes all domains]` or similar, manually remove the `10.ID.10.254` entry from the DNS servers for the host. You can do this via the GUI (Network and Internet -> Change Adaptor Options -> Right-click -> Properties -> Internet Protocol Version 4 (TCP/IPv4) -> Properties) or via Powershell:
-
-```powershell
-# Run this on the failing host
-$adapter = Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPAddress -ne $null }
-$dnsServers = $adapter.DNSServerSearchOrder
-$newDnsServers = $dnsServers | Where-Object { $_ -notmatch ".*\.254$" }
-$adapter.SetDNSServerSearchOrder($newDnsServers)
-```
-
-:::
-
-### 7. Snapshot VMs
+### 6. Snapshot VMs
 
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
 ```bash
+# Get RANGEID dynamically
 export RANGEID=$(ludus range list --json | jq -r .userID)
-vms=("$RANGEID-GOAD-DC01" "$RANGEID-GOAD-DC02" "$RANGEID-GOAD-DC03" "$RANGEID-GOAD-SRV02" "$RANGEID-GOAD-SRV03")
-COMMENT="Clean GOAD setup after ansible run"
+vms=("$RANGEID-NHA-DC01" "$RANGEID-NHA-DC02" "$RANGEID-NHA-SRV01" "$RANGEID-NHA-SRV02" "$RANGEID-NHA-SRV03")
+COMMENT="Clean NHA setup after ansible run"
 # Loop over the array
 for vm in "${vms[@]}"
 do
@@ -315,8 +291,6 @@ do
 done
 ```
 
-### 8. Hack!
+### 7. Hack!
 
 Access your Kali machine at `http://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
-
-Follow [the GOAD guide](https://mayfly277.github.io/posts/GOADv2-pwning_part1/) or explore the network on your own.
