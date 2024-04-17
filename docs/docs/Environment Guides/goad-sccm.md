@@ -239,11 +239,7 @@ If you encounter errors with `TASK [sccm/install/iis : Install .Net Framework 3.
 
 ```shell-sessions
 #terminal-command-local
-userID=$(ludus range list --json | jq -r '.userID')
-#terminal-command-local
-updatesccm="ludus testing update -n ${userID}-SCCM-MECM"
-#terminal-command-local
-$updatesccm
+ludus testing update -n JD-SCCM-MECM # Replace JD with your UserID
 # Wait for all updates to be installed. 
 # Be patient, this will take a long time.
 
@@ -260,7 +256,7 @@ JD-SCCM-MECM               : ok=8    changed=5    unreachable=0    failed=0    s
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
 ```bash
-export RANGEID=$(ludus range list --json | jq -r .userID)
+export RANGEID=JD # <= change to your ID
 vms=("$RANGEID-SCCM-DC" "$RANGEID-SCCM-MECM" "$RANGEID-SCCM-MSSQL" "$RANGEID-SCCM-CLIENT")
 COMMENT="Clean GOAD SCCM setup after ansible run"
 # Loop over the array

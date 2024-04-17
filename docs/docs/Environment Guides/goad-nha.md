@@ -1,35 +1,43 @@
 ---
-title: "GOAD - NHA - NINJA HACKER ACADEMY "
+title: "GOAD - NHA"
 ---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# Game of Active Directory (GOAD) - NHA - NINJA HACKER ACADEMY
+# Game of Active Directory (GOAD) - NHA - Ninja Hacker Academy
 
 :::success Props!
 
 Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to create GOAD NHA, and [@ladhaAleem](https://twitter.com/LadhaAleem) for getting GOAD NHA to work with Ludus!
 
-NINJA HACKER ACADEMY (NHA) is written as a training challenge where GOAD was written as a lab with a maximum of vulns.
-
-You should find your way in to get domain admin on the 2 domains (academy.ninja.lan and ninja.hack)
-
-Starting point is on srv01 : "WEB"
-
-Flags are disposed on each machine, try to grab all. Be careful all the machines are up to date with defender enabled.
-
-Some exploits needs to modify path so this lab is not very multi-players compliant (unless you do it as a team ;))
-
-Obviously do not cheat by looking at the passwords and flags in the recipe files, the lab must start without user to full compromise.
-
 :::
 
-### For the eager beavers who want to breeze through the installation and automation, here's a one-liner that'll make you feel like a wizard
+## Description from GOAD
+
+- NINJA HACKER ACADEMY (NHA) is written as a training challenge where GOAD was written as a lab with a maximum of vulns.
+
+- You should find your way in to get domain admin on the 2 domains (academy.ninja.lan and ninja.hack)
+
+- Starting point is on srv01 : "WEB"
+
+- Flags are disposed on each machine, try to grab all. Be careful all the machines are up to date with defender enabled.
+
+- Some exploits needs to modify path so this lab is not very multi-players compliant (unless you do it as a team ;))
+
+- Obviously do not cheat by looking at the passwords and flags in the recipe files, the lab must start without user to full compromise.
+
+- Hint: No bruteforce, if not in rockyou do not waste your time and your cpu/gpu cycle.
+
+## Community maintained Linux deployment script 
+
+This script assumes a Linux host and that `jq` and the `ludus` client are installed
+
 ```bash
 
 wget https://raw.githubusercontent.com/aleemladha/Ludus-Lab-Auto-Deployment/main/ludus_autodeploy_nha_lab.sh && chmod +x ludus_autodeploy_nha_lab.sh && ./ludus_autodeploy_nha_lab.sh
 
 ```
+## Manual Deployment
 
 ### 1. Add the Windows 2019 template to Ludus
 
@@ -277,8 +285,7 @@ your lab : NHA is successfully setup ! have fun ;)
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
 ```bash
-# Get RANGEID dynamically
-export RANGEID=$(ludus range list --json | jq -r .userID)
+export RANGEID=JD # <= change to your ID
 vms=("$RANGEID-NHA-DC01" "$RANGEID-NHA-DC02" "$RANGEID-NHA-SRV01" "$RANGEID-NHA-SRV02" "$RANGEID-NHA-SRV03")
 COMMENT="Clean NHA setup after ansible run"
 # Loop over the array

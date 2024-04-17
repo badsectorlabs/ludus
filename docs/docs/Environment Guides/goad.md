@@ -125,11 +125,7 @@ ludus range deploy
 
 ```bash
 #terminal-command-local
-userID=$(ludus range list --json | jq -r '.userID')
-#terminal-command-local
-updatesrv02="ludus testing update -n ${userID}-GOAD-SRV02"
-#terminal-command-local
-$updatesrv02
+ludus testing update -n JD-GOAD-SRV02 # replace "JD" with your range ID
 #terminal-command-local
 ludus range logs -f
 # Wait for all updates to be installed. 
@@ -302,7 +298,7 @@ $adapter.SetDNSServerSearchOrder($newDnsServers)
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
 ```bash
-export RANGEID=$(ludus range list --json | jq -r .userID)
+export RANGEID=JD # <= change to your ID
 vms=("$RANGEID-GOAD-DC01" "$RANGEID-GOAD-DC02" "$RANGEID-GOAD-DC03" "$RANGEID-GOAD-SRV02" "$RANGEID-GOAD-SRV03")
 COMMENT="Clean GOAD setup after ansible run"
 # Loop over the array
