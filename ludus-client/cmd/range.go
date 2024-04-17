@@ -499,7 +499,7 @@ var rangeAbortCmd = &cobra.Command{
 
 var rangeRDPGET = &cobra.Command{
 	Use:   "rdp",
-	Short: "Get a zip of RDP configuration files for all Windows hosts in a rage",
+	Short: "Get a zip of RDP configuration files for all Windows hosts in a range",
 	Long: `The RDP zip file will contain two configs for each Windows box:
 one for the domainadmin user, and another for the domainuser user`,
 	Args: cobra.NoArgs,
