@@ -428,7 +428,7 @@
                 "tags" : [ "User Management" ],
                 "summary" : "List user details",
                 "operationId" : "listUser",
-                "description" : "By passing in the appropriate options, you can search for\navailable users in Ludus\n",
+                "description" : "Get a single user object (default: the caller's). Specify a specific user to get with the userID query parameter. To get all users, the caller must be an admin and must use the /user/all endpoint.\n",
                 "parameters" : [ {
                   "in" : "query",
                   "name" : "userID",
@@ -672,7 +672,7 @@
                 "tags" : [ "User Management" ],
                 "summary" : "Reset and retrieve the Ludus API key for a user",
                 "operationId" : "getAPIKey",
-                "description" : "Reset and return the API key for the user specified in the query (admins only)\n",
+                "description" : "Reset and return the API key for the user specified in the query. By default this will reset the caller's API key. To reset a specific user's API key, specify their userID using a query parameter userID.\n",
                 "parameters" : [ {
                   "in" : "query",
                   "name" : "userID",
@@ -2272,7 +2272,7 @@
               },
               "UserObject" : {
                 "type" : "object",
-                "required" : [ "name", "userID", "dateCreated", "dateLastActive", "isAdmin", "encryptedAPIKey", "proxmoxUsername" ],
+                "required" : [ "name", "userID", "isAdmin" ],
                 "properties" : {
                   "name" : {
                     "type" : "string",
