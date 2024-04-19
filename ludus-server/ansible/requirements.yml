@@ -22,5 +22,3 @@ roles:
     version: 1.0.2
   - name: ansible-thoteam.nexus3-oss
     version: v2.5.2
-  - name: gantsign.golang
-    version: 3.3.1
