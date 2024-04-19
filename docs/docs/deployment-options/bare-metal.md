@@ -15,4 +15,4 @@ When looking for a Ludus host, try to get as much RAM as possible, followed by a
 ## Install
 
 1. Install Debian 12 - make note of the root and user passwords set during install
-2. Follow [Install Ludus](../Quick%20Start/install-ludus)
+2. Follow [Install Ludus](../quick-start/install-ludus)

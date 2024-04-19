@@ -10,7 +10,7 @@ Ansible roles should follow the [standard structure](https://docs.ansible.com/an
 
 Some example roles:
 
-- [ludus_adcs](https://github.com/badsectorlabs/ludus_adcs). Follow our short deployment guide [here](https://docs.ludus.cloud/docs/Environment%20Guides/adcs)
+- [ludus_adcs](https://github.com/badsectorlabs/ludus_adcs). Follow our short deployment guide [here](../environment-guides/adcs)
 - [ludus_bloodhound_ce](https://github.com/badsectorlabs/ludus_bloudhound_ce)
 - [ludus_vulhub](https://github.com/badsectorlabs/ludus_vulhub)
 

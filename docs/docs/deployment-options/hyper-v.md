@@ -20,4 +20,4 @@ Set-VMProcessor -VMName <Ludus VM Name> -ExposeVirtualizationExtensions $true
 
 ## Install
 
-1. Follow [Install Ludus](../Quick%20Start/install-ludus)
+1. Follow [Install Ludus](../quick-start/install-ludus)

@@ -117,7 +117,7 @@ resource "google_compute_instance" "{InstanceName}" {
 4. Edit the config file at `/opt/ludus/config.yml` and update the public IP to the public IP of the GCP instance.
 5. Run `/opt/ludus/ludus-server` and agree to the prompt to start the install.
 6. When the VM reboots, SSH back in and run `ludus-install-status` as root to monitor the install.
-7. Once the install succeeds, follow the Quick start guide as normal starting at [Create a User](../Quick%20Start/create-a-user).
+7. Once the install succeeds, follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user).
 
 ## Troubleshooting
 

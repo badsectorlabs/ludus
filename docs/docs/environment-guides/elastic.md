@@ -12,7 +12,7 @@ This guide will create an [Elastic Security](https://www.elastic.co/security) se
 #terminal-command-local
 ludus ansible roles add badsectorlabs.ludus_elastic_container
 #terminal-command-local
-local:~$ ludus ansible roles add badsectorlabs.ludus_elastic_agent
+ludus ansible roles add badsectorlabs.ludus_elastic_agent
 ```
 
 2. Modify your ludus config to add the `badsectorlabs.ludus_elastic_container` role to a Debian or Ubuntu VM and the `badsectorlabs.ludus_elastic_agent` on Debian-based or Windows VMs

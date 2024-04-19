@@ -1,5 +1,5 @@
 ---
-sidebar_position: 7
+sidebar_position: 8
 title: "📜 Templates"
 ---
 
@@ -28,12 +28,16 @@ These templates include:
 
 - debian10
 - rocky-9-x64-server
+- ubuntu-20.04-x64-server
 - ubuntu-22.04-x64-server
 - win10-21h1-x64-enterprise
 - win11-23h2-x64-enterprise
 - win2012r2-server-x64
 - win2016-server-x64
 - win2019-server-x64
+- commando-vm
+- flare-vm
+- remnux
 
 ## Adding Templates to Ludus
 

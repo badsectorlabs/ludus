@@ -28,4 +28,4 @@ Create a Debian 12 VM with the following settings (disk can be larger than 250GB
 
 ## Install
 
-Once Debian 12 is installed and running, follow [Install Ludus](../Quick%20Start/install-ludus).
+Once Debian 12 is installed and running, follow [Install Ludus](../quick-start/install-ludus).
