@@ -8,13 +8,14 @@ title: Ansible Roles
 
 Ansible roles should follow the [standard structure](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html#role-directory-structure) and must have a `meta` folder with a `main.yml` file.
 
-Some example roles:
+:::tip
 
-- [ludus_adcs](https://github.com/badsectorlabs/ludus_adcs). Follow our short deployment guide [here](../environment-guides/adcs)
-- [ludus_bloodhound_ce](https://github.com/badsectorlabs/ludus_bloudhound_ce)
-- [ludus_vulhub](https://github.com/badsectorlabs/ludus_vulhub)
+Use the [ludus role template](https://github.com/badsectorlabs/ludus_ansible_role_template) to quickly get started.
+:::
 
-If you've build a cool role you'd like to share with us, let us know [via email](mailto:info@badsectorlabs.com), ping us on X ([@badsectorlabs](https://twitter.com/badsectorlabs)), or in our [Discord](https://discord.gg/HryzhdUSYT) server!
+Example roles can be found in the table on the [roles page](../roles)
+
+If you've build a cool role you'd like to share with us, let us know [via email](mailto:info@badsectorlabs.com), ping us on X ([@badsectorlabs](https://twitter.com/badsectorlabs)), or in our [Discord](https://discord.gg/HryzhdUSYT) server and submit a pull request to have it added to the [roles page](../roles).
 
 ## Testing roles
 

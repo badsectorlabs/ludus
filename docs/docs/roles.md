@@ -5,7 +5,27 @@ title: "🎭 Roles"
 
 ## How to use Roles
 
-Roles are Ansible roles that are applied to VMs in Ludus after they are deployed and configured. It's easy to add a role to a Ludus VM, simply define the `roles` key in the config:
+Roles are Ansible roles that are applied to VMs in Ludus after they are deployed and configured. It's easy to add a role to a Ludus VM, simply add the role to Ludus and then define the `roles` key in the config.
+
+Roles are unique to each user on a Ludus host, which allows users to have different versions of roles, custom roles, etc without overwriting or breaking each other's roles.
+
+To add a role to Ludus, use the client as the user that will deploy the role (optionally specify the user/range that will use the role with `--user`)
+
+```bash
+# Add directly from Ansible Galaxy
+#terminal-command-local
+ludus ansible role add badsectorlabs.luds_adcs
+
+# Add from a local directory
+#terminal-command-local
+ludus ansible role add -d ./ludus_child_domain
+
+# Add a role for another user/range (as an admin)
+#terminal-command-local
+ludus ansible role add badsectorlabs.luds_adcs --user USER2
+```
+
+After roles have been added to Ludus, you can modify the range config to use them:
 
 ```yaml title="range-config.yml"
 ludus:
@@ -22,7 +42,7 @@ ludus:
     //highlight-next-line
       - geerlingguy.docker  # Arbitrary role name, as it appears in `ludus ansible roles list`
     role_vars:              # This key contains `key: value` pairs of variables that are passed to ALL user-defined roles.
-      docker_edition: ce    # Arbitrary variables for user-defined roles. Do *not* use hypens to prefix these variables, the role_vars key *must* be a dictionary!
+      docker_edition: ce    # Arbitrary variables for user-defined roles. Do *not* use hyphens to prefix these variables, the role_vars key *must* be a dictionary!
       docker_users:         # You can use lists or dicts here
         - localuser
 ```
@@ -46,5 +66,10 @@ While most existing ansible roles will work with Ludus, this page contains a tab
 | [badsectorlabs.ludus_flarevm](https://github.com/badsectorlabs/ludus_flarevm) | Installs Flare VM on Windows >= 10 hosts | Bad Sector Labs | Available as a [template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates/flare-vm?ref_type=heads) |
 | [badsectorlabs.ludus_remnux](https://github.com/badsectorlabs/ludus_remnux) | Installs REMnux on Ubuntu 20.04 systems | Bad Sector Labs | Available as a [template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates/remnux?ref_type=heads) |
 | [aleemladha.wazuh_server_install](https://github.com/aleemladha/wazuh_server_install) | Install Wazuh SIEM Unified XDR and SIEM protection with SOC Fortress Rules | [@LadhaAleem](https://twitter.com/LadhaAleem) ||
-| [ludus_child_domain](https://github.com/ChoiSG/ludus_ansible_roles) | Create a child domain and domain controller because ansible's microsoft.ad doesn't support it | [@_choisec](https://twitter.com/_choisec) ||
-| [ludus_child_domain_join](https://github.com/ChoiSG/ludus_ansible_roles) | Join a machine to the child domain created from ludus_child_domain, since ludus's backend does not support domain/controllers created with 3rd party ansible roles | [@_choisec](https://twitter.com/_choisec) ||
+| [aleemladha.ludus_wazuh_agent](https://github.com/aleemladha/ludus_wazuh_agent) | Deploys Wazuh Agents to Windows systems | [@LadhaAleem](https://twitter.com/LadhaAleem) ||
+| [aleemladha.ludus_exchange2019](https://github.com/aleemladha/ludus_exchange2019) | installs Microsoft Exchange Server 2019 | [@LadhaAleem](https://twitter.com/LadhaAleem) ||
+| [ludus_child_domain](https://github.com/ChoiSG/ludus_ansible_roles) | Create a child domain and domain controller because ansible's microsoft.ad doesn't support it | [@_choisec](https://twitter.com/_choisec) | Must install from directory |
+| [ludus_child_domain_join](https://github.com/ChoiSG/ludus_ansible_roles) | Join a machine to the child domain created from ludus_child_domain, since ludus's backend does not support domain/controllers created with 3rd party ansible roles | [@_choisec](https://twitter.com/_choisec) | Must install from directory |
+| [ludus-local-users](https://github.com/Cyblex-Consulting/ludus-local-users) | Manages local users and groups for Windows or Linux | [@tigrebleu](https://infosec.exchange/@tigrebleu) | Must install from directory |
+| [ludus-gitlab-ce](https://github.com/Cyblex-Consulting/ludus-gitlab-ce) | Handles the installation of a Gitlab instance | [@tigrebleu](https://infosec.exchange/@tigrebleu) | Must install from directory |
+| [ludus-ad-content](https://github.com/Cyblex-Consulting/ludus-ad-content) | Creates content in an Active Directory (OUs, Groups, Users) | [@tigrebleu](https://infosec.exchange/@tigrebleu) | Must install from directory |
