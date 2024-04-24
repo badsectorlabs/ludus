@@ -33,4 +33,4 @@ Ludus will make the following changes - **do NOT do any actions below yourself b
 3. Restart the ludus processes with `systemctl restart ludus-admin` and `systemctl restart ludus`.
 4. Follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user).
 
-If you encounter networking issues like VMs not getting IP addresses or having internet access, see [this guide](../Troubleshooting/network.md).
+If you encounter networking issues like VMs not getting IP addresses or having internet access, see [this guide](../troubleshooting/network.md).

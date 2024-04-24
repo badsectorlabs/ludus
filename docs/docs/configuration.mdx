@@ -31,7 +31,7 @@ ludus:
     roles:                  # This key is an array of user-defined roles that will be installed on this VM. Roles must exist on the Ludus server and can be installed with `ludus ansible role add`
       - geerlingguy.docker  # Arbitrary role name, as it appears in `ludus ansible roles list`
     role_vars:              # This key contains `key: value` pairs of variables that are passed to ALL user-defined roles.
-      docker_edition: ce    # Arbitrary variables for user-defined roles. Do *not* use hypens to prefix these variables, the role_vars key *must* be a dictionary!
+      docker_edition: ce    # Arbitrary variables for user-defined roles. Do *not* use hyphens to prefix these variables, the role_vars key *must* be a dictionary!
       docker_users:         # You can use lists or dicts here
         - localuser
     ansible_groups:         # Define the groups this VM will be a part of when `ludus range inventory` is run. These groups can be set after VM deployment with `ludus range deploy -t custom-groups`

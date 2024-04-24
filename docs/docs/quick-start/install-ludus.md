@@ -26,12 +26,12 @@ Ludus can **only** be installed on a host that meets the following requirements:
 - Root access
 - Internet access (not via WiFi)
 
-To install ludus, copy the ludus-server binary to the machine and run it as root. It will copy all files into /opt/ludus and print the configuration
+To install ludus, copy the ludus-server binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to the machine and run it as root. It will copy all files into /opt/ludus and print the configuration
 values used during install.
 
 :::tip[Don't trust the binaries?]
 
-    Ludus binaries are built in CI, but you can always [build them from source](../Developers/building-from-source) yourself.
+    Ludus binaries are built in CI, but you can always [build them from source](../developers/building-from-source) yourself.
 
 :::
 
