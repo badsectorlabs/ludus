@@ -5,6 +5,12 @@ title: "🎭 Roles"
 
 ## How to use Roles
 
+:::tip
+
+Looking to create your own roles? Check out the [role developer](./developers/ansible-roles) page!
+
+:::
+
 Roles are Ansible roles that are applied to VMs in Ludus after they are deployed and configured. It's easy to add a role to a Ludus VM, simply add the role to Ludus and then define the `roles` key in the config.
 
 Roles are unique to each user on a Ludus host, which allows users to have different versions of roles, custom roles, etc without overwriting or breaking each other's roles.
