@@ -22,4 +22,6 @@
   ansible.builtin.service:
     name: getty@tty1
     state: restarted
+  timeout: 5
+  ignore_errors: true
   when: no_bounce_tty is undefined or not no_bounce_tty
