@@ -112,6 +112,9 @@
       add:
         - Domain Admins
         - Remote Desktop Users
+        - Enterprise Admins
+        - Schema Admins
+        - Group Policy Create Owners
 
 - name: Allow the domain user and domain admin to RDP
   ansible.windows.win_user_right:
