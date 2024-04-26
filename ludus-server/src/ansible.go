@@ -1,13 +1,17 @@
 package ludusapi
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/apenella/go-ansible/pkg/execute"
 	"github.com/apenella/go-ansible/pkg/options"
@@ -178,4 +182,47 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 		returnArray = append(returnArray, AccessGrantStruct{sourceRange.RangeNumber, sourceUser.ProxmoxUsername})
 	}
 	return returnArray
+}
+
+// Return true if the role exists for the user, or false if it doesn't
+func checkRoleExists(c *gin.Context, roleName string) (bool, error) {
+	user, err := getUserObject(c)
+	if err != nil {
+		return false, err
+	}
+	cmd := exec.Command("ansible-galaxy", "role", "list") // no --format json for roles...
+	cmd.Env = os.Environ()
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
+	roleOutput, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("unable to get the ansible roles: %w", err)
+	}
+
+	// Create a scanner to read the input
+	scanner := bufio.NewScanner(bytes.NewReader(roleOutput))
+
+	// Slice to store the roles
+	var availableAnsibleRoles []string
+
+	// Process each line
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Skip non-role lines
+		if !strings.HasPrefix(line, "- ") {
+			continue
+		}
+
+		// Split the line into role name and version
+		parts := strings.SplitN(line[2:], ", ", 2)
+		if len(parts) != 2 {
+			fmt.Println("Invalid line format:", line)
+			continue
+		}
+
+		roleName := strings.TrimSpace(parts[0])
+		availableAnsibleRoles = append(availableAnsibleRoles, roleName)
+	}
+	return slices.Contains(availableAnsibleRoles, roleName), nil
+
 }

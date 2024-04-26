@@ -53,6 +53,21 @@ func DeployRange(c *gin.Context) {
 		return
 	}
 
+	// If the user specified roles, make sure they exist on the server before trying to use them
+	if len(deployBody.OnlyRoles) > 0 {
+		for _, role := range deployBody.OnlyRoles {
+			exists, err := checkRoleExists(c, role)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if !exists {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The role '%s' does not exist on the Ludus server for user %s", role, usersRange.UserID)})
+				return
+			}
+		}
+	}
+
 	// Set range state to "DEPLOYING"
 	db.Model(&usersRange).Update("range_state", "DEPLOYING")
 
