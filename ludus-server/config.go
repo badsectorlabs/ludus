@@ -12,7 +12,7 @@ import (
 // get interface information for the machine, and create a config automatically
 // useful for CI/CD tests
 func automatedConfigGenerator() {
-	f, err := os.Create("config.yml")
+	f, err := os.Create(fmt.Sprintf("%s/config.yml", ludusPath))
 	if err != nil {
 		log.Fatal(err)
 	}
