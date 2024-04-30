@@ -167,7 +167,7 @@ func getUserObject(c *gin.Context) (UserObject, error) {
 	result := db.First(&user, "user_id = ?", userID)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		// Must check if the header status has already been written for this request before writing to avoid a panic
-		if c.Writer.Status() == 0 {
+		if !c.Writer.Written() {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		}
 		return user, gorm.ErrRecordNotFound

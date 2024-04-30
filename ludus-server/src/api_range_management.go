@@ -459,7 +459,7 @@ WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`})
 			db.Save(&rangeAccessObject)
 		}
 		// Response may have been set by 'target router not up' warning
-		if c.Writer.Status() == 0 {
+		if !c.Writer.Written() {
 			c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Range access to %s's range granted to %s. Have %s pull an updated wireguard config.",
 				targetUserObject.ProxmoxUsername,
 				sourceUserObject.ProxmoxUsername,
