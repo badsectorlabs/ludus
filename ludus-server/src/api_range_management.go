@@ -359,6 +359,7 @@ func RangeAccessAction(c *gin.Context) {
 		AccessActionVerb string `json:"action"`
 		TargetUserID     string `json:"targetUserID"`
 		SourceUserID     string `json:"sourceUserID"`
+		Force            bool   `json:"force"`
 	}
 	var thisRangeAccessActionPayload RangeAccessActionPayload
 
@@ -435,12 +436,15 @@ The target range router VM is inaccessible!
 If the target range router is deployed, no firewall changes have taken place.
 If the VM is not deployed yet, the rule will be added when it is deployed and you can ignore this.
 WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`})
-		} else if routerWANFatalRegex.MatchString(output) {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "The target range router is inaccessible. To revoke access, the target range router must be up and accessible."})
-		} else {
+		} else if routerWANFatalRegex.MatchString(output) && !thisRangeAccessActionPayload.Force {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "The target range router is inaccessible. To revoke access, the target range router must be up and accessible. Use --force to override this protection."})
+			return
+		} else if routerWANFatalRegex.MatchString(output) && thisRangeAccessActionPayload.Force {
+			// pass
+		} else { // Some other error we want to fail on
 			c.JSON(http.StatusInternalServerError, gin.H{"error": output})
+			return
 		}
-		return
 	}
 
 	if thisRangeAccessActionPayload.AccessActionVerb == "grant" {
@@ -454,13 +458,22 @@ WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`})
 			rangeAccessObject.SourceUserIDs = append(rangeAccessObject.SourceUserIDs, sourceUserObject.UserID)
 			db.Save(&rangeAccessObject)
 		}
-		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Range access to %s's range granted to %s. Have %s pull an updated wireguard config.",
-			targetUserObject.ProxmoxUsername,
-			sourceUserObject.ProxmoxUsername,
-			sourceUserObject.ProxmoxUsername)})
+		// Response may have been set by 'target router not up' warning
+		if c.Writer.Status() == 0 {
+			c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Range access to %s's range granted to %s. Have %s pull an updated wireguard config.",
+				targetUserObject.ProxmoxUsername,
+				sourceUserObject.ProxmoxUsername,
+				sourceUserObject.ProxmoxUsername)})
+		}
 	} else {
 		rangeAccessObject.SourceUserIDs = removeStringExact(rangeAccessObject.SourceUserIDs, sourceUserObject.UserID)
 		db.Save(&rangeAccessObject)
+
+		// If we have removed the last access, leaving the entry empty, remove the record from the DB to prevent confusion
+		// with empty records
+		if len(rangeAccessObject.SourceUserIDs) == 0 {
+			db.Delete(&rangeAccessObject)
+		}
 		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Range access to %s's range revoked from %s.",
 			targetUserObject.ProxmoxUsername,
 			sourceUserObject.ProxmoxUsername)})

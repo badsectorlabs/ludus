@@ -562,6 +562,7 @@ type RangeAccessActionPayload struct {
 	AccessActionVerb string `json:"action"`
 	TargetUserID     string `json:"targetUserID"`
 	SourceUserID     string `json:"sourceUserID"`
+	Force            bool   `json:"force"`
 }
 
 func genericRangeActionCmd(use string, short string, aliases []string) *cobra.Command {
@@ -582,6 +583,7 @@ func genericRangeActionCmd(use string, short string, aliases []string) *cobra.Co
 				AccessActionVerb: use,
 				TargetUserID:     targetUserID,
 				SourceUserID:     sourceUserID,
+				Force:            force,
 			}
 
 			responseJSON, success = rest.GenericJSONPost(client, "/range/access", accessBody)
@@ -600,6 +602,7 @@ var accessRevokeCmd = genericRangeActionCmd("revoke", "revoke access to a target
 func setupGenericRangeActionCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&targetUserID, "target", "t", "", "the userID of the range to grant/revoke access to/from")
 	command.Flags().StringVarP(&sourceUserID, "source", "s", "", "the userID of the user to gaining or losing access")
+	command.Flags().BoolVar(&force, "force", false, "force the access action even if the target router is inaccessible")
 }
 
 var accessListCmd = &cobra.Command{

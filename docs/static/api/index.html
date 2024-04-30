@@ -672,7 +672,7 @@
                 "tags" : [ "User Management" ],
                 "summary" : "Reset and retrieve the Ludus API key for a user",
                 "operationId" : "getAPIKey",
-                "description" : "Reset and return the API key for the user specified in the query. By default this will reset the caller's API key. To reset a specific user's API key, specify their userID using a query parameter userID.\n",
+                "description" : "Reset and return the API key for the user specified in the query. By default this will reset the caller's API key. To reset a specific user's API key, specify their userID using the query parameter userID.\n",
                 "parameters" : [ {
                   "in" : "query",
                   "name" : "userID",
@@ -1342,6 +1342,11 @@
                             "type" : "string",
                             "example" : "JS",
                             "description" : "the userID of the user that will be gaining/losing access"
+                          },
+                          "force" : {
+                            "type" : "boolean",
+                            "example" : false,
+                            "description" : "force the access action even if the target router is inaccessible"
                           }
                         }
                       }
