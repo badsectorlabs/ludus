@@ -63,7 +63,7 @@ While most existing ansible roles will work with Ludus, this page contains a tab
 | ---- | ----------- | ------ | ----- |
 | [badsectorlabs.ludus_vulhub](https://github.com/badsectorlabs/ludus_vulhub) | Runs [Vulhub](https://vulhub.org/) environments on a Linux system. | Bad Sector Labs | See [the env guide](./environment-guides/vulhub.md) |
 | [badsectorlabs.ludus_adcs](https://github.com/badsectorlabs/ludus_adcs) | Installs ADCS on Windows Server and optionally configures Certified Preowned templates. | Bad Sector Labs | See [the env guide](./environment-guides/adcs.md) |
-| [badsectorlabs.ludus_bloudhound_ce](https://github.com/badsectorlabs/ludus_bloudhound_ce) | Installs Bloodhound CE on a Debian based system. | Bad Sector Labs ||
+| [badsectorlabs.ludus_bloodhound_ce](https://github.com/badsectorlabs/ludus_bloodhound_ce) | Installs Bloodhound CE on a Debian based system. | Bad Sector Labs ||
 | [badsectorlabs.ludus_mssql](https://github.com/badsectorlabs/ludus_mssql) | Installs MSSQL on Windows systems. | Bad Sector Labs ||
 | [badsectorlabs.ludus_elastic_container](https://github.com/badsectorlabs/ludus_elastic_container) | Installs "The Elastic Container Project" on a Linux system. | Bad Sector Labs | See [the env guide](./environment-guides/elastic.md) |
 | [badsectorlabs.ludus_elastic_agent](https://github.com/badsectorlabs/ludus_elastic_agent) | Installs an Elastic Agent on a Windows, Debian, or Ubuntu system | Bad Sector Labs | See [the env guide](./environment-guides/elastic.md) |
