@@ -20,7 +20,7 @@ Ludus will make the following changes - **do NOT do any actions below yourself b
 - Create the proxmox groups `ludus_users` and `ludus_admins`
 - Create the proxmox pools `SHARED` and `ADMIN`
 - Create a wireguard server wg0 with IP range `198.51.100.0/24`
-- Create an interface 'ludus' with IP range 192.0.2.0/24 that NATs traffic
+- Create an interface `vmbr1000` with IP range 192.0.2.0/24 that NATs traffic
 - Create user ranges with IPs in the 10.0.0.0/16 network starting at 10.2.0.0/8 and incrementing the second octet for each user
 - Create user interfaces starting at `vmbr1002` incrementing for each user
 - Create the pam user `ludus` and pam users for all Ludus users added

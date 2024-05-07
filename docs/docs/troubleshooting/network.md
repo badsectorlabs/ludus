@@ -23,7 +23,7 @@ proxmox_vm_storage_pool: local
 proxmox_vm_storage_format: qcow2
 proxmox_iso_storage_pool: local
 //highlight-next-line
-ludus_nat_interface: ludus
+ludus_nat_interface: vmbr1000
 prevent_user_ansible_add: false
 ```
 
@@ -51,7 +51,7 @@ root@ludus:~# ip a
     inet 198.51.100.1/24 scope global wg0
        valid_lft forever preferred_lft forever
 //highlight-next-line
-10: ludus: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+10: vmbr1000: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
     link/ether 82:a4:7a:9a:10:35 brd ff:ff:ff:ff:ff:ff
     inet 192.0.2.254/24 scope global ludus
        valid_lft forever preferred_lft forever
@@ -66,7 +66,7 @@ root@ludus:~# ip a
 If line 21 (or the line that corresponds with your ludus_nat_interface) shows `DOWN` inside the angle brackets for the ludus interface, run the following command to bring the interface `UP`:
 
 ```plain
-ifup ludus
+ifup vmbr1000
 ```
 
 Run `ip a` again to verify the interface is up. Next, check that the MASQUERADE rule is in place:
@@ -89,5 +89,15 @@ Chain POSTROUTING (policy ACCEPT 328 packets, 22056 bytes)
 ```
 
 Line 13 shows the MASQUERADE rule is in place for the Ludus network range of 192.0.2.0/24. Ludus VMs should now have internet access.
+
+If VMs still are unable to obtain an IP in the 192.0.2.0/24 after this, check the status of the `dnsmasq` service on the Ludus server.
+
+```
+systemctl status dnsmasq
+```
+
+In some cases, other programs such as `conmand` listen on port 53 which causes a conflict with `dnsmasq`.
+Resolve this conflict and restart `dnsmasq`.
+Once `dnsmasq` is running, VMs should be able to get an IP address via DHCP and access the internet.
 
 For more information about how this all works, learn more about [Ludus' networking](../networking).

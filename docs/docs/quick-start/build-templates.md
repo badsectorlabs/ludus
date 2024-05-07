@@ -59,6 +59,7 @@ Building templates will take a while (up to a few hours depending on your intern
 The "error" `[DEBUG] Error getting SSH address: 500 QEMU guest agent is not running` or `[DEBUG] Error getting WinRM host: 500 QEMU guest agent is not running` is expected and you will see this printed every 8 seconds until the VM has installed the OS and rebooted.
 Don't panic!
 
+If multiple VMs time out without getting created, there may be a [network issue](../troubleshooting/network).
 :::
 
 Use `control+c` to stop following the logs.
