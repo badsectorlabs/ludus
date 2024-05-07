@@ -94,12 +94,35 @@
     dest: C:\ludus\background\bginfo.exe
   when: not bginfo_stat.stat.exists
 
-- name: Install bginfo
-  ansible.windows.win_powershell:
-    script: |
-      Set-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run -Name bginfo -Value 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File "C:\ludus\background\set-bg.ps1"'
-      Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name TileWallpaper -Value '0' # fitted bg
-      Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name WallpaperStyle -Value '10' # stretch
+- name: Check Run key for background script
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+    name: bginfo
+  register: bginfo_run_key_stat
+
+- name: Install bginfo Run key (if key does not exist)
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+    name: bginfo
+    data: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File "C:\ludus\background\set-bg.ps1"'
+    state: present
+  when: not bginfo_run_key_stat.exists
+
+- name: Set desktop wallpaper settings (if key does not exist)
+  ansible.windows.win_regedit:
+    path: HKCU:\Control Panel\Desktop
+    name: TileWallpaper
+    data: '0'
+    state: present
+  when: not bginfo_run_key_stat.exists
+
+- name: Set desktop wallpaper style (if key does not exist)
+  ansible.windows.win_regedit:
+    path: HKCU:\Control Panel\Desktop
+    name: WallpaperStyle
+    data: '10'
+    state: present
+  when: not bginfo_run_key_stat.exists
 
 - name: Disable Telemetry
   ansible.windows.win_shell: ".\\disable-telemetry.ps1"
