@@ -29,7 +29,7 @@ Ludus is an automation overlay on top of Proxmox, not a 100% replacement for man
 Ludus is *only* compatible with virtualization capable Debian 12 or Proxmox 8. No other environments or hosting solutions will be supported.
 
 ### Requirements
-- x86_64 (aka amd64 aka 64-bit "Intel") CPU with a [Passmark](https://www.cpubenchmark.net/cpu_list.php) score > 10,000
+- x86_64 (aka amd64 aka 64-bit "Intel") CPU with a [Passmark](https://www.cpubenchmark.net/cpu_list.php) score > 6,000
 - A host capable of virtualization running Debian 12 or Proxmox 8 (e.g. "bare metal", Azure Dv3 and Ev3, AWS *.metal, [supported Google Cloud VMs](https://cloud.google.com/compute/docs/instances/nested-virtualization/managing-constraint) see [Deployment Options](./category/deployment-options))
 - at least 32GB RAM per user/range that will be deployed
 - at least 200GB storage for initial templates and at least 50GB per user/range that will be deployed (large, fast NVMe drives recommended)
@@ -39,6 +39,8 @@ Ludus is *only* compatible with virtualization capable Debian 12 or Proxmox 8. N
 - If you want to access Ludus across the internet
     - 1 public IP address
     - the ability to allow in arbitrary ports (i.e. port forwarding or control of the cloud firewall)
+
+Machines with lower specs than listed above may work, but are not tested/supported.
 
 ### User Quick Start
 

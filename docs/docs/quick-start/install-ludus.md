@@ -18,13 +18,15 @@ Ludus is not supported on hosts that are connected to the network via WiFi. Plea
 
 Ludus can **only** be installed on a host that meets the following requirements:
 
-- x86_64 (aka amd64 aka 64-bit "Intel") CPU with a [Passmark](https://www.cpubenchmark.net/cpu_list.php) score > 10,000
+- x86_64 (aka amd64 aka 64-bit "Intel") CPU with a [Passmark](https://www.cpubenchmark.net/cpu_list.php) score > 6,000
 - Debian 12 or Proxmox 8 (If Proxmox, see [this page](../deployment-options/proxmox) for details)
 - Supports virtualization - vmx or svm in /proc/cpuinfo (nested virtualization is supported, but has a performance penalty)
 - Has at least 32 GB of RAM
 - Has at least 200 GB of disk space (fast NVMe recommended)
 - Root access
 - Internet access (not via WiFi)
+
+Machines with lower specs than listed above may work, but are not tested/supported.
 
 To install ludus, copy the ludus-server binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to the machine and run it as root. It will copy all files into /opt/ludus and print the configuration
 values used during install.
