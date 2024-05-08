@@ -52,10 +52,10 @@ func formatRangeResponse(data RangeObject, withVMs bool) {
 	// Create table
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetAlignment(tablewriter.ALIGN_CENTER)
-	table.SetHeader([]string{"User ID", "Range Number", "Last Deployment", "Number of VMs", "Deployment Status", "Testing Enabled"})
+	table.SetHeader([]string{"User ID", "Range Network", "Last Deployment", "Number of VMs", "Deployment Status", "Testing Enabled"})
 	lastDeployment := formatTimeObject(data.LastDeployment)
 
-	table.Append([]string{data.UserID, fmt.Sprint(data.RangeNumber), lastDeployment, fmt.Sprint(data.NumberOfVMs), data.RangeState, strings.ToUpper(strconv.FormatBool(data.TestingEnabled))})
+	table.Append([]string{data.UserID, fmt.Sprintf("10.%d.0.0/16", data.RangeNumber), lastDeployment, fmt.Sprint(data.NumberOfVMs), data.RangeState, strings.ToUpper(strconv.FormatBool(data.TestingEnabled))})
 
 	if data.TestingEnabled {
 		table.SetColumnColor(nil, nil, nil, nil, getRangeStateColor(data), tablewriter.Colors{tablewriter.FgBlackColor, tablewriter.Bold, tablewriter.BgGreenColor})
@@ -131,11 +131,11 @@ var rangeListCmd = &cobra.Command{
 			}
 			table := tablewriter.NewWriter(os.Stdout)
 			table.SetAlignment(tablewriter.ALIGN_CENTER)
-			table.SetHeader([]string{"User ID", "Range Number", "Last Deployment", "VM Count", "Deployment Status", "Testing Enabled"})
+			table.SetHeader([]string{"User ID", "Range Network", "Last Deployment", "VM Count", "Deployment Status", "Testing Enabled"})
 			for _, rangeObject := range data {
 				lastDeployment := formatTimeObject(rangeObject.LastDeployment)
 
-				rowValues := []string{rangeObject.UserID, fmt.Sprint(rangeObject.RangeNumber), lastDeployment, fmt.Sprint(rangeObject.NumberOfVMs), rangeObject.RangeState, strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled))}
+				rowValues := []string{rangeObject.UserID, fmt.Sprintf("10.%d.0.0/16", rangeObject.RangeNumber), lastDeployment, fmt.Sprint(rangeObject.NumberOfVMs), rangeObject.RangeState, strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled))}
 
 				var testingColor tablewriter.Colors
 				if rangeObject.TestingEnabled {
@@ -346,9 +346,10 @@ func setupRangeLogsCmd(command *cobra.Command) {
 }
 
 var rangeErrorsCmd = &cobra.Command{
-	Use:   "errors",
-	Short: "Parse the latest deploy logs from your range and print any non-ignored fatal errors",
-	Args:  cobra.NoArgs,
+	Use:     "errors",
+	Short:   "Parse the latest deploy logs from your range and print any non-ignored fatal errors",
+	Args:    cobra.NoArgs,
+	Aliases: []string{"error"},
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
