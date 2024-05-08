@@ -170,6 +170,47 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 
+	var errorUserIDs []string
+	// Remove any RangeAccessObjects where the user.UserID is in the SourceUserIDs array
+	if rangeAccessGrants.RowsAffected != 0 {
+		// Loop over rows returned in the userAccessGrants object
+		for _, accessObject := range userAccessGrants {
+			// Remove the user from the SourceUserIDs array
+			accessObject.SourceUserIDs = removeStringExact(accessObject.SourceUserIDs, user.UserID)
+			if len(accessObject.SourceUserIDs) == 0 {
+				// If the SourceUserIDs array is empty, delete the object
+				db.Delete(&accessObject)
+			} else {
+				db.Save(&accessObject)
+			}
+			// Revoke the user being deleted access to the range
+			var targetUserRangeObject RangeObject
+			db.First(&targetUserRangeObject, "user_id = ?", accessObject.TargetUserID)
+
+			var targetUserObject UserObject
+			db.First(&targetUserObject, "user_id = ?", accessObject.TargetUserID)
+
+			var sourceUserRangeObject RangeObject
+			db.First(&sourceUserRangeObject, "user_id = ?", user.UserID)
+
+			extraVars := map[string]interface{}{
+				"target_username":           targetUserObject.ProxmoxUsername,
+				"target_range_id":           targetUserObject.UserID,
+				"target_range_second_octet": targetUserRangeObject.RangeNumber,
+				"source_username":           user.ProxmoxUsername,
+				"source_range_id":           user.UserID,
+				"source_range_second_octet": sourceUserRangeObject.RangeNumber,
+			}
+			output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, "revoke", false, "")
+			if err != nil {
+				routerWANFatalRegex := regexp.MustCompile(`fatal:.*?192\.0\.2\\"`)
+				if routerWANFatalRegex.MatchString(output) {
+					errorUserIDs = append(errorUserIDs, accessObject.TargetUserID)
+				}
+			}
+		}
+	}
+
 	playbook := []string{ludusInstallPath + "/ansible/user-management/del-user.yml"}
 	extraVars := map[string]interface{}{
 		"username":      user.ProxmoxUsername,
@@ -183,8 +224,7 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 
-	db.Delete(&user, "user_id = ?", userID)
-	db.Delete(&usersRange, "user_id = ?", user.UserID)
+	// There are users with access to this user's range, revoke their access
 	if !errors.Is(rangeAccessResult.Error, gorm.ErrRecordNotFound) {
 		db.Delete(&usersAccess, "target_user_id = ?", user.UserID)
 		for _, userID := range usersAccess.SourceUserIDs {
@@ -207,22 +247,15 @@ func DeleteUser(c *gin.Context) {
 			}
 		}
 	}
-	// Remove any RangeAccessObjects where the user.UserID is in the SourceUserIDs array
-	if rangeAccessGrants.RowsAffected != 0 {
-		// Loop over rows returned in the userAccessGrants object
-		for _, accessObject := range userAccessGrants {
-			// Remove the user from the SourceUserIDs array
-			accessObject.SourceUserIDs = removeStringExact(accessObject.SourceUserIDs, user.UserID)
-			if len(accessObject.SourceUserIDs) == 0 {
-				// If the SourceUserIDs array is empty, delete the object
-				db.Delete(&accessObject)
-			} else {
-				db.Save(&accessObject)
-			}
-		}
-	}
+	db.Delete(&user, "user_id = ?", userID)
+	db.Delete(&usersRange, "user_id = ?", user.UserID)
 
-	c.JSON(http.StatusOK, gin.H{"result": "User deleted"})
+	if len(errorUserIDs) > 0 {
+		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("User deleted but access was not revoked from ranges: %v\nIf these users do not have a range deployed, this is ok.\nOtherwise, the next user created with range number %d could have access to their range if they modify their WireGuard config manually.", errorUserIDs, usersRange.RangeNumber)})
+		return
+	} else {
+		c.JSON(http.StatusOK, gin.H{"result": "User deleted"})
+	}
 }
 
 // GetAPIKey - reset and retrieve the Ludus API key for the user
