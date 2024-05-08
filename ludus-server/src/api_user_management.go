@@ -144,14 +144,29 @@ func DeleteUser(c *gin.Context) {
 	var user UserObject
 	result := db.First(&user, "user_id = ?", userID)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s not found", user.UserID)})
 		return
 	}
 
 	var usersRange RangeObject
 	result = db.First(&usersRange, "user_id = ?", user.UserID)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User's range not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s range not found", user.UserID)})
+		return
+	}
+
+	var usersAccess RangeAccessObject
+	rangeAccessResult := db.First(&usersAccess, "target_user_id = ?", user.UserID)
+	if !errors.Is(rangeAccessResult.Error, gorm.ErrRecordNotFound) && rangeAccessResult.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting user access grants for %s", user.UserID)})
+		return
+	}
+
+	// Search for any RangeAccessObjects where the user.UserID is in the SourceUserIDs array
+	var userAccessGrants []RangeAccessObject
+	rangeAccessGrants := db.Where("source_user_ids LIKE ?", fmt.Sprintf("%%%s%%", user.UserID)).Find(&userAccessGrants)
+	if !errors.Is(rangeAccessGrants.Error, gorm.ErrRecordNotFound) && rangeAccessGrants.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting user access grants that contain user %s", user.UserID)})
 		return
 	}
 
@@ -170,6 +185,42 @@ func DeleteUser(c *gin.Context) {
 
 	db.Delete(&user, "user_id = ?", userID)
 	db.Delete(&usersRange, "user_id = ?", user.UserID)
+	if !errors.Is(rangeAccessResult.Error, gorm.ErrRecordNotFound) {
+		db.Delete(&usersAccess, "target_user_id = ?", user.UserID)
+		for _, userID := range usersAccess.SourceUserIDs {
+			// Remove the network range of the user being deleted from each source user's WireGuard config
+			var sourceUser UserObject
+			db.First(&sourceUser, "user_id = ?", userID)
+			sourceUserWireGuardConfigPath := fmt.Sprintf("%s/users/%s/%s_client.conf", ludusInstallPath, sourceUser.ProxmoxUsername, sourceUser.UserID)
+			sourceUserWireGuardConfig, err := GetFileContents(sourceUserWireGuardConfigPath)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error reading WireGuard config for user %s", sourceUser.UserID)})
+				return
+			}
+			// Replace the network with an empty string, it may end in a comma or not
+			sourceUserWireGuardConfig = strings.ReplaceAll(sourceUserWireGuardConfig, fmt.Sprintf("10.%d.0.0/16, ", usersRange.RangeNumber), "")
+			sourceUserWireGuardConfig = strings.ReplaceAll(sourceUserWireGuardConfig, fmt.Sprintf(", 10.%d.0.0/16", usersRange.RangeNumber), "")
+			err = os.WriteFile(sourceUserWireGuardConfigPath, []byte(sourceUserWireGuardConfig), 0660)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error writing WireGuard config for user %s", sourceUser.UserID)})
+				return
+			}
+		}
+	}
+	// Remove any RangeAccessObjects where the user.UserID is in the SourceUserIDs array
+	if rangeAccessGrants.RowsAffected != 0 {
+		// Loop over rows returned in the userAccessGrants object
+		for _, accessObject := range userAccessGrants {
+			// Remove the user from the SourceUserIDs array
+			accessObject.SourceUserIDs = removeStringExact(accessObject.SourceUserIDs, user.UserID)
+			if len(accessObject.SourceUserIDs) == 0 {
+				// If the SourceUserIDs array is empty, delete the object
+				db.Delete(&accessObject)
+			} else {
+				db.Save(&accessObject)
+			}
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{"result": "User deleted"})
 }
