@@ -147,7 +147,7 @@
                         },
                         {
                             "type": "string",
-                            "pattern": "^public$"
+                            "enum": [ "public", "all" ]
                         }
                     ],
                     "description": "Traffic destination VLAN"
