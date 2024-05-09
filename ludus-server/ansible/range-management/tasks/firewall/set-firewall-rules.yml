@@ -81,6 +81,12 @@
     comment: "Default: WireGuard Client access rule"
     numeric: true
 
+# Somehow the access_grants_array is being set to NoneType, so we need to set it to an empty list if it is NoneType
+# which prevents the next task's loop from failing with a template error, despite being set to an empty array by default...
+- name: Set range_access_grants_array from access_grants_array
+  ansible.builtin.set_fact:
+    range_access_grants_array: "{{ access_grants_array | default([]) }}"
+
 # Make sure any existing access grants are set up (in the event the range is destroyed and then rebuilt after an access grant)
 - name: Modify router firewall to allow WireGuard IP's for access grants to this range
   ansible.builtin.iptables:
@@ -93,7 +99,7 @@
     action: insert
     comment: "Access Grant: WireGuard client access rule for {{ item.username }}"
     numeric: true
-  loop: "{{ access_grants_array | default([]) | list }}"
+  loop: "{{ range_access_grants_array | default([]) | list }}"
 
 - name: Allow the Ludus IP to hit this router from the outside for ansible
   ansible.builtin.iptables:
