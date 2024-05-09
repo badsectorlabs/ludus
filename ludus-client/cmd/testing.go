@@ -284,7 +284,7 @@ func testingAllowDenyCmd(use, short, long string) *cobra.Command {
 
 			var responseJSON []byte
 			var success bool
-			if userID == "" {
+			if userID != "" {
 				responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/testing/%s?userID=%s", use, userID), string(payload))
 			} else {
 				responseJSON, success = rest.GenericJSONPost(client, "/testing/"+use, string(payload))
