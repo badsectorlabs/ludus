@@ -67,8 +67,6 @@
   tasks:
     - name: Set any user defined firewall rules
       ansible.builtin.include_tasks: tasks/firewall/set-firewall-rules.yml
-  vars:
-    range_access_grants_array: "{{ access_grants_array | default([]) }}" # for some reason underscores cause the loop to fail in set-firewall-rules?
 
 - name: Deploy DC VMs
   tags: [vm-deploy]

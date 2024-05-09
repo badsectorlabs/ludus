@@ -1,37 +1,37 @@
-- name: Set the policy for the FORWARD chain to DROP while we change the firewall
+- name: Set the policy for the FORWARD chain to DROP
   ansible.builtin.iptables:
     chain: FORWARD
     policy: DROP
 
-- name: Flush the FORWARD table to remove any user defined rules to prevent old rules from lingering
+- name: Create the LUDUS_DEFAULTS chain
   ansible.builtin.iptables:
-    chain: FORWARD
+    chain: LUDUS_DEFAULTS
+    chain_management: true
+
+- name: Create the LUDUS_USER_RULES chain
+  ansible.builtin.iptables:
+    chain: LUDUS_USER_RULES
+    chain_management: true
+
+- name: Create the LUDUS_TESTING chain
+  ansible.builtin.iptables:
+    chain: LUDUS_TESTING
+    chain_management: true
+
+- name: Flush the LUDUS_USER_RULES table to remove any user defined rules to prevent old rules from lingering
+  ansible.builtin.iptables:
+    chain: LUDUS_USER_RULES
     flush: true
 
-# The following two rules are added directly to the FORWARD chain so they can be pre-empted by user rules and testing rules
-- name: Set the default external rule
+- name: Flush the LUDUS_DEFAULTS table to remove any user defined rules to prevent old rules from lingering
   ansible.builtin.iptables:
-    chain: FORWARD
-    source: "10.{{ range_second_octet }}.0.0/16"
-    destination: "! 10.{{ range_second_octet }}.0.0/16"
-    protocol: all
-    jump: "{{ network.external_default | default('ACCEPT') }}"
-    state: present
-    action: insert
-    comment: "User Default: External Rule"
-    numeric: true
+    chain: LUDUS_DEFAULTS
+    flush: true
 
-- name: Set the default inter-VLAN rule
+- name: Flush the INPUT to prevent locking ourselves out during rule setup
   ansible.builtin.iptables:
-    chain: FORWARD
-    source: "10.{{ range_second_octet }}.0.0/16"
-    destination: "10.{{ range_second_octet }}.0.0/16"
-    protocol: all
-    jump: "{{ network.inter_vlan_default | default('ACCEPT') }}"
-    state: present
-    action: insert
-    comment: "User Default: Inter-VLAN Rule"
-    numeric: true
+    chain: INPUT
+    flush: true
 
 - name: Get the VM id of the router via Proxmox API
   ansible.builtin.shell: |
@@ -57,11 +57,6 @@
   ansible.builtin.set_fact:
     router_external_interface: "{{ wan_interface_command.stdout }}"
 
-- name: Create the LUDUS_DEFAULTS chain
-  ansible.builtin.iptables:
-    chain: LUDUS_DEFAULTS
-    chain_management: true
-
 - name: Deny all other traffic from the external interface
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
@@ -86,7 +81,7 @@
     comment: "Default: WireGuard Client access rule"
     numeric: true
 
-# Make sure any existing access grants are set up (in the event the range is destroied and then rebuilt after an access grant)
+# Make sure any existing access grants are set up (in the event the range is destroyed and then rebuilt after an access grant)
 - name: Modify router firewall to allow WireGuard IP's for access grants to this range
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
@@ -98,7 +93,7 @@
     action: insert
     comment: "Access Grant: WireGuard client access rule for {{ item.username }}"
     numeric: true
-  loop: "{{ range_access_grants_array | list | default([]) }}"
+  loop: "{{ access_grants_array | default([]) | list }}"
 
 - name: Allow the Ludus IP to hit this router from the outside for ansible
   ansible.builtin.iptables:
@@ -125,6 +120,32 @@
     comment: "Default: allow related/established rule"
     numeric: true
 
+- name: Set the default external rule
+  ansible.builtin.iptables:
+    chain: LUDUS_USER_RULES
+    source: "10.{{ range_second_octet }}.0.0/16"
+    destination: "! 10.{{ range_second_octet }}.0.0/16"
+    protocol: all
+    jump: "{{ network.external_default | default('ACCEPT') }}"
+    state: present
+    action: insert
+    comment: "User Default: External Rule"
+    numeric: true
+  # Don't set the default external rule if we are testing and this is a forced deploy
+  when: not ludus_testing_enabled
+
+- name: Set the default inter-VLAN rule
+  ansible.builtin.iptables:
+    chain: LUDUS_USER_RULES
+    source: "10.{{ range_second_octet }}.0.0/16"
+    destination: "10.{{ range_second_octet }}.0.0/16"
+    protocol: all
+    jump: "{{ network.inter_vlan_default | default('ACCEPT') }}"
+    state: present
+    action: insert
+    comment: "User Default: Inter-VLAN Rule"
+    numeric: true
+
 - name: Jump all traffic from FORWARD to LUDUS_DEFAULTS
   ansible.builtin.iptables:
     chain: FORWARD
@@ -134,6 +155,52 @@
     rule_num: 1
     comment: "Default: Apply Ludus default routing rules"
     numeric: true
+
+- name: Jump all traffic from FORWARD to LUDUS_TESTING
+  ansible.builtin.iptables:
+    chain: FORWARD
+    jump: LUDUS_TESTING
+    state: present
+    action: insert
+    rule_num: 2
+    comment: "Default: Apply Ludus testing mode routing rules"
+    numeric: true
+
+- name: Jump all traffic from FORWARD to LUDUS_USER_RULES
+  ansible.builtin.iptables:
+    chain: FORWARD
+    jump: LUDUS_USER_RULES
+    state: present
+    action: insert
+    rule_num: 3
+    comment: "Default: Apply Ludus user defined rules"
+    numeric: true
+
+- name: Deny all range traffic to SSH on this router
+  ansible.builtin.iptables:
+    chain: INPUT
+    source: "10.{{ range_second_octet }}.0.0/16"
+    destination_port: 22
+    protocol: tcp
+    jump: REJECT
+    state: present
+    action: insert
+    comment: "Default: Deny SSH traffic from range to this router"
+    numeric: true
+
+- name: Deny all range traffic to user defined "always_blocked_networks"
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    source: "10.{{ range_second_octet }}.0.0/16"
+    destination: "{{ item }}"
+    protocol: all
+    jump: REJECT
+    state: present
+    action: insert
+    comment: "Default: Deny traffic from range to user defined range"
+    numeric: true
+  loop: "{{ network.always_blocked_networks | default([]) }}"
+  when: network.always_blocked_networks is defined
 
 - name: Jump all traffic from INPUT to LUDUS_DEFAULTS
   ansible.builtin.iptables:
@@ -155,11 +222,6 @@
   ansible.builtin.shell: conntrack -F
   async: 5 # Becuase this resets the conntrack entries, ansible will hang unless we run it async
   poll: 1
-
-- name: Set the policy for the FORWARD chain to ACCEPT as we are done changing the firewall
-  ansible.builtin.iptables:
-    chain: FORWARD
-    policy: ACCEPT
 
 - name: Save current state of the firewall to a file
   community.general.iptables_state:

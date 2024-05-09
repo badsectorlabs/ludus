@@ -41,7 +41,7 @@ If the Ludus admin has set up [CI/CD](cicd), the CI/CD network is `203.0.113.0/2
 Ludus assigns a unique Linux bridge interface in Proxmox to each user which is capable of supporting 255 VLANs (1-255). The user's `vmbr` number is 1000 + their Ludus range number (e.g. a Ludus user with range number 2 would have `vmbr1002`).
 This interface can be thought of conceptually as a virtual switch.
 
-All user networks are /24 with the format `10.{{ ludus range number }}.{{ VLAN }}.{{ ip_last_octet }}`. Because all user networks are within 10.0.0.0/8, admins deploying Ludus into a network within 10.0.0.0/8 will need to avoid issuing users with a range number that overlaps the existing range. As range numbers are issued sequentially, it is up to the Ludus admin to recognize this conflict and create a dummy user for any 10.0.0.0/16 networks that overlap with the network Ludus itself is deploy into. For example, if the Ludus server itself has an IP of 10.10.0.123, the tenth created user will cause routing issues if the user is also on the 10.10.0.0/16 network. This user should be created as a dummy user and not an actual user of Ludus.
+All user networks are /16 with VLANs of /24 in the format `10.{{ ludus range number }}.{{ VLAN }}.{{ ip_last_octet }}`. Because all user networks are within 10.0.0.0/8, admins deploying Ludus into a network within 10.0.0.0/8 will need to avoid issuing users with a range number that overlaps the existing range. As range numbers are issued sequentially, it is up to the Ludus admin to recognize this conflict and create a dummy user for any 10.0.0.0/16 networks that overlap with the network Ludus itself is deploy into. For example, if the Ludus server itself has an IP of 10.10.0.123, the tenth created user will cause routing issues if the user is also on the 10.10.0.0/16 network. This user should be created as a dummy user and not an actual user of Ludus. The admin will need to manually remove the `vmbr1010` interface on the Ludus host to prevent routing issues.
 
 VMs are limited to a single network interface when deployed with Ludus.
 
@@ -90,6 +90,8 @@ An example of a different types of user defined firewall rules are listed below.
 network:
   external_default: ACCEPT
   inter_vlan_default: REJECT
+  always_blocked_networks:
+    - 192.168.1.0/24
   rules:
     - name: Only allow TCP 443 from VLAN 10 to VLAN 20
       vlan_src: 10
@@ -141,4 +143,22 @@ network:
       action: ACCEPT
 ```
 
-See more details about the range config schema (which includes the network object) [here](https://docs.ludus.cloud/docs/configuration).
+See more details about the range config schema (which includes the network object) [here](./configuration).
+
+## Testing Mode
+
+Each range has a Debian based router/firewall VM.
+This VM controls how traffic is routed between VLANs/subnets in the range as well as traffic out of the range to other networks/the internet.
+The router uses `iptables` to control traffic flow, using three custom chains in the filter table.
+Note that the FORWARD chain, which controls traffic from outside the router with a destination that is not the route itself has a policy of `DROP` meaning that if no rule matches the traffic will not be forwarded.
+This is a "deny by default" policy, and prevents accidental traffic from leaving the range in the event that IP addresses change or machines are added while testing mode is enabled.
+
+!['iptables diagram'](/img/network/iptables.png)
+
+For the default [basic AD network](./environment-guides/basic-ad-network), when not in testing mode the iptables filter table has the following rules.
+
+!['iptables not in testing'](/img/network/iptables-screenshot-not-testing.png)
+
+When testing mode is enabled, and the user has allowed `example.com` and `8.8.8.8`, the iptables filter table has the following rules.
+
+!['iptables in testing'](/img/network/iptables-screenshot-testing.png)

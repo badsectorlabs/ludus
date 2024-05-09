@@ -1,12 +1,20 @@
 # ==========================================================
 # Block
 # ==========================================================
-- name: Create block_rules list
+- name: Create block_rules for all IPs
   ansible.builtin.set_fact:
-    block_rules: "{{ action_ips | default([]) | map('regex_replace', '^(.*)$', '/.*/$client=\\1/32') | list }}"
+    block_rules:
+      - "! Block everything"
+      - "/.*/$client=10.0.0.0/8"
   when: testing_action == "block"
 
-- name: Block VMs from using any DNS
+- name: Add allow rules for action_ips to block_rules list
+  ansible.builtin.set_fact:
+    block_rules: "{{ block_rules + ['@@||$client=' + item + '/32'] }}"
+  loop: "{{ action_ips }}"
+  when: testing_action == "block"
+
+- name: Set the block_rules on the DNS server
   ansible.builtin.uri:
     url: http://127.0.0.1:3000/control/filtering/set_rules
     method: POST
@@ -85,9 +93,9 @@
 
 - name: Populate the rules array for DNS with new domains, skipping already allowed domains
   ansible.builtin.set_fact:
-    rules: "{{ rules | default([]) + ['@@||' + domain + '^$client=' + item + '/32'] }}"
+    rules: "{{ rules | default([]) + ['@@||' + domain + '^'] }}"
   loop: "{{ action_ips | default([]) }}"
-  when: testing_action == "allow-domain" and ('@@||' + domain + '^$client=' + item + '/32') not in (rules | join(" "))
+  when: testing_action == "allow-domain" and ('@@||' + domain + '^') not in (rules | join(" "))
 
 - name: Allow DNS for a domain
   ansible.builtin.uri:
@@ -125,8 +133,8 @@
     headers:
       Authorization: Basic YWRtaW46cGFzc3dvcmQ=
     body:
-      domain: "{{ domain }}"
-      answer: "{{ domainIP }}"
+      domain: "{{ domain }}"   # set as an extra var by Go
+      answer: "{{ domainIP }}" # set as an extra var by Go
   when: testing_action == "allow-domain" and (rewrites.content | from_json | selectattr('domain', 'equalto', domain) | list | length == 0)
 
 # ==========================================================
@@ -171,7 +179,7 @@
 
 - name: Remove domain from defined DNS allow rules
   ansible.builtin.set_fact:
-    new_rules: "{{ filtering_status.content | from_json | json_query('user_rules') | reject('regex', '@@\\|\\|' + domain + '\\^\\$') | list }}"
+    new_rules: "{{ filtering_status.content | from_json | json_query('user_rules') | reject('regex', '@@\\|\\|' + domain + '\\^') | list }}"
   when: testing_action == "deny-domain"
 
 - name: Set filtering rules (now without the domain)

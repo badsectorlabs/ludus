@@ -80,7 +80,7 @@
 
 - name: Apply a standard firewall rule
   ansible.builtin.iptables:
-    chain: FORWARD
+    chain: LUDUS_USER_RULES
     source: "{{ src }}"
     destination: "{{ dst }}"
     protocol: "{{ proto }}"
@@ -88,7 +88,6 @@
     jump: "{{ item.action }}"
     state: present
     action: insert
-    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
     comment: "User Rule: {{ item.name }}"
     numeric: true
   when: >
@@ -99,7 +98,7 @@
 
 - name: Apply a src range firewall rule
   ansible.builtin.iptables:
-    chain: FORWARD
+    chain: LUDUS_USER_RULES
     src_range: "{{ src }}"
     destination: "{{ dst }}"
     protocol: "{{ proto }}"
@@ -107,7 +106,6 @@
     jump: "{{ item.action }}"
     state: present
     action: insert
-    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
     comment: "User Rule: {{ item.name }}"
     numeric: true
   when:
@@ -117,7 +115,7 @@
 
 - name: Apply a dst range firewall rule
   ansible.builtin.iptables:
-    chain: FORWARD
+    chain: LUDUS_USER_RULES
     source: "{{ src }}"
     dst_range: "{{ dst }}"
     protocol: "{{ proto }}"
@@ -125,7 +123,6 @@
     jump: "{{ item.action }}"
     state: present
     action: insert
-    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
     comment: "User Rule: {{ item.name }}"
     numeric: true
   when:
@@ -135,7 +132,7 @@
 
 - name: Apply a src and dst range firewall rule
   ansible.builtin.iptables:
-    chain: FORWARD
+    chain: LUDUS_USER_RULES
     src_range: "{{ src }}"
     dst_range: "{{ dst }}"
     protocol: "{{ proto }}"
@@ -143,7 +140,6 @@
     jump: "{{ item.action }}"
     state: present
     action: insert
-    rule_num: 2 # Keep the LUDUS_DEFAULTS jump rule on top
     comment: "User Rule: {{ item.name }}"
     numeric: true
   when:

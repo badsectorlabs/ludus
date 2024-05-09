@@ -1,0 +1,55 @@
+# These taks are only run when a pre Ludus 1.4.0 range has a testing action run against it
+# on a Ludus > 1.4.0 server. This is to ensure that the range is still compatible with the
+# new firewall rules.
+
+- name: Set the policy for the FORWARD chain to DROP
+  ansible.builtin.iptables:
+    chain: FORWARD
+    policy: DROP
+
+- name: Get existing iptables rules
+  ansible.builtin.command: iptables -S
+  register: iptables_rules
+
+- name: Print the existing iptables rules
+  ansible.builtin.debug:
+    msg: "{{ iptables_rules.stdout_lines }}"
+
+- name: Flush the FORWARD table
+  ansible.builtin.iptables:
+    chain: FORWARD
+    flush: true
+
+- name: Set base firewall rules
+  ansible.builtin.include_tasks:
+    file: set-firewall-rules.yml
+
+- name: Find rules to replicate in the FORWARD chain (user is in testing and has custom rules)
+  ansible.builtin.set_fact:
+    rules_to_replicate: "{{ rules_to_replicate | default([]) + [item | regex_replace('FORWARD', 'LUDUS_TESTING') | regex_replace('10\\.' + (range_second_octet | string) + '\\.\\d{1,3}\\.\\d{1,3}\\/32', '10.' + (range_second_octet | string) + '.0.0/16')] }}"
+  loop: "{{ iptables_rules.stdout_lines }}"
+  when: '"Ludus Testing: Allow" in item'
+
+- name: Remove duplicates in rules_to_replicate
+  ansible.builtin.set_fact:
+    rules_to_replicate: "{{ rules_to_replicate | unique }}"
+
+- name: Add custom rules to the LUDUS_TESTING chain
+  ansible.builtin.command: iptables {{ item }}
+  loop: "{{ rules_to_replicate }}"
+  when: rules_to_replicate is defined and rules_to_replicate | length > 0
+  register: iptables_add
+  failed_when: iptables_add.rc == 1 and 'Bad rule (does a matching rule exist in that chain?)' not in iptables_add.stderr
+
+- name: Add a rule for each non-blocked VM in the LUDUS_TESTING chain
+  ansible.builtin.iptables:
+    chain: LUDUS_TESTING
+    source: "{{ item }}"
+    destination: "! 10.{{ range_second_octet }}.0.0/16"
+    protocol: all
+    jump: ACCEPT
+    state: present
+    action: insert
+    comment: "Ludus Testing: Allow VM {{ item }}"
+    numeric: true
+  loop: "{{ action_ips }}"

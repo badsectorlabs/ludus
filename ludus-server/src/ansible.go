@@ -51,9 +51,10 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 		"username":           user.ProxmoxUsername,
 		"range_id":           user.UserID,
 		"range_second_octet": usersRange.RangeNumber,
-		// We have to send this in the even this deploy is a fresh deploy AFTER a user has been granted access to this
+		// We have to send this in the event this deploy is a fresh deploy AFTER a user has been granted access to this
 		// range, which means there is a fresh router deployed with no knowledge of the access grants
-		"access_grants_array": accessGrantsArray,
+		"access_grants_array":   accessGrantsArray,
+		"ludus_testing_enabled": usersRange.TestingEnabled,
 	}
 
 	// Merge userVars with any extraVars provided

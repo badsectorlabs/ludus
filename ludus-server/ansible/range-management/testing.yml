@@ -1,88 +1,42 @@
 - name: Pre-run checks
   ansible.builtin.import_playbook: pre-run-checks.yml
 
-- name: Gather VMs to to action
+- name: Gather VMs to snapshot, and IPs to action # IPs to action are IPs of machines that should be allowed out during testing
   tags: [always]
   hosts: "{{ defaults.router_vm_name }}"
   tasks:
-    - name: Collect VMs to action
+    - name: Collect VMs to snapshot
       ansible.builtin.set_fact:
-        action_vms: "{{ ((block_vms | default([])) + [item.vm_name]) | unique }}"
+        vm_names_to_snapshot: "{{ ((vm_names_to_snapshot | default([])) + [item.vm_name]) | unique }}"
       loop: "{{ ludus }}"
-      when: item.testing is undefined or (item.testing is defined and item.testing.block_internet is undefined) or (item.testing.block_internet is defined and item.testing.block_internet)
+      when: item.testing is undefined or (item.testing is defined and item.testing.snapshot is undefined) or (item.testing.snapshot is defined and item.testing.snapshot)
+
+    - name: Collect VM IDs to snapshot
+      ansible.builtin.set_fact:
+        vmids_to_snapshot: "{{ ((vmids_to_snapshot | default([])) + [ hostvars[item.vm_name]['proxmox_vmid'] | default('') ]) | unique }}"
+      loop: "{{ ludus }}"
+      when: item.testing is undefined or (item.testing is defined and item.testing.snapshot is undefined) or (item.testing.snapshot is defined and item.testing.snapshot)
 
     - name: Collect IPs to action from config
       ansible.builtin.set_fact:
         action_ips: "{{ ((action_ips | default([])) + ['10.' + range_second_octet | string + '.' + item.vlan | string + '.' + item.ip_last_octet | string]) | unique }}"
       loop: "{{ ludus }}"
-      when: item.testing is undefined or (item.testing is defined and item.testing.block_internet is undefined) or (item.testing.block_internet is defined and item.testing.block_internet)
+      when: item.testing is defined and item.testing.block_internet is defined and not item.testing.block_internet
 
     - name: Collect IPs to action from ansible inventory
       ansible.builtin.set_fact:
         action_ips_from_inventory: "{{ ((action_ips_from_inventory | default([])) + [ hostvars[item.vm_name]['ansible_host'] | default('') ]) | unique }}"
       loop: "{{ ludus }}"
-      when: item.testing is undefined or (item.testing is defined and item.testing.block_internet is undefined) or (item.testing.block_internet is defined and item.testing.block_internet)
+      when: item.testing is defined and item.testing.block_internet is defined and not item.testing.block_internet
 
-    - name: Find IPs defined in the user's range config but not present in ansible inventory
-      ansible.builtin.set_fact:
-        ips_in_config_but_not_inventory: "{{ action_ips | default([]) | difference(action_ips_from_inventory | default([])) | reject('==', '') | list }}"
+    - name: Check if the LUDUS_TESTING chain exists
+      ansible.builtin.shell: iptables -L LUDUS_TESTING -n
+      register: testing_chain
+      ignore_errors: true
 
-    - name: Find IPs in ansible inventory that are not in the user's range config
-      ansible.builtin.set_fact:
-        ips_in_inventory_but_not_config: "{{ action_ips_from_inventory | default([]) | difference(action_ips | default([])) | reject('==', '') | list }}"
-
-    - name: Find IPs of unmanaged VMs
-      ansible.builtin.set_fact:
-        unmanaged_vm_ips: "{{ ((unmanaged_vm_ips | default([])) + ['10.' + range_second_octet | string + '.' + item.vlan | string + '.' + item.ip_last_octet | string]) | unique }}" 
-      loop: "{{ ludus }}"
-      when:
-        - ips_in_config_but_not_inventory | length != 0
-        - item.unmanaged is defined
-        - item.unmanaged
-
-    - name: Set ips_in_config_but_not_inventory_to_check
-      ansible.builtin.set_fact:
-        ips_in_config_but_not_inventory_to_check: "{{ ips_in_config_but_not_inventory }}"
-
-    - name: Remove unmanaged VM IPs from ips_in_config_but_not_inventory
-      ansible.builtin.set_fact:
-        ips_in_config_but_not_inventory_to_check: "{{ ips_in_config_but_not_inventory | difference(unmanaged_vm_ips) }}"
-      when:
-        - ips_in_config_but_not_inventory | length != 0
-        - unmanaged_vm_ips is defined
-
-    - name: Show IPs to action from config
-      ansible.builtin.debug:
-        var: action_ips
-
-    - name: Show IPs to action from config from inventory
-      ansible.builtin.debug:
-        var: action_ips_from_inventory
-
-    - name: Show unmanaged VM IPs
-      ansible.builtin.debug:
-        var: unmanaged_vm_ips
-
-    - name: Show IPs in the config but not inventory
-      ansible.builtin.debug:
-        var: ips_in_config_but_not_inventory
-
-    - name: Show IPs in the config but not inventory with unmanaged VMs removed
-      ansible.builtin.debug:
-        var: ips_in_config_but_not_inventory_to_check
-
-    - name: Check that IPs are the same in the config and dynamic inventory
-      ansible.builtin.assert:
-        that:
-          - ips_in_inventory_but_not_config | length == 0
-          - ips_in_config_but_not_inventory_to_check | length == 0
-        fail_msg: IPs collected from the config do not match the dynamic inventory. If a VM was manually modified this may be the cause. Or perhaps the target VM is powered off/unreachable
-        success_msg: IPs collected from the config match the dynamic inventory
-
-# All actions below are performed against "action_ips" which is built from the range config
-# The ansible inventory is a sanity check to make sure VM IPs have not been changed
-# In the event a user has a VM that will not report its IP via proxmox to ansible (no qemu guest agent),
-# the user can set the 'unmanaged' key on that VM in their range config to "ignore" this check
+    - name: If the LUDUS_TESTING chain does not exist, call compatibility.yml
+      ansible.builtin.include_tasks: tasks/firewall/compatibility.yml
+      when: testing_chain.rc != 0
 
 # ==========================================================
 # Start-testing
@@ -91,13 +45,8 @@
   tags: [never, start-testing]
   hosts: localhost
   tasks: 
-    - name: Collect VMs to snapshot
-      ansible.builtin.set_fact:
-        vm_names_to_snapshot: "{{ ((vm_names_to_snapshot | default([])) + [item.vm_name]) | unique }}"
-      loop: "{{ ludus }}"
-      when: item.testing is undefined or (item.testing is defined and item.testing.snapshot is undefined) or (item.testing.snapshot is defined and item.testing.snapshot)
-
     - name: Snapshot VMs
+      # This task file requires vm_names_to_snapshot and vmids_to_snapshot to be set
       ansible.builtin.include_tasks: tasks/proxmox/snapshot-management.yml
   vars:
     snapshot_action: take_snapshot
@@ -148,6 +97,7 @@
 - name: Set the time and check expiration of the DC(s)
   tags: [never, stop-testing]
   hosts: "{{ range_id }}_test_range_dc"
+  ignore_unreachable: true
   tasks:
     - name: Try to set the NTP server to NIST
       ansible.windows.win_shell: |
@@ -164,6 +114,7 @@
 - name: Set the time and check expiration of Windows endpoints/servers
   tags: [never, stop-testing]
   hosts: "{{ range_id }}_windows_endpoints"
+  ignore_unreachable: true
   vars:
     dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
   tasks:
