@@ -36,7 +36,11 @@ var testingStatusCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		responseJSON, success := rest.GenericGet(client, "/range")
+		if userID == "" {
+			userID = strings.Split(apiKey, ".")[0]
+		}
+
+		responseJSON, success := rest.GenericGet(client, fmt.Sprintf("/range?userID=%s", userID))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
