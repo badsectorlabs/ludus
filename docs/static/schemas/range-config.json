@@ -98,6 +98,15 @@
                     "enum": [ "ACCEPT", "REJECT", "DROP" ],
                     "description": "The default rule to apply to traffic leaving the range out to the internet. Default: ACCEPT"
                 },
+                "always_blocked_networks": {
+                    "type": "array",
+                    "items": [
+                        {
+                            "type": "string",
+                            "pattern": "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\/[0-9]{1,2}$"
+                        }
+                    ]
+                },
                 "rules": {
                     "type": "array",
                     "description": "Specify rules to restrict or allow based on inter_vlan_default. Default: allow all traffic",
