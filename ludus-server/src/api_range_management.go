@@ -223,8 +223,50 @@ func ListAllRanges(c *gin.Context) {
 		return
 	}
 
+	// Make sure the range table is up to date by looping over all ranges and updating them
+	var usersRanges []RangeObject
+	result := db.Find(&usersRanges)
+	if result.Error != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, result.Error)
+		return
+	}
+
+	// The calling user is an admin can can see all VMs
+	proxmoxClient, err := getProxmoxClientForUser(c)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Unable to get proxmox client for user: %s", err.Error())})
+		return
+	}
+
+	rawVMs, err := proxmoxClient.GetVmList()
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Unable to list VMs: %s", err.Error())})
+		return
+	}
+
+	// Loop over all users and update their range data
+	for _, rangeObject := range usersRanges {
+		// Update the VM data for this range
+		var rangeVMCount = 0
+		vms := rawVMs["data"].([]interface{})
+		for vmCounter := range vms {
+			vm := vms[vmCounter].(map[string]interface{})
+			// Skip shared templates
+			if vm["pool"] == nil || vm["name"] == nil || vm["template"] == nil {
+				continue // A vm with these values as nil will cause the conversions to panic
+			}
+			if vm["pool"].(string) != rangeObject.UserID ||
+				strings.HasSuffix(vm["name"].(string), "-template") ||
+				int(vm["template"].(float64)) == 1 {
+				continue
+			}
+			rangeVMCount += 1
+		}
+		db.Model(&rangeObject).Update("number_of_vms", rangeVMCount)
+	}
+
 	var ranges []RangeObject
-	result := db.Find(&ranges)
+	result = db.Find(&ranges)
 	if result.Error != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, result.Error)
 	}
