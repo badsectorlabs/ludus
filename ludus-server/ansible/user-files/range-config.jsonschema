@@ -67,6 +67,10 @@
                 "ad_domain_safe_mode_password": {
                     "type": "string",
                     "description": "The domain safe mode password for every Windows domain"
+                },
+                "timezone": {
+                    "type": "string",
+                    "description": "The Unix TZ format timezone string to set for all VMs in the range"
                 }
             },
             "required": [
