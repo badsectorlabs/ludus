@@ -53,7 +53,7 @@ func formatRangeResponse(data RangeObject, withVMs bool) {
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetAlignment(tablewriter.ALIGN_CENTER)
 	table.SetHeader([]string{"User ID", "Range Network", "Last Deployment", "Number of VMs", "Deployment Status", "Testing Enabled"})
-	lastDeployment := formatTimeObject(data.LastDeployment)
+	lastDeployment := formatTimeObject(data.LastDeployment, "2006-01-02 15:04")
 
 	table.Append([]string{data.UserID, fmt.Sprintf("10.%d.0.0/16", data.RangeNumber), lastDeployment, fmt.Sprint(data.NumberOfVMs), data.RangeState, strings.ToUpper(strconv.FormatBool(data.TestingEnabled))})
 
@@ -133,7 +133,7 @@ var rangeListCmd = &cobra.Command{
 			table.SetAlignment(tablewriter.ALIGN_CENTER)
 			table.SetHeader([]string{"User ID", "Range Network", "Last Deployment", "VM Count", "Deployment Status", "Testing Enabled"})
 			for _, rangeObject := range data {
-				lastDeployment := formatTimeObject(rangeObject.LastDeployment)
+				lastDeployment := formatTimeObject(rangeObject.LastDeployment, "2006-01-02 15:04")
 
 				rowValues := []string{rangeObject.UserID, fmt.Sprintf("10.%d.0.0/16", rangeObject.RangeNumber), lastDeployment, fmt.Sprint(rangeObject.NumberOfVMs), rangeObject.RangeState, strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled))}
 

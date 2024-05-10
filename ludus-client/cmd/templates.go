@@ -178,7 +178,7 @@ var templateLogsCmd = &cobra.Command{
 				}
 				newLogs, cursor = stringAndCursorFromResult(responseJSON)
 				if len(newLogs) > 0 {
-					fmt.Print(newLogs)
+					filterAndPrintTemplateLogs(newLogs)
 				}
 				// compareAndPrint(newLogs)
 				time.Sleep(2 * time.Second)
@@ -196,7 +196,7 @@ var templateLogsCmd = &cobra.Command{
 				return
 			}
 			newLogs, _ := stringAndCursorFromResult(responseJSON)
-			fmt.Print(newLogs)
+			filterAndPrintTemplateLogs(newLogs)
 		}
 
 	},

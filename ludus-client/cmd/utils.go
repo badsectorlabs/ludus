@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-func formatTimeObject(timeObject time.Time) string {
+func formatTimeObject(timeObject time.Time, format string) string {
 	localTimeZone, err := time.LoadLocation("Local")
 	if err != nil {
 		logger.Logger.Warnf("Error loading time zone: %s\n", err)
@@ -28,7 +28,7 @@ func formatTimeObject(timeObject time.Time) string {
 		}
 	}
 	localTimeObject := timeObject.In(localTimeZone)
-	return localTimeObject.Format("2006-01-02 15:04")
+	return localTimeObject.Format(format)
 }
 
 func handleGenericResult(responseJSON []byte) {
@@ -226,5 +226,22 @@ func printFatalErrorsFromString(input string) {
 	if fatalRegex.MatchString(previousLine) {
 		errorCount += 1
 		formatAndPrintError(previousLine, errorCount)
+	}
+}
+
+// Parse the logs and skip printing lines that contain
+// 'Error getting WinRM host: 500 QEMU guest agent is not running' or
+// 'Error getting SSH address: 500 QEMU guest agent is not running'
+func filterAndPrintTemplateLogs(logs string) {
+	scanner := bufio.NewScanner(strings.NewReader(logs))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "Error getting WinRM host: 500 QEMU guest agent is not running") ||
+			strings.Contains(line, "Error getting SSH address: 500 QEMU guest agent is not running") {
+			// Print a message prepended with the current time in the format 2024/05/09 19:36:46
+			fmt.Printf("%s %s\n", formatTimeObject(time.Now(), "2006/01/02 15:04:05"), "Waiting for the VM to boot and complete initial setup...")
+			continue
+		}
+		fmt.Println(line)
 	}
 }

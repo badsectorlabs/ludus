@@ -67,8 +67,8 @@ var usersListCmd = &cobra.Command{
 
 		// Add data to table
 		for _, item := range userObjectArray {
-			created := formatTimeObject(item.DateCreated)
-			active := formatTimeObject(item.DateLastActive)
+			created := formatTimeObject(item.DateCreated, "2006-01-02 15:04")
+			active := formatTimeObject(item.DateLastActive, "2006-01-02 15:04")
 			table.Append([]string{item.Name,
 				item.UserID,
 				created,
