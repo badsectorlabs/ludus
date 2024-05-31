@@ -20,7 +20,7 @@ To add a role to Ludus, use the client as the user that will deploy the role (op
 ```bash
 # Add directly from Ansible Galaxy
 #terminal-command-local
-ludus ansible role add badsectorlabs.luds_adcs
+ludus ansible role add badsectorlabs.ludus_adcs
 
 # Add from a local directory
 #terminal-command-local
