@@ -194,6 +194,7 @@ build {
     ]
     ansible_env_vars = ["ANSIBLE_HOME=${var.ansible_home}", "ANSIBLE_LOCAL_TEMP=${var.ansible_home}/tmp", "ANSIBLE_REMOTE_TEMP=${var.ansible_home}/remote_tmp", "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR=${var.ansible_home}/pc", "ANSIBLE_SSH_CONTROL_PATH_DIR=${var.ansible_home}/cp"]
     skip_version_check = true # Due to https://github.com/hashicorp/packer-plugin-ansible/issues/157
+    timeout = "4h"
   }
 
 }
