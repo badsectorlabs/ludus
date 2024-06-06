@@ -124,7 +124,7 @@ source "proxmox-iso" "win11-23h2-x64-enterprise" {
   # Required for Win11
   bios = "ovmf"
   efi_config {
-    efi_storage_pool  = "local"
+    efi_storage_pool  = "${var.proxmox_storage_pool}"
     pre_enrolled_keys = true
     efi_type          = "4m"
   }
