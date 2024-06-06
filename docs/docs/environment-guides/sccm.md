@@ -174,6 +174,12 @@ ludus:
       ludus_sccm_enable_active_directory_group_discovery: true
       ludus_sccm_enable_active_directory_system_discovery: true
       ludus_sccm_enable_active_directory_user_discovery: true
+      # ----------------------------------PXE-------------------------------------------------
+      ludus_sccm_enable_pxe: true
+      ludus_enable_pxe_password: false
+      ludus_pxe_password: 'Password123'
+      ludus_domain_join_account: domainadmin
+      ludus_domain_join_password: 'password'
 ```
 
 ```shell-session
@@ -193,7 +199,7 @@ ludus range deploy
 
 4. Use [Misconfiguration Manager](https://github.com/subat0mik/Misconfiguration-Manager) to explore all the ways to pwn SCCM!
 
-Our favorite SCCM tool is [SharpSCCM](https://github.com/Mayyhem/SharpSCCM) by [@_Mayyhem](https://twitter.com/_Mayyhem).
+Our favorite SCCM tools are [SharpSCCM](https://github.com/Mayyhem/SharpSCCM) by [@_Mayyhem](https://twitter.com/_Mayyhem) and [SCCMHunter](https://github.com/garrettfoster13/sccmhunter) by [@garrfoster](https://x.com/garrfoster).
 
 The main way to access SCCM is on the Site Server (sccm-sitesrv) with the Configuration Manager Console.
 
