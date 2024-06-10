@@ -52,4 +52,4 @@
     action: insert
     comment: "Ludus Testing: Allow VM {{ item }}"
     numeric: true
-  loop: "{{ action_ips }}"
+  loop: "{{ action_ips | default([]) }}"

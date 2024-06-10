@@ -11,7 +11,7 @@
 - name: Add allow rules for action_ips to block_rules list
   ansible.builtin.set_fact:
     block_rules: "{{ block_rules + ['@@||$client=' + item + '/32'] }}"
-  loop: "{{ action_ips }}"
+  loop: "{{ action_ips | default([]) }}"
   when: testing_action == "block"
 
 - name: Set the block_rules on the DNS server

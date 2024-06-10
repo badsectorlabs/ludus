@@ -25,7 +25,7 @@
     action: append
     comment: "Ludus Testing: Allow VM {{ item }}"
     numeric: true
-  loop: "{{ action_ips }}"
+  loop: "{{ action_ips | default([]) }}"
   when: testing_action == "block"
 
 - name: Reset the conntrack entries to prevent previously allowed traffic to continue
