@@ -10,6 +10,9 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"os"
+	"os/user"
+	"strconv"
 	"strings"
 
 	"github.com/Telmate/proxmox-api-go/proxmox"
@@ -305,4 +308,32 @@ func getDomainIPString(rangeSlice []string, domain string) string {
 	}
 	// Return an empty string if the domain is not found.
 	return ""
+}
+
+// Chown a file to a user and their group
+func chownFileToUsername(filePath string, username string) {
+	runnerUser, err := user.Lookup(username)
+	if err != nil {
+		fmt.Printf("Failed to lookup user %s for chown of %s\n", err, filePath)
+		return
+	}
+
+	uid, err := strconv.Atoi(runnerUser.Uid)
+	if err != nil {
+		fmt.Printf("Failed to convert UID to integer: %s\n", err)
+		return
+	}
+
+	gid, err := strconv.Atoi(runnerUser.Gid)
+	if err != nil {
+		fmt.Printf("Failed to convert GID to integer: %s\n", err)
+		return
+	}
+
+	// Change ownership of the file
+	err = os.Chown(filePath, uid, gid)
+	if err != nil {
+		fmt.Printf("Failed to change ownership of the file: %s\n", err)
+		return
+	}
 }

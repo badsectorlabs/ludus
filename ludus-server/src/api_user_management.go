@@ -28,6 +28,11 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
+	callingUser, err := getUserObject(c)
+	if err != nil {
+		return // JSON set in getUserObject
+	}
+
 	var user UserObject
 	c.Bind(&user)
 
@@ -94,6 +99,9 @@ func AddUser(c *gin.Context) {
 				db.Where("user_id = ?", user.UserID).Delete(&usersRange)
 				return
 			}
+			// If this endpoint is called by a user that is not ROOT and this is their first ansible action, their log file will be owned by root
+			// Chown the ansible log file to ludus to prevent errors when they use the normal ludus endpoint (which runs as ludus)
+			chownFileToUsername(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, callingUser.ProxmoxUsername), "ludus")
 
 			user.DateCreated = time.Now()
 			user.DateLastActive = time.Now()
