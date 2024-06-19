@@ -196,12 +196,30 @@ ludus range deploy
 # You can watch the logs with `ludus range logs -f`
 # Or check the status with `ludus range status`
 ```
+:::tip
+
+If you'd like to watch the progress of the SCCM install, open a console or RDP into the sccm-sitesrv VM and run:
+
+```
+Get-Content C:\ConfigMgrSetup.log -Wait
+```
+
+This will "tail" the log file as SCCM installs.
+
+:::
+
 
 4. Use [Misconfiguration Manager](https://github.com/subat0mik/Misconfiguration-Manager) to explore all the ways to pwn SCCM!
 
 Our favorite SCCM tools are [SharpSCCM](https://github.com/Mayyhem/SharpSCCM) by [@_Mayyhem](https://twitter.com/_Mayyhem) and [SCCMHunter](https://github.com/garrettfoster13/sccmhunter) by [@garrfoster](https://x.com/garrfoster).
 
 The main way to access SCCM is on the Site Server (sccm-sitesrv) with the Configuration Manager Console.
+
+:::tip
+
+Using the configuration above, the `domainadmin` user is the user that has permissions in SCCM. To access the Configuration Manager Console. Log into the sccm-sitesrv VM as `domainadmin` (not the default `domainuser`).
+
+:::
 
 ![Opening Cfgmgr](/img/envs/sccm-cfgmgr.png)
 
