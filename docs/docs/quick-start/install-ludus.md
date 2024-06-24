@@ -28,6 +28,11 @@ Ludus can **only** be installed on a host that meets the following requirements:
 
 Machines with lower specs than listed above may work, but are not tested/supported.
 
+If you are installing Debian 12, the [netinst ISO](https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/) (scroll down to `debian-12.x.x-amd64-netinst.iso`) is recommended. 
+At the screen below during install, uncheck `Debain desktop environment` and check `SSH server`.
+
+![A screenshot of the Debain 12 install page with SSH Server and standard system utilities checked](/img/intro/debain-12-install.png)
+
 To install ludus, copy the ludus-server binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to the machine and run it as root. It will copy all files into /opt/ludus and print the configuration
 values used during install.
 

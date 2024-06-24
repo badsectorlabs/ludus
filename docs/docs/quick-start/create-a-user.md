@@ -11,7 +11,7 @@ import TabItem from '@theme/TabItem';
 
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">
-Copy the correct Ludus client binary to a location in your PATH and make it executable.
+Copy the correct Ludus client binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to a location in your PATH and make it executable.
 
 ```shell
 # terminal-command-local
@@ -22,7 +22,7 @@ sudo chmod +x /usr/local/bin/ludus
 
   </TabItem>
   <TabItem value="macos" label="macOS">
-Copy the correct Ludus client binary to a location in your PATH and make it executable.
+Copy the correct Ludus client binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to a location in your PATH and make it executable.
 
 ```shell
 # terminal-command-local
@@ -46,7 +46,7 @@ This documentation assumes the use of the Windows Terminal and Powershell (not c
 
 :::
 
-Copy the correct Ludus client binary to your Windows device.
+Copy the correct Ludus client binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to your Windows device.
 
 `cd` to the directory that contains the binary or move the binary to a location in your PATH.
 
