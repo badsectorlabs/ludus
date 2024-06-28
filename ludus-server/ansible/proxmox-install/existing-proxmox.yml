@@ -8,6 +8,12 @@
     pve_interface: "{{ proxmox_interface | default(ansible_default_ipv4.interface) }}"
   serial: 1
   tasks:
+    - name: Setup ludus-install-status script
+      ansible.builtin.template:
+        src: ludus-install-status.sh.j2
+        dest: /usr/local/bin/ludus-install-status
+        mode: '0755'
+
     - name: Install bridge-utils, git, python3-pip, dnsmasq, jq, and other required packages
       ansible.builtin.apt:
         name:

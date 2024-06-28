@@ -79,8 +79,13 @@
         path: /root/.bashrc
         block: |
           alias ll='ls $LS_OPTIONS -lart'
-          alias ludus-install-status="if [[ -f {{ ludus_install_path }}/install/.stage-3-complete ]]; then echo 'Ludus install completed successfully' && echo -n \"Root API key: \" && cat {{ ludus_install_path }}/install/root-api-key && echo; else tail -f {{ ludus_install_path }}/install/install.log; fi"
         create: true
+
+    - name: Setup ludus-install-status script
+      ansible.builtin.template:
+        src: ludus-install-status.sh.j2
+        dest: /usr/local/bin/ludus-install-status
+        mode: '0755'
 
     - name: Install bridge-utils, git, python3-pip, dnsmasq, jq, and other required packages
       ansible.builtin.apt:
