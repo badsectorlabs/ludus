@@ -162,3 +162,17 @@ For the default [basic AD network](./environment-guides/basic-ad-network), when 
 When testing mode is enabled, and the user has allowed `example.com` and `8.8.8.8`, the iptables filter table has the following rules.
 
 !['iptables in testing'](/img/network/iptables-screenshot-testing.png)
+
+## Packet Capture
+
+By default, the bridge interfaces in Proxmox are MAC aware. If you wish to use some type of packet capture appliance like Zeek or Suricata, the `bridge_ageing` parmater needs to be set to `0` on the Proxmox host.
+
+To complete this step, open up a shell to your proxmox host and enter the following commands:
+
+`brctl setageing vmbr1002 0` where `vmbr1002` is the Linux bridge for your Ludus VMs
+
+Followed by:
+
+`ip link set vmbr1002 promisc on`
+
+You can confirm these settings with the `ip -d link show vmbr1002` command which should show `promiscutiy 1` and `ageing time 0`
