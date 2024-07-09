@@ -186,7 +186,31 @@ sed -i '' "s/RANGENUMBER/$RANGENUMBER/g" inventory.yml
 </Tabs>
 
 
-### 5. Deploy GOAD
+### 5. Edit GOAD Ansible
+
+Edit `GOAD/ansible/roles/sccm/install/mecm/tasks/main.yml` and add these three tasks to the top of the file:
+
+```
+- name: create directory to store the downloaded prerequisite files
+  ansible.windows.win_file:
+    path: C:\setup
+    state: directory
+
+- name: Download Visual C++ 2017 Redistributable
+  ansible.windows.win_get_url:
+    url: https://aka.ms/vs/15/release/vc_redist.x64.exe
+    dest: C:\setup\vc_redist.x64.exe
+  register: download_vc_redist
+
+- name: Install Visual C++ 2017 Redistributable
+  ansible.windows.win_package:
+    path: C:\setup\vc_redist.x64.exe
+    arguments: /quiet /norestart
+  when: download_vc_redist.changed
+```
+
+
+### 6. Deploy GOAD
 
 :::note
 
@@ -251,7 +275,7 @@ JD-SCCM-MECM               : ok=8    changed=5    unreachable=0    failed=0    s
 :::
 
 
-### 6. Snapshot VMs
+### 7. Snapshot VMs
 
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
@@ -269,6 +293,6 @@ do
 done
 ```
 
-### 7. Hack!
+### 8. Hack!
 
 Access your Kali machine at `http://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
