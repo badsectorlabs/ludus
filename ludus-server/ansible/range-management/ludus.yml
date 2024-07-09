@@ -802,7 +802,7 @@
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: Fail the deploy when office install failed
+    - name: Check if the office install did not complete
       ansible.builtin.fail:
         msg: |
           Office was unable to be installed. This is either due to an upstream issue or your Windows VM is not up to date enough.
