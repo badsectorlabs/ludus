@@ -14,8 +14,8 @@
     "write-heading-ids": "docusaurus write-heading-ids"
   },
   "dependencies": {
-    "@docusaurus/core": "^3.3.2",
-    "@docusaurus/preset-classic": "^3.3.2",
+    "@docusaurus/core": "^3.4.0",
+    "@docusaurus/preset-classic": "^3.4.0",
     "@mdx-js/react": "^3.0.0",
     "clsx": "^2.1.0",
     "docusaurus-json-schema-plugin": "^1.7.0",
@@ -26,7 +26,7 @@
     "typewriter-effect": "^2.21.0"
   },
   "devDependencies": {
-    "@docusaurus/module-type-aliases": "^3.3.2",
+    "@docusaurus/module-type-aliases": "^3.4.0",
     "@docusaurus/types": "^3.3.2"
   },
   "browserslist": {
