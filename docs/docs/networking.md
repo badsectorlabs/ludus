@@ -39,7 +39,7 @@ If the Ludus admin has set up [CI/CD](cicd), the CI/CD network is `203.0.113.0/2
 ## User Networks
 
 Ludus assigns a unique Linux bridge interface in Proxmox to each user which is capable of supporting 255 VLANs (1-255). The user's `vmbr` number is 1000 + their Ludus range number (e.g. a Ludus user with range number 2 would have `vmbr1002`).
-This interface can be thought of conceptually as a virtual switch.
+This interface can be thought of conceptually as a virtual switch. If you wish to capture packets on this interface see [Packet Capture](#packet-capture).
 
 All user networks are /16 with VLANs of /24 in the format `10.{{ ludus range number }}.{{ VLAN }}.{{ ip_last_octet }}`. Because all user networks are within 10.0.0.0/8, admins deploying Ludus into a network within 10.0.0.0/8 will need to avoid issuing users with a range number that overlaps the existing range. As range numbers are issued sequentially, it is up to the Ludus admin to recognize this conflict and create a dummy user for any 10.0.0.0/16 networks that overlap with the network Ludus itself is deploy into. For example, if the Ludus server itself has an IP of 10.10.0.123, the tenth created user will cause routing issues if the user is also on the 10.10.0.0/16 network. This user should be created as a dummy user and not an actual user of Ludus. The admin will need to manually remove the `vmbr1010` interface on the Ludus host to prevent routing issues.
 
@@ -165,14 +165,12 @@ When testing mode is enabled, and the user has allowed `example.com` and `8.8.8.
 
 ## Packet Capture
 
-By default, the bridge interfaces in Proxmox are MAC aware. If you wish to use some type of packet capture appliance like Zeek or Suricata, the `bridge_ageing` parmater needs to be set to `0` on the Proxmox host.
+By default, the bridge interfaces in Proxmox are MAC aware, which means they will "learn" which MACs are on which "ports" and only send traffic for a MAC to its "port." This means that VMs on the same VLAN only see traffic destined for their MAC (and broadcast) by default. If you wish to use some type of packet capture appliance like Zeek or Suricata, the `bridge-ageing` parameter needs to be set to `0` on the Proxmox host for the bridge interface of the range. This effectively turns the bridge interface into a hub, where all traffic on a VLAN is sent to all machines.
 
 To complete this step, open up a shell to your proxmox host and enter the following commands:
 
-`brctl setageing vmbr1002 0` where `vmbr1002` is the Linux bridge for your Ludus VMs
+`brctl setageing vmbr10XX 0` where `vmbr10XX` is the Linux bridge for your Ludus range (1000 + range number/range second octet)
 
-Followed by:
+You can confirm this settings with the `ip -d link show vmbr10XX` command which should show `ageing_time 0`.
 
-`ip link set vmbr1002 promisc on`
-
-You can confirm these settings with the `ip -d link show vmbr1002` command which should show `promiscutiy 1` and `ageing time 0`
+To make this change persist reboots of the Ludus server, add `bridge-ageing 0` to the options for the interface in `/etc/network/interfaces`
