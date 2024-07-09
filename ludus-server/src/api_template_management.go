@@ -178,6 +178,10 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 	// Run the command and log to a file
 	Run(renderedOutputString, workingDir, packerLogFileDebug)
 
+	// Write 'Build complete' to the packerLogFile to indicate the end of the build so the user knows it's done
+	if verbose {
+		os.WriteFile(packerLogFile, []byte("\n\n===============\nBuild complete!\n===============\n\n"), os.ModeAppend)
+	}
 }
 
 func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject, proxmoxPassword string, templateName string, parallel int, verbose bool) error {
