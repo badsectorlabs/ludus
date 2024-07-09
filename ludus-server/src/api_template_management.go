@@ -180,7 +180,17 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 
 	// Write 'Build complete' to the packerLogFile to indicate the end of the build so the user knows it's done
 	if verbose {
-		os.WriteFile(packerLogFile, []byte("\n\n===============\nBuild complete!\n===============\n\n"), os.ModeAppend)
+		file, err := os.OpenFile(packerLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Printf("Error opening file: %v\n", err)
+			return
+		}
+		defer file.Close()
+
+		if _, err := file.Write([]byte("\n\n=>================\n=> Build complete!\n=>================\n\n")); err != nil {
+			fmt.Printf("Error writing to file: %v\n", err)
+			return
+		}
 	}
 }
 
