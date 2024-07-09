@@ -16,11 +16,12 @@ import (
 )
 
 var (
-	follow            bool
-	tail              int
-	templateName      string
-	templateParallel  int
-	templateDirectory string
+	follow              bool
+	tail                int
+	templateName        string
+	templateParallel    int
+	templateDirectory   string
+	verboseTemplateLogs bool
 )
 
 var templatesCmd = &cobra.Command{
@@ -178,9 +179,8 @@ var templateLogsCmd = &cobra.Command{
 				}
 				newLogs, cursor = stringAndCursorFromResult(responseJSON)
 				if len(newLogs) > 0 {
-					filterAndPrintTemplateLogs(newLogs)
+					filterAndPrintTemplateLogs(newLogs, verboseTemplateLogs)
 				}
-				// compareAndPrint(newLogs)
 				time.Sleep(2 * time.Second)
 			}
 		} else {
@@ -196,7 +196,7 @@ var templateLogsCmd = &cobra.Command{
 				return
 			}
 			newLogs, _ := stringAndCursorFromResult(responseJSON)
-			filterAndPrintTemplateLogs(newLogs)
+			filterAndPrintTemplateLogs(newLogs, verboseTemplateLogs)
 		}
 
 	},
@@ -205,6 +205,7 @@ var templateLogsCmd = &cobra.Command{
 func setupTemplateLogsCmd(command *cobra.Command) {
 	command.Flags().BoolVarP(&follow, "follow", "f", false, "continuously poll the log and print new lines as they are written")
 	command.Flags().IntVarP(&tail, "tail", "t", 0, "number of lines of the log from the end to print")
+	command.Flags().BoolVarP(&verboseTemplateLogs, "--verbose-packer", "v", false, "print all lines from the packer log")
 }
 
 var templateAddCmd = &cobra.Command{

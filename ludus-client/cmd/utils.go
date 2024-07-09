@@ -232,7 +232,7 @@ func printFatalErrorsFromString(input string) {
 // Parse the logs and skip printing lines that contain
 // 'Error getting WinRM host: 500 QEMU guest agent is not running' or
 // 'Error getting SSH address: 500 QEMU guest agent is not running'
-func filterAndPrintTemplateLogs(logs string) {
+func filterAndPrintTemplateLogs(logs string, verbose bool) {
 	scanner := bufio.NewScanner(strings.NewReader(logs))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -240,6 +240,10 @@ func filterAndPrintTemplateLogs(logs string) {
 			strings.Contains(line, "Error getting SSH address: 500 QEMU guest agent is not running") {
 			// Print a message prepended with the current time in the format 2024/05/09 19:36:46
 			fmt.Printf("%s %s\n", formatTimeObject(time.Now(), "2006/01/02 15:04:05"), "Waiting for the VM to boot and complete initial setup...")
+			continue
+		}
+		// This will ignore all lines without the '=>', which is most of the verbose stuff
+		if !verbose && !strings.Contains(line, "=>") {
 			continue
 		}
 		fmt.Println(line)
