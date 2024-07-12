@@ -23,7 +23,7 @@ func PowerAction(c *gin.Context, action string) {
 		} else {
 			go RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/power.yml"}, nil, nil, "startup-range", false, "")
 		}
-		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("full range power %s in progress", action)})
+		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Full range power %s in progress", action)})
 		return
 	} else {
 		// One or more machine names passed in
@@ -45,9 +45,9 @@ func PowerAction(c *gin.Context, action string) {
 		}
 	}
 	if len(powerBody.Machines) > 1 {
-		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("powered %s %d VMs", action, len(powerBody.Machines))})
+		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Powered %s %d VMs", action, len(powerBody.Machines))})
 	} else {
-		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("powered %s VM: %s", action, powerBody.Machines[0])})
+		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Powered %s VM: %s", action, powerBody.Machines[0])})
 	}
 }
 
