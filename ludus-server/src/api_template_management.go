@@ -59,7 +59,7 @@ func extractTemplateNameFromHCL(hclFile string, templateRegex *regexp.Regexp) st
 	}
 }
 
-func Run(command string, workingDir string, outputLog string) {
+func Run(command string, workingDir string, outputLog string) error {
 
 	f, err := os.OpenFile(outputLog, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0660)
 	if err != nil {
@@ -93,7 +93,9 @@ func Run(command string, workingDir string, outputLog string) {
 	log.Println(outputString)
 	if err != nil {
 		log.Println(err.Error())
+		return err
 	}
+	return nil
 }
 
 func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, packerFile string, verbose bool) {
@@ -176,10 +178,10 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 	renderedOutputString := renderedOutput.String()
 
 	// Run the command and log to a file
-	Run(renderedOutputString, workingDir, packerLogFileDebug)
+	packerCommandError := Run(renderedOutputString, workingDir, packerLogFileDebug)
 
 	// Write 'Build complete' to the packerLogFile to indicate the end of the build so the user knows it's done
-	if verbose {
+	if verbose && packerCommandError == nil {
 		file, err := os.OpenFile(packerLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			fmt.Printf("Error opening file: %v\n", err)
@@ -191,7 +193,13 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 			fmt.Printf("Error writing to file: %v\n", err)
 			return
 		}
+	} else if verbose && packerCommandError != nil {
+		// Copy the debug log to the regular log if the command failed
+		if err := copyFileContents(packerLogFileDebug, packerLogFile); err != nil {
+			fmt.Println("Failed to copy file contents:", err)
+		}
 	}
+
 }
 
 func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject, proxmoxPassword string, templateName string, parallel int, verbose bool) error {

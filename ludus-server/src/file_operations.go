@@ -213,3 +213,32 @@ func changeFileOwner(filename, owner string) error {
 	err := cmd.Run()
 	return err
 }
+
+func copyFileContents(srcFileName, dstFileName string) error {
+	// Open the source file for reading
+	srcFile, err := os.Open(srcFileName)
+	if err != nil {
+		return fmt.Errorf("error opening source file: %w", err)
+	}
+	defer srcFile.Close()
+
+	// Read the contents of the source file
+	contents, err := io.ReadAll(srcFile)
+	if err != nil {
+		return fmt.Errorf("error reading from source file: %w", err)
+	}
+
+	// Open the destination file for writing, create it if it does not exist, or append to it if it does
+	dstFile, err := os.OpenFile(dstFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("error opening destination file: %w", err)
+	}
+	defer dstFile.Close()
+
+	// Write the contents to the destination file
+	if _, err := dstFile.Write(contents); err != nil {
+		return fmt.Errorf("error writing to destination file: %w", err)
+	}
+
+	return nil
+}
