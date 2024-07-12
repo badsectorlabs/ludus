@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	yaml "sigs.k8s.io/yaml"
 )
 
 // Ansible Item represents an Ansible role or collection with its version and type
@@ -229,6 +230,63 @@ func InstallRoleFromTar(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": string(cmdOutput)})
 		return
 	}
+	// Parse the version.yml file in the meta directory for this role, and set the value in meta/.galaxy_install_info
+	roleName := strings.TrimSuffix(file.Filename, ".tar.gz")
+	roleMetaPath := fmt.Sprintf("%s/users/%s/.ansible/roles/%s/meta", ludusInstallPath, user.ProxmoxUsername, roleName)
+	versionYmlPath := fmt.Sprintf("%s/version.yml", roleMetaPath)
+	if _, err := os.Stat(versionYmlPath); err == nil {
+		versionYmlContents, err := os.ReadFile(versionYmlPath)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to read version.yml in the role meta directory: %s", roleMetaPath)})
+			return
+		}
+		// Parse the version.yml file
+		var versionYml map[string]string
+		err = yaml.Unmarshal(versionYmlContents, &versionYml)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to parse version.yml in the role meta directory: %s", roleMetaPath)})
+			return
+		}
+		// Write the version to the .galaxy_install_info file
+		galaxyInstallInfoPath := fmt.Sprintf("%s/users/%s/.ansible/roles/%s/meta/.galaxy_install_info", ludusInstallPath, user.ProxmoxUsername, roleName)
+		fileContents, err := os.ReadFile(galaxyInstallInfoPath)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to read .galaxy_install_info: %s", err)})
+			return
+		}
+
+		// Convert the contents to a string and split into lines
+		contents := string(fileContents)
+		lines := strings.Split(contents, "\n")
+
+		// Flag to check if version line exists
+		versionExists := false
+		for i, line := range lines {
+			if strings.HasPrefix(line, "version:") {
+				// Update the version line
+				lines[i] = fmt.Sprintf("version: %s", versionYml["version"])
+				versionExists = true
+				break
+			}
+		}
+
+		// If version line does not exist, append it
+		if !versionExists {
+			lines = append(lines, fmt.Sprintf("version: %s", versionYml["version"]))
+		}
+
+		// Join the lines back together
+		updatedContents := strings.Join(lines, "\n")
+
+		// Write the updated contents back to the file
+		err = os.WriteFile(galaxyInstallInfoPath, []byte(updatedContents), 0660)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to write to .galaxy_install_info in the role meta directory: %s", roleMetaPath)})
+			return
+		}
+
+	}
+
 	c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed role"})
 
 }
