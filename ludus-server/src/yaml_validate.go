@@ -209,7 +209,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 		seenVMNames[vmNameKey] = true
 		// Check the template
 		if !slices.Contains(templateSlice, vm.Template) {
-			return fmt.Errorf("template not found our built on this server: %s for VM: %s", vm.Template, vm.VMName)
+			return fmt.Errorf("template not found or built on this server: %s for VM: %s", vm.Template, vm.VMName)
 		}
 	}
 
