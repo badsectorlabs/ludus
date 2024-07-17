@@ -51,13 +51,6 @@
       set_fact:
         user_proxmox_password: "{{ lookup('password', ludus_users_dir + '/' + username + '/proxmox_password length=20 chars=ascii_letters,digits') }}"
 
-    # TODO: Store this in the keyring
-    - name: 'Generating ssh key for user'
-      delegate_to: localhost
-      become: false
-      community.crypto.openssh_keypair:
-        path: "{{ ludus_users_dir }}/{{ username }}/proxmox_ssh_key"
-
     - name: Add the user to the host
       ansible.builtin.user:
         name: "{{ username }}"
@@ -65,12 +58,6 @@
         groups:
           - pveusers
       register: created_user
-
-    - name: Deploy SSH key for user
-      authorized_key:
-        user: "{{ username }}"
-        key: "{{ lookup('file', ludus_users_dir + '/' + username + '/proxmox_ssh_key.pub') }}"
-        state: present
 
     - name: Enable helpful aliases
       become: true
