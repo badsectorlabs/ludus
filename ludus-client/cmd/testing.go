@@ -337,7 +337,7 @@ var testingUpdateCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID == "" {
+		if userID != "" {
 			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/testing/update?userID=%s", userID), string(payload))
 		} else {
 			responseJSON, success = rest.GenericJSONPost(client, "/testing/update", string(payload))
