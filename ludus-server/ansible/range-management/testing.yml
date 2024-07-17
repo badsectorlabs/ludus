@@ -129,6 +129,7 @@
     - name: Try to resync the time
       ansible.windows.win_shell: |
         w32tm /resync /rediscover
+      ignore_errors: true
     - name: Try to resync the time 2
       ansible.windows.win_shell: |
         w32tm /resync /force     
