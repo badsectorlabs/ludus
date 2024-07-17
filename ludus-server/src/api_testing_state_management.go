@@ -261,7 +261,7 @@ func UpdateVMs(c *gin.Context) {
 	}
 
 	if usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "testing is enabled; stop testing to update VMs"})
+		c.JSON(http.StatusConflict, gin.H{"error": "Testing is enabled; stop testing to update VMs"})
 		return
 	}
 
@@ -272,12 +272,12 @@ func UpdateVMs(c *gin.Context) {
 
 	err = c.BindJSON(&thisUpdatePayload)
 	if err != nil {
-		c.JSON(http.StatusNoContent, gin.H{"error": "improperly formatted update payload"})
+		c.JSON(http.StatusNoContent, gin.H{"error": "Improperly formatted update payload"})
 		return
 	}
 
 	extraVars := map[string]interface{}{"update_host": thisUpdatePayload.Name}
 	go RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/update.yml"}, nil, extraVars, "update", false, "")
 
-	c.JSON(http.StatusOK, gin.H{"result": "update process started"})
+	c.JSON(http.StatusOK, gin.H{"result": "Update process started"})
 }
