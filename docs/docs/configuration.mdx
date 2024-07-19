@@ -72,6 +72,25 @@ ludus:
       snapshot: false
       block_internet: false
 
+# This key defines 
+router:
+  vm_name: "{{ range_id }}-router-debian11-x64"
+  hostname: "{{ range_id }}-router"
+  template: debian11-x64-template
+  ram_gb: 2
+  ram_min_gb: 0.5
+  cpus: 2
+  roles:
+    - ludus_guacamole_server
+  role_vars:
+    somevar: value
+  outbound_wireguard_config: |- # NOTE: this config must not set DNS and must exclude 198.51.100.0/24, 10.0.0.0/8, 192.0.2.0/24, and the address of the WireGuard server
+    [Interface]
+    PrivateKey = XXXX
+    ...
+  outbound_wireguard_vlans:
+    - 10
+
 # This key defines network rules in your range. It is optional, and by default all traffic is allowed
 network: 
   inter_vlan_default: REJECT # The default rule to apply to traffic between VLANs. Default: ACCEPT
@@ -81,7 +100,7 @@ network:
   rules: # Specify rules to restrict or allow based on inter_vlan_default. Default: allow all traffic
     - name: Only allow windows to kali on 443 # The rule name will be added as a comment in iptables
       vlan_src: 10   # Traffic source VLAN
-      vlan_dst: 99   # Traffic destination VLAN. Special value 'public' can be used which is coverted to '! 10.ID.0.0/16' in the iptables rule
+      vlan_dst: 99   # Traffic destination VLAN. Special value 'public' can be used which is converted to '! 10.ID.0.0/16' in the iptables rule
       protocol: tcp  # Protocol (tcp|udp|icmp|all)
       ports: 443     # A single port, a range in the format start:end, or 'all'
       action: ACCEPT # ACCEPT|REJECT|DROP
