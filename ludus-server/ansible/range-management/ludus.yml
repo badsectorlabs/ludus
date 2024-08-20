@@ -630,7 +630,7 @@
       apt:
         name:
           - rsync
-          - temurin-8-jdk
+          - temurin-17-jdk
         update_cache: true
 
 - name: Configure Nexus nuget cache VM
