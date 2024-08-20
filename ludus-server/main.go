@@ -18,11 +18,6 @@ const ludusInstallPath string = "/opt/ludus"
 
 var ludusPath string
 
-var config ludusapi.Configuration = ludusapi.Configuration{}
-
-var interactiveInstall bool
-var autoGenerateConfig bool = true
-
 var GitCommitHash string
 var VersionString string
 var LudusVersion string = VersionString + "+" + GitCommitHash
@@ -65,13 +60,14 @@ func main() {
 	ludusPath = filepath.Dir(ex)
 
 	// Sanity checks
+	checkArgs()
 	checkDebian12()
 	checkForVirtualizationSupport()
-	checkArgs()
-	checkConfig()
+	generateConfigIfAutomatedInstall()
 
 	// If we're done installing, serve the API
 	if fileExists(fmt.Sprintf("%s/install/.stage-3-complete", ludusInstallPath)) && !fileExists("/etc/systemd/system/ludus-install.service") {
+		checkConfig()
 		serve()
 	}
 

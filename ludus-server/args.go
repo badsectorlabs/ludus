@@ -1,18 +1,64 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 )
 
+var (
+	interactiveInstall bool
+	updateFlag         bool
+	versionFlag        bool
+	helpFlag           bool
+	noPromptFlag       bool
+	nodeName           string
+	autoGenerateConfig bool
+)
+
+func init() {
+	flag.BoolVar(&updateFlag, "update", false, "update the ludus install with this binary and embedded files and restart the ludus services")
+	flag.BoolVar(&noPromptFlag, "no-prompt", false, "run the installer without prompting for confirmation")
+	flag.BoolVar(&versionFlag, "v", false, "print the version of this ludus server")
+	flag.BoolVar(&versionFlag, "version", false, "print the version of this ludus server")
+	flag.BoolVar(&helpFlag, "h", false, "display help information")
+	flag.BoolVar(&helpFlag, "help", false, "display help information")
+	flag.Usage = printHelp
+}
+
 func checkArgs() {
-	if len(os.Args) > 1 && os.Args[1] == "--no-prompt" {
-		interactiveInstall = false
-	} else {
-		interactiveInstall = true
+	flag.Parse()
+
+	if helpFlag {
+		printHelp()
+		os.Exit(0)
 	}
-	if len(os.Args) > 1 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
-		fmt.Print(`
+
+	if versionFlag {
+		fmt.Println(LudusVersion)
+		os.Exit(0)
+	}
+
+	if updateFlag {
+		checkRoot()
+		updateLudus()
+		os.Exit(0)
+	}
+
+	interactiveInstall = !noPromptFlag
+	autoGenerateConfig = noPromptFlag
+
+	if noPromptFlag {
+		if flag.NArg() > 0 {
+			nodeName = flag.Arg(0)
+		} else {
+			nodeName = ""
+		}
+	}
+}
+
+func printHelp() {
+	fmt.Print(`
 Ludus is a project to enable teams to quickly and
 safely deploy test environments (ranges) to test tools and
 techniques against representative virtual machines.
@@ -30,20 +76,6 @@ Usage:
     ludus-server --update
 
 Flags:
-        --update       update the ludus install with this binary and 
-                       embedded files and restart the ludus services
-        --no-prompt    run the installer without prompting for confirmation
-    -h, --help         help for ludus-server
-    -v, --version      print the version of this ludus server
 `)
-		os.Exit(0)
-	} else if len(os.Args) > 1 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
-		fmt.Println(LudusVersion)
-		os.Exit(0)
-	} else if len(os.Args) > 1 && os.Args[1] == "--update" {
-		// If the user wants to update, just do that and exit
-		checkRoot()
-		updateLudus()
-		os.Exit(0)
-	}
+	flag.PrintDefaults()
 }

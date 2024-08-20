@@ -12,10 +12,14 @@ const ludusInstallPath string = "/opt/ludus"
 // Configurations exported
 type Configuration struct {
 	ProxmoxNode            string `mapstructure:"proxmox_node" yaml:"proxmox_node"`
+	ProxmoxInterface       string `mapstructure:"proxmox_interface" yaml:"proxmox_interface"`
 	ProxmoxInvalidCert     bool   `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
 	ProxmoxURL             string `mapstructure:"proxmox_url" yaml:"proxmox_url"`
 	ProxmoxHostname        string `mapstructure:"proxmox_hostname" yaml:"proxmox_hostname"`
+	ProxmoxLocalIP         string `mapstructure:"proxmox_local_ip" yaml:"proxmox_local_ip"`
 	ProxmoxPublicIP        string `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"`
+	ProxmoxGateway         string `mapstructure:"proxmox_gateway" yaml:"proxmox_gateway"`
+	ProxmoxNetmask         string `mapstructure:"proxmox_netmask" yaml:"proxmox_netmask"`
 	ProxmoxVMStoragePool   string `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
 	ProxmoxVMStorageFormat string `mapstructure:"proxmox_vm_storage_format" yaml:"proxmox_vm_storage_format"`
 	ProxmoxISOStoragePool  string `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
