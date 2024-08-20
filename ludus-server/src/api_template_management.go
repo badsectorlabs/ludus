@@ -123,6 +123,19 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 		packerVerbose = "1"
 	} else {
 		packerVerbose = "0"
+		// Since the log file is only used in verbose mode, we need to write to the log file path with a message to alert the user that
+		// no logs will be written in parallel mode
+		file, err := os.OpenFile(packerLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Printf("Error opening file: %v\n", err)
+			return
+		}
+		defer file.Close()
+
+		if _, err := file.Write([]byte("\n\n=>================\n=> No logs will be written in parallel mode\n=>================\n\n")); err != nil {
+			fmt.Printf("Error writing to file: %v\n", err)
+			return
+		}
 	}
 
 	data := struct {
