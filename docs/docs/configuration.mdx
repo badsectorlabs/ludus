@@ -38,6 +38,10 @@ ludus:
       block_internet: true  # Cut this VM off from the internet during testing. Default true
     roles:                  # This key is an array of user-defined roles that will be installed on this VM. Roles must exist on the Ludus server and can be installed with `ludus ansible role add`
       - geerlingguy.docker  # Arbitrary role name, as it appears in `ludus ansible roles list`
+      - name: badsectorlabs.ludus_elastic_agent # You can also specify a role with a an array of dependencies that have to run first
+        depends_on:
+          - vm_name: "{{ range_id }}-elastic"  # In this case, we have to set up the elastic container (server) before the agent
+            role: badsectorlabs.ludus_elastic_container
     role_vars:              # This key contains `key: value` pairs of variables that are passed to ALL user-defined roles.
       docker_edition: ce    # Arbitrary variables for user-defined roles. Do *not* use hyphens to prefix these variables, the role_vars key *must* be a dictionary!
       docker_users:         # You can use lists or dicts here
@@ -68,6 +72,16 @@ ludus:
     domain:
       fqdn: ludus.network
       role: member
+  - vm_name: "{{ range_id }}-elastic"
+    hostname: "{{ range_id }}-elastic"
+    template: debian-12-x64-server-template
+    vlan: 20
+    ip_last_octet: 2
+    ram_gb: 8
+    cpus: 4
+    linux: true
+    roles:
+      - badsectorlabs.ludus_elastic_container # This role will run before the elastic agent role on the windows VM     
   - vm_name: "{{ range_id }}-kali"
     hostname: "{{ range_id }}-kali"
     template: kali-x64-desktop-template
@@ -152,6 +166,10 @@ ludus:
       block_internet: true  # Cut this VM off from the internet during testing. Default true
     roles:                  # This key is an array of user-defined roles that will be installed on this VM. Roles must exist on the Ludus server and can be installed with `ludus ansible role add`
       - geerlingguy.docker  # Arbitrary role name, as it appears in `ludus ansible roles list`
+      - name: badsectorlabs.ludus_elastic_agent # You can also specify a role with a an array of dependencies that have to run first
+        depends_on:
+          - vm_name: "{{ range_id }}-elastic"  # In this case, we have to set up the elastic container (server) before the agent
+            role: badsectorlabs.ludus_elastic_container
     role_vars:              # This key contains `key: value` pairs of variables that are passed to ALL user-defined roles.
       docker_edition: ce    # Arbitrary variables for user-defined roles. Do *not* use hyphens to prefix these variables, the role_vars key *must* be a dictionary!
       docker_users:         # You can use lists or dicts here
@@ -182,6 +200,16 @@ ludus:
     domain:
       fqdn: ludus.network
       role: member
+  - vm_name: "{{ range_id }}-elastic"
+    hostname: "{{ range_id }}-elastic"
+    template: debian-12-x64-server-template
+    vlan: 20
+    ip_last_octet: 2
+    ram_gb: 8
+    cpus: 4
+    linux: true
+    roles:
+      - badsectorlabs.ludus_elastic_container # This role will run before the elastic agent role on the windows VM     
   - vm_name: "{{ range_id }}-kali"
     hostname: "{{ range_id }}-kali"
     template: kali-x64-desktop-template
