@@ -91,6 +91,7 @@ stages:
 .ansible-tests: &ansible-tests
   # Add and remove a role
   - ludus ansible role list
+  - ludus ansible role rm geerlingguy.docker || true
   - ludus ansible role add geerlingguy.docker
   - ludus ansible role list | grep geerlingguy.docker
   - ludus ansible role rm geerlingguy.docker
@@ -107,11 +108,26 @@ stages:
   - '! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1'
   # Test collections
   - ludus ansible collection list
-  - ludus ansible collection add maxhoesel.smallstep
+  - ludus ansible collection add maxhoesel.smallstep || true
   - ludus ansible collection list | grep maxhoesel.smallstep
   # Force install a collection
   - ludus ansible collection add maxhoesel.smallstep --version 0.24.4 --force
   - ludus ansible collection list | grep maxhoesel.smallstep | grep 0.24.4
+  # Depends on tests
+  - ludus ansible role add -d ludus-server/ci/roles/hello_world --force
+  - ludus range config set -f ludus-server/ci/configs/depends-on.yml
+  - ludus range deploy -t user-defined-roles
+  - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+  # Depends on - dependency that doesn't exist test
+  - ludus range config set -f ludus-server/ci/configs/depends-on-not-found.yml
+  - ludus range deploy
+  - sleep 5
+  - 'ludus range logs | egrep "ERROR: Dependency not found \w+-ad-dc-win2022-server-x64-1:geerlingguy.docker"'
+  # Depends on circular dependency test
+  - ludus range config set -f ludus-server/ci/configs/depends-on-circular.yml
+  - ludus range deploy
+  - sleep 5
+  - 'ludus range logs | egrep "ERROR: Circular dependency found for \w+-ad-win11-22h2-enterprise-x64-1:geerlingguy.docker"'
 
 .testing-mode-tests: &testing-mode-tests
   - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API

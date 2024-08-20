@@ -2,6 +2,7 @@ package ludusapi
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -51,4 +52,16 @@ func GetLogsFromFile(c *gin.Context, filePath string) {
 		}
 		c.JSON(http.StatusOK, gin.H{"result": logs, "cursor": returnCursor})
 	}
+}
+
+// LogToFile - writes the provided log string to the provided file (truncating it first)
+func logToFile(logFilePath string, log string, append bool) {
+	var logFile *os.File
+	if append {
+		logFile, _ = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0660)
+	} else {
+		logFile, _ = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0660)
+	}
+	defer logFile.Close()
+	logFile.WriteString(log)
 }

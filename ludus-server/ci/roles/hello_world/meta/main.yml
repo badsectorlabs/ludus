@@ -1,0 +1,29 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: hello_world
+  author: badsectorlabs
+  description: Just prints hello world - for use in CI testing
+  company: Bad Sector Labs
+  license: GPLv3
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Windows
+      versions:
+        - "2012R2"
+        - "2016"
+        - "2019"
+        - "2022"
+    - name: Debian
+      versions:
+        - buster
+        - bullseye
+        - bookworm
+    - name: Ubuntu
+      versions:
+        - bionic
+        - focal
+        - jammy
+
+collections: []

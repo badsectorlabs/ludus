@@ -1,0 +1,21 @@
+# ==========================================================
+# User-Defined Roles
+# ==========================================================
+- name: Setup for user-defined roles
+  tags: always
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Run the custom module to resolve role dependencies
+      ludus_role_dependency_resolver:
+        ludus_config_object: "{{ ludus }}"
+      register: resolved_role_order
+
+    - name: Display resolved role order
+      ansible.builtin.debug:
+        var: resolved_role_order
+
+    - name: Write out an ansible playbook to run the user-defined roles
+      ansible.builtin.template:
+        src: templates/user-defined-roles.yml.j2
+        dest: "{{ lookup('env', 'ANSIBLE_HOME') }}/user-defined-roles.yml"

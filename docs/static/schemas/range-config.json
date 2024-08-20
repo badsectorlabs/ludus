@@ -273,14 +273,10 @@
                 },
                 "unmanaged": {
                     "type": "boolean",
-                    "description": "Set this to true for VMs that cannot report an IP to ansible via proxmox (no qemu-guest-agent, i.e. EDR appliances). You *must* manually configure this VM to have the IP defined in the config or risk leaking data during testing. Default: false"
+                    "description": "Set this to true for VMs that cannot report an IP to ansible via proxmox (no qemu-guest-agent, i.e. EDR appliances)"
                 },
                 "roles": {
-                    "type": "array",
-                    "description": "User defined Ansible roles to apply to this VM. Roles must be installed on the Ludus host with `ludus ansible role add`.",
-                    "items": {
-                        "type": "string"
-                    }
+                    "$ref": "#/definitions/Roles"
                 },
                 "role_vars": {
                     "$ref": "#/definitions/RoleVars"
@@ -421,6 +417,41 @@
             "items": {
                 "type": "string",
                 "description": "Domain to assign this VM's IP in DNS (wildcards allowed)"
+            }
+        },
+         "Roles": {
+            "type": "array",
+            "description": "User defined Ansible roles to apply to this VM. Roles must be installed on the Ludus host with `ludus ansible role add`.",
+            "items": {
+                "oneOf": [
+                    {
+                        "type": "string"
+                    },
+                    {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            },
+                            "depends_on": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["vm_name", "role"],
+                                    "properties": {
+                                        "vm_name": {
+                                            "type": "string"
+                                        },
+                                        "role": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ]
             }
         }
     }

@@ -139,12 +139,15 @@ type VM struct {
 		FQDN string `json:"fqdn"`
 		Role string `json:"role"`
 	} `json:"domain"`
+	Roles interface{} `yaml:"roles"`
 }
+
 type LudusConfig struct {
 	Ludus []VM `json:"ludus"`
 }
 
 // validateRangeYAML checks for duplicate vlan and ip_last_octet combinations, templates exist on the server, and unique hostname
+// also checks each role to see if it exists on the server and creates the user-defined-roles.yml file.
 func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 	var config LudusConfig
 	err := yaml.Unmarshal(yamlData, &config)
@@ -163,6 +166,11 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 		return err
 	}
 
+	user, err := getUserObject(c)
+	if err != nil {
+		return err
+	}
+
 	// Check for duplicate vlan and ip_last_octet combinations
 	seenVLANAndIP := make(map[string]bool)
 	// Check that all vm_names and hostnames are unique
@@ -171,6 +179,8 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 	// Check that NETBIOS are unique per domain
 	seenNETBIOSnames := make(map[string]string)
 	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
+	// User has roles?
+	userHasRoles := false
 	var NETBIOSnameKey string
 	for _, vm := range config.Ludus {
 		vlanIPKey := fmt.Sprintf("vlan: %d, ip_last_octet: %d", vm.VLAN, vm.IPLastOctet)
@@ -209,8 +219,67 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 		seenVMNames[vmNameKey] = true
 		// Check the template
 		if !slices.Contains(templateSlice, vm.Template) {
-			return fmt.Errorf("template not found or built on this server: %s for VM: %s", vm.Template, vm.VMName)
+			return fmt.Errorf("template not found or not built on this server: %s for VM: %s", vm.Template, vm.VMName)
 		}
+		// Check the roles (if any)
+		if vm.Roles != nil {
+			switch roles := vm.Roles.(type) {
+			case []interface{}:
+				for _, role := range roles {
+					switch r := role.(type) {
+					case string:
+						exists, err := checkRoleExists(c, r)
+						if err != nil {
+							return fmt.Errorf("error checking if role exists on the server: %s", err)
+						}
+						if !exists {
+							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.UserID)
+						} else {
+							userHasRoles = true
+						}
+					case map[string]interface{}:
+						log.Println(role)
+						if name, ok := r["name"].(string); ok {
+							exists, err := checkRoleExists(c, name)
+							if err != nil {
+								return fmt.Errorf("error checking if role exists on the server: %s", err)
+							}
+							if !exists {
+								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, usersRange.UserID)
+							} else {
+								userHasRoles = true
+							}
+							if dependsOn, ok := r["depends_on"].([]interface{}); ok {
+								for _, dep := range dependsOn {
+									if depMap, ok := dep.(map[string]interface{}); ok {
+										if role, ok := depMap["role"].(string); ok {
+											exists, err := checkRoleExists(c, role)
+											if err != nil {
+												return fmt.Errorf("error checking if role exists on the server: %s", err)
+											}
+											if !exists {
+												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.UserID)
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if userHasRoles {
+		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "Resolving dependencies for user-defined roles...", false)
+		rolesOutput, err := RunLocalAnsiblePlaybook(c, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
+		if err != nil {
+			db.Model(&usersRange).Update("range_state", "ERROR")
+			logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), rolesOutput, true)
+			return fmt.Errorf("Error generating ordered roles: %s %s", rolesOutput, err)
+		}
+		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "Done resolving role dependencies.", true)
 	}
 
 	return nil

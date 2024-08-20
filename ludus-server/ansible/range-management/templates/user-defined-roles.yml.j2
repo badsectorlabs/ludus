@@ -1,0 +1,36 @@
+{% if resolved_role_order|length == 0 %}
+- name: Run debug task on localhost
+  tags: [user-defined-roles]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: No user-defined roles to run
+      ansible.builtin.debug:
+        msg: "No user-defined roles to run"
+{% endif %}
+{% for item in resolved_role_order.order %}
+{% if item.vm_name not in groups['all'] %}
+- name: Stop if the VM is not in the inventory
+  tags: [user-defined-roles]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check if {{ item.vm_name }} is in the inventory
+      ansible.builtin.fail:
+        msg: "{{ item.vm_name }} is not in the Ansible inventory. Perhaps the VM is not built yet and you need to do a full deploy?"
+      when: '"{{ item.vm_name }}" not in groups["all"]'
+{% endif %}
+- name: Run user-defined roles
+  tags: [user-defined-roles]
+  hosts: "{{ item.vm_name }}"
+  tasks:
+    - name: Show the host and role being run
+      ansible.builtin.debug:
+        msg: "Running role {{ item.role_name }} on {{ item.vm_name }}"
+      when: (only_roles is undefined or only_roles is none) or (only_roles is defined and "{{ item.role_name }}" in only_roles)
+
+    - name: Execute a role
+      ansible.builtin.include_role:
+        name: "{{ item.role_name }}"
+      when: (only_roles is undefined or only_roles is none) or (only_roles is defined and "{{ item.role_name }}" in only_roles)
+{% endfor %}

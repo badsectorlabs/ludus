@@ -17,6 +17,7 @@ var (
 	roleDirectory  string
 	ansibleForce   bool
 	ansibleVersion string
+	ansibleGlobal  bool
 )
 
 var ansibleCmd = &cobra.Command{
@@ -43,11 +44,11 @@ func formatAnsibleResponse(ansibleItems []AnsibleItem, ansibleType string) {
 	// Create table
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetAlignment(tablewriter.ALIGN_CENTER)
-	table.SetHeader([]string{"Name", "Version"})
+	table.SetHeader([]string{"Name", "Version", "Global"})
 
 	for _, item := range ansibleItems {
 		if item.Type == ansibleType {
-			table.Append([]string{item.Name, item.Version})
+			table.Append([]string{item.Name, item.Version, strconv.FormatBool(item.Global)})
 		}
 	}
 
@@ -118,9 +119,9 @@ func genericRoleCmd(use, short, long string, aliases []string) *cobra.Command {
 				}
 				filename := filepath.Base(roleDirectory)
 				if userID != "" {
-					responseJSON, success = rest.PostFileAndForce(client, fmt.Sprintf("/ansible/role/fromtar?userID=%s", userID), roleTar.Bytes(), filename, ansibleForce)
+					responseJSON, success = rest.PostFileAndForceAndGlobal(client, fmt.Sprintf("/ansible/role/fromtar?userID=%s", userID), roleTar.Bytes(), filename, ansibleForce, ansibleGlobal)
 				} else {
-					responseJSON, success = rest.PostFileAndForce(client, "/ansible/role/fromtar", roleTar.Bytes(), filename, ansibleForce)
+					responseJSON, success = rest.PostFileAndForceAndGlobal(client, "/ansible/role/fromtar", roleTar.Bytes(), filename, ansibleForce, ansibleGlobal)
 				}
 
 				if didFailOrWantJSON(success, responseJSON) {
@@ -133,8 +134,9 @@ func genericRoleCmd(use, short, long string, aliases []string) *cobra.Command {
 				"role": "%s",
 				"force": %s,
 				"version": "%s",
-				"action": "%s"
-			  }`, args[0], strconv.FormatBool(ansibleForce), ansibleVersion, action)
+				"action": "%s",
+				"global": %s
+			  }`, args[0], strconv.FormatBool(ansibleForce), ansibleVersion, action, strconv.FormatBool(ansibleGlobal))
 
 				if userID != "" {
 					responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/ansible/role?userID=%s", userID), requestBody)
@@ -160,6 +162,7 @@ func setupRoleCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&roleDirectory, "directory", "d", "", "the path to the local directory of the role to install")
 	command.Flags().BoolVarP(&ansibleForce, "force", "f", false, "force the role to be added")
 	command.Flags().StringVar(&ansibleVersion, "version", "", "the role version to install")
+	command.Flags().BoolVarP(&ansibleGlobal, "global", "g", false, "install the role for all users")
 }
 
 var collectionAddCmd = &cobra.Command{
