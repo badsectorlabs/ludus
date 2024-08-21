@@ -328,6 +328,7 @@ build all:
     - cd spinner && git checkout unhide-interrupts && cd .. && go mod edit -replace github.com/briandowns/spinner=./spinner
     - go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-amd64
     - GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-arm64
+    - GOOS=linux GOARCH=arm go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-arm
     - GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_macOS-amd64
     - GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_macOS-arm64
     # The forked spinner library doesn't compile for windows, so switch back to the original
@@ -1405,14 +1406,29 @@ upload:
   rules:
     - if: $CI_COMMIT_TAG
   script:
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-server ${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm64-${CI_COMMIT_TAG}'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_macOS-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_macOS-amd64-${CI_COMMIT_TAG}'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_macOS-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_macOS-arm64-${CI_COMMIT_TAG}'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-amd64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-386.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-386-${CI_COMMIT_TAG}.exe'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-arm64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-server ${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm64-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-arm ${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_macOS-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_macOS-amd64-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_macOS-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_macOS-arm64-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-amd64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-386.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-386-${CI_COMMIT_TAG}.exe'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-arm64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe'
+    - touch ludus_${CI_COMMIT_TAG}_checksums.txt
+    - cd binaries
+    - sha256sum ludus-server >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_linux-amd64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_linux-arm64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_linux-arm >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_macOS-amd64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_macOS-arm64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_windows-amd64.exe >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_windows-386.exe >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_windows-arm64.exe >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - cd ..
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file ludus_${CI_COMMIT_TAG}_checksums.txt ${PACKAGE_REGISTRY_URL}/ludus_${CI_COMMIT_TAG}_checksums.txt'
+
 
 release:
   stage: release
@@ -1436,8 +1452,10 @@ release:
     - sudo chmod +x /usr/local/bin/release-cli
     - 'release-cli create --name "ludus $CI_COMMIT_TAG" --description CHANGELOG.txt --tag-name $CI_COMMIT_TAG --assets-link 
       "[{\"name\":\"ludus-server-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}\"},
+      {\"name\":\"ludus_${CI_COMMIT_TAG}_checksums.txt\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus_${CI_COMMIT_TAG}_checksums.txt\"},
       {\"name\":\"ludus-client_linux-amd64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_linux-arm64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm64-${CI_COMMIT_TAG}\"},
+      {\"name\":\"ludus-client_linux-arm-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_macOS-amd64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_macOS-amd64-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_macOS-arm64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_macOS-arm64-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\"},
