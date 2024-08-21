@@ -119,15 +119,10 @@ stages:
   - ludus range deploy -t user-defined-roles
   - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
   # Depends on - dependency that doesn't exist test
-  - ludus range config set -f ludus-server/ci/configs/depends-on-not-found.yml
-  - ludus range deploy
-  - sleep 5
-  - 'ludus range logs | egrep "ERROR: Dependency not found \w+-ad-dc-win2022-server-x64-1:geerlingguy.docker"'
+  - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
+  - 'ludus range config set -f ludus-server/ci/configs/depends-on-not-found.yml 2>&1 | egrep "ERROR: Dependency not found \w+-ad-dc-win2022-server-x64-1:geerlingguy.docker"'
   # Depends on circular dependency test
-  - ludus range config set -f ludus-server/ci/configs/depends-on-circular.yml
-  - ludus range deploy
-  - sleep 5
-  - 'ludus range logs | egrep "ERROR: Circular dependency found for \w+-ad-win11-22h2-enterprise-x64-1:geerlingguy.docker"'
+  - 'ludus range config set -f ludus-server/ci/configs/depends-on-circular.yml 2>&1 | egrep "ERROR: Circular dependency found for \w+-ad-win11-22h2-enterprise-x64-1:geerlingguy.docker"'
 
 .testing-mode-tests: &testing-mode-tests
   - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API

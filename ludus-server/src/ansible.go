@@ -254,7 +254,7 @@ func checkRoleExists(c *gin.Context, roleName string) (bool, error) {
 }
 
 // Run a simple local ansible playbook that doesn't require any extra vars and doesn't log
-func RunLocalAnsiblePlaybook(c *gin.Context, playbookPathArray []string) (string, error) {
+func RunLocalAnsiblePlaybookOnTmpRangeConfig(c *gin.Context, playbookPathArray []string) (string, error) {
 
 	buff := new(bytes.Buffer)
 
@@ -283,7 +283,7 @@ func RunLocalAnsiblePlaybook(c *gin.Context, playbookPathArray []string) (string
 
 	// Always include the ludus, server, and user configs
 	userDir := fmt.Sprintf("@%s/users/%s/", ludusInstallPath, user.ProxmoxUsername)
-	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), userDir + "range-config.yml"}
+	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), userDir + ".tmp-range-config.yml"}
 	inventory := "127.0.0.1"
 
 	execute := execute.NewDefaultExecute(

@@ -166,11 +166,6 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 		return err
 	}
 
-	user, err := getUserObject(c)
-	if err != nil {
-		return err
-	}
-
 	// Check for duplicate vlan and ip_last_octet combinations
 	seenVLANAndIP := make(map[string]bool)
 	// Check that all vm_names and hostnames are unique
@@ -179,8 +174,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 	// Check that NETBIOS are unique per domain
 	seenNETBIOSnames := make(map[string]string)
 	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
-	// User has roles?
-	userHasRoles := false
+
 	var NETBIOSnameKey string
 	for _, vm := range config.Ludus {
 		vlanIPKey := fmt.Sprintf("vlan: %d, ip_last_octet: %d", vm.VLAN, vm.IPLastOctet)
@@ -235,7 +229,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 						if !exists {
 							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.UserID)
 						} else {
-							userHasRoles = true
+							c.Set("userHasRoles", true)
 						}
 					case map[string]interface{}:
 						log.Println(role)
@@ -247,7 +241,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 							if !exists {
 								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, usersRange.UserID)
 							} else {
-								userHasRoles = true
+								c.Set("userHasRoles", true)
 							}
 							if dependsOn, ok := r["depends_on"].([]interface{}); ok {
 								for _, dep := range dependsOn {
@@ -269,17 +263,6 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 				}
 			}
 		}
-	}
-
-	if userHasRoles {
-		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "Resolving dependencies for user-defined roles...", false)
-		rolesOutput, err := RunLocalAnsiblePlaybook(c, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
-		if err != nil {
-			db.Model(&usersRange).Update("range_state", "ERROR")
-			logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), rolesOutput, true)
-			return fmt.Errorf("Error generating ordered roles: %s %s", rolesOutput, err)
-		}
-		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "Done resolving role dependencies.", true)
 	}
 
 	return nil

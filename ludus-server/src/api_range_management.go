@@ -322,6 +322,27 @@ func PutConfig(c *gin.Context) {
 		return
 	}
 
+	// Check the roles and dependencies
+	userHasRoles, exists := c.Get("userHasRoles")
+	if exists && userHasRoles.(bool) {
+		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "Resolving dependencies for user-defined roles...", false)
+		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(c, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
+		if err != nil {
+			db.Model(&usersRange).Update("range_state", "ERROR")
+			// Find the 'ERROR' line in the output and return it to the user
+			errorLine := regexp.MustCompile(`ERROR[^"]*`)
+			errorMatch := errorLine.FindString(rolesOutput)
+			if errorMatch != "" {
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Configuration error: " + errorMatch})
+				return
+			} else {
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error generating ordered roles: %s %s", rolesOutput, err)})
+				return
+
+			}
+		}
+	}
+
 	// The file is valid, so let's move it to the range-config
 	err = os.Rename(filePath, fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername))
 	if err != nil {
