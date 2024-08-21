@@ -57,7 +57,7 @@
           roles: ["PVEVMAdmin", "PVESDNAdmin"]
           groups: ["ludus_admins"]
         - path: /
-          roles: ["ResourceAudit"]
+          roles: ["LudusResourceAudit"]
           groups: ["ludus_users"]
         - path: "/storage/{{ proxmox_vm_storage_pool }}"
           roles: ["PVEDatastoreAdmin"]

@@ -123,11 +123,11 @@
       pve_remove_subscription_warning: false
       pve_remove_old_kernels: false
       pve_roles:
-        - name: ResourceAudit
+        - name: LudusResourceAudit
           privileges:
             - "Sys.Audit"
             - "Datastore.Audit"
-        - name: DatastoreUser
+        - name: LudusDatastoreUser
           privileges:
             - "Datastore.AllocateSpace"
             - "Datastore.AllocateTemplate"
@@ -167,12 +167,6 @@
       pve_ceph_enabled: false
       pve_remove_subscription_warning: false
       pve_remove_old_kernels: false
-      pve_roles:
-        - name: LudusDatastoreUser
-          privileges:
-            - "Datastore.AllocateSpace"
-            - "Datastore.AllocateTemplate"
-            - "Datastore.Audit"
       pve_acls:
         - path: /pool/SHARED
           roles: ["PVEVMAdmin", "PVEPoolUser", "PVESDNAdmin"] # ["PVETemplateUser"] only allows using templates, not creating
@@ -184,7 +178,7 @@
           roles: ["PVEVMAdmin", "PVESDNAdmin"]
           groups: ["ludus_admins"]
         - path: /
-          roles: ["ResourceAudit"]
+          roles: ["LudusResourceAudit"]
           groups: ["ludus_users"]
         - path: "/storage/{{ proxmox_vm_storage_pool }}"
           roles: ["PVEDatastoreAdmin"]
