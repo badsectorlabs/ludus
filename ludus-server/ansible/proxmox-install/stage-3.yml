@@ -59,6 +59,22 @@
         - path: /
           roles: ["ResourceAudit"]
           groups: ["ludus_users"]
+        - path: "/storage/{{ proxmox_vm_storage_pool }}"
+          roles: ["PVEDatastoreAdmin"]
+          groups:
+            - ludus_admins
+        - path: "/storage/{{ proxmox_iso_storage_pool }}"
+          roles: ["PVEDatastoreAdmin"]
+          groups:
+            - ludus_admins
+        - path: "/storage/{{ proxmox_vm_storage_pool }}"
+          roles: ["LudusDatastoreUser"]
+          groups:
+            - ludus_users
+        - path: "/storage/{{ proxmox_iso_storage_pool }}"
+          roles: ["LudusDatastoreUser"]
+          groups:
+            - ludus_users  
   vars:
     - port: "51820"
     - server_cidr: "198.51.100.1/24"

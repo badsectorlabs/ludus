@@ -189,10 +189,7 @@
           roles: ["PVEAdmin", "PVESDNAdmin"]
           groups:
             - ludus_admins
-        - path: "/storage/local"
-          roles: ["PVEDatastoreAdmin"]
-          users:
-            - "{{ username }}@pam"
+
   tasks:
     - name: Add user to ludus_admins
       ansible.builtin.shell: pveum user modify {{ username }}@pam --groups ludus_admins --append
