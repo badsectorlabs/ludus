@@ -117,12 +117,14 @@ type Model struct {
 	form              *huh.Form
 	width             int
 	currentFieldIndex int
+	confirmed         bool
 }
 
 func NewModel() Model {
 	m := Model{width: maxWidth}
 	m.lg = lipgloss.DefaultRenderer()
 	m.styles = NewStyles(m.lg)
+	m.confirmed = false
 
 	m.form = huh.NewForm(
 		// Page 1
@@ -350,6 +352,7 @@ func (m Model) View() string {
 
 	switch m.form.State {
 	case huh.StateCompleted:
+		m.confirmed = true
 		return s.Status.Margin(0, 1).Padding(1, 2).Width(60).Render(generateFinalMessage()) + "\n\n"
 	default:
 
@@ -517,9 +520,13 @@ to function. The Ludus install process will not reboot your host.
 	} else {
 		automatedConfigGenerator(false)
 	}
-	_, err := tea.NewProgram(NewModel()).Run()
+	finalModel, err := tea.NewProgram(NewModel()).Run()
 	if err != nil {
 		fmt.Println("Oh no:", err)
+		os.Exit(1)
+	}
+	if !finalModel.(Model).confirmed {
+		fmt.Println("Exiting")
 		os.Exit(1)
 	}
 	// Now that the form is done, write the config
