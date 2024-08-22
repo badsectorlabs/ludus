@@ -189,6 +189,23 @@
           roles: ["PVEAdmin", "PVESDNAdmin"]
           groups:
             - ludus_admins
+        # Make sure the storage pools are set up for the admins/users
+        - path: "/storage/{{ proxmox_vm_storage_pool }}"
+          roles: ["PVEDatastoreAdmin"]
+          groups:
+            - ludus_admins
+        - path: "/storage/{{ proxmox_iso_storage_pool }}"
+          roles: ["PVEDatastoreAdmin"]
+          groups:
+            - ludus_admins
+        - path: "/storage/{{ proxmox_vm_storage_pool }}"
+          roles: ["DatastoreUser"]
+          groups:
+            - ludus_users
+        - path: "/storage/{{ proxmox_iso_storage_pool }}"
+          roles: ["DatastoreUser"]
+          groups:
+            - ludus_users
 
   tasks:
     - name: Add user to ludus_admins
