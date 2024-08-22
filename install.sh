@@ -4,8 +4,10 @@
 #          FILE: install.sh
 # 
 #         USAGE: curl https://ludus.cloud/install | bash
+#                curl https://ludus.cloud/install | zsh
 #                 OR
 #                wget -qO- https://ludus.cloud.install | bash
+#                wget -qO- https://ludus.cloud.install | zsh
 # 
 #   DESCRIPTION: Ludus server Installer Script.
 #
@@ -14,6 +16,7 @@
 #
 #       OPTIONS: -p, --prefix "${INSTALL_PREFIX}"
 #                      Prefix to install the Ludus client into.  Defaults to /usr/local/bin
+#                      Usage: curl https://ludus.cloud/install | bash -s -- -p ~/.local/bin
 #  REQUIREMENTS: bash, uname, tar/unzip, curl/wget, grep, sudo (if not run
 #                as root), install, mktemp, sha256sum/shasum/sha256
 #
@@ -246,7 +249,8 @@ download_file() {
 #       RETURNS:  0 = checkusm verified
 #                 1 = checksum verification failed
 #                 20 = failed to determine tool to use to check checksum
-#                 30 = failed to change into or go back from working dir
+#                 30 = failed to change into tmp dir
+#                 31 = failed to change back into working dir
 #-------------------------------------------------------------------------------
 checksum_check() {
   local checksum_file
@@ -290,7 +294,7 @@ checksum_check() {
   else
     return 20
   fi
-  cd - >/dev/null 2>&1 || return 30
+  cd - >/dev/null 2>&1 || return 31
   
   if [[ "${rcode}" -gt "0" ]]; then
     echo "${shasum_c}"
@@ -387,6 +391,49 @@ install_file_linux() {
 }
 
 #---  FUNCTION  ----------------------------------------------------------------
+#          NAME:  install_file_freebsd
+#   DESCRIPTION:  Installs a file into a location using 'install'.  If EUID not
+#                 0, then attempt to use sudo.
+#    PARAMETERS:  $1 = file to install
+#                 $2 = location to install file into
+#       RETURNS:  0 = File Installed
+#                 1 = File not installed
+#                 20 = Could not find install command
+#                 21 = Could not find sudo command
+#-------------------------------------------------------------------------------
+install_file_freebsd() {
+  local file
+  local prefix
+  local rcode
+
+  file="${1}"
+  prefix="${2}"
+
+  if command -v install >/dev/null 2>&1; then
+    if [[ "${EUID}" == "0" ]]; then
+      install -C -b -B '_old' -m 755 "${file}" "${prefix}"
+      rcode="${?}"
+    else
+      install -C -b -B '_old' -m 755 "${file}" "${prefix}" >/dev/null 2>&1
+      rcode="${?}"
+      if [[ "${rcode}" -gt "0" ]]; then
+        if command -v sudo >/dev/null 2>&1; then
+          print_message "[+] Asking for sudo password to install file: ${file} to directory: ${prefix}" "warn"
+          sudo install -C -b -B '_old' -m 755 "${file}" "${prefix}"
+          rcode="${?}"
+        else
+          rcode="21"
+        fi
+      fi
+    fi
+  else
+    rcode="20"
+  fi
+
+  return "${rcode}"
+}
+
+#---  FUNCTION  ----------------------------------------------------------------
 #          NAME:  install_completions
 #   DESCRIPTION:  Installs completion filkes for bash and zsh
 #    PARAMETERS:  none; must be called after install
@@ -395,22 +442,28 @@ install_file_linux() {
 #-------------------------------------------------------------------------------
 install_completions() {
   if [[ "$SHELL" == "/bin/zsh" ]]; then
-    mkdir -p "${HOME}/.zsh_completions"
-    ludus completion zsh > "${HOME}/.zsh_completions/_ludus"
+    mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/.zsh_completions"
+    ludus completion zsh > "${XDG_CONFIG_HOME:-$HOME/.config}/.zsh_completions/_ludus"
     print_message "[+] Installed zsh completion file" "ok"
     print_message "[+] To enable, add the following to your .zshrc:" "info"
     echo
-    print_message "fpath+=${HOME}/.zsh_completions" "info"
+    print_message "fpath+=${XDG_CONFIG_HOME:-$HOME/.config}/.zsh_completions" "info"
     print_message "autoload -U compinit && compinit" "info"
     echo
   elif [[ "$SHELL" == "/bin/bash" ]]; then
-    mkdir -p "${HOME}/.bash_completions"
-    ludus completion bash > "${HOME}/.bash_completions/ludus"
-    print_message "[+] Installed bash completion file" "ok"
-    print_message "[+] To enable, add the following to your .bashrc:" "info"
-    echo
-    print_message "source ${HOME}/.bash_completions/ludus" "info"
-    echo
+    if [[ "${EUID}" == "0" ]]; then
+      mkdir -p /usr/share/bash-completion/completions
+      ludus completion bash > /usr/share/bash-completion/completions/ludus
+      print_message "[+] Installed bash completion file for all users" "ok"
+    else
+      mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion"
+      ludus completion bash > "${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion/ludus"
+      print_message "[+] Installed bash completion file" "ok"
+      print_message "[+] To enable, add the following to your .bashrc:" "info"
+      echo
+      print_message "source ${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion/ludus" "info"
+      echo
+    fi
   else
     print_message "[+] Unsupported shell: $SHELL" "error"
     return 1
@@ -576,6 +629,9 @@ main() {
   elif [[ "${checksum_check_rcode}" == "30" ]]; then
     print_message "[+] Failed to change into working directory ${tmpdir}" "error"
     exit 1
+  elif [[ "${checksum_check_rcode}" == "31" ]]; then
+    print_message "[+] Failed to change back into working directory. Are you running this in a directory you have no access to?" "error"
+    exit 1
   else
     print_message "[+] Unknown return code returned while checking checksum of ${tmpdir}/${ludus_file}. Returned ${checksum_check_rcode}" "error"
     exit 1
@@ -605,7 +661,8 @@ main() {
   case "${ludus_os}" in
     "linux" ) install_file_linux "${tmpdir}/ludus" "${prefix}/";
               install_file_rcode="${?}";;
-    "macOS" ) install_file_freebsd "${tmpdir}/ludus" "${prefix}/";
+    "macOS" ) xattr -d com.apple.quarantine "${tmpdir}/ludus";
+              install_file_freebsd "${tmpdir}/ludus" "${prefix}/";
               install_file_rcode="${?}";;
   esac
 
@@ -628,9 +685,14 @@ main() {
   print_message "[+] Ludus client installation complete" "ok"
 
   # Completions
-  if { [[ "$SHELL" == "/bin/zsh" ]] && [[ ! -f "${HOME}/.zsh_completions/_ludus" ]] } || { [[ "$SHELL" == "/bin/bash" ]] && [[ ! -f "${HOME}/.bash_completions/ludus" ]] }; then
+  if { [[ "$SHELL" == "/bin/zsh" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/.zsh_completions/_ludus" ]] } || { [[ "$SHELL" == "/bin/bash" ]] && [[ ! -f /usr/share/bash-completion/completions/ludus ]] && { [[ "${EUID}" == "0" ]] || { [[ "${EUID}" != "0" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion/ludus" ]] } } }; then
     print_message "[?] Would you like to install shell completions so tab works with the 'ludus' command?" "warn"
-      read -r -p "[?] (y/n): " completions_response
+    if [[ "$SHELL" == "/bin/zsh" ]]; then
+      print_message "[?] (y/n): " "warn"
+      read -r completions_response </dev/tty
+    else
+      read -r -p "[?] (y/n): " completions_response </dev/tty
+    fi
       case "${completions_response}" in
         "y" ) print_message "[+] Installing Ludus completions" "info";
               install_completions
@@ -645,7 +707,12 @@ main() {
   
   if [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && [[ ! -d /opt/ludus ]]; then 
     print_message "[?] Would you like to install the Ludus server on this host?" "warn"
-    read -r -p "[?] (y/n): " install_server
+    if [[ "$SHELL" == "/bin/zsh" ]]; then
+      print_message "[?] (y/n): " "warn"
+      read -r install_server </dev/tty
+    else
+      read -r -p "[?] (y/n): " install_server </dev/tty
+    fi
     case "${install_server}" in
       "y" ) print_message "[+] Installing Ludus server" "info"
             # Download
@@ -679,6 +746,9 @@ main() {
             elif [[ "${checksum_check_rcode}" == "30" ]]; then
               print_message "[+] Failed to change into working directory ${tmpdir}" "error"
               exit 1
+            elif [[ "${checksum_check_rcode}" == "31" ]]; then
+              print_message "[+] Failed to change back into working directory. Are you running this in a directory you have no access to?" "error"
+              exit 1
             else
               print_message "[+] Unknown return code returned while checking checksum of ${tmpdir}/ludus-server-${LATEST_TAG}. Returned ${checksum_check_rcode}" "error"
               exit 1
@@ -705,7 +775,12 @@ main() {
   elif [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && [[ -d /opt/ludus ]]; then
     print_message "[+] Ludus server already installed in /opt/ludus" "info"
     print_message "[?] Would you like to update the Ludus server on this host?" "warn"
-    read -r -p "[?] (y/n): " update_server
+    if [[ "$SHELL" == "/bin/zsh" ]]; then
+      print_message "[?] (y/n): " "warn"
+      read -r update_server </dev/tty
+    else
+      read -r -p "[?] (y/n): " update_server </dev/tty
+    fi
     case "${update_server}" in
       "y" ) print_message "[+] Updating Ludus server" "info"
             # Download
@@ -738,6 +813,9 @@ main() {
               exit 1
             elif [[ "${checksum_check_rcode}" == "30" ]]; then
               print_message "[+] Failed to change into working directory ${tmpdir}" "error"
+              exit 1
+            elif [[ "${checksum_check_rcode}" == "31" ]]; then
+              print_message "[+] Failed to change back into working directory. Are you running this in a directory you have no access to?" "error"
               exit 1
             else
               print_message "[+] Unknown return code returned while checking checksum of ${tmpdir}/ludus-server-${LATEST_TAG}. Returned ${checksum_check_rcode}" "error"
