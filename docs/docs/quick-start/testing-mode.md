@@ -15,10 +15,10 @@ This is accomplished by enabling "testing." When a user enables testing, the fol
 To enter testing mode, run `ludus testing start`. You can check testing status with `ludus testing status`.
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus testing start
-[INFO]  testing started
-#terminal-command-local
+[INFO]  Testing started
+#terminal-command-ludus
 ludus testing status
 +-----------------+--------------------+------------------------+
 | TESTING ENABLED |    ALLOWED IPS     |    ALLOWED DOMAINS     |
@@ -64,13 +64,13 @@ If a domain's IP changes while in testing mode, deny it then allow it again to u
 :::
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus testing allow -d example.com
 [INFO]  Allowed: example.com
 [INFO]  Allowed: crl3.digicert.com
 [INFO]  Allowed: crl4.digicert.com
 [INFO]  Allowed: ocsp.digicert.com
-#terminal-command-local
+#terminal-command-ludus
 ludus testing status
 +-----------------+--------------------+---------------------------------------+
 | TESTING ENABLED |    ALLOWED IPS     |            ALLOWED DOMAINS            |

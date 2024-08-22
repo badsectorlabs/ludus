@@ -33,8 +33,8 @@ At the screen below during install, uncheck `Debain desktop environment` and che
 
 ![A screenshot of the Debain 12 install page with SSH Server and standard system utilities checked](/img/intro/debain-12-install.png)
 
-To install ludus, copy the ludus-server binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to the machine and run it as root. It will copy all files into /opt/ludus and print the configuration
-values used during install.
+To install ludus, use the installer script on a Debian 12 machine as shown below. It will extract files into /opt/ludus and walk through the configuration
+values during install.
 
 :::tip[Don't trust the binaries?]
 
@@ -42,57 +42,34 @@ values used during install.
 
 :::
 
-```shell-session
-# terminal-command-local
-scp ludus-server user@debian12:
+```shell
 # terminal-command-local
 ssh user@debian12
+
+# All-in-one command
 # terminal-command-user-at-debian
-chmod +x ludus-server
+curl -s https://ludus.cloud/install | bash
+
+# If you want to check out the install script
 # terminal-command-user-at-debian
-sudo ./ludus-server
-
-Ludus server v0.9.2+e35d94d
-No config.yml found. Generating a config at /home/debian/config.yml. Please check that it contains the correct values.
-Extracting ludus to /opt/ludus...
-Ludus files extracted successfully
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!! Only run Ludus install on a clean Debian 12 machine that will be dedicated to Ludus !!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-Using the following config:
----
-proxmox_node: ludus
-proxmox_interface: ens18
-proxmox_local_ip: 203.0.113.136
-proxmox_public_ip: 203.0.113.136
-proxmox_gateway: 203.0.113.254
-proxmox_netmask: 255.255.255.0
-proxmox_vm_storage_pool: local
-proxmox_vm_storage_format: qcow2
-proxmox_iso_storage_pool: local
-ludus_nat_interface: ludus
-prevent_user_ansible_add: false
-
-Ludus install will cause the machine to reboot twice. Install will continue
-automatically after each reboot. Check the progress of the install by running:
-'ludus-install-status' from a root shell.
-
-Do you want to continue? (y/N):
-y
-...
+curl https://ludus.cloud/install > install.sh
+# terminal-command-user-at-debian
+cat install.sh
+# terminal-command-user-at-debian
+chmod +x install.sh
+# terminal-command-user-at-debian
+./install.sh
 ```
 
-Once the install starts, ansible logs will be printed to the screen until the first reboot.
+The `install.sh` script will install the `ludus` client, and optionally shell completions, and then prompt to install the server.
+Follow the interactive installer. If you are unsure of any option, just accept the default value. The installer will start and reboot the machine.
 
 After the reboot, the install will continue automatically. To monitor its progress, ssh into
 the machine, elevate to root, and run `ludus-install-status`.
 
-## Customizing the install
+![A gif of the ssh-ing into Debian 12 and running the installer](/img/intro/ludus-install.gif)
 
-In almost all cases, the default values generated during install are correct. However, if the auto-generated
-config contains incorrect values, you can manually create a config called `config.yml` in the same
-directory as the ludus-server binary and those values will be used when run.
+## Customizing the install
 
 In advanced setups `/opt/ludus/config.yml` can be modified after install to accommodate different storage pools,
 ZFS, etc.

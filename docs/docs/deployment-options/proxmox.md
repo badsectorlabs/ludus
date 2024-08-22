@@ -12,7 +12,7 @@ Using an existing Proxmox installation may cause issues with existing customizat
 
 Existing Proxmox 8 servers can install Ludus without a reboot.
 
-Ludus will make the following changes - **do NOT do any actions below yourself before running the binary**:
+Ludus will make the following changes - **do NOT do any actions below yourself before running the install script**:
 
 - Extract files to `/opt/ludus`
 - Install the following packages to the Proxmox host: ansible, packer, dnsmasq, sshpass, curl, jq, iptables-persistent, gpg-agent, dbus, dbus-user-session, and vim
@@ -28,9 +28,30 @@ Ludus will make the following changes - **do NOT do any actions below yourself b
 
 ## Install
 
-1. Copy the ludus-server binary to the Proxmox host and run it as root.
-2. Once the install succeeds, update the values in `/opt/ludus/config.yml` to reflect the install (proxmox may have set up an lvm-thin datastore vs the default `local`)
-3. Restart the ludus processes with `systemctl restart ludus-admin` and `systemctl restart ludus`.
-4. Follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user).
+1. Run the install script. Be careful to choose your datastores correctly!
+
+```shell
+# All-in-one command
+curl -s https://ludus.cloud/install | bash
+
+# If you want to check out the install script
+curl https://ludus.cloud/install > install.sh
+cat install.sh
+chmod +x install.sh
+./install.sh
+```
+
+2. Follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user).
+
+
+If you made a mistake, you can update the values in `/opt/ludus/config.yml` to reflect the install.
+After updating the config, restart the ludus processes with `systemctl restart ludus-admin` and `systemctl restart ludus`.
+
+If you changed the datastores you are using with Ludus, you will need to give permissions to the `ludus_users` and `ludus_admins` group. As root on your Promox host, run the following:
+
+```shell
+pveum acl modify /storage/<your new storage> -group ludus_users -role DatastoreUser
+pveum acl modify /storage/<your new storage> -group ludus_admins -role PVEDatastoreAdmin
+```
 
 If you encounter networking issues like VMs not getting IP addresses or having internet access, see [this guide](../troubleshooting/network.md).

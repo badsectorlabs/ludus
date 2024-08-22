@@ -2,89 +2,24 @@
 sidebar_position: 2
 ---
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
-
 # Create a User
-
-## Setting up the Ludus client
-
-<Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
-Copy the correct Ludus client binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to a location in your PATH and make it executable.
-
-```shell
-# terminal-command-local
-sudo cp ludus-client_linux-[arch]-[version] /usr/local/bin/ludus
-# terminal-command-local
-sudo chmod +x /usr/local/bin/ludus
-```
-
-  </TabItem>
-  <TabItem value="macos" label="macOS">
-Copy the correct Ludus client binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to a location in your PATH and make it executable.
-
-```shell
-# terminal-command-local
-sudo cp ludus-client_macOS-[arch]-[version] /usr/local/bin/ludus
-# terminal-command-local
-sudo chmod +x /usr/local/bin/ludus
-# terminal-command-local
-xattr -r -d com.apple.quarantine /usr/local/bin/ludus
-```
-
-:::note
-
-macOS users need to remove the "quarantine" attribute as the ludus client binary is not (currently) signed
-
-:::
-</TabItem>
-<TabItem value="windows" label="Windows">
-:::note
-
-This documentation assumes the use of the Windows Terminal and Powershell (not cmd.exe and batch).
-
-:::
-
-Copy the correct Ludus client binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to your Windows device.
-
-`cd` to the directory that contains the binary or move the binary to a location in your PATH.
-
-```shell-session
-# terminal-command-powershell
-.\ludus-client_windows_[arch]-[version].exe
-Ludus client v1.0.0
-
-Ludus is a CLI application to control a Ludus server
-This application can manage users as well as ranges.
-...
-```
-
-  </TabItem>
-</Tabs>
 
 ## Using the Ludus client to create a Ludus user
 
 To perform user related actions, which modify the Ludus host as root, we must connect to the
-admin service which only listens on localhost. To do this we will create an SSH tunnel.
+admin service which only listens on localhost.
 
-```plain title="Terminal 1 (Linux/macOS/Windows)"
-ssh -L 8081:127.0.0.1:8081 user@<Ludus IP>
-```
-
-From a root shell run `ludus-install-status` which will print the root
+From a root shell on the Ludus host run `ludus-install-status` which will print the root
 API key.
 
 ```shell-session title="Terminal 1"
 #terminal-command-ludus
 sudo su -
 #terminal-command-ludus-root
-root@ludus:~# ludus-install-status
+ludus-install-status
 Ludus install completed successfully
 Root API key: ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF
 ```
-
-Open a second terminal.
 
 Now create your first ludus user! This user will be an admin as we specify `--admin`.
 Initials are commonly used for the userID.
@@ -98,8 +33,7 @@ on the system already, it's PAM password will be changed by Ludus! This user's g
 
 Prepend the LUDUS_API_KEY variable to the command to authenticate properly.
 
-<Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
+
 :::tip
 
 Adding a space at the beginning of this command will prevent it from being written to the
@@ -107,8 +41,8 @@ shell's history file in most common shells.
 
 :::
 
-```shell-session title="Terminal 2 (Linux/macOS)"
-#terminal-command-local
+```shell-session
+#terminal-command-ludus
 LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
  ludus user add --name "John Doe" --userid JD --admin --url https://127.0.0.1:8081
 +--------+------------------+-------+---------------------------------------------+
@@ -118,171 +52,15 @@ LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
 +--------+------------------+-------+---------------------------------------------+
 ```
 
-  </TabItem>
-  <TabItem value="macos" label="macOS">
-:::tip
-
-Adding a space at the beginning of this command will prevent it from being written to the
-shell's history file in most common shells.
-
-:::
-
-```shell-session title="Terminal 2 (Linux/macOS)"
-#terminal-command-local
-LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF' \
- ludus user add --name "John Doe" --userid JD --admin --url https://127.0.0.1:8081
-+--------+------------------+-------+---------------------------------------------+
-| USERID | PROXMOX USERNAME | ADMIN |                   API KEY                   |
-+--------+------------------+-------+---------------------------------------------+
-| JD     | john-doe         | true  | JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt |
-+--------+------------------+-------+---------------------------------------------+
-```
-
-  </TabItem>
-  <TabItem value="windows" label="Windows">
-```shell-session title="Terminal 2 (Windows)"
-#terminal-command-powershell
-$env:LUDUS_API_KEY='ROOT.o>T3BMm!^\As_0Fhve8B\VrD&zqc#kCk&B&?e|aF'
-#terminal-command-powershell
-.\ludus-client.exe user add --name "John Doe" --userid JD --admin --url https://127.0.0.1:8081
-+--------+------------------+-------+---------------------------------------------+
-| USERID | PROXMOX USERNAME | ADMIN |                   API KEY                   |
-+--------+------------------+-------+---------------------------------------------+
-| JD     | john-doe         | true  | JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt |
-+--------+------------------+-------+---------------------------------------------+
-
-# Remove the LUDUS_API_KEY environment variable set in the previous command
-#terminal-command-powershell
-Remove-Item Env:\LUDUS_API_KEY
-```
-  </TabItem>
-</Tabs>
-:::info
-
-This command construct is only required for user add and delete actions. Normal user actions don't require the SSH tunnel or url parameter
-
-:::
-
-
-## WireGuard
-
-The easiest way to interact with Ludus VMs is directly - via SSH, RDP, or KasmVNC.
-This is possible thanks to a WireGuard VPN hosted on the Ludus server.
-To get the WireGuard configuration file for your user, run the `user wireguard` command.
-Admins can get WireGuard configurations for other users with the `user wireguard --user <UserID>` command.
-
-<Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
-```shell-session title="Terminal 2 (Linux/macOS)"
-#terminal-command-local
- LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt' \
- ludus user wireguard --user JD --url https://127.0.0.1:8081 | tee ludus.conf
-[Interface]
-PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
-Address = 198.51.100.2/32
-
-[Peer]
-PublicKey = 5nlDO6gtqVXI89xQNkd2c2L0US7RnPinbAlfiyWHHBM=
-Endpoint = 10.2.99.240:51820
-AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
-PersistentKeepalive = 25
-```
-
-  </TabItem>
-  <TabItem value="macos" label="macOS">
-```shell-session title="Terminal 2 (Linux/macOS)"
-#terminal-command-local
- LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt' \
- ludus user wireguard --user JD --url https://127.0.0.1:8081 | tee ludus.conf
-[Interface]
-PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
-Address = 198.51.100.2/32
-
-[Peer]
-PublicKey = 5nlDO6gtqVXI89xQNkd2c2L0US7RnPinbAlfiyWHHBM=
-Endpoint = 10.2.99.240:51820
-AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
-PersistentKeepalive = 25
-```
-  </TabItem>
-  <TabItem value="windows" label="Windows">
-```shell-session title="Terminal 2 (Windows)"
-#terminal-command-powershell
-$env:LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'
-#terminal-command-powershell
-.\ludus-client.exe user wireguard --user JD --url https://127.0.0.1:8081 | Tee-Object -Variable luduswg; $luduswg  | Set-Content -Encoding ASCII ludus.conf
-[Interface]
-PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
-Address = 198.51.100.2/32
-
-[Peer]
-PublicKey = 5nlDO6gtqVXI89xQNkd2c2L0US7RnPinbAlfiyWHHBM=
-Endpoint = 10.2.99.240:51820
-AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
-PersistentKeepalive = 25
-
-# Remove the LUDUS_API_KEY environment variable set in the previous command
-#terminal-command-powershell
-Remove-Item Env:\LUDUS_API_KEY
-```
-
-  </TabItem>
-</Tabs>
-Import this WireGuard configuration (`ludus.conf`) into the [WireGuard GUI client](https://www.wireguard.com/install/) or on the command line with [wg-quick](https://manpages.ubuntu.com/manpages/jammy/man8/wg-quick.8.html) and connect. `wg setconf` is not supported by this configuration. Once connected, the ludus client's default url (`https://198.51.100.1:8080`)
-will work for all future commands.
 
 ## Set the API Key
 
-Using the key from the previous step, run `ludus apikey` and provide the user API key.
-
-<Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
-```shell-session
-#terminal-command-local
-ludus apikey
-[INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
-JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
-[INFO]  Ludus API key set successfully
-```
-
-:::tip
-
-On headless Linux systems or Linux systems without a keyring, set the LUDUS_API_KEY environment variable instead
-
-`export LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'`
-
-:::
-  </TabItem>
-  <TabItem value="macos" label="macOS">
+Using the key from the previous step, we will export the `LUDUS_API_KEY` variable so it is known to future commands.
 
 ```shell-session
-#terminal-command-local
-ludus apikey
-[INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
-JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
-[INFO]  Ludus API key set successfully
+#terminal-command-ludus
+export LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'
 ```
-
-:::tip
-
-On headless macOS systems or macOS systems without a keyring, set the LUDUS_API_KEY environment variable instead
-
-`export LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt'`
-
-:::
-  </TabItem>
-  <TabItem value="windows" label="Windows">
-
-```shell-session
-#terminal-command-powershell
-.\ludus-client.exe apikey
-[INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
-JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
-[INFO]  Ludus API key set successfully
-```
-
-  </TabItem>
-</Tabs>
 
 With the API key set, all user commands are available!
 
@@ -291,10 +69,8 @@ With the API key set, all user commands are available!
 Ludus is built on top of the [Proxmox](https://www.proxmox.com/en/) hypervisor which has a web interface.
 It's available at `https://<ludus IP>:8006` and the credentials for the web GUI can be retrieved with `ludus user creds get`.
 
-<Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus user creds get
 +------------------+----------------------+
 | PROXMOX USERNAME |   PROXMOX PASSWORD   |
@@ -302,30 +78,6 @@ ludus user creds get
 | john-doe         | oQjQC76Ny0HQfpNV31zK |
 +------------------+----------------------+
 ```
-</TabItem>
-  <TabItem value="macos" label="macOS">
-```shell-session
-#terminal-command-local
-ludus user creds get
-+------------------+----------------------+
-| PROXMOX USERNAME |   PROXMOX PASSWORD   |
-+------------------+----------------------+
-| john-doe         | oQjQC76Ny0HQfpNV31zK |
-+------------------+----------------------+
-```
-  </TabItem>
-  <TabItem value="windows" label="Windows">
-```shell-session
-#terminal-command-powershell
-.\ludus-client.exe user creds get
-+------------------+----------------------+
-| PROXMOX USERNAME |   PROXMOX PASSWORD   |
-+------------------+----------------------+
-| john-doe         | oQjQC76Ny0HQfpNV31zK |
-+------------------+----------------------+
-```
-  </TabItem>
-</Tabs>
 
 :::info
 

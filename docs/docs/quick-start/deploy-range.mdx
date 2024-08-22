@@ -9,7 +9,7 @@ Ludus ranges (environments) are defined by a single yaml configuration file. By 
 To view your current configuration, run the following command
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus range config get
 ```
 
@@ -18,11 +18,11 @@ For a detailed explanation of the configuration file, see **[configuration](../c
 If you would like to make changes to this file, save it to disk, modify it, and set it with the following commands.
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus range config get > ludus-range-config.yml
-#terminal-command-local
+#terminal-command-ludus
 <vim|nano> config
-#terminal-command-local
+#terminal-command-ludus
 ludus range config set -f ludus-range-config.yml
 [INFO]  Your range config has been successfully updated.
 ```
@@ -30,7 +30,7 @@ ludus range config set -f ludus-range-config.yml
 Once you are satisfied with your range configuration, deploy it with `range deploy`.
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus range deploy
 [INFO]  range deploy started
 ```
@@ -38,7 +38,7 @@ ludus range deploy
 Just like with templates, you can tail the ansible logs for range deployment with `range logs -f`
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus range logs -f
 PLAY [Pre run checks] **********************************************************
 
@@ -56,7 +56,7 @@ ok: [localhost] => {
 You can also check the status of your range at any time with `range status`
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus range status
 +---------+---------------+------------------+---------------+-------------------+-----------------+
 | USER ID | RANGE NETWORK | LAST DEPLOYMENT  | NUMBER OF VMS | DEPLOYMENT STATUS | TESTING ENABLED |
@@ -74,13 +74,18 @@ ludus range status
 ```
 
 When the range status shows `SUCCESS` your range is fully deployed!
-The easiest way to interact with the VMs is via SSH or RDP.
-All VMs are directly accessible to users connected to the Ludus WireGuard server.
-To get a WireGuard configuration file for your user, run `user wireguard`
+
+## WireGuard
+
+The easiest way to interact with Ludus VMs is directly - via SSH, RDP, or KasmVNC.
+This is possible thanks to a WireGuard VPN hosted on the Ludus server.
+To get the WireGuard configuration file for your user, run the `user wireguard` command.
+Admins can get WireGuard configurations for other users with the `user wireguard --user <UserID>` command.
 
 ```shell-session
-#terminal-command-local
-ludus user wireguard
+#terminal-command-ludus
+ LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt' \
+ ludus user wireguard --user JD --url https://127.0.0.1:8081 | tee ludus.conf
 [Interface]
 PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
 Address = 198.51.100.2/32
@@ -92,12 +97,16 @@ AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
 PersistentKeepalive = 25
 ```
 
+**On your local machine**, import this WireGuard configuration (`ludus.conf`) into the [WireGuard GUI client](https://www.wireguard.com/install/) or on the command line with [wg-quick](https://manpages.ubuntu.com/manpages/jammy/man8/wg-quick.8.html) and connect. 
+`wg setconf` is not supported by this configuration.
+Now you can directly interact with range VMs as if you were on the same network.
+
 Import this configuration into a [WireGuard client](https://www.wireguard.com/install/) and once connected, all range VMs are directly accessible.
 
 To get a zip file of RDP configuration files for the Windows machines, use the `range rdp` command.
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus range rdp
 [INFO]  File downloaded and saved as rdp.zip
 ```
@@ -106,13 +115,15 @@ These configuration files can be imported into any RDP client and used to connec
 
 All Linux machines have SSH running on port 22.
 
-The Kali template is running [KasmVNC](https://github.com/kasmtech/KasmVNC) on port 8444.
+All Windows machines have RDP enabled on port 3389.
+
+The Kali template is running [KasmVNC](https://github.com/kasmtech/KasmVNC) on `https://<kali IP>:8444/`.
 The password for KasmVNC is `password` as it requires a 6 character password.
 
 ## Default Machine Credentials
   - Kali
     - `kali:kali` (OS)
-    - `kali:password` (KasmVNC - port 8444)
+    - `kali:password` (KasmVNC - https port 8444)
   - Windows
     - `localuser:password` (local Administrator)
     - `LUDUS\domainuser:password`

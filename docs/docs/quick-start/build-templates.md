@@ -14,7 +14,7 @@ This focus on infrastructure as code allows Ludus users to create fresh, up to d
 The first step is to start the template build process. First, we can view the available templates.
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus templates list
 +------------------------------------+-------+
 |              TEMPLATE              | BUILT |
@@ -30,7 +30,7 @@ ludus templates list
 On a fresh install, no templates are built. Ludus will build them from ISO files (with checksums) with the following command.
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus templates build
 [INFO]  Template building started - this will take a while. Building 1 template(s) at a time.
 ```
@@ -38,13 +38,13 @@ ludus templates build
 To check the status of the template build, you can run `templates status`, `templates list` again, or follow the packer logs with 
 
 ```shell-session
-#terminal-command-local
+#terminal-command-ludus
 ludus templates logs -f
-2023/12/01 22:00:47 [INFO] Packer version: 1.9.4 [go1.20.7 linux amd64]
-2023/12/01 22:00:47 [TRACE] discovering plugins in /opt/ludus/resources/packer/plugins
-2023/12/01 22:00:47 [INFO] Discovered potential plugin: proxmox = /opt/ludus/resources/packer/plugins/github.com/hashicorp/proxmox/packer-plugin-proxmox_v1.1.6_x5.0_linux_amd64
-2023/12/01 22:00:47 [INFO] found external [-packer-default-plugin-name- clone iso] builders from proxmox plugin
-2023/12/01 22:00:47 [INFO] PACKER_CONFIG env var not set; checking the default config file path
+2024/08/16 20:11:17 ui: ==> proxmox-iso.debian11: Retrieving ISO
+2024/08/16 20:11:17 ui: ==> proxmox-iso.debian11: Trying https://cdimage.debian.org/cdimage/archive/11.7.0/amd64/iso-cd/debian-11.7.0-amd64-netinst.iso
+2024/08/16 20:11:17 ui: ==> proxmox-iso.debian11: Trying https://cdimage.debian.org/cdimage/archive/11.7.0/amd64/iso-cd/debian-11.7.0-amd64-netinst.iso?checksum=sha512%4460ef6470f6d8ae193c268e213d33a6a5a0da90c2d30c1024784faa4e4473f0c9b546a41e2d34c43fbbd43542ae4fb93cfd5cb6ac9b88a476f1a6877c478674
+2024/08/16 20:11:18 ui: ==> proxmox-iso.debian11: https://cdimage.debian.org/cdimage/archive/11.7.0/amd64/iso-cd/debian-11.7.0-amd64-netinst.iso?checksum=sha512%4460ef6470f6d8ae193c268e213d33a6a5a0da90c2d30c1024784faa4e4473f0c9b546a41e2d34c43fbbd43542ae4fb93cfd5cb6ac9b88a476f1a6877c478674 => /opt/ludus/users/john-doe/packer/packer_cache/50c7c8865f6fecec41b10c36bf86b3bd9bdb1eaf.iso
+2024/08/16 20:11:22 ui: ==> proxmox-iso.debian11: Creating VM
 ...
 ```
 
