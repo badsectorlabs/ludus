@@ -123,11 +123,11 @@
       pve_remove_subscription_warning: false
       pve_remove_old_kernels: false
       pve_roles:
-        - name: LudusResourceAudit
+        - name: ResourceAudit
           privileges:
             - "Sys.Audit"
             - "Datastore.Audit"
-        - name: LudusDatastoreUser
+        - name: DatastoreUser
           privileges:
             - "Datastore.AllocateSpace"
             - "Datastore.AllocateTemplate"
@@ -178,7 +178,7 @@
           roles: ["PVEVMAdmin", "PVESDNAdmin"]
           groups: ["ludus_admins"]
         - path: /
-          roles: ["LudusResourceAudit"]
+          roles: ["ResourceAudit"]
           groups: ["ludus_users"]
         - path: "/storage/{{ proxmox_vm_storage_pool }}"
           roles: ["PVEDatastoreAdmin"]
@@ -189,11 +189,11 @@
           groups:
             - ludus_admins
         - path: "/storage/{{ proxmox_vm_storage_pool }}"
-          roles: ["LudusDatastoreUser"]
+          roles: ["DatastoreUser"]
           groups:
             - ludus_users
         - path: "/storage/{{ proxmox_iso_storage_pool }}"
-          roles: ["LudusDatastoreUser"]
+          roles: ["DatastoreUser"]
           groups:
             - ludus_users
   vars:

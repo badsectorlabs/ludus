@@ -84,11 +84,11 @@
       pve_cluster_enabled: false
       pve_zfs_enabled: false
       pve_roles:
-        - name: LudusResourceAudit
+        - name: ResourceAudit
           privileges:
             - "Sys.Audit"
             - "Datastore.Audit"
-        - name: LudusDatastoreUser
+        - name: DatastoreUser
           privileges:
             - "Datastore.AllocateSpace"
             - "Datastore.AllocateTemplate"
