@@ -340,6 +340,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.form.State == huh.StateCompleted {
+		m.confirmed = true
 		// Quit when the form is done.
 		cmds = append(cmds, tea.Quit)
 	}
@@ -352,7 +353,6 @@ func (m Model) View() string {
 
 	switch m.form.State {
 	case huh.StateCompleted:
-		m.confirmed = true
 		return s.Status.Margin(0, 1).Padding(1, 2).Width(60).Render(generateFinalMessage()) + "\n\n"
 	default:
 
