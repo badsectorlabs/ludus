@@ -122,8 +122,13 @@ func initConfig() {
 	if len(apiKey) == 0 {
 		apiKey, err = keyring.Get(keyringService, url)
 	}
-	// Fail if there is no API key if they aren't running the apikey or version subcommand
-	if err != nil && !strings.Contains(strings.Join(os.Args, " "), " apikey") && !strings.Contains(strings.Join(os.Args, " "), " version") && !strings.Contains(strings.Join(os.Args, " "), " completion") {
+	// Fail if there is no API key if they aren't running the apikey, version, completion, or __complete subcommands
+	if err != nil && !strings.Contains(strings.Join(os.Args, " "), " apikey") &&
+		!strings.Contains(strings.Join(os.Args, " "), " version") &&
+		!strings.Contains(strings.Join(os.Args, " "), " completion") &&
+		!strings.Contains(strings.Join(os.Args, " "), " __complete") &&
+		!strings.Contains(strings.Join(os.Args, " "), " __completeNoDesc") {
+
 		logger.Logger.Fatalf(fmt.Sprintf("No Ludus API key found in system keyring for %s.\nSet one using the `apikey` command."+
 			"\nYou can also set the LUDUS_API_KEY env variable if you are on a headless system.", url))
 	} else {
