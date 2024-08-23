@@ -28,7 +28,7 @@ func getProxmoxClientForUser(c *gin.Context) (*proxmox.Client, error) {
 	}
 	err = proxmoxClient.Login(user.ProxmoxUsername+"@pam", proxmoxPassword, "")
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "unable to login to proxmox"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "unable to login to proxmox: " + err.Error()})
 		return nil, errors.New("unable to login to proxmox")
 	}
 	return proxmoxClient, nil
