@@ -1,7 +1,8 @@
 - hosts: all
   tasks:
   - name: Install security updates
-    win_updates:
+    ansible.windows.win_updates:
       category_names:
       - SecurityUpdates
-      reboot: yes
+      reboot: true
+      reboot_timeout: 7200
