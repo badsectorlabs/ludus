@@ -325,8 +325,9 @@ func PutConfig(c *gin.Context) {
 	// Check the roles and dependencies
 	userHasRoles, exists := c.Get("userHasRoles")
 	if exists && userHasRoles.(bool) {
-		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "Resolving dependencies for user-defined roles...", false)
+		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "Resolving dependencies for user-defined roles..\n", false)
 		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(c, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
+		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), rolesOutput, true)
 		if err != nil {
 			db.Model(&usersRange).Update("range_state", "ERROR")
 			// Find the 'ERROR' line in the output and return it to the user
