@@ -94,7 +94,6 @@ func automatedConfigGenerator(writeToFile bool) {
 					config.PreventUserAnsibleAdd = false
 					config.ProxmoxInvalidCert = true
 					config.ProxmoxURL = "https://127.0.0.1:8006"
-					config.ProxmoxHostname = config.ProxmoxNode
 				}
 				return
 			}

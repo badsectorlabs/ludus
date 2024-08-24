@@ -530,6 +530,7 @@ to function. The Ludus install process will not reboot your host.
 		os.Exit(1)
 	}
 	// Now that the form is done, write the config
+	config.ProxmoxHostname = config.ProxmoxNode
 	writeConfigToFile(config, fmt.Sprintf("%s/config.yml", ludusInstallPath))
 }
 
