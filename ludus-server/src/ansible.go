@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -202,6 +203,60 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 
 // Return true if the role exists for the user, or false if it doesn't
 func checkRoleExists(c *gin.Context, roleName string) (bool, error) {
+
+	// If there are two `.` characters in the role name, it is part of a collection, so check that the first two segments of the role name
+	// exist in the collection listing, and if so, assume the role exists
+	//
+	// This is a workaround for the fact that ansible-galaxy doesn't support listing roles in collections
+	// We could walk the filesystem and pull out every role in every collection, but that would be slow
+	if strings.Count(roleName, ".") == 2 {
+		roleParts := strings.Split(roleName, ".")
+		collectionName := strings.Join(roleParts[:2], ".")
+
+		// Check if collections are already cached in the context
+		if cachedCollections, exists := c.Get("ansible_collections"); exists {
+			return slices.Contains(cachedCollections.([]string), collectionName), nil
+		}
+
+		user, err := getUserObject(c)
+		if err != nil {
+			return false, err
+		}
+
+		// Collections
+		collectionCmd := exec.Command("ansible-galaxy", "collection", "list", "--format", "json")
+		collectionCmd.Env = os.Environ()
+		collectionCmd.Env = append(collectionCmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
+
+		collectionOutput, err := collectionCmd.CombinedOutput()
+		if err != nil {
+			return false, errors.New("Unable to get the ansible collections: " + err.Error())
+		}
+
+		// Unmarshal the JSON into a suitable Go data structure
+		var data map[string]map[string]map[string]string
+		err = json.Unmarshal(collectionOutput, &data)
+		if err != nil {
+			return false, errors.New("Unable to get parse ansible collections JSON: " + err.Error())
+		}
+
+		// Iterate through the data
+		var collections []string
+		for path, modules := range data {
+			if strings.Contains(path, ".ansible") {
+				for name := range modules {
+					collections = append(collections, name)
+				}
+			}
+		}
+
+		// Cache the collections in the context
+		c.Set("ansible_collections", collections)
+
+		return slices.Contains(collections, collectionName), nil
+
+	}
+
 	// Check if roles are already cached in the context
 	if roles, exists := c.Get("ansible_roles"); exists {
 		return slices.Contains(roles.([]string), roleName), nil
