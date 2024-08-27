@@ -685,7 +685,13 @@ main() {
   print_message "[+] Ludus client installation complete" "ok"
 
   # Completions
-  if { [[ "$SHELL" == "/bin/zsh" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/.zsh_completions/_ludus" ]] } || { [[ "$SHELL" == "/bin/bash" ]] && [[ ! -f /usr/share/bash-completion/completions/ludus ]] && { [[ "${EUID}" == "0" ]] || { [[ "${EUID}" != "0" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion/ludus" ]] } } }; then
+  if { [[ "$SHELL" == "/bin/zsh" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/.zsh_completions/_ludus" ]]; } || \
+   { [[ "$SHELL" == "/bin/bash" ]] && \
+     [[ ! -f /usr/share/bash-completion/completions/ludus ]] && \
+     { [[ "${EUID}" == "0" ]] || \
+       { [[ "${EUID}" != "0" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion/ludus" ]]; }
+     }
+   }; then
     print_message "[?] Would you like to install shell completions so tab works with the 'ludus' command?" "warn"
     if [[ "$SHELL" == "/bin/zsh" ]]; then
       print_message "[?] (y/n): " "warn"
@@ -706,140 +712,156 @@ main() {
   fi
   
   if [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && [[ ! -d /opt/ludus ]]; then 
-    print_message "[?] Would you like to install the Ludus server on this host?" "warn"
-    if [[ "$SHELL" == "/bin/zsh" ]]; then
-      print_message "[?] (y/n): " "warn"
-      read -r install_server </dev/tty
-    else
-      read -r -p "[?] (y/n): " install_server </dev/tty
-    fi
-    case "${install_server}" in
-      "y" ) print_message "[+] Installing Ludus server" "info"
-            # Download
-            download_file "${ludus_base_url}/ludus-server-${LATEST_TAG}" "${tmpdir}" "ludus-server-${LATEST_TAG}"
-            download_file_rcode="${?}"
-            if [[ "${download_file_rcode}" == "0" ]]; then
-              print_message "[+] Downloaded ludus-server-${LATEST_TAG} into ${tmpdir}" "info"
-            elif [[ "${download_file_rcode}" == "1" ]]; then
-              print_message "[+] Failed to download ludus-server-${LATEST_TAG}" "error"
-              exit 1
-            elif [[ "${download_file_rcode}" == "20" ]]; then
-              print_message "[+] Failed to locate curl or wget" "error"
-              exit 1
-            else
-              print_message "[+] Return code of download tool returned an unexpected value of ${download_file_rcode}" "error"
-              exit 1
-            fi
-            # Move the server
-            mv "${tmpdir}/ludus-server-${LATEST_TAG}" "${tmpdir}/ludus-server" 
-            # Checksum check
-            checksum_check "${tmpdir}/${ludus_checksum_file}" "${tmpdir}/ludus-server" "${tmpdir}"
-            checksum_check_rcode="${?}"
-            if [[ "${checksum_check_rcode}" == "0" ]]; then
-              print_message "[+] Checksum of ${tmpdir}/ludus-server-${LATEST_TAG} verified" "ok"
-            elif [[ "${checksum_check_rcode}" == "1" ]]; then
-              print_message "[+] Failed to verify checksum of ${tmpdir}/ludus-server-${LATEST_TAG}" "error"
-              exit 1
-            elif [[ "${checksum_check_rcode}" == "20" ]]; then
-              print_message "[+] Failed to find tool to verify sha256 sums" "error"
-              exit 1
-            elif [[ "${checksum_check_rcode}" == "30" ]]; then
-              print_message "[+] Failed to change into working directory ${tmpdir}" "error"
-              exit 1
-            elif [[ "${checksum_check_rcode}" == "31" ]]; then
-              print_message "[+] Failed to change back into working directory. Are you running this in a directory you have no access to?" "error"
-              exit 1
-            else
-              print_message "[+] Unknown return code returned while checking checksum of ${tmpdir}/ludus-server-${LATEST_TAG}. Returned ${checksum_check_rcode}" "error"
-              exit 1
-            fi
-            # Chmod
-            chmod +x "${tmpdir}/ludus-server"
-            # Install
-            if [[ "${EUID}" == "0" ]]; then
-              "${tmpdir}/ludus-server"
-            else
-              if command -v sudo >/dev/null 2>&1; then
-                sudo "${tmpdir}/ludus-server"
-              else
-                print_message "[+] Failed to locate 'sudo' command" "error"
-                exit 1
-              fi
-            fi
-            ;;
-      "n" ) print_message "[+] Skipping Ludus server installation" "info"
-            ;;
-        * ) print_message "[-_-] Invalid response. Skipping Ludus server installation" "error"
-            ;;
-    esac
+    # Check if this is a Debian 12 host by reading /etc/debian_version
+    if [[ -f /etc/os-release ]]; then
+      # shellcheck source=/dev/null
+      source /etc/os-release
+      if [[ "${ID}" == "debian" ]] && [[ "${VERSION_ID}" == "12" ]]; then
+        print_message "[?] Would you like to install the Ludus server on this host?" "warn"
+        if [[ "$SHELL" == "/bin/zsh" ]]; then
+          print_message "[?] (y/n): " "warn"
+          read -r install_server </dev/tty
+        else
+          read -r -p "[?] (y/n): " install_server </dev/tty
+        fi
+        case "${install_server}" in
+          "y" ) print_message "[+] Installing Ludus server" "info"
+                # Download
+                download_file "${ludus_base_url}/ludus-server-${LATEST_TAG}" "${tmpdir}" "ludus-server-${LATEST_TAG}"
+                download_file_rcode="${?}"
+                if [[ "${download_file_rcode}" == "0" ]]; then
+                  print_message "[+] Downloaded ludus-server-${LATEST_TAG} into ${tmpdir}" "info"
+                elif [[ "${download_file_rcode}" == "1" ]]; then
+                  print_message "[+] Failed to download ludus-server-${LATEST_TAG}" "error"
+                  exit 1
+                elif [[ "${download_file_rcode}" == "20" ]]; then
+                  print_message "[+] Failed to locate curl or wget" "error"
+                  exit 1
+                else
+                  print_message "[+] Return code of download tool returned an unexpected value of ${download_file_rcode}" "error"
+                  exit 1
+                fi
+                # Move the server
+                mv "${tmpdir}/ludus-server-${LATEST_TAG}" "${tmpdir}/ludus-server" 
+                # Checksum check
+                checksum_check "${tmpdir}/${ludus_checksum_file}" "${tmpdir}/ludus-server" "${tmpdir}"
+                checksum_check_rcode="${?}"
+                if [[ "${checksum_check_rcode}" == "0" ]]; then
+                  print_message "[+] Checksum of ${tmpdir}/ludus-server-${LATEST_TAG} verified" "ok"
+                elif [[ "${checksum_check_rcode}" == "1" ]]; then
+                  print_message "[+] Failed to verify checksum of ${tmpdir}/ludus-server-${LATEST_TAG}" "error"
+                  exit 1
+                elif [[ "${checksum_check_rcode}" == "20" ]]; then
+                  print_message "[+] Failed to find tool to verify sha256 sums" "error"
+                  exit 1
+                elif [[ "${checksum_check_rcode}" == "30" ]]; then
+                  print_message "[+] Failed to change into working directory ${tmpdir}" "error"
+                  exit 1
+                elif [[ "${checksum_check_rcode}" == "31" ]]; then
+                  print_message "[+] Failed to change back into working directory. Are you running this in a directory you have no access to?" "error"
+                  exit 1
+                else
+                  print_message "[+] Unknown return code returned while checking checksum of ${tmpdir}/ludus-server-${LATEST_TAG}. Returned ${checksum_check_rcode}" "error"
+                  exit 1
+                fi
+                # Chmod
+                chmod +x "${tmpdir}/ludus-server"
+                # Install
+                if [[ "${EUID}" == "0" ]]; then
+                  "${tmpdir}/ludus-server"
+                else
+                  if command -v sudo >/dev/null 2>&1; then
+                    sudo "${tmpdir}/ludus-server"
+                  else
+                    print_message "[+] Failed to locate 'sudo' command" "error"
+                    exit 1
+                  fi
+                fi
+                ;;
+          "n" ) print_message "[+] Skipping Ludus server installation" "info"
+                ;;
+            * ) print_message "[-_-] Invalid response. Skipping Ludus server installation" "error"
+                ;;
+        esac
+        fi
+      fi # End of /etc/os-release check
   elif [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && [[ -d /opt/ludus ]]; then
-    print_message "[+] Ludus server already installed in /opt/ludus" "info"
-    print_message "[?] Would you like to update the Ludus server on this host?" "warn"
-    if [[ "$SHELL" == "/bin/zsh" ]]; then
-      print_message "[?] (y/n): " "warn"
-      read -r update_server </dev/tty
+    if [[ ! -f /etc/systemd/system/ludus.service ]] && [[ ! -f /etc/systemd/system/ludus-install.service ]]; then
+      print_message "[!] The /opt/ludus directory exists but Ludus is not installed and is not currently installing" "error"
+      print_message "[!] Remove the /opt/ludus directory and re-run this script if you wish to install" "error"
+      exit 1
+    elif [[ ! -f /etc/systemd/system/ludus.service ]] && [[ -f /etc/systemd/system/ludus-install.service ]]; then
+      print_message "[!] Ludus is currently installing!" "error"
+      exit 1    
     else
-      read -r -p "[?] (y/n): " update_server </dev/tty
-    fi
-    case "${update_server}" in
-      "y" ) print_message "[+] Updating Ludus server" "info"
-            # Download
-            download_file "${ludus_base_url}/ludus-server-${LATEST_TAG}" "${tmpdir}" "ludus-server-${LATEST_TAG}"
-            download_file_rcode="${?}"
-            if [[ "${download_file_rcode}" == "0" ]]; then
-              print_message "[+] Downloaded ludus-server-${LATEST_TAG} into ${tmpdir}" "info"
-            elif [[ "${download_file_rcode}" == "1" ]]; then
-              print_message "[+] Failed to download ludus-server-${LATEST_TAG}" "error"
-              exit 1
-            elif [[ "${download_file_rcode}" == "20" ]]; then
-              print_message "[+] Failed to locate curl or wget" "error"
-              exit 1
-            else
-              print_message "[+] Return code of download tool returned an unexpected value of ${download_file_rcode}" "error"
-              exit 1
-            fi
-            # Move the server
-            mv "${tmpdir}/ludus-server-${LATEST_TAG}" "${tmpdir}/ludus-server" 
-            # Checksum check
-            checksum_check "${tmpdir}/${ludus_checksum_file}" "${tmpdir}/ludus-server" "${tmpdir}"
-            checksum_check_rcode="${?}"
-            if [[ "${checksum_check_rcode}" == "0" ]]; then
-              print_message "[+] Checksum of ${tmpdir}/ludus-server-${LATEST_TAG} verified" "ok"
-            elif [[ "${checksum_check_rcode}" == "1" ]]; then
-              print_message "[+] Failed to verify checksum of ${tmpdir}/ludus-server-${LATEST_TAG}" "error"
-              exit 1
-            elif [[ "${checksum_check_rcode}" == "20" ]]; then
-              print_message "[+] Failed to find tool to verify sha256 sums" "error"
-              exit 1
-            elif [[ "${checksum_check_rcode}" == "30" ]]; then
-              print_message "[+] Failed to change into working directory ${tmpdir}" "error"
-              exit 1
-            elif [[ "${checksum_check_rcode}" == "31" ]]; then
-              print_message "[+] Failed to change back into working directory. Are you running this in a directory you have no access to?" "error"
-              exit 1
-            else
-              print_message "[+] Unknown return code returned while checking checksum of ${tmpdir}/ludus-server-${LATEST_TAG}. Returned ${checksum_check_rcode}" "error"
-              exit 1
-            fi
-            # Chmod
-            chmod +x "${tmpdir}/ludus-server"
-            # Update
-            if [[ "${EUID}" == "0" ]]; then
-              "${tmpdir}/ludus-server" --update
-            else
-              if command -v sudo >/dev/null 2>&1; then
-                sudo "${tmpdir}/ludus-server" --update
+      print_message "[+] Ludus server already installed in /opt/ludus" "info"
+      print_message "[?] Would you like to update the Ludus server on this host?" "warn"
+      if [[ "$SHELL" == "/bin/zsh" ]]; then
+        print_message "[?] (y/n): " "warn"
+        read -r update_server </dev/tty
+      else
+        read -r -p "[?] (y/n): " update_server </dev/tty
+      fi
+      case "${update_server}" in
+        "y" ) print_message "[+] Updating Ludus server" "info"
+              # Download
+              download_file "${ludus_base_url}/ludus-server-${LATEST_TAG}" "${tmpdir}" "ludus-server-${LATEST_TAG}"
+              download_file_rcode="${?}"
+              if [[ "${download_file_rcode}" == "0" ]]; then
+                print_message "[+] Downloaded ludus-server-${LATEST_TAG} into ${tmpdir}" "info"
+              elif [[ "${download_file_rcode}" == "1" ]]; then
+                print_message "[+] Failed to download ludus-server-${LATEST_TAG}" "error"
+                exit 1
+              elif [[ "${download_file_rcode}" == "20" ]]; then
+                print_message "[+] Failed to locate curl or wget" "error"
+                exit 1
               else
-                print_message "[+] Failed to locate 'sudo' command" "error"
+                print_message "[+] Return code of download tool returned an unexpected value of ${download_file_rcode}" "error"
                 exit 1
               fi
-            fi
-            ;;
-      "n" ) print_message "[+] Skipping Ludus server update" "info"
-            ;;
-        * ) print_message "[-_-] Invalid response. Skipping Ludus server update" "error"
-            ;;
-    esac
+              # Move the server
+              mv "${tmpdir}/ludus-server-${LATEST_TAG}" "${tmpdir}/ludus-server" 
+              # Checksum check
+              checksum_check "${tmpdir}/${ludus_checksum_file}" "${tmpdir}/ludus-server" "${tmpdir}"
+              checksum_check_rcode="${?}"
+              if [[ "${checksum_check_rcode}" == "0" ]]; then
+                print_message "[+] Checksum of ${tmpdir}/ludus-server-${LATEST_TAG} verified" "ok"
+              elif [[ "${checksum_check_rcode}" == "1" ]]; then
+                print_message "[+] Failed to verify checksum of ${tmpdir}/ludus-server-${LATEST_TAG}" "error"
+                exit 1
+              elif [[ "${checksum_check_rcode}" == "20" ]]; then
+                print_message "[+] Failed to find tool to verify sha256 sums" "error"
+                exit 1
+              elif [[ "${checksum_check_rcode}" == "30" ]]; then
+                print_message "[+] Failed to change into working directory ${tmpdir}" "error"
+                exit 1
+              elif [[ "${checksum_check_rcode}" == "31" ]]; then
+                print_message "[+] Failed to change back into working directory. Are you running this in a directory you have no access to?" "error"
+                exit 1
+              else
+                print_message "[+] Unknown return code returned while checking checksum of ${tmpdir}/ludus-server-${LATEST_TAG}. Returned ${checksum_check_rcode}" "error"
+                exit 1
+              fi
+              # Chmod
+              chmod +x "${tmpdir}/ludus-server"
+              # Update
+              if [[ "${EUID}" == "0" ]]; then
+                "${tmpdir}/ludus-server" --update
+              else
+                if command -v sudo >/dev/null 2>&1; then
+                  sudo "${tmpdir}/ludus-server" --update
+                else
+                  print_message "[+] Failed to locate 'sudo' command" "error"
+                  exit 1
+                fi
+              fi
+              ;;
+        "n" ) print_message "[+] Skipping Ludus server update" "info"
+              ;;
+          * ) print_message "[-_-] Invalid response. Skipping Ludus server update" "error"
+              ;;
+      esac
+    fi # Ludus service check
   fi
 
   exit 0
