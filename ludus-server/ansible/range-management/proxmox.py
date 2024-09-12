@@ -30,8 +30,8 @@
 # Added error handling
 # Added Windows os name normalization
 # Added macOS "support"
-# Ignored local, APIPA, 192.168.0.0/16, and 172.0.0.0/8 IP addresses
 # Fixed version detection logic for Proxmox VE >= 8.0.0
+# Added Ludus config integration to select IP address based on VM name
 
 from six.moves.urllib import request, parse, error
 
@@ -40,18 +40,22 @@ try:
     import json
 except ImportError:
     import simplejson as json
+import ipaddress
 import os
 import sys
 import socket
 import re
 import time
 from optparse import OptionParser
+import yaml
 
 from six import iteritems
 
 from six.moves.urllib.error import HTTPError
 
 from ansible.module_utils.urls import open_url
+
+compiled_range_id_regex = re.compile(r"{{\s+range_id\s+}}", re.IGNORECASE)
 
 
 class ProxmoxNodeList(list):
@@ -231,7 +235,7 @@ class ProxmoxAPI(object):
     def version(self):
         return ProxmoxVersion(self.get('api2/json/version'))
 
-    def qemu_agent_info(self, node, vm):
+    def qemu_agent_info(self, node, vm, proxmox_name):
         system_info = SystemInfo()
         osinfo = self.get('api2/json/nodes/{0}/qemu/{1}/agent/get-osinfo'.format(node, vm))['result']
         if osinfo:
@@ -253,7 +257,7 @@ class ProxmoxAPI(object):
             if 'version-id' in osinfo:
                 system_info.version_id = osinfo['version-id']
 
-        ip_address = None
+        all_ip_addresses = []
         try:
             networks = self.get('api2/json/nodes/{0}/qemu/{1}/agent/network-get-interfaces'.format(node, vm))['result']
         except HTTPError:
@@ -269,9 +273,7 @@ class ProxmoxAPI(object):
                         try:
                             # IP address validation
                             if socket.inet_aton(ip_address):
-                                # Ignore localhost, APIPA, 192.168.0.0/16, and any 172 (docker) address
-                                if ip_address != '127.0.0.1' and not re.search(r'^169\.254\.\d{1,3}\.\d{1,3}', ip_address) and not re.search(r'^172\.\d{1,3}\.\d{1,3}\.\d{1,3}', ip_address) and not re.search(r'^192\.168\.\d{1,3}\.\d{1,3}', ip_address):
-                                    system_info.ip_address = ip_address
+                                all_ip_addresses.append(network['ip-address'])
                         except socket.error:
                             pass
             elif type(networks) is list:
@@ -281,13 +283,59 @@ class ProxmoxAPI(object):
                             try:
                                 # IP address validation
                                 if socket.inet_aton(ip_address['ip-address']):
-                                    # Ignore localhost, APIPA, 192.168.0.0/16, and any 172 (docker) address
-                                    if ip_address['ip-address'] != '127.0.0.1' and not re.search(r'^169\.254\.\d{1,3}\.\d{1,3}', ip_address['ip-address']) and not re.search(r'^172\.\d{1,3}\.\d{1,3}\.\d{1,3}', ip_address['ip-address']) and not re.search(r'^192\.168\.\d{1,3}\.\d{1,3}', ip_address['ip-address']):
-                                        system_info.ip_address = ip_address['ip-address']
+                                    all_ip_addresses.append(ip_address['ip-address'])
                             except socket.error:
                                 pass
+        if all_ip_addresses:
+            system_info.ip_address = check_ip_addresses(proxmox_name, all_ip_addresses)
 
         return system_info
+
+def check_ip_addresses(vm_name, ip_addresses):
+    ludus_range_config = os.environ.get('LUDUS_RANGE_CONFIG')
+    range_number = os.environ.get('LUDUS_RANGE_NUMBER')
+    range_id = os.environ.get('LUDUS_RANGE_ID')
+
+    valid_ips = []
+    config_ip = None
+
+    if ludus_range_config and range_number and range_id:
+        try:
+            with open(ludus_range_config, 'r') as config_file:
+                config = yaml.safe_load(config_file)
+
+                for vm in config.get('ludus', []):
+                    resolved_vm_name = compiled_range_id_regex.sub(range_id, vm['vm_name'])
+                    if resolved_vm_name == vm_name:
+                        config_ip = f"10.{range_number}.{vm['vlan']}.{vm['ip_last_octet']}"
+                        break
+
+        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+            print(e, file=sys.stderr)
+            pass
+
+    for ip_address in ip_addresses:
+        # print(config_ip, file=sys.stderr)
+        try:
+            ip = ipaddress.ip_address(ip_address)
+            if ip_address == config_ip:
+                return ip_address
+            if not ip.is_loopback and not ip.is_link_local and ip not in ipaddress.ip_network('172.16.0.0/12'):
+                valid_ips.append(ip_address)
+        except ValueError:
+            continue
+
+    # Check if any of the valid IPs are in the 192.0.2.0/24 range
+    for ip in valid_ips:
+        if ipaddress.ip_address(ip) in ipaddress.ip_network('192.0.2.0/24'):
+            return ip
+
+    # If we have any valid IPs, return the first one
+    if valid_ips:
+        return valid_ips[0]
+
+    # If all else fails, return None
+    return None
 
 
 class SystemInfo(object):
@@ -374,10 +422,10 @@ def main_list(options, config_path):
                 # Retrieve information from QEMU agent if installed
                 if proxmox_api.qemu_agent(node, vmid):
                     try:
-                        system_info = proxmox_api.qemu_agent_info(node, vmid)
+                        system_info = proxmox_api.qemu_agent_info(node, vmid, results['_meta']['hostvars'][vm]['proxmox_name'])
                     except Exception as e:
-                        time.sleep(2)
-                        system_info = proxmox_api.qemu_agent_info(node, vmid)
+                        time.sleep(0.5)
+                        system_info = proxmox_api.qemu_agent_info(node, vmid, results['_meta']['hostvars'][vm]['proxmox_name'])
                     results['_meta']['hostvars'][vm]['ansible_host'] = system_info.ip_address
                     # Pull macos from VM name since macOS doesn't have QEMU guest agent support
                     if system_info.id == '' and 'macos' in results['_meta']['hostvars'][vm]['proxmox_name'].lower():

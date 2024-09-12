@@ -118,6 +118,9 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 		// Inject creds for the proxmox.py dynamic inventory script
 		execute.WithEnvVar("PROXMOX_USERNAME", user.ProxmoxUsername+"@pam"),
 		execute.WithEnvVar("PROXMOX_PASSWORD", proxmoxPassword),
+		execute.WithEnvVar("LUDUS_RANGE_CONFIG", fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername)),
+		execute.WithEnvVar("LUDUS_RANGE_NUMBER", strconv.Itoa(int(usersRange.RangeNumber))),
+		execute.WithEnvVar("LUDUS_RANGE_ID", usersRange.UserID),
 	)
 
 	playbook := &playbook.AnsiblePlaybookCmd{
