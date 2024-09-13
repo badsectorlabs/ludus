@@ -16,7 +16,7 @@ func updateLudus() {
 	// This assumes that ludus is the only thing that would run
 	// packer or ansible on the system - an ok assumption for
 	// a dedicated ludus machine
-	ansiblePackerPIDs := Run("pgrep -f 'ansible|packer'", false, false)
+	ansiblePackerPIDs := Run("pgrep 'ansible|packer'", false, false)
 	if ansiblePackerPIDs != "Command processed (no output)." {
 		log.Fatal(`Ansible or Packer processes are running on this host.
 Refusing to update to prevent interruption of template builds
