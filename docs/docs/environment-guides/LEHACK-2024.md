@@ -73,7 +73,6 @@ ludus templates list
 # In the config above (adjust cpus and ram_gb values if you have the resources to allocate more 2gb ram is enough)
 #terminal-command-local
 ludus range config set -f LeHack-2024/ad/LEHACK/providers/ludus/config.yml
-ludus range config set -f config.yml
 #terminal-command-local
 ludus range deploy
 # Wait for the range to successfully deploy
