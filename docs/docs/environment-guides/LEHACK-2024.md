@@ -173,7 +173,7 @@ Now you wait. `[WARNING]` lines are ok, and some steps may take a long time, don
 This will take a few hours. You'll know it is done when you see:
 
 ```
-your lab : LEHACK is successfully setup ! have fun ;)
+May the gods of Gaul guide you as you embark on this dangerous quest!
 ```
 
 ### 5. Once install has finished disable localuser user to avoid using it and avoid unintended secrets stored / am looking at you Lsassy
