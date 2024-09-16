@@ -1,38 +1,36 @@
 ---
-title: "LEHACK 2024 WORKSHOP"
+title: "Netexec Workshop"
 ---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# LEHACK FREE Workshop 2024 (Active Directory pwnage with NetExec)
+# Netexec Wrokshop (leHACK 2024)
 
 :::success Props!
 
-Huge shout out to  [@ladhaAleem](https://twitter.com/LadhaAleem) for creating this project and converting the LEHACK-2024 workshop created by [@mpgn_x64](https://x.com/mpgn_x64)  to an ansible playbook and making it work with LUDUS as well
+Huge shout out to [@ladhaAleem](https://twitter.com/LadhaAleem) for creating this project and converting the leHACK 2024 workshop created by [@mpgn_x64](https://x.com/mpgn_x64) to an ansible playbook and making it work with Ludus as well!
 :::
 
-## Description from LEHACK-2024
+## Description from leHACK 2024
 
-Welcome to the NetExec Active Directory Lab! This lab is designed to teach you how to exploit Active Directory (AD) environments using the powerful tool NetExec.
+Welcome to the NetExec Active Directory Lab! This lab is designed to teach you how to exploit Active Directory (AD) environments using the powerful tool [NetExec](https://github.com/Pennyw0rth/NetExec).
 
-Originally featured in the LeHack2024 Workshop, this lab is now available for free to everyone! In this lab, you’ll explore how to use the powerful tool NetExec to efficiently compromise an Active Directory domain during an internal pentest.
+Originally featured in the leHACK 2024 Workshop, this lab is now available for free to everyone! In this lab, you’ll explore how to use the powerful tool NetExec to efficiently compromise an Active Directory domain during an internal pentest.
 
-The ultimate goal? Become Domain Administrator by following various attack paths, using nothing but NetExec! and Maybe BloodHound (Why not :P)
+The ultimate goal? Become Domain Administrator by following various attack paths, using nothing but NetExec and maybe BloodHound (Why not :P).
 
 Obviously do not cheat by looking at the passwords and flags in the recipe files, the lab must start without user to full compromise
 
-Note: On change has been made on this lab regarding the workshop, the part using msol module on nxc is replaced with a dump of lsass. The rest is identical.
+**Note**: One change has been made on this lab regarding the workshop, the part using msol module on nxc is replaced with a dump of lsass. The rest is identical.
 
-**Note**: On change has been made on this lab regarding the workshop, the part using msol module on nxc is replaced with a dump of lsass. The rest is identical.
-
-### Original pitch
+### Scenario
 
 The Gallic camp was attacked by the Romans and it seems that a traitor made this attack possible! Two domains must be compromised to find it 🔥
 
 ### Public Writeups
 
-- https://www.rayanle.cat/lehack-2024-netexec-workshop-writeup/ by [https://x.com/rayanlecat](@rayanlecat)
-- https://blog.lasne.pro/posts/netexec-workshop-lehack2024/ by [https://x.com/0xFalafel](@0xFalafel)
+- https://www.rayanle.cat/lehack-2024-netexec-workshop-writeup/ by [@rayanlecat](https://x.com/rayanlecat)
+- https://blog.lasne.pro/posts/netexec-workshop-lehack2024/ by [@0xFalafel](https://x.com/0xFalafel)
 
 
 
@@ -66,13 +64,15 @@ ludus templates list
 +----------------------------------------+-------+
 ```
 
-### 2. Set and deploy the following range configuration
+### 2. Deploy VMs
 
+Set and deploy the configuration for the lab.
 
 ```bash
-# In the config above (adjust cpus and ram_gb values if you have the resources to allocate more 2gb ram is enough)
 #terminal-command-local
-ludus range config set -f LeHack-2024/ad/LEHACK/providers/ludus/config.yml
+git clone https://github.com/Pennyw0rth/NetExec-Lab
+#terminal-command-local
+ludus range config set -f NetExec-Lab/LeHack-2024/ad/LEHACK/providers/ludus/config.yml
 #terminal-command-local
 ludus range deploy
 # Wait for the range to successfully deploy
@@ -81,7 +81,9 @@ ludus range deploy
 ```
 
 
-### 3. Install ansible and its requirements for GOAD on your local machine
+### 3. Install requirements
+
+Install ansible and its requirements for the NetExec lab on your local machine.
 
 ```shell-session
 # You can use a virtualenv here if you would like
@@ -93,75 +95,83 @@ python3 -m pip install pywinrm
 git clone https://github.com/Pennyw0rth/NetExec-Lab
 #terminal-command-local
 cd LeHack-2024/ansible
-#terminal-command-goad
+#terminal-command-local
 ansible-galaxy install -r requirements.yml
 ```
 
-### 4. The inventory file is already present in the providers folder and replace RANGENUMBER with your range number with sed (commands provided below)
+### 4. Setup  the inventory files
+
+The inventory file is already present in the providers folder and replace RANGENUMBER with your range number with sed (commands provided below)
 
 
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">
 ```bash
-#terminal-command-goad
+#terminal-command-local
 cd LeHack-2024/ansible
 # go the the ansible directory as above
-#terminal-command-goad
+#terminal-command-local
 export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
 # `sudo apt install jq` if you don't have jq
-#terminal-command-goad
+#terminal-command-local
 sed -i "s/RANGENUMBER/$RANGENUMBER/g" ../ad/LEHACK/providers/ludus/inventory.yml
+#terminal-command-local
+sed -i "s/RANGENUMBER/$RANGENUMBER/g" ../ad/LEHACK/providers/ludus/inventory_disableludus.yml
 ```
   </TabItem>
   <TabItem value="macos" label="macOS">
 ```bash
-#terminal-command-goad
+#terminal-command-local
 cd LeHack-2024/ansible
 # paste in the inventory file above
-#terminal-command-goad
+#terminal-command-local
 export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
 # `brew install jq` if you don't have jq
-#terminal-command-goad
+#terminal-command-local
 sed -i '' "s/RANGENUMBER/$RANGENUMBER/g" ../ad/LEHACK/providers/ludus/inventory.yml
+#terminal-command-local
+sed -i '' "s/RANGENUMBER/$RANGENUMBER/g" ../ad/LEHACK/providers/ludus/inventory_disableludus.yml
 ```
   </TabItem>
 </Tabs>
 
 
-### 5. Deploy LEHACK FREE Workshop 2024 
+### 5. Deploy the NetExec Workshop
 
 :::note
 
-You must be connected to your Ludus wireguard VPN for these commands to work
+If not running on the Ludus host, you must be connected to your Ludus wireguard VPN for these commands to work
 
 :::
 
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">
 ```bash
-#terminal-command-goad
+#terminal-command-local
 cd LeHack-2024/ansible
 # in the ansible folder perform the following
-#terminal-command-goad
+#terminal-command-local
 export ANSIBLE_COMMAND="ansible-playbook -i ../ad/LEHACK/data/inventory -i ../ad/LEHACK/providers/ludus/inventory.yml"
-#terminal-command-goad
+#terminal-command-local
 export LAB="LEHACK"
-#terminal-command-goad
+#terminal-command-local
+chmod +x ../scripts/provisionning.sh
+#terminal-command-local
 ../scripts/provisionning.sh
 ```
   </TabItem>
   <TabItem value="macos" label="macOS">
 ```bash
-#terminal-command-goad
+#terminal-command-local
 cd LeHack-2024/ansible
 # In the ansible folder perform the following
-#terminal-command-goad
+#terminal-command-local
 export ANSIBLE_COMMAND="ansible-playbook -i ../ad/LEHACK/data/inventory -i ../ad/LEHACK/providers/ludus/inventory.yml"
-#terminal-command-goad
+#terminal-command-local
 export LAB="LEHACK"
-#terminal-command-goad
+#terminal-command-local
 export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
-#terminal-command-goad
+#terminal-command-local
 ../scripts/provisionning.sh
 ```
   </TabItem>
@@ -175,7 +185,9 @@ This will take a few hours. You'll know it is done when you see:
 May the gods of Gaul guide you as you embark on this dangerous quest!
 ```
 
-### 5. Once install has finished disable localuser user to avoid using it and avoid unintended secrets stored / am looking at you Lsassy
+### 5. Disable localuser
+
+Once install has finished disable localuser user to avoid using it and avoid unintended secrets stored (*I'm looking at you Lsassy*).
 
 :::note
 
@@ -183,8 +195,7 @@ You must be connected to your Ludus wireguard VPN for these commands to work
 
 :::
 ```bash
-cd LeHack-2024/ansible
-sed -i "s/RANGENUMBER/$RANGENUMBER/g" ../ad/LEHACK/providers/ludus/inventory_disableludus.yml
+# Still in the LeHack-2024/ansible directory
 ansible-playbook -i ../ad/LEHACK/providers/ludus/inventory_disableludus.yml disable_localuser.yml reboot.yml
 ```
 
@@ -195,8 +206,8 @@ Take snapshots via the proxmox web UI or SSH into ludus and as root run the foll
 
 ```bash
 export RANGEID=JD # <= change to your ID
-vms=("$RANGEID-LEHACK-DC01" "$RANGEID-LEHACK-DC02" "$RANGEID-LEHACK-SRV01" "$RANGEID-LEHACK-SRV02")
-COMMENT="Clean LEHACK setup after ansible run"
+vms=("$RANGEID-dc01" "$RANGEID-dc02" "$RANGEID-srv01" "$RANGEID-srv02" "$RANGEID-kali")
+COMMENT="Clean NetExec Lab setup after ansible run"
 # Loop over the array
 for vm in "${vms[@]}"
 do
@@ -209,4 +220,6 @@ done
 
 ### 7. Hack!
 
-Access your Kali machine at `http://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
+Access your Kali machine at `https://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
+
+![Network Diagram](/img/envs/netexec.png)
