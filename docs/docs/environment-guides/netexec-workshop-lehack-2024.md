@@ -1,10 +1,10 @@
 ---
-title: "Netexec Workshop"
+title: "Netexec Workshop (leHACK 2024)"
 ---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# Netexec Wrokshop (leHACK 2024)
+# Netexec Workshop (leHACK 2024)
 
 :::success Props!
 
