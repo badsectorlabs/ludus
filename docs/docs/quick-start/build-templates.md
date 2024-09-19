@@ -35,6 +35,13 @@ ludus templates build
 [INFO]  Template building started - this will take a while. Building 1 template(s) at a time.
 ```
 
+:::tip
+
+If you have decently powerful hardware, you can build more than 1 template at a time with the `--parallel` option to specify how many
+templates to build concurrently. Be aware that when building in parallel, no template logs will be generated (see [issue #55](https://gitlab.com/badsectorlabs/ludus/-/issues/55#note_2026923273))
+
+:::
+
 To check the status of the template build, you can run `templates status`, `templates list` again, or follow the packer logs with 
 
 ```shell-session

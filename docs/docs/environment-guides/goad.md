@@ -125,7 +125,7 @@ ludus range deploy
 
 ```bash
 #terminal-command-local
-ludus testing update -n JD-GOAD-SRV02 # replace "JD" with your range ID
+ludus testing update -n JD-GOAD-SRV02 # replace "JD" with your user ID
 #terminal-command-local
 ludus range logs -f
 # Wait for all updates to be installed. 
@@ -298,7 +298,7 @@ $adapter.SetDNSServerSearchOrder($newDnsServers)
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
 ```bash
-export RANGEID=JD # <= change to your ID
+export RANGEID=JD # <= change to your user ID
 vms=("$RANGEID-GOAD-DC01" "$RANGEID-GOAD-DC02" "$RANGEID-GOAD-DC03" "$RANGEID-GOAD-SRV02" "$RANGEID-GOAD-SRV03")
 COMMENT="Clean GOAD setup after ansible run"
 # Loop over the array
@@ -313,6 +313,6 @@ done
 
 ### 8. Hack!
 
-Access your Kali machine at `http://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
+Access your Kali machine at `https://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
 
 Follow [the GOAD guide](https://mayfly277.github.io/posts/GOADv2-pwning_part1/) or explore the network on your own.

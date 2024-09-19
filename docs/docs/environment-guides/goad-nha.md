@@ -285,7 +285,7 @@ your lab : NHA is successfully setup ! have fun ;)
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
 ```bash
-export RANGEID=JD # <= change to your ID
+export RANGEID=JD # <= change to your user ID
 vms=("$RANGEID-NHA-DC01" "$RANGEID-NHA-DC02" "$RANGEID-NHA-SRV01" "$RANGEID-NHA-SRV02" "$RANGEID-NHA-SRV03")
 COMMENT="Clean NHA setup after ansible run"
 # Loop over the array
@@ -300,4 +300,4 @@ done
 
 ### 7. Hack!
 
-Access your Kali machine at `http://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
+Access your Kali machine at `https://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
