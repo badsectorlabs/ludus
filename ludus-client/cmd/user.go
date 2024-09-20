@@ -265,6 +265,8 @@ var usersAddCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
+		logger.Logger.Info("Adding user to Ludus, this can take up to a minute. Please wait.")
+
 		requestBody := fmt.Sprintf(`{
 			"name": "%s",
 			"userID": "%s",
