@@ -205,7 +205,7 @@ var templateLogsCmd = &cobra.Command{
 func setupTemplateLogsCmd(command *cobra.Command) {
 	command.Flags().BoolVarP(&follow, "follow", "f", false, "continuously poll the log and print new lines as they are written")
 	command.Flags().IntVarP(&tail, "tail", "t", 0, "number of lines of the log from the end to print")
-	command.Flags().BoolVarP(&verboseTemplateLogs, "--verbose-packer", "v", false, "print all lines from the packer log")
+	command.Flags().BoolVarP(&verboseTemplateLogs, "verbose-packer", "v", false, "print all lines from the packer log")
 }
 
 var templateAddCmd = &cobra.Command{
