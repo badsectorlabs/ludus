@@ -202,8 +202,8 @@
   tasks:
     - name: Install proxmox and ansible packer plugin
       ansible.builtin.shell:
-        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/proxmox;
-        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/ansible
+        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/proxmox v1.1.8;
+        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/ansible v1.1.1
       register: packer_plugin_install
 
     - name: Ensure group "pveusers" exists
