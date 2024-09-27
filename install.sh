@@ -726,6 +726,13 @@ main() {
         fi
         case "${install_server}" in
           "y" ) print_message "[+] Installing Ludus server" "info"
+                if [[ -f /usr/bin/pveversion ]] && [[ -z ${LANGUAGE+x} ]]; then
+                  print_message "[+] Detected Proxmox host with unset LANGUAGE env var. Setting locale to en_US.UTF-8" "info"
+                  export LANGUAGE=en_US.UTF-8
+                  export LC_ALL=en_US.UTF-8
+                  export LANG=en_US.UTF-8
+                  export LC_CTYPE=en_US.UTF-8
+                fi
                 # Download
                 download_file "${ludus_base_url}/ludus-server-${LATEST_TAG}" "${tmpdir}" "ludus-server-${LATEST_TAG}"
                 download_file_rcode="${?}"
