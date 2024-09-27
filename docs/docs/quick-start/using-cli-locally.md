@@ -86,19 +86,20 @@ This documentation assumes the use of the Windows Terminal and Powershell (not c
 
 :::
 
-Copy the correct Ludus client binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to your Windows device.
-
-`cd` to the directory that contains the binary or move the binary to a location in your PATH.
-
 ```shell-session
 # terminal-command-powershell
-.\ludus-client_windows_[arch]-[version].exe
-Ludus client v1.5.0
+irm https://ludus.cloud/install-client.ps1 | iex
+
+# terminal-command-powershell
+ludus
+Ludus client v1.5.4
 
 Ludus is a CLI application to control a Ludus server
 This application can manage users as well as ranges.
 ...
 ```
+
+If you don't want to use the powershell script you can copy the correct Ludus client binary (get it [here](https://gitlab.com/badsectorlabs/ludus/-/releases)) to your Windows device and place it in your PATH.
 
   </TabItem>
 </Tabs>
@@ -147,7 +148,7 @@ On headless macOS systems or macOS systems without a keyring, set the LUDUS_API_
 
 ```shell-session
 #terminal-command-powershell
-.\ludus-client.exe apikey
+ludus apikey
 [INFO]  Enter your Ludus API Key for https://198.51.100.1:8080:
 JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
 [INFO]  Ludus API key set successfully
@@ -194,7 +195,7 @@ shell's history file in most common shells.
 
 :::
 
-```shell-session title="Terminal 2 (Linux/macOS)"
+```shell-session title="Terminal 2 (Linux)"
 #terminal-command-local
 ludus user add --name "Jane Smith" --userid JS --admin --url https://127.0.0.1:8081
 +--------+------------------+-------+---------------------------------------------+
@@ -213,7 +214,7 @@ shell's history file in most common shells.
 
 :::
 
-```shell-session title="Terminal 2 (Linux/macOS)"
+```shell-session title="Terminal 2 (macOS)"
 #terminal-command-local
 ludus user add --name "Jane Smith" --userid JS --admin --url https://127.0.0.1:8081
 +--------+------------------+-------+---------------------------------------------+
@@ -227,16 +228,12 @@ ludus user add --name "Jane Smith" --userid JS --admin --url https://127.0.0.1:8
   <TabItem value="windows" label="Windows">
 ```shell-session title="Terminal 2 (Windows)"
 #terminal-command-powershell
-.\ludus-client.exe user add --name "Jane Smith" --userid JS --admin --url https://127.0.0.1:8081
+ludus user add --name "Jane Smith" --userid JS --admin --url https://127.0.0.1:8081
 +--------+------------------+-------+---------------------------------------------+
 | USERID | PROXMOX USERNAME | ADMIN |                   API KEY                   |
 +--------+------------------+-------+---------------------------------------------+
 | JS     | jane-smith       | true  | JS._8Bx2T5kTXMR*uTWZ%lFi^Os6MpFR=OrH+yT96Dq |
 +--------+------------------+-------+---------------------------------------------+
-
-# Remove the LUDUS_API_KEY environment variable set in the previous command
-#terminal-command-powershell
-Remove-Item Env:\LUDUS_API_KEY
 ```
   </TabItem>
 </Tabs>
