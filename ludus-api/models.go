@@ -70,6 +70,8 @@ type UserObject struct {
 	HashedAPIKey string `json:"-"` // - means do not marshal as JSON, prevents the hash from being sent with every user object
 
 	ProxmoxUsername string `json:"proxmoxUsername"`
+
+	PortforwardingEnabled bool `json:"portforwardingEnabled"`
 }
 
 type VmObject struct {

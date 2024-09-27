@@ -37,7 +37,7 @@ func DeployRange(c *gin.Context) {
 		tags = deployBody.Tags
 	}
 
-	usersRange, err := getRangeObject(c)
+	usersRange, err := GetRangeObject(c)
 	if err != nil {
 		return // JSON set in getRangeObject
 	}
@@ -84,7 +84,7 @@ func DeployRange(c *gin.Context) {
 
 // DeleteRange - stops and deletes all range VMs
 func DeleteRange(c *gin.Context) {
-	usersRange, err := getRangeObject(c)
+	usersRange, err := GetRangeObject(c)
 	if err != nil {
 		return // JSON set in getRangeObject
 	}
@@ -168,7 +168,7 @@ func GetRDP(c *gin.Context) {
 	extraVars := map[string]interface{}{
 		"username": user.ProxmoxUsername,
 	}
-	output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "generate-rdp", false, "")
+	output, err := server.RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "generate-rdp", false, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 		return
@@ -204,7 +204,7 @@ func ListRange(c *gin.Context) {
 		return // JSON error set in updateUsersRangeVMData
 	}
 	// Get the updated range
-	usersRange, err := getRangeObject(c)
+	usersRange, err := GetRangeObject(c)
 	if err != nil {
 		return // JSON error is set in getRangeObject
 	}
@@ -280,7 +280,7 @@ func PutConfig(c *gin.Context) {
 		return // JSON set in getUserObject
 	}
 
-	usersRange, err := getRangeObject(c)
+	usersRange, err := GetRangeObject(c)
 	if err != nil {
 		return // JSON set in getRangeObject
 	}
@@ -405,7 +405,7 @@ func AbortAnsible(c *gin.Context) {
 	}
 	killProcessAndChildren(ansiblePid)
 
-	usersRange, err := getRangeObject(c)
+	usersRange, err := GetRangeObject(c)
 	if err != nil {
 		return // JSON set in getRangeObject
 	}
@@ -491,7 +491,7 @@ func RangeAccessAction(c *gin.Context) {
 		"source_range_id":           sourceUserObject.UserID,
 		"source_range_second_octet": sourceUserRangeObject.RangeNumber,
 	}
-	output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, thisRangeAccessActionPayload.AccessActionVerb, false, "")
+	output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, thisRangeAccessActionPayload.AccessActionVerb, false, "")
 	if err != nil {
 		routerWANFatalRegex := regexp.MustCompile(`fatal:.*?192\.0\.2\\"`)
 		if strings.Contains(output, "Target router is not up") && thisRangeAccessActionPayload.AccessActionVerb == "grant" {

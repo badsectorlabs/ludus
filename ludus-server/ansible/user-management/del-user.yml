@@ -81,10 +81,16 @@
       loop:
         - 1
 
-    - name: Save current state of the firewall to a file
-      community.general.iptables_state:
-        state: saved
-        path: /etc/iptables/rules.v4
+    - name: Remove the portforward for this user (Enterprise)
+      ansible.builtin.include_tasks: portforward-management.yml
+      vars:
+        port_to_forward_on_ludus_host: "{{ 51000 + range_second_octet }}"
+        host_to_forward_to: "192.0.2.{{ 100 + range_second_octet }}"
+        port_to_forward_to: 51820
+        state_var: absent
+      when:
+        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/portforward-management.yml') != []
 
 - hosts: localhost
   become: true

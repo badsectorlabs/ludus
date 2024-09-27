@@ -8,21 +8,21 @@
     - name: Deploy router VM
       ansible.builtin.include_tasks: tasks/proxmox/deploy-vm.yml
   vars:
-    template_vm_name: "debian-11-x64-server-template"
-    vm_name: "{{ defaults.router_vm_name }}"
+    template_vm_name: "{{ router.template | default('debian-11-x64-server-template') }}"
+    vm_name: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
     bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - the "WAN" side of the router
     vm_groups: '"{{ range_id }}","{{ range_id }}_router"'
     is_linux: true
-    ram: 2
-    balloon_size: 0.5
-    cpu_cores: 2
-    num_vcpus: 2
+    ram: "{{ router.ram_gb | default(2) }}"
+    balloon_size: "{{ router.ram_min_gb if router.ram_min_gb is defined else '0.5' }}"
+    cpu_cores: "{{ router.cpus | default(2) }}"
+    num_vcpus: "{{ router.cpus | default(2) }}"
     unmanaged: false
 
 # This must come before the VLAN setup to install iptables etc
 - name: Configure the router
   tags: [network]
-  hosts: "{{ defaults.router_vm_name }}"
+  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
   become: true
   pre_tasks:
     - name: Check if the .ludus-configured file exists
@@ -62,11 +62,89 @@
 
 - name: Apply all user defined network rules to the router
   tags: [network]
-  hosts: "{{ defaults.router_vm_name }}"
+  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
   become: true
   tasks:
     - name: Set any user defined firewall rules
       ansible.builtin.include_tasks: tasks/firewall/set-firewall-rules.yml
+
+- name: Apply all user defined roles to the router (Enterprise)
+  tags: [network]
+  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  become: true
+  tasks:
+    - name: Check for enterprise license
+      ansible.builtin.assert:
+        that: ludus_enterprise_license is defined and ludus_enterprise_license
+        fail_msg: "The router roles feature requires an enterprise license"
+      when:
+        - router.roles is defined
+        - router.roles | length > 0
+
+    - name: Set any user defined firewall rules
+      ansible.builtin.include_tasks: tasks/router/user-defined-roles.yml
+      when:
+        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/user-defined-roles.yml') != []
+        - router.roles is defined
+        - router.roles | length > 0
+
+- name: Apply outbound WireGuard to the router (Enterprise)
+  tags: [network]
+  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  become: true
+  tasks:
+    - name: Check for enterprise license
+      ansible.builtin.assert:
+        that: ludus_enterprise_license is defined and ludus_enterprise_license
+        fail_msg: "The outbound WireGuard feature requires an enterprise license"
+      when:
+        - router.outbound_wireguard_config is defined
+        - router.outbound_wireguard_config | length > 0
+        - router.outbound_wireguard_vlans | length > 0
+
+    - name: Clear any outbound WireGuard related configurations
+      ansible.builtin.include_tasks: tasks/router/clear-outbound-wireguard.yml
+      when:
+        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-outbound-wireguard.yml') != []
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-outbound-wireguard.yml') != []
+    - name: Setup outbound WireGuard on the router
+      ansible.builtin.include_tasks: tasks/router/setup-outbound-wireguard.yml
+      when:
+        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-outbound-wireguard.yml') != []
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-outbound-wireguard.yml') != []
+        - router.outbound_wireguard_config is defined
+        - router.outbound_wireguard_config | length > 0
+        - router.outbound_wireguard_vlans | length > 0
+
+- name: Apply inbound WireGuard to the router (Enterprise)
+  tags: [network]
+  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  become: true
+  tasks:
+    - name: Check for enterprise license
+      ansible.builtin.assert:
+        that: ludus_enterprise_license is defined and ludus_enterprise_license
+        fail_msg: "The inbound WireGuard feature requires an enterprise license"
+      when:
+        - router.inbound_wireguard is defined
+        - router.inbound_wireguard | length > 0
+
+    - name: Clear any inbound WireGuard related configurations
+      ansible.builtin.include_tasks: tasks/router/clear-inbound-wireguard.yml
+      when:
+        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-inbound-wireguard.yml') != []
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-inbound-wireguard.yml') != []
+    - name: Setup inbound WireGuard on the router
+      ansible.builtin.include_tasks: tasks/router/setup-inbound-wireguard.yml
+      when:
+        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-inbound-wireguard.yml') != []
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-inbound-wireguard.yml') != []
+        - router.inbound_wireguard is defined
 
 - name: Deploy DC VMs
   tags: [vm-deploy]
@@ -161,7 +239,7 @@
 # ==========================================================
 - name: Add all hosts to DNS on the router
   tags: [dns-rewrites]
-  hosts: "{{ defaults.router_vm_name }}"
+  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
   tasks:
     - name: Add host to router DNS
       ansible.builtin.include_tasks: tasks/router/add-host-to-router-dns.yml
@@ -179,7 +257,7 @@
 
 - name: Add custom DNS rewrite rules
   tags: [dns-rewrites]
-  hosts: "{{ defaults.router_vm_name }}"
+  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
   tasks:
     - name: Add user-defined rewrites to the router
       ansible.builtin.include_tasks: tasks/router/add-user-defined-rewrites-to-router.yml
@@ -824,7 +902,7 @@
 # ==========================================================
 - name: Debug
   tags: [never, debug]
-  hosts: "{{ defaults.router_vm_name }}"
+  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
   tasks:
     - name: Get current DNS rules
       ansible.builtin.uri:

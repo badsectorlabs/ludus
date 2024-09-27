@@ -13,5 +13,6 @@ if [[ ! -d spinner ]]; then
 fi
 go mod edit -replace github.com/briandowns/spinner=./spinner
 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual -X ludus/cmd.VersionString=$VERSION"
+GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual -X ludus/cmd.VersionString=$VERSION" -o ludus-linux
 go mod edit -dropreplace=github.com/briandowns/spinner
 sudo mv ludus /usr/local/bin/ludus

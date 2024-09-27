@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	userName        string
-	newUserID       string
-	userIsAdmin     bool
-	proxmoxPassword string
+	userName             string
+	newUserID            string
+	userIsAdmin          bool
+	proxmoxPassword      string
+	enablePortforwarding bool
 )
 
 // usersCmd represents the users command
@@ -270,8 +271,9 @@ var usersAddCmd = &cobra.Command{
 		requestBody := fmt.Sprintf(`{
 			"name": "%s",
 			"userID": "%s",
-			"isAdmin": %s
-		  }`, userName, newUserID, strconv.FormatBool(userIsAdmin))
+			"isAdmin": %s,
+			"portforwardingEnabled": %s
+		  }`, userName, newUserID, strconv.FormatBool(userIsAdmin), strconv.FormatBool(enablePortforwarding))
 		responseJSON, success = rest.GenericJSONPost(client, "/user", requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
@@ -315,6 +317,7 @@ func setupUsersAddCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the new user (2-20 chars, typically capitalized initials)")
 	command.Flags().StringVarP(&userName, "name", "n", "", "the name of the user (typically 'first last')")
 	command.Flags().BoolVarP(&userIsAdmin, "admin", "a", false, "set this flag to make the user an admin of Ludus")
+	command.Flags().BoolVarP(&enablePortforwarding, "portforward", "p", false, "set this flag to portfoward UDP port 51000+range_number to the range's router for inbound WireGuard support (Enterprise)")
 
 	_ = command.MarkFlagRequired("userid")
 	_ = command.MarkFlagRequired("name")

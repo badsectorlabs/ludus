@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	ludusapi "ludus-server/src"
+	ludusapi "ludusapi"
 	"net"
 	"os"
 	"strings"
@@ -80,6 +80,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					f.WriteString("proxmox_iso_storage_pool: local\n")
 					f.WriteString("ludus_nat_interface: vmbr1000\n")
 					f.WriteString("prevent_user_ansible_add: false\n")
+					f.WriteString("license_key: community\n")
 				} else {
 					config.ProxmoxNode = nodeName
 					config.ProxmoxInterface = inter.Name
@@ -94,6 +95,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					config.PreventUserAnsibleAdd = false
 					config.ProxmoxInvalidCert = true
 					config.ProxmoxURL = "https://127.0.0.1:8006"
+					config.LicenseKey = "community"
 				}
 				return
 			}

@@ -86,13 +86,14 @@ func AddUser(c *gin.Context) {
 
 			playbook := []string{ludusInstallPath + "/ansible/user-management/add-user.yml"}
 			extraVars := map[string]interface{}{
-				"username":          user.ProxmoxUsername,
-				"user_range_id":     user.UserID,
-				"second_octet":      usersRange.RangeNumber,
-				"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
-				"user_is_admin":     user.IsAdmin,
+				"username":            user.ProxmoxUsername,
+				"user_range_id":       user.UserID,
+				"second_octet":        usersRange.RangeNumber,
+				"proxmox_public_ip":   ServerConfiguration.ProxmoxPublicIP,
+				"user_is_admin":       user.IsAdmin,
+				"portforward_enabled": user.PortforwardingEnabled,
 			}
-			output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
+			output, err := server.RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 				// Remove the range record since creation failed
@@ -209,7 +210,7 @@ func DeleteUser(c *gin.Context) {
 				"source_range_id":           user.UserID,
 				"source_range_second_octet": sourceUserRangeObject.RangeNumber,
 			}
-			output, err := RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, "revoke", false, "")
+			output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, "revoke", false, "")
 			if err != nil {
 				routerWANFatalRegex := regexp.MustCompile(`fatal:.*?192\.0\.2\\"`)
 				if routerWANFatalRegex.MatchString(output) {
@@ -226,7 +227,7 @@ func DeleteUser(c *gin.Context) {
 		"second_octet":  usersRange.RangeNumber,
 		"user_is_admin": user.IsAdmin,
 	}
-	output, err := RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
+	output, err := server.RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 		return

@@ -5,6 +5,7 @@ skip_list:
 
 mock_roles:
   - ansible-thoteam.nexus3-oss
+  - lae.proxmox
 
 extra_vars:
   range_id: "JD"

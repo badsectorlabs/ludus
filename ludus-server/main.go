@@ -11,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
-	ludusapi "ludus-server/src"
+	ludusapi "ludusapi"
 )
 
 const ludusInstallPath string = "/opt/ludus"
@@ -34,15 +34,62 @@ var embeddedPackerDir embed.FS
 var embeddedCIDir embed.FS
 
 func serve() {
-	log.Printf("Starting Ludus API server %s\n", LudusVersion)
-	router := ludusapi.NewRouter(LudusVersion)
-	// If we're running as a non-root user, bind to the wireguard IP, else bind to localhost
+
+	server := &ludusapi.Server{
+		Version:          LudusVersion,
+		LudusInstallPath: ludusInstallPath,
+	}
+
+	// Load plugins
+	pluginsDir := fmt.Sprintf("%s/plugins", ludusInstallPath)
+	pluginsFound := false
+	err := filepath.Walk(pluginsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if filepath.Ext(path) == ".so" {
+			pluginsFound = true
+			if err := server.LoadPlugin(path); err != nil {
+				log.Printf("Error loading plugin %s: %v", path, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("Error walking plugins directory: %v", err)
+	}
+	if !pluginsFound {
+		fmt.Println("LICENSE: Community Edition")
+	}
+
+	// Initialize plugins
+	server.InitializePlugins()
+
+	// Setup Gin router
+	router := ludusapi.NewRouter(LudusVersion, server)
+
+	// Register plugin routes
+	server.RegisterPluginRoutes(router)
+
+	certPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.pem"
+	keyPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.key"
+
+	// Check if the pve-ssl.pem and pve-ssl.key files exist and we can read them
+	if !fileExists("/etc/pve/nodes/"+config.ProxmoxNode+"/pve-ssl.pem") || !fileExists("/etc/pve/nodes/"+config.ProxmoxNode+"/pve-ssl.key") {
+		log.Println("Could not find/read /etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.pem or /etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.key")
+		generateSelfSignedCert()
+		certPath = "/opt/ludus/cert.pem"
+		keyPath = "/opt/ludus/key.pem"
+	}
+	// If we're running as a non-root user, bind to all interfaces, else (running as root) bind to localhost
 	if os.Geteuid() != 0 {
-		// This is safer (must have a WG connection, but is harder for local deployments and CI/CD)
-		// log.Fatal(router.RunTLS("198.51.100.1:8080", "/etc/pve/nodes/"+config.ProxmoxNode+"/pve-ssl.pem", "/etc/pve/nodes/"+config.ProxmoxNode+"/pve-ssl.key"))
-		log.Fatal(router.RunTLS("0.0.0.0:8080", "/etc/pve/nodes/"+config.ProxmoxNode+"/pve-ssl.pem", "/etc/pve/nodes/"+config.ProxmoxNode+"/pve-ssl.key"))
+		err = router.RunTLS("0.0.0.0:8080", certPath, keyPath)
 	} else {
-		log.Fatal(router.RunTLS("127.0.0.1:8081", "/etc/pve/nodes/"+config.ProxmoxNode+"/pve-ssl.pem", "/etc/pve/nodes/"+config.ProxmoxNode+"/pve-ssl.key"))
+		err = router.RunTLS("127.0.0.1:8081", certPath, keyPath)
+	}
+	server.ShutdownPlugins()
+	if err != nil {
+		log.Fatalf("Error in Ludus API server: %v", err)
 	}
 
 }

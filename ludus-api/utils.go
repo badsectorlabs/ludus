@@ -180,7 +180,7 @@ func getUserObject(c *gin.Context) (UserObject, error) {
 
 // Gets a range object for the user from the query string (if the user is an admin) or from
 // API key context. Sets the return status and message when returning and error
-func getRangeObject(c *gin.Context) (RangeObject, error) {
+func GetRangeObject(c *gin.Context) (RangeObject, error) {
 	var usersRange RangeObject
 
 	// If we have already stored the range object for this context, just return it
@@ -209,7 +209,7 @@ func getRangeObject(c *gin.Context) (RangeObject, error) {
 
 // updates the VM and range data for a user extracted from the context
 func updateUsersRangeVMData(c *gin.Context) error {
-	usersRange, err := getRangeObject(c)
+	usersRange, err := GetRangeObject(c)
 	if err != nil {
 		return errors.New("unable to get users range") // JSON error is set in getRangeObject
 	}
@@ -260,7 +260,7 @@ func updateUsersRangeVMData(c *gin.Context) error {
 		if err == nil {
 		interfaceLoop:
 			for _, thisInterface := range interfaces {
-				for _, ip := range thisInterface.IPAddresses {
+				for _, ip := range thisInterface.IpAddresses {
 					if network.Contains(ip) {
 						thisVM.IP = ip.String()
 						break interfaceLoop

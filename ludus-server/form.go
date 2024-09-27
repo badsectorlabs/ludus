@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss/list"
 	"golang.org/x/term"
 
-	ludusapi "ludus-server/src"
+	ludusapi "ludusapi"
 )
 
 const maxWidth = 100
@@ -275,6 +275,14 @@ func NewModel() Model {
 				Affirmative("Deny"). // Yea... this is backwards, but the field is named prevent_user_ansible_add...
 				Negative("Allow").
 				Value(&config.PreventUserAnsibleAdd),
+		),
+
+		huh.NewGroup(
+			huh.NewInput().
+				Key("license_key").
+				Title("Do you have a Ludus license key?").
+				Description("Leave blank for community edition").
+				Value(&config.LicenseKey),
 		),
 
 		huh.NewGroup(

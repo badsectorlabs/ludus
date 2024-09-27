@@ -25,11 +25,12 @@ type Configuration struct {
 	ProxmoxISOStoragePool  string `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
 	LudusNATInterface      string `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
 	PreventUserAnsibleAdd  bool   `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
+	LicenseKey             string `mapstructure:"license_key" yaml:"license_key"`
 }
 
 var ServerConfiguration Configuration
 
-func ParseConfig() {
+func (s *Server) ParseConfig() {
 	// Set the file name of the configurations file
 	viper.SetConfigName("config")
 
@@ -62,6 +63,16 @@ func ParseConfig() {
 	// By default hostname is the node name, but not always
 	if ServerConfiguration.ProxmoxHostname == "" {
 		ServerConfiguration.ProxmoxHostname = ServerConfiguration.ProxmoxNode
+	}
+	// If there is no license in the config, set it to community
+	if ServerConfiguration.LicenseKey == "" || ServerConfiguration.LicenseKey == "community" {
+		s.LicenseType = "community"
+		s.LicenseValid = true
+		s.LicenseMessage = ""
+	} else {
+		s.LicenseType = "enterprise"
+		s.LicenseMessage = ""
+		s.LicenseKey = ServerConfiguration.LicenseKey
 	}
 	fmt.Println("Using configuration file: ", viper.ConfigFileUsed())
 }

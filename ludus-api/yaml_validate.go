@@ -161,7 +161,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 		return err
 	}
 
-	usersRange, err := getRangeObject(c)
+	usersRange, err := GetRangeObject(c)
 	if err != nil {
 		return err
 	}

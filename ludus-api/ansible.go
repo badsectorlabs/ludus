@@ -24,9 +24,7 @@ import (
 
 // Runs an ansible playbook with an arbitrary amount of extraVars
 // Returns a tuple of the playbook output and an error
-func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
-
-	var err error
+func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
 
 	buff := new(bytes.Buffer)
 
@@ -42,7 +40,7 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 	if err != nil {
 		return "Could not get user", err // JSON set in getUserObject
 	}
-	usersRange, err := getRangeObject(c)
+	usersRange, err := GetRangeObject(c)
 	if err != nil {
 		return "Could not get range", errors.New("could not get range") // JSON set in getRangeObject
 	}
@@ -56,6 +54,8 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 		// range, which means there is a fresh router deployed with no knowledge of the access grants
 		"access_grants_array":   accessGrantsArray,
 		"ludus_testing_enabled": usersRange.TestingEnabled,
+		// Tell ansible if we have an enterprise license
+		"ludus_enterprise_license": server.LicenseType == "enterprise" && server.LicenseValid,
 	}
 
 	// Merge userVars with any extraVars provided
@@ -156,7 +156,7 @@ func RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string,
 
 // A helper to keep function calls clean
 func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, onlyRoles []string, limit string) (string, error) {
-	usersRange, err := getRangeObject(c)
+	usersRange, err := GetRangeObject(c)
 	if err != nil {
 		return "", errors.New("unable to get users range") // JSON error is set in getRangeObject
 	}
@@ -165,7 +165,7 @@ func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, 
 	extraVars := map[string]interface{}{"only_roles": onlyRolesArray}
 
 	// Run the deploy
-	output, err := RunAnsiblePlaybookWithVariables(c, nil, nil, extraVars, tag, verbose, limit)
+	output, err := server.RunAnsiblePlaybookWithVariables(c, nil, nil, extraVars, tag, verbose, limit)
 
 	if err != nil {
 		db.Model(&usersRange).Update("range_state", "ERROR")
@@ -178,7 +178,7 @@ func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, 
 // A helper to keep function calls clean
 func RunPlaybookWithTag(c *gin.Context, playbook string, tag string, verbose bool) (string, error) {
 	playbookPathArray := []string{fmt.Sprintf("%s/ansible/range-management/%s", ludusInstallPath, playbook)}
-	return RunAnsiblePlaybookWithVariables(c, playbookPathArray, nil, nil, tag, verbose, "")
+	return server.RunAnsiblePlaybookWithVariables(c, playbookPathArray, nil, nil, tag, verbose, "")
 }
 
 type AccessGrantStruct struct {
@@ -323,7 +323,7 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(c *gin.Context, playbookPathArray [
 	if err != nil {
 		return "Could not get user", err // JSON set in getUserObject
 	}
-	usersRange, err := getRangeObject(c)
+	usersRange, err := GetRangeObject(c)
 	if err != nil {
 		return "Could not get range", errors.New("could not get range") // JSON set in getRangeObject
 	}

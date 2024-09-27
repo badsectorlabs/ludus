@@ -19,9 +19,9 @@ func PowerAction(c *gin.Context, action string) {
 		return
 	} else if len(powerBody.Machines) == 1 && powerBody.Machines[0] == "all" {
 		if action == "off" {
-			go RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/power.yml"}, nil, nil, "stop-range", false, "")
+			go server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/power.yml"}, nil, nil, "stop-range", false, "")
 		} else {
-			go RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/power.yml"}, nil, nil, "startup-range", false, "")
+			go server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/power.yml"}, nil, nil, "startup-range", false, "")
 		}
 		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Full range power %s in progress", action)})
 		return
