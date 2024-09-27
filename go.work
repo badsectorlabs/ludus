@@ -3,4 +3,5 @@ go 1.23.1
 use (
     ./ludus-api
     ./ludus-server
+    ./ludus-client
 )
