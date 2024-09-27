@@ -80,3 +80,6 @@ While most existing ansible roles will work with Ludus, this page contains a tab
 | [ludus-local-users](https://github.com/Cyblex-Consulting/ludus-local-users) | Manages local users and groups for Windows or Linux | [@tigrebleu](https://infosec.exchange/@tigrebleu) | Must install from directory |
 | [ludus-gitlab-ce](https://github.com/Cyblex-Consulting/ludus-gitlab-ce) | Handles the installation of a Gitlab instance | [@tigrebleu](https://infosec.exchange/@tigrebleu) | Must install from directory |
 | [ludus-ad-content](https://github.com/Cyblex-Consulting/ludus-ad-content) | Creates content in an Active Directory (OUs, Groups, Users) | [@tigrebleu](https://infosec.exchange/@tigrebleu) | Must install from directory |
+| [ludus_tailscale](https://github.com/NocteDefensor/ludus_tailscale) | Provision or remove a device to/from a Tailnet | [@__Mastadon](https://x.com/__Mastadon) | |
+| [ludus_velociraptor_client](https://github.com/fmurer/ludus_velociraptor_client) | Install a Velociraptor Agent on a System in Ludus | [@f_Murer](https://x.com/f_Murer) | Must install from directory |
+| [ludus_velociraptor_server](https://github.com/fmurer/ludus_velociraptor_server) | Install a Velociraptor Server in Ludus | [@f_Murer](https://x.com/f_Murer) | Must install from directory |
