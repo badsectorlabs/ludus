@@ -281,7 +281,7 @@ func NewModel() Model {
 			huh.NewInput().
 				Key("license_key").
 				Title("Do you have a Ludus license key?").
-				Description("Leave blank for community edition").
+				Description("Leave 'community' for community edition").
 				Value(&config.LicenseKey),
 		),
 
