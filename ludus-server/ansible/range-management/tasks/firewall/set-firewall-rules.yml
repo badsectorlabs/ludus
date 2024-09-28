@@ -35,7 +35,7 @@
 
 - name: Get the VM id of the router via Proxmox API
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ defaults.router_vm_name }}").vmid'
+    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ router.vm_name | default(range_id + '-router-debian11-x64') }}").vmid'
   delegate_to: localhost
   become: false
   register: router_id_command

@@ -130,7 +130,8 @@
         fail_msg: "The inbound WireGuard feature requires an enterprise license"
       when:
         - router.inbound_wireguard is defined
-        - router.inbound_wireguard | length > 0
+        - router.inbound_wireguard.enabled is defined
+        - router.inbound_wireguard.enabled
 
     - name: Clear any inbound WireGuard related configurations
       ansible.builtin.include_tasks: tasks/router/clear-inbound-wireguard.yml
@@ -145,6 +146,8 @@
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-inbound-wireguard.yml') != []
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-inbound-wireguard.yml') != []
         - router.inbound_wireguard is defined
+        - router.inbound_wireguard.enabled is defined
+        - router.inbound_wireguard.enabled
 
 - name: Deploy DC VMs
   tags: [vm-deploy]

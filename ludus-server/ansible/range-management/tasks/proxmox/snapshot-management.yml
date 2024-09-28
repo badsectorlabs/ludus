@@ -2,7 +2,7 @@
   ansible.builtin.shell:
     cmd: |
       curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ item }}/snapshot/{{ snapshot_name }}/config" | jq '.[] | .snaptime'
-  loop: "{{ hostvars[defaults.router_vm_name]['vmids_to_snapshot'] }}"
+  loop: "{{ hostvars[router.vm_name | default(range_id + '-router-debian11-x64')]['vmids_to_snapshot'] }}"
   register: snapshot_times
   ignore_errors: true
   when: snapshot_action == "take_snapshot"
@@ -16,7 +16,7 @@
     state: absent
     snapname: "{{ snapshot_name }}"
     timeout: 300
-  loop: "{{ hostvars[defaults.router_vm_name]['vmids_to_snapshot'] }}"
+  loop: "{{ hostvars[router.vm_name | default(range_id + '-router-debian11-x64')]['vmids_to_snapshot'] }}"
   loop_control:
     index_var: index
   when:
@@ -41,7 +41,7 @@
     description: "Automated snapshot created by ludus at {{ ansible_date_time.iso8601 }}"
     vmstate: "{{ include_RAM }}"
     timeout: 600
-  loop: "{{ hostvars[defaults.router_vm_name]['vmids_to_snapshot'] }}"
+  loop: "{{ hostvars[router.vm_name | default(range_id + '-router-debian11-x64')]['vmids_to_snapshot'] }}"
   loop_control:
     index_var: index
   when:
@@ -60,7 +60,7 @@
   ansible.builtin.set_fact:
     # Set a key/value where the key is the vm_id and the value is the current state of the VM
     vm_states: "{{ vm_states | default({}) | combine({hostvars[item].proxmox_vmid: hostvars[item].proxmox_status}) }}"
-  loop: "{{ hostvars[defaults.router_vm_name]['vm_names_to_snapshot'] }}"
+  loop: "{{ hostvars[router.vm_name | default(range_id + '-router-debian11-x64')]['vm_names_to_snapshot'] }}"
   when: snapshot_action == "revert_snapshot"
 
 - name: Revert VM to snapshot
@@ -72,7 +72,7 @@
     state: rollback
     snapname: "{{ snapshot_name }}"
     timeout: 300
-  loop: "{{ hostvars[defaults.router_vm_name]['vmids_to_snapshot'] }}"
+  loop: "{{ hostvars[router.vm_name | default(range_id + '-router-debian11-x64')]['vmids_to_snapshot'] }}"
   when: snapshot_action == "revert_snapshot"
   register: revert_to_snapshot
   failed_when: revert_to_snapshot.changed == false or ('Too many redirections' in revert_to_snapshot.msg)
@@ -87,7 +87,7 @@
     vmid: "{{ item }}"
     state: started
     timeout: 300
-  loop: "{{ hostvars[defaults.router_vm_name]['vmids_to_snapshot'] }}"
+  loop: "{{ hostvars[router.vm_name | default(range_id + '-router-debian11-x64')]['vmids_to_snapshot'] }}"
   # Only start the VM if it was started before the revert
   when: snapshot_action == "revert_snapshot" and vm_states[item] == 'running'
   # But sometimes it fails anyway?

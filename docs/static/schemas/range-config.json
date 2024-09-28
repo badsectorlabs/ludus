@@ -13,6 +13,9 @@
                 "$ref": "#/definitions/Ludus"
             }
         },
+        "router": {
+            "$ref": "#/definitions/Router"
+        },
         "defaults": {
             "$ref": "#/definitions/Defaults"
         }
@@ -26,10 +29,6 @@
             "description": "This key defines default settings for Ludus and Windows Domains created in ranges",
             "additionalProperties": false,
             "properties": {
-                "router_vm_name": {
-                    "type": "string",
-                    "description": "The name of the router VM deployed by Ludus"
-                },
                 "snapshot_with_RAM": {
                     "type": "boolean",
                     "description": "When entering testing mode, capture the RAM state which allows reverting to a running VM"
@@ -107,7 +106,7 @@
                     "items": [
                         {
                             "type": "string",
-                            "pattern": "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\/[0-9]{1,2}$"
+                            "pattern": "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}/[0-9]{1,2}$"
                         }
                     ]
                 },
@@ -419,7 +418,7 @@
                 "description": "Domain to assign this VM's IP in DNS (wildcards allowed)"
             }
         },
-         "Roles": {
+        "Roles": {
             "type": "array",
             "description": "User defined Ansible roles to apply to this VM. Roles must be installed on the Ludus host with `ludus ansible role add`.",
             "items": {
@@ -453,6 +452,98 @@
                     }
                 ]
             }
+        },
+        "InboundWireguard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Enable or disable the WireGuard server on the router (default: false)"
+                },
+                "server_cidr": {
+                    "type": "string",
+                    "pattern": "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}/[0-9]{1,2}$",
+                    "description": "The CIDR of the WireGuard server (default: 10.254.254.0/24)"
+                },
+                "port": {
+                    "type": "integer",
+                    "enum": [ 51820 ],
+                    "description": "The port the WireGuard server is listening on (UDP) (default: 51820). Note: This must be 51820 to work with port forwarding."
+                },
+                "allowed_vlans": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 255,
+                        "description": "The VLANs that WireGuard clients are allowed to connect to (default: all)"
+                    }
+                }
+            },
+            "required": [
+                "enabled"
+            ],
+            "title": "InboundWireguard"
+        },
+        "Router": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "vm_name": {
+                    "type": "string",
+                    "description": "The name of the VM in Proxmox. You can use the `{{ range_id }}` template string which resolves to your range ID (i.e. JS)"
+                },
+                "hostname": {
+                    "type": "string",
+                    "description": "The hostname for the VM. Note: Windows host names are limited to 15 characters due to NETBIOS"
+                },
+                "template": {
+                    "type": "string",
+                    "description": "The template that will be the base for this VM (`ludus templates list` to get a list of them)"
+                },
+                "ram_min_gb": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4096,
+                    "description": "If defined, the minimum amount of RAM to allocated to the VM in ballooning mode"
+                },
+                "ram_gb": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4096,
+                    "description": "The amount of RAM to allocate to the VM in in non-ballooning mode, or the max RAM in ballooning mode. Define ram_min_gb to enable ballooning mode."
+                },
+                "cpus": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 512,
+                    "description": "The number of cpu cores to allocate to this VM (can provision more CPUs than the host physically has)"
+                },
+                "roles": {
+                    "$ref": "#/definitions/Roles"
+                },
+                "role_vars": {
+                    "$ref": "#/definitions/RoleVars"
+                },
+                "outbound_wireguard_config": {
+                    "type": "string",
+                    "description": "The contents of a WireGuard client configuration that the router will direct traffic out of for the VLANs in outbound_wireguard_vlans"
+                },
+                "outbound_wireguard_vlans": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer",
+                        "description": "The VLANs that will be routed over the WireGuard VPN on the router"
+                    }
+                },
+                "inbound_wireguard": {
+                    "$ref": "#/definitions/InboundWireguard"
+                }
+            },
+            "required": [
+            ],
+            "title": "Router"
         }
     }
 }
