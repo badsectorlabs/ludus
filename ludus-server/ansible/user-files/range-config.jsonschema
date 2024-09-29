@@ -80,7 +80,6 @@
                 "ad_domain_user",
                 "ad_domain_user_password",
                 "ad_forest_functional_level",
-                "router_vm_name",
                 "snapshot_with_RAM",
                 "stale_hours"
             ],

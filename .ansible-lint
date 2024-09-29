@@ -71,7 +71,6 @@ extra_vars:
       - 99
 
   defaults:
-    router_vm_name: "{{ range_id }}-router-debian11-x64"
     snapshot_with_RAM: true                  # When entering testing mode, capture the RAM state which allows reverting to a running VM
     stale_hours: 0                           # How many hours until a pre-existing snapshot should be deleted and retaken (if entering and exiting testing mode quickly)
     ad_domain_functional_level: Win2012R2    # The functional level of each Windows domain created by Ludus - options are: "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", or "WinThreshold"
