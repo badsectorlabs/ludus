@@ -146,7 +146,7 @@ network:
 router:
   vm_name: "{{ range_id }}-router"
   hostname: "{{ range_id }}-router"
-  template: debian11-x64-template
+  template: debian11-x64-server-template
   ram_gb: 2
   ram_min_gb: 1
   cpus: 2
