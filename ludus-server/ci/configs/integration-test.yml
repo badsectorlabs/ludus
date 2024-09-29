@@ -143,8 +143,15 @@ network:
       ports: 22
       action: REJECT
 
+router:
+  vm_name: "{{ range_id }}-router"
+  hostname: "{{ range_id }}-router"
+  template: debian11-x64-template
+  ram_gb: 2
+  ram_min_gb: 1
+  cpus: 2
+
 defaults:
-  router_vm_name: "{{ range_id }}-router-debian11-x64"
   snapshot_with_RAM: true
   stale_hours: 1
   ad_domain_functional_level: WinThreshold
