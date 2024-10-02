@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,7 +40,15 @@ func AddUser(c *gin.Context) {
 	if user.Name != "" && user.UserID != "" {
 		if UserIDRegex.MatchString(user.UserID) {
 
-			if user.UserID == "ADMIN" || user.UserID == "ROOT" || user.UserID == "CICD" {
+			// ADMIN is the pool used for generally available VMs (Nexus cache)
+			// ROOT is the ID of the root ludus user
+			// CICD is the ID of the CI/CD user
+			// SHARED is the pool used for shared VMs (templates)
+			// 0 is a bug in proxmox where creating a resource pool with ID 0 succeeds but doesn't actually create the pool
+			reservedUserIDs := []string{"ADMIN", "ROOT", "CICD", "SHARED", "0"}
+
+			// Do not allow users to be created with the reserved user IDs
+			if slices.Contains(reservedUserIDs, user.UserID) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s is a reserved user ID", user.UserID)})
 				return
 			}
