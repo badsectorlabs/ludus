@@ -100,4 +100,4 @@ In some cases, other programs such as `conmand` listen on port 53 which causes a
 Resolve this conflict and restart `dnsmasq`.
 Once `dnsmasq` is running, VMs should be able to get an IP address via DHCP and access the internet.
 
-For more information about how this all works, learn more about [Ludus' networking](../networking).
+For more information about how this all works, learn more about [Ludus' networking](../networking.md).

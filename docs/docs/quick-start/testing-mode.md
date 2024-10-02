@@ -10,6 +10,13 @@ This is accomplished by enabling "testing." When a user enables testing, the fol
 1. VMs without a `testing` key defined (default) or VMs with a `testing.snapshot` key that is set to `true` are snapshotted in Proxmox.
 2. VMs without a `testing` key defined (default) or VMs with a `testing.block_internet` key that is set to `true` are blocked from sending traffic outside of the Ludus range.
 
+:::note
+Domain joined Windows VMs use their Domain Controller as their DNS server.
+If a domain joined Windows VM has `testing.block_internet: false` set, but its DC does not, it will not be able to resolve addresses.
+
+Either also set `testing.block_internet: false` on the DC, or change the DNS server to `10.X.Y.254` on the Windows VM to resolve addresses.
+:::
+
 ## Entering Testing Mode
 
 To enter testing mode, run `ludus testing start`. You can check testing status with `ludus testing status`.

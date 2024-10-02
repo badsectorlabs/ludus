@@ -69,4 +69,4 @@ You can also monitor template builds using the Proxmox web GUI. It is available 
 
 Once all the templates have been built, you can deploy a range.
 
-Curious how templates work? Check out the [Templates](../templates) page.
+Curious how templates work? Check out the [Templates](../templates.md) page.

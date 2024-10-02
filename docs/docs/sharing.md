@@ -11,7 +11,7 @@ import TabItem from '@theme/TabItem';
 
 :::note
 
-Sharing ranges requires Ludus >= 1.3.0 (See [Updating](./updating))
+Sharing ranges requires Ludus >= 1.3.0 (See [Updating](./updating.md))
 
 :::
 

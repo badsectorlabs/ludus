@@ -148,8 +148,7 @@ For best performance of VMs in Proxmox, it is recommended to set the following o
     disk_size         = "${var.vm_disk_size}"
     format            = "${var.proxmox_storage_format}"
     storage_pool      = "${var.proxmox_storage_pool}"
-    type              = "scsi"
-    ssd               = true
+    type              = "virtio"
     discard           = true # allows Proxmox to reclaim space when files are deleted
     io_thread         = true 
   }

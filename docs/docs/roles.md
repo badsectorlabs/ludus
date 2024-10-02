@@ -7,7 +7,7 @@ title: "🎭 Roles"
 
 :::tip
 
-Looking to create your own roles? Check out the [role developer](./developers/ansible-roles) page!
+Looking to create your own roles? Check out the [role developer](./developers/ansible-roles.md) page!
 
 :::
 

@@ -50,4 +50,4 @@ If you are a Ludus user and your Ludus server has already been installed, gettin
 2. Download or compile the Ludus client
 3. Import and connect the WireGuard VPN
 4. Run `ludus apikey` and give it your API key
-5. Use the **[Ludus CLI](./cli)** to manage your range!
+5. Use the **[Ludus CLI](./cli.md)** to manage your range!

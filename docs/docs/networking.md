@@ -34,7 +34,7 @@ The remaining 49 IPs in the `.1 - .50` range are reserved for future use.
 
 ### CI/CD Network (ludusci)
 
-If the Ludus admin has set up [CI/CD](cicd), the CI/CD network is `203.0.113.0/24` on interface `ludusci`. This network is necessary because the CI/CD Ludus VMs will themselves set up a `vmbr1000` with a range of `192.0.2.0/24` which would conflict with the "public" IP of the CI/CD Ludus VM if it was in the host's `vmbr1000` (a DHCP'd `192.0.2.50-100` IP).
+If the Ludus admin has set up [CI/CD](cicd.md), the CI/CD network is `203.0.113.0/24` on interface `ludusci`. This network is necessary because the CI/CD Ludus VMs will themselves set up a `vmbr1000` with a range of `192.0.2.0/24` which would conflict with the "public" IP of the CI/CD Ludus VM if it was in the host's `vmbr1000` (a DHCP'd `192.0.2.50-100` IP).
 
 ## User Networks
 

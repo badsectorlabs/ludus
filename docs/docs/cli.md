@@ -72,7 +72,7 @@ Flags:
 
 ## Ansible
 
-The ansible command allows a Ludus user to add ansible roles and collections to the Ludus server for use in their range deployment. Additional roles can be added with the `roles` key and configured with the `role_vars` key (see [Configuration](./configuration)).
+The ansible command allows a Ludus user to add ansible roles and collections to the Ludus server for use in their range deployment. Additional roles can be added with the `roles` key and configured with the `role_vars` key (see [Configuration](./configuration.mdx)).
 
 ### Ansible Role
 
