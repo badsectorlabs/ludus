@@ -326,16 +326,16 @@ build all:
     # Use the fork that doesn't break the terminal on control+c for Linux and macOS
     - git clone https://github.com/zimeg/spinner
     - cd spinner && git checkout unhide-interrupts && cd .. && go mod edit -replace github.com/briandowns/spinner=./spinner
-    - go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-amd64
-    - GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-arm64
-    - GOOS=linux GOARCH=arm go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-arm
-    - GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_macOS-amd64
-    - GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_macOS-arm64
+    - CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-amd64
+    - CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-arm64
+    - CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-arm
+    - CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_macOS-amd64
+    - CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_macOS-arm64
     # The forked spinner library doesn't compile for windows, so switch back to the original
     - go mod edit -dropreplace=github.com/briandowns/spinner
-    - GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-amd64.exe
-    - GOOS=windows GOARCH=386 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-386.exe
-    - GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-arm64.exe
+    - CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-amd64.exe
+    - CGO_ENABLED=0 GOOS=windows GOARCH=386 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-386.exe
+    - CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-arm64.exe
     - echo "Compile complete."
 
 ###########
