@@ -105,8 +105,7 @@ source "proxmox-iso" "debian10" {
     disk_size         = "${var.vm_disk_size}"
     format            = "${var.proxmox_storage_format}"
     storage_pool      = "${var.proxmox_storage_pool}"
-    type              = "scsi"
-    ssd               = true
+    type              = "virtio"
     discard           = true
     io_thread         = true
   }
