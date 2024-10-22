@@ -21,6 +21,8 @@
     source: http://192.0.2.2:8081/repository/raw/install.ps1
   when: not choco_test.failed
 
+- include_tasks: tasks/windows/update-dotnet-framework.yml
+
 - name: Install custom chocolatey packages
   chocolatey.chocolatey.win_chocolatey:
     name: "{{ item }}"

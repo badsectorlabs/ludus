@@ -12,6 +12,8 @@
     chocolatey_source: http://192.0.2.2:8081/repository/chocolatey/
   when: not choco_test.failed
 
+- include_tasks: tasks/windows/update-dotnet-framework.yml
+
 - name: "Install Visual Studio {{ visual_studio_version }}"
   chocolatey.chocolatey.win_chocolatey:
     name: "visualstudio{{ visual_studio_version }}community"
