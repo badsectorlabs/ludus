@@ -11,20 +11,25 @@
       failed_when: dotnet_framework.value is not defined
   rescue:
     - name: Set default .NET Framework version (e.g., 0 if not found)
-      set_fact:
+      ansible.builtin.set_fact:
         dotnet_framework:
           value: "0"
 
+- name: Show dotnet_framework version
+  ansible.builtin.debug:
+    var: dotnet_framework.value
+
 - name: Ensure .NET Framework 4.8 requirement is satisfied for Chocolatey CLI v2.0.0+
+  when: (dotnet_framework.value | int) < 528040 # 528040 is the release number for .NET Framework 4.8 (see link above)
   block:
     - name: Install Chocolatey CLI v1.4.0
-      win_chocolatey:
+      chocolatey.chocolatey.win_chocolatey:
         name: 'chocolatey'
         state: present
         version: '1.4.0'
 
     - name: Install Microsoft .NET Framework 4.8
-      win_chocolatey:
+      chocolatey.chocolatey.win_chocolatey:
         name: 'netfx-4.8'
         state: present
 
@@ -32,7 +37,6 @@
       ansible.windows.win_reboot:
 
     - name: Install Chocolatey CLI v2.0.0+ when .NET Framework 4.8 dependency is met
-      win_chocolatey:
+      chocolatey.chocolatey.win_chocolatey:
         name: 'chocolatey'
         state: latest
-  when: dotnet_framework.value < 528040 # 528040 is the release number for .NET Framework 4.8 (see link above)

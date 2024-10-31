@@ -13,18 +13,19 @@
     chocolatey_source: http://192.0.2.2:8081/repository/chocolatey/
   when: not choco_test.failed
 
+- name: Update dotnet framework if needed for Chocolatey 2.0+
+  ansible.builtin.include_tasks: tasks/windows/update-dotnet-framework.yml
+
 # https://github.com/chocolatey/chocolatey-ansible/issues/18
 - name: Bootstrap chocolatey by hand
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name:
       - chocolatey
     source: http://192.0.2.2:8081/repository/raw/install.ps1
   when: not choco_test.failed
 
-- include_tasks: tasks/windows/update-dotnet-framework.yml
-
 - name: Install Additional Tools
-  win_chocolatey:
+  chocolatey.chocolatey.win_chocolatey:
     name:
       - networkmonitor
       - wireshark
