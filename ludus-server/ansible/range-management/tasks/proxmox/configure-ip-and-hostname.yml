@@ -214,6 +214,20 @@
     - ansible_distribution == "Ubuntu"
     - netplan_file.stat.exists
 
+- name: Remove netplan cloud-init
+  ansible.builtin.file:
+    path: /etc/netplan/50-cloud-init.yaml
+    state: absent
+  become: true
+  when: ansible_distribution == "Ubuntu"
+
+- name: Disable cloud dhcp network
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+    content: "network: {config: disabled}"
+  become: true
+  when: ansible_distribution == "Ubuntu"
+
 - name: Set DNS search domain for systemd-resolved
   ansible.builtin.lineinfile:
     path: /etc/systemd/resolved.conf
