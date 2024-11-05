@@ -316,9 +316,9 @@ build all:
     - | # If we have docs from the previous stage, embed them, otherwise build without docs
       if [[ -d ../built-docs ]]; then
         mv ../built-docs ../ludus-api/docs
-        go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -tags=embeddocs -o ../binaries/ludus-server
+        CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -tags=embeddocs -o ../binaries/ludus-server
       else
-        go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -o ../binaries/ludus-server
+        CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -o ../binaries/ludus-server
       fi
     - cd ..
     - echo "Compiling the client code..."
