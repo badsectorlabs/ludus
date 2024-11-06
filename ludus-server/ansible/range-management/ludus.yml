@@ -566,6 +566,20 @@
   hosts: "{{ hostvars['localhost']['custom_roles_vms'] | default([]) }}"
   tags: [user-defined-roles]
   tasks:
+    - name: Check type of global_role_vars
+      ansible.builtin.assert:
+        that: global_role_vars | type_debug == 'dict'
+        fail_msg: "'global_role_vars' must be a dictionary. Remove the leading `-` from each value!"
+        success_msg: "'global_role_vars' is a dictionary"
+      when: global_role_vars is defined
+
+    - name: Set global role variables
+      ansible.builtin.set_fact:
+        "{{ global_role_var.key }}": "{{ global_role_var.value }}"
+      loop: "{{ global_role_vars | default([]) | dict2items }}"
+      loop_control:
+        loop_var: global_role_var
+
     - name: Get roles for this VM
       ansible.builtin.set_fact:
         custom_roles_list: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).roles }}"

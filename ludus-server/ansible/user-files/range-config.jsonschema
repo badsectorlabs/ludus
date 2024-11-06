@@ -18,6 +18,9 @@
         },
         "defaults": {
             "$ref": "#/definitions/Defaults"
+        },
+        "global_role_vars": {
+            "$ref": "#/definitions/RoleVars"
         }
     },
     "required": [

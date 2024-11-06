@@ -92,6 +92,10 @@ ludus:
       snapshot: false
       block_internet: false
 
+# This key contains `key: value` pairs of variables that are passed to ALL user-defined roles on all VMs in the range
+global_role_vars:
+  docker_edition: ce
+
 # This key defines the settings for the router VM in your range. It is optional, and by default Ludus will deploy a router VM with the default settings.
 router:
   vm_name: "{{ range_id }}-router-debian11-x64"
