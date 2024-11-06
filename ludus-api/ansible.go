@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/apenella/go-ansible/pkg/execute"
 	"github.com/apenella/go-ansible/pkg/options"
@@ -145,11 +146,28 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 			false)
 	}
 
-	err = playbook.Run(context.TODO())
+	// Only notify if this is a range deployment
+	if slices.Contains(playbookPathArray, fmt.Sprintf("%s/ansible/range-management/ludus.yml", ludusInstallPath)) {
+		// Run and time the playbook
+		startTime := time.Now()
+		err = playbook.Run(context.TODO())
+		duration := time.Since(startTime)
+		// Notify the user of the result of the playbook
+		payload := NewPayload(err == nil, usersRange.UserID, buff.String(), false, duration)
+		notifier := Notify{
+			ConfigFilePath: fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername),
+			Payload:        payload,
+		}
+		notifier.Send()
+	} else {
+		// Just run the playbook
+		err = playbook.Run(context.TODO())
+	}
+
+	// Return the output of the playbook
 	if err != nil {
 		return buff.String(), err
 	}
-
 	return buff.String(), nil
 
 }

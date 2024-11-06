@@ -158,6 +158,32 @@ defaults:
   ad_domain_user_password: password        # The domain user password for every Windows domain
   ad_domain_safe_mode_password: password   # The domain safe mode password for every Windows domain
   timezone: America/New_York               # The timezone for all VMs, use the TZ identifier format from https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+
+# Use the notify key to send a notification when a range deployment finishes or fails.
+# Notification "urls" look like the following. For more information about service specific configuration see
+# Shoutrrr's documentation: https://containrrr.dev/shoutrrr/services/overview/
+#
+# Note: usernames and passwords containing special characters will need to be urlencoded.
+# If your username is: "myname@example.com" and your password is "124@34$1"
+# your shoutrrr url will look like: "smtp://myname%40example%2Ecom:124%4034%241@ms.my.domain.com:587"
+notify:
+ urls:
+   - "discord://token@webhookid"
+   - "telegram://token@telegram?channels=channel-1[,channel-2,...]"
+   - "pushover://shoutrrr:apiToken@userKey/?priority=1&devices=device1[,device2, ...]"
+   - "slack://[botname@]token-a/token-b/token-c"
+   - "smtp://username:password@host:port/?fromAddress=fromAddress&toAddresses=recipient1[,recipient2,...]"
+   - "teams://token-a/token-b/token-c"
+   - "gotify://gotify-host/token"
+   - "pushbullet://api-token[/device/#channel/email]"
+   - "ifttt://key/?events=event1[,event2,...]&value1=value1&value2=value2&value3=value3"
+   - "mattermost://[username@]mattermost-host/token[/channel]"
+   - "ntfy://username:password@host:port/topic"
+   - "hangouts://chat.googleapis.com/v1/spaces/FOO/messages?key=bar&token=baz"
+   - "zulip://bot-mail:bot-key@zulip-domain/?stream=name-or-id&topic=name"
+   - "join://shoutrrr:api-key@join/?devices=device1[,device2, ...][&icon=icon][&title=title]"
+   - "script:///file/path/on/disk"
+   - "https://www.example.com/path"
 ```
 
 

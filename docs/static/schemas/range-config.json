@@ -21,6 +21,9 @@
         },
         "global_role_vars": {
             "$ref": "#/definitions/RoleVars"
+        },
+        "notify": {
+            "$ref": "#/definitions/Notify"
         }
     },
     "required": [
@@ -546,6 +549,23 @@
             "required": [
             ],
             "title": "Router"
+        },
+        "Notify": {
+            "type": "object",
+            "description": "Use the notify key to send notification(s) when a range deployment finishes or fails.",
+            "properties": {
+                "urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "description": "A Shoutrrr url (see https://containrrr.dev/shoutrrr/services/overview/ for more information)"
+                    }
+                }
+            },
+            "required": [
+                "urls"
+            ],
+            "title": "Notify"
         }
     }
 }
