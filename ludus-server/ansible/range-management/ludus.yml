@@ -742,6 +742,7 @@
   roles:
     - role: ansible-thoteam.nexus3-oss
   vars:
+    nexus_version: 3.71.0-06
     nexus_timezone: 'Etc/UTC'
     nexus_admin_password: "{{ hostvars['localhost'].api_password }}"
     nexus_public_hostname: '192.0.2.2'
