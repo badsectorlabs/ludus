@@ -576,7 +576,7 @@
     - name: Set global role variables
       ansible.builtin.set_fact:
         "{{ global_role_var.key }}": "{{ global_role_var.value }}"
-      loop: "{{ global_role_vars | default([]) | dict2items }}"
+      loop: "{{ global_role_vars | default({}) | dict2items }}"
       loop_control:
         loop_var: global_role_var
 
