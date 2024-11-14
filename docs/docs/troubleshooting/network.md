@@ -6,9 +6,17 @@ title: Network Issues
 
 ## Templates cannot connect to the internet
 
-If your templates cannot connect to the internet or are getting Automatic Private IP Addressing (APIPA) addresses that start with `169.254`, your Ludus nat interface may be down.
+If your templates cannot connect to the internet or are getting Automatic Private IP Addressing (APIPA) addresses that start with `169.254`, your Ludus nat interface may be down or dnsmasq may not be running (or running but not listening).
 
-First, get your `ludus_nat_interface` value from `/opt/ludus/config.yml`
+Before proceeding, try restarting the `dnsmasq` service on the Ludus server:
+
+```shell
+systemctl restart dnsmasq
+```
+
+Even if dnsmasq was already running, there have been multiple cases where it was not listening and restarting it fixed the issue.
+
+If that didn't solve your issue, get your `ludus_nat_interface` value from `/opt/ludus/config.yml`
 
 ```plain
 root@ludus:~# cat /opt/ludus/config.yml

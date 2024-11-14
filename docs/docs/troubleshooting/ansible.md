@@ -31,3 +31,17 @@ exited with result 1", "unreachable": true}
 This is a long error message, but the key is `"unreachable": true`.
 
 Check that the VM that failed is powered on and reachable. Power cycle the VM if needed. Re-run the ansible that caused this error.
+
+## Unable to retrieve API task ID from node
+### Error:
+`Unable to retrieve API task ID from node <node name> HTTPSConnectionPool(host='<node name>', port=8006): Read timed out. (read timeout=5)`
+
+### Resolution:
+
+This issue has been seen on existing Proxmox installs. 
+
+Try to `curl https://<node name>:8006/`
+
+If you get an ssl error (`SSL certificate problem: unable to get local issuer certificate`) try copying the `/etc/pve/pve-root-ca.pem` file to `/usr/local/share/ca-certificates/pve-root-ca.crt` (make sure to change the `.pem` extension to `.crt` and run `update-ca-certificates`).
+
+Then try again to `curl https://<node name>:8006/`. If the ssl error issue is gone, chances are ansible API task ID error will be resolved.
