@@ -145,7 +145,7 @@
           User=kali
           PIDFile=/home/kali/.vnc/%H%i.pid
           ExecStartPre=/bin/sh -c "/usr/bin/kasmvncserver -kill :%i > /dev/null 2>&1 || :"
-          ExecStart=/usr/bin/kasmvncserver :%i -localhost no -alwaysshared -fg -geometry 1920x1080 -SecurityTypes VncAuth
+          ExecStart=/usr/bin/kasmvncserver :%i -localhost no -alwaysshared -fg -geometry 1920x1080 -SecurityTypes VncAuth -PublicIP 127.0.0.1
           ExecStop=/usr/bin/kasmvncserver -kill :%i
           Restart=on-failure
           RestartSec=5s
