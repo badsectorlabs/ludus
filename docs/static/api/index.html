@@ -20,7 +20,7 @@
           "openapi" : "3.0.3",
           "info" : {
             "description" : "This API controls Ludus user management, range deployment, power state, and testing state.",
-            "version" : "1.5.0",
+            "version" : "1.7.0",
             "title" : "Ludus API",
             "license" : {
               "name" : "GNU AGPLv3",
@@ -120,6 +120,10 @@
                               "type" : {
                                 "type" : "string",
                                 "example" : "role"
+                              },
+                              "global" : {
+                                "type" : "boolean",
+                                "example" : false
                               }
                             }
                           }
@@ -168,6 +172,10 @@
                           "action" : {
                             "type" : "string",
                             "example" : "install"
+                          },
+                          "global" : {
+                            "type" : "boolean",
+                            "example" : false
                           }
                         }
                       }
@@ -978,6 +986,19 @@
                 "summary" : "Update the range configuration",
                 "operationId" : "putConfig",
                 "description" : "Updates the range configuration with the provided yaml file\n",
+                "parameters" : [ {
+                  "in" : "query",
+                  "name" : "userID",
+                  "description" : "pass an optional userID to query. \nDefaults to the user's range (admins can query other ranges)\n",
+                  "schema" : {
+                    "properties" : {
+                      "userID" : {
+                        "$ref" : "#/components/schemas/userID"
+                      }
+                    }
+                  },
+                  "required" : false
+                } ],
                 "requestBody" : {
                   "content" : {
                     "multipart/form-data" : {
@@ -2382,6 +2403,10 @@
                       "type" : "string",
                       "example" : "example.com"
                     }
+                  },
+                  "rangeState" : {
+                    "type" : "string",
+                    "example" : "SUCCESS"
                   },
                   "VMs" : {
                     "type" : "array",
