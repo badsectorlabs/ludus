@@ -186,8 +186,10 @@ var templateLogsCmd = &cobra.Command{
 		} else {
 			if userID != "" && tail > 0 {
 				apiString = fmt.Sprintf("/templates/logs?userID=%s&tail=%d", userID, tail)
-			} else if tail > 0 {
+			} else if userID == "" && tail > 0 {
 				apiString = fmt.Sprintf("/templates/logs?tail=%d", tail)
+			} else if userID != "" {
+				apiString = fmt.Sprintf("/templates/logs?userID=%s", userID)
 			} else {
 				apiString = "/templates/logs"
 			}
