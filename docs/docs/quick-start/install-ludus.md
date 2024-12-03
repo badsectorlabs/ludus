@@ -46,6 +46,12 @@ values during install.
 # terminal-command-local
 ssh user@debian12
 
+# terminal-command-local
+su -
+# Enter root password to elevate to root
+# terminal-command-local
+apt update && apt install curl sudo
+
 # All-in-one command
 # terminal-command-user-at-debian
 curl -s https://ludus.cloud/install | bash
@@ -89,4 +95,6 @@ proxmox_vm_storage_format: qcow2  # The VM storage format - can be changed after
 proxmox_iso_storage_pool: local   # The storage pool used to store ISOs as they are downloaded for templates - can be changed after install
 ludus_nat_interface: ludus        # The name of the interface Ludus will create on the proxmox host that Ludus will use as the "WAN" for range routers
 prevent_user_ansible_add: false   # Set this to true to prevent non-admin users from adding Ansible roles or collections to the server
+license_key: community            # Set this to your license key if you have one, or leave as community for community edition
+expose_admin_port: false          # Set this to true to expose the admin API globally
 ```

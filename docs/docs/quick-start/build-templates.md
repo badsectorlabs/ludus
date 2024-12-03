@@ -59,7 +59,7 @@ ludus templates logs -f
 
 Building templates will take a while (up to a few hours depending on your internet and hardware speed).
 
-If multiple VMs time out without getting created, there may be a [network issue](../troubleshooting/network).
+If multiple VMs time out without getting created, there may be a [network issue](../troubleshooting/network.md).
 
 :::
 

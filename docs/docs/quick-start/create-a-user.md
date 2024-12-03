@@ -85,4 +85,4 @@ As a reminder, you can still log into the proxmox console as the `root` user for
 
 :::
 
-Now that you've created the user, grabbed your WireGuard config, and obtained your user creds for proxmox, you can build templates!
+Now that you've created the user and obtained your user creds for proxmox, you can build templates!
