@@ -46,24 +46,24 @@ values during install.
 # terminal-command-local
 ssh user@debian12
 
-# terminal-command-local
+# terminal-command-user-at-debian
 su -
 # Enter root password to elevate to root
-# terminal-command-local
+# terminal-command-root-at-debian
 apt update && apt install curl sudo
 
 # All-in-one command
-# terminal-command-user-at-debian
+# terminal-command-root-at-debian
 curl -s https://ludus.cloud/install | bash
 
 # If you want to check out the install script
-# terminal-command-user-at-debian
+# terminal-command-root-at-debian
 curl https://ludus.cloud/install > install.sh
-# terminal-command-user-at-debian
+# terminal-command-root-at-debian
 cat install.sh
-# terminal-command-user-at-debian
+# terminal-command-root-at-debian
 chmod +x install.sh
-# terminal-command-user-at-debian
+# terminal-command-root-at-debian
 ./install.sh
 ```
 

@@ -8,7 +8,7 @@ import TabItem from '@theme/TabItem';
 
 :::success Props!
 
-Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to create GOAD NHA, and [@ladhaAleem](https://twitter.com/LadhaAleem) for getting GOAD NHA to work with Ludus!
+Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to create GOAD NHA!
 
 :::
 
@@ -27,17 +27,6 @@ Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to
 - Obviously do not cheat by looking at the passwords and flags in the recipe files, the lab must start without user to full compromise.
 
 - Hint: No bruteforce, if not in rockyou do not waste your time and your cpu/gpu cycle.
-
-## Community maintained Linux deployment script 
-
-This script assumes a Linux host and that `jq` and the `ludus` client are installed
-
-```bash
-
-wget https://raw.githubusercontent.com/aleemladha/Ludus-Lab-Auto-Deployment/main/ludus_autodeploy_nha_lab.sh && chmod +x ludus_autodeploy_nha_lab.sh && ./ludus_autodeploy_nha_lab.sh
-
-```
-## Manual Deployment
 
 ### 1. Add the Windows 2019 template to Ludus
 
@@ -67,55 +56,43 @@ ludus templates list
 +----------------------------------------+-------+
 ```
 
-### 2. Set and deploy the following range configuration
+### 2. On the Ludus host, clone and setup the GOAD project
 
-```yaml title="config.yml"
-ludus:
-  - vm_name: "{{ range_id }}-NHA-DC01"
-    hostname: "{{ range_id }}-DC01"
-    template: win2019-server-x64-template
-    vlan: 10
-    ip_last_octet: 30
-    ram_gb: 4
-    cpus: 2
-    windows:
-      sysprep: true
-  - vm_name: "{{ range_id }}-NHA-DC02"
-    hostname: "{{ range_id }}-DC02"
-    template: win2019-server-x64-template
-    vlan: 10
-    ip_last_octet: 31
-    ram_gb: 4
-    cpus: 2
-    windows:
-      sysprep: true
-  - vm_name: "{{ range_id }}-NHA-SRV01"
-    hostname: "{{ range_id }}-SRV01"
-    template: win2019-server-x64-template
-    vlan: 10
-    ip_last_octet: 32
-    ram_gb: 4
-    cpus: 2
-    windows:
-      sysprep: true
-  - vm_name: "{{ range_id }}-NHA-SRV02"
-    hostname: "{{ range_id }}-SRV02"
-    template: win2019-server-x64-template
-    vlan: 10
-    ip_last_octet: 33
-    ram_gb: 4
-    cpus: 2
-    windows:
-      sysprep: true
-  - vm_name: "{{ range_id }}-NHA-SRV03"
-    hostname: "{{ range_id }}-SRV03"
-    template: win2019-server-x64-template
-    vlan: 10
-    ip_last_octet: 34
-    ram_gb: 4
-    cpus: 2
-    windows:
-      sysprep: true
+```bash
+git clone https://github.com/Orange-Cyberdefense/GOAD.git
+cd GOAD
+sudo apt install python3.11-venv
+export LUDUS_API_KEY='myapikey'  # put your Ludus admin api key here
+./goad.sh -p ludus
+GOAD/ludus/local > check
+GOAD/ludus/local > set_lab NHA # GOAD/GOAD-Light/NHA/SCCM
+GOAD/ludus/local > install
+```
+
+Now you wait. `[WARNING]` lines are ok, and some steps may take a long time, don't panic!
+
+This will take a few hours. You'll know it is done when you see:
+
+```
+[*] Lab successfully provisioned in XX:YY:ZZ
+```
+
+### Optional: Add a Kali VM
+
+```
+ludus --user GOADd126ca range config get > config.yml # Replace GOADd126ca with your GOAD UserID
+vim config.yml # Edit the file to add a Kali VM (see below)
+ludus --user GOADd126ca range config set -f config.yml
+ludus --user GOADd126ca range deploy -t vm-deploy
+# Wait for the deployment to finish
+ludus --user GOADd126ca range logs -f
+# Deploy the Kali VM
+ludus --user GOADd126ca range deploy --limit localhost,GOADd126ca-kali
+```
+
+The added Kali VM should look like this at the end of the `ludus:` block:
+
+```yaml
   - vm_name: "{{ range_id }}-kali"
     hostname: "{{ range_id }}-kali"
     template: kali-x64-desktop-template
@@ -126,166 +103,15 @@ ludus:
     linux: true
     testing:
       snapshot: false
-      block_internet: false	  
+      block_internet: false
 ```
 
-```bash
-#terminal-command-local
-vim config.yml
-# paste in the config above (adjust cpus and ram_gb values if you have the resources to allocate more)
-#terminal-command-local
-ludus range config set -f config.yml
-#terminal-command-local
-ludus range deploy
-# Wait for the range to successfully deploy
-# You can watch the logs with `ludus range logs -f`
-# Or check the status with `ludus range status`
-```
-
-
-### 3. Install ansible and its requirements for GOAD on your local machine
-
-```shell-session
-# You can use a virtualenv here if you would like
-#terminal-command-local
-python3 -m pip install ansible-core
-#terminal-command-local
-python3 -m pip install pywinrm
-#terminal-command-local
-git clone https://github.com/Orange-Cyberdefense/GOAD
-#terminal-command-local
-cd GOAD/ansible
-#terminal-command-goad
-ansible-galaxy install -r requirements.yml
-```
-
-### 4. Create the following inventory file and replace RANGENUMBER with your range number with sed (commands provided below)
-
-```ini title="inventory.yml"
-[default]
-; Note: ansible_host *MUST* be an IPv4 address or setting things like DNS
-; servers will break.
-; ------------------------------------------------
-; ninja.local
-; ------------------------------------------------
-dc01 ansible_host=10.RANGENUMBER.10.30 dns_domain=dc01 dns_domain=dc02 dict_key=dc01
-dc02 ansible_host=10.RANGENUMBER.10.31 dns_domain=dc02 dict_key=dc02
-srv01 ansible_host=10.RANGENUMBER.10.32 dns_domain=dc02 dict_key=srv01
-srv02 ansible_host=10.RANGENUMBER.10.33 dns_domain=dc02 dict_key=srv02
-srv03 ansible_host=10.RANGENUMBER.10.34 dns_domain=dc02 dict_key=srv03
-
-
-[all:vars]
-; domain_name : folder inside ad/
-domain_name=NHA
-
-force_dns_server=yes
-dns_server=10.RANGENUMBER.10.254
-
-two_adapters=no
-; adapter created by vagrant and virtualbox (comment if you use vmware)
-nat_adapter=Ethernet
-domain_adapter=Ethernet
-
-; adapter created by vagrant and vmware (uncomment if you use vmware)
-; nat_adapter=Ethernet0
-; domain_adapter=Ethernet1
-
-; winrm connection (windows)
-ansible_user=localuser
-ansible_password=password
-ansible_connection=winrm
-ansible_winrm_server_cert_validation=ignore
-ansible_winrm_operation_timeout_sec=400
-ansible_winrm_read_timeout_sec=500
-
-; proxy settings (the lab need internet for some install, if you are behind a proxy you should set the proxy here)
-enable_http_proxy=no
-ad_http_proxy=http://x.x.x.x:xxxx
-ad_https_proxy=http://x.x.x.x:xxxx
-```
-
-<Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
-```bash
-#terminal-command-goad
-vim inventory.yml
-# paste in the inventory file above
-#terminal-command-goad
-export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
-# `sudo apt install jq` if you don't have jq
-#terminal-command-goad
-sed -i "s/RANGENUMBER/$RANGENUMBER/g" inventory.yml
-```
-  </TabItem>
-  <TabItem value="macos" label="macOS">
-```bash
-#terminal-command-goad
-vim inventory.yml
-# paste in the inventory file above
-#terminal-command-goad
-export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
-# `brew install jq` if you don't have jq
-#terminal-command-goad
-sed -i '' "s/RANGENUMBER/$RANGENUMBER/g" inventory.yml
-```
-  </TabItem>
-</Tabs>
-
-
-### 5. Deploy GOAD - NINJA HACKER ACADEMY 
-
-:::note
-
-You must be connected to your Ludus wireguard VPN for these commands to work
-
-:::
-
-<Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
-```bash
-#terminal-command-goad
-vim build.yml
-# Edit the keyboard layout to your preferred layout (or remove that whole line)
-#terminal-command-goad
-export ANSIBLE_COMMAND="ansible-playbook -i ../ad/NHA/data/inventory -i ./inventory.yml"
-#terminal-command-goad
-export LAB="NHA"
-#terminal-command-goad
-../scripts/provisionning.sh
-```
-  </TabItem>
-  <TabItem value="macos" label="macOS">
-```bash
-#terminal-command-goad
-vim build.yml
-# Edit the keyboard layout to your preferred layout (or remove that whole line)
-#terminal-command-goad
-export ANSIBLE_COMMAND="ansible-playbook -i ../ad/NHA/data/inventory -i ./inventory.yml"
-#terminal-command-goad
-export LAB="NHA"
-#terminal-command-goad
-export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
-#terminal-command-goad
-../scripts/provisionning.sh
-```
-  </TabItem>
-</Tabs>
-
-Now you wait. `[WARNING]` lines are ok, and some steps may take a long time, don't panic!
-
-This will take a few hours. You'll know it is done when you see:
-
-```
-your lab : NHA is successfully setup ! have fun ;)
-```
-
-### 6. Snapshot VMs
+### 3. Snapshot VMs
 
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
 ```bash
-export RANGEID=JD # <= change to your user ID
+export RANGEID=GOADd126ca # <= change to your user GOAD ID
 vms=("$RANGEID-NHA-DC01" "$RANGEID-NHA-DC02" "$RANGEID-NHA-SRV01" "$RANGEID-NHA-SRV02" "$RANGEID-NHA-SRV03")
 COMMENT="Clean NHA setup after ansible run"
 # Loop over the array
@@ -298,6 +124,6 @@ do
 done
 ```
 
-### 7. Hack!
+### 4. Hack!
 
-Access your Kali machine at `https://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
+With your WireGuard connected on a client machine (your laptop, etc.), access your Kali machine (if you deployed one) at `https://10.RANGENUMBER.10.99:8444` using the creds `kali:password`. Or you can access the lab directly from your client machine with WireGuard connected and attack the 10.RANGENUMBER.10.X subnet.

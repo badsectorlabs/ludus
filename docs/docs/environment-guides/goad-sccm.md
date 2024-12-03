@@ -1,14 +1,12 @@
 ---
 title: "GOAD - SCCM"
 ---
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
 
 # Game of Active Directory (GOAD) - SCCM
 
 :::success Props!
 
-Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to create GOAD SCCM, and Errorix404 on the [Ludus Discord](https://discord.gg/HryzhdUSYT) for getting GOAD SCCM to work with Ludus!
+Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to create GOAD SCCM!
 
 :::
 
@@ -42,46 +40,60 @@ ludus templates list
 +----------------------------------------+-------+
 ```
 
-### 2. Set and deploy the following range configuration
+### 2. On the Ludus host, clone and setup the GOAD project
 
-```yaml title="config.yml"
-ludus:
-  - vm_name: "{{ range_id }}-SCCM-DC"
-    hostname: "{{ range_id }}-DC01"
-    template: win2019-server-x64-template
-    vlan: 10
-    ip_last_octet: 40
-    ram_gb: 4
-    cpus: 2
-    windows:
-      sysprep: true
-  - vm_name: "{{ range_id }}-SCCM-MECM"
-    hostname: "{{ range_id }}-SRV01"
-    template: win2019-server-x64-template
-    vlan: 10
-    ip_last_octet: 41
-    ram_gb: 4
-    cpus: 2
-    windows:
-      sysprep: true
-  - vm_name: "{{ range_id }}-SCCM-MSSQL"
-    hostname: "{{ range_id }}-SRV02"
-    template: win2019-server-x64-template
-    vlan: 10
-    ip_last_octet: 42
-    ram_gb: 4
-    cpus: 4
-    windows:
-      sysprep: true
-  - vm_name: "{{ range_id }}-SCCM-CLIENT"
-    hostname: "{{ range_id }}-WS01"
-    template: win2019-server-x64-template
-    vlan: 10
-    ip_last_octet: 43
-    ram_gb: 4
-    cpus: 2
-    windows:
-      sysprep: true
+```bash
+git clone https://github.com/Orange-Cyberdefense/GOAD.git
+cd GOAD
+sudo apt install python3.11-venv
+export LUDUS_API_KEY='myapikey'  # put your Ludus admin api key here
+./goad.sh -p ludus
+GOAD/ludus/local > check
+GOAD/ludus/local > set_lab SCCM # GOAD/GOAD-Light/NHA/SCCM
+GOAD/ludus/local > install
+```
+
+Now you wait. Now you wait. `[WARNING]` lines are ok, and some steps may take a long time, don't panic!
+
+This will take a few hours. You'll know it is done when you see:
+
+```
+[*] Lab successfully provisioned in XX:YY:ZZ
+```
+
+:::tip Install .Net Framework 3.5 with DISM Error
+
+If you encounter errors with `TASK [sccm/install/iis : Install .Net Framework 3.5 with DISM]` or similar, update the failing machine with ludus:
+
+```shell-sessions
+#terminal-command-local
+ludus testing update -n GOADd126ca-SCCM-MECM # Replace GOADd126ca with your GOAD UserID
+# Wait for all updates to be installed. 
+# Be patient, this will take a long time.
+
+# When you see the following, the updates are complete:
+localhost                  : ok=5    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+GOADd126ca-SCCM-MECM       : ok=8    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0 
+```
+
+:::
+
+### Optional: Add a Kali VM
+
+```
+ludus --user GOADd126ca range config get > config.yml # Replace GOADd126ca with your GOAD UserID
+vim config.yml # Edit the file to add a Kali VM (see below)
+ludus --user GOADd126ca range config set -f config.yml
+ludus --user GOADd126ca range deploy -t vm-deploy
+# Wait for the deployment to finish
+ludus --user GOADd126ca range logs -f
+# Deploy the Kali VM
+ludus --user GOADd126ca range deploy --limit localhost,GOADd126ca-kali
+```
+
+The added Kali VM should look like this at the end of the `ludus:` block:
+
+```yaml
   - vm_name: "{{ range_id }}-kali"
     hostname: "{{ range_id }}-kali"
     template: kali-x64-desktop-template
@@ -95,192 +107,12 @@ ludus:
       block_internet: false
 ```
 
-```bash
-#terminal-command-local
-vim config.yml
-# paste in the config above (adjust cpus and ram_gb values if you have the resources to allocate more)
-#terminal-command-local
-ludus range config set -f config.yml
-#terminal-command-local
-ludus range deploy
-# Wait for the range to successfully deploy
-# You can watch the logs with `ludus range logs -f`
-# Or check the status with `ludus range status`
-```
-
-
-### 3. Install ansible and its requirements for GOAD on your local machine
-
-```shell-session
-# You can use a virtualenv here if you would like
-#terminal-command-local
-python3 -m pip install ansible-core
-#terminal-command-local
-python3 -m pip install pywinrm
-#terminal-command-local
-git clone https://github.com/Orange-Cyberdefense/GOAD
-#terminal-command-local
-cd GOAD/ansible
-#terminal-command-goad
-ansible-galaxy install -r requirements.yml
-```
-
-### 4. Create the following inventory file and replace RANGENUMBER with your range number with sed (commands provided below)
-
-```ini title="inventory.yml"
-[default]
-; Note: ansible_host *MUST* be an IPv4 address or setting things like DNS
-; servers will break.
-; ------------------------------------------------
-; sccm.lab
-; ------------------------------------------------
-dc01 ansible_host=10.RANGENUMBER.10.40 dns_domain=dc01 dict_key=dc01
-srv01 ansible_host=10.RANGENUMBER.10.41 dns_domain=dc01 dict_key=srv01
-srv02 ansible_host=10.RANGENUMBER.10.42 dns_domain=dc01 dict_key=srv02
-ws01 ansible_host=10.RANGENUMBER.10.43 dns_domain=dc01 dict_key=ws01
-
-[all:vars]
-force_dns_server=yes
-dns_server=10.RANGENUMBER.10.254
-
-two_adapters=no
-; adapter created by proxmox (change them if you get an error)
-; to get the name connect to one vm and run ipconfig it will show you the adapters name
-nat_adapter=Ethernet
-domain_adapter=Ethernet
-
-; winrm connection (windows)
-ansible_user=localuser
-ansible_password=password
-ansible_connection=winrm
-ansible_winrm_server_cert_validation=ignore
-ansible_winrm_operation_timeout_sec=400
-ansible_winrm_read_timeout_sec=500
-```
-
-<Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
-```bash
-#terminal-command-goad
-vim inventory.yml
-# paste in the inventory file above
-#terminal-command-goad
-export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
-# `sudo apt install jq` if you don't have jq
-#terminal-command-goad
-sed -i "s/RANGENUMBER/$RANGENUMBER/g" inventory.yml
-```
-  </TabItem>
-  <TabItem value="macos" label="macOS">
-```bash
-#terminal-command-goad
-vim inventory.yml
-# paste in the inventory file above
-#terminal-command-goad
-export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
-# `brew install jq` if you don't have jq
-#terminal-command-goad
-sed -i '' "s/RANGENUMBER/$RANGENUMBER/g" inventory.yml
-```
-  </TabItem>
-</Tabs>
-
-
-### 5. Edit GOAD Ansible
-
-Edit `GOAD/ansible/roles/sccm/install/mecm/tasks/main.yml` and add these three tasks to the top of the file:
-
-```
-- name: create directory to store the downloaded prerequisite files
-  ansible.windows.win_file:
-    path: C:\setup
-    state: directory
-
-- name: Download Visual C++ 2017 Redistributable
-  ansible.windows.win_get_url:
-    url: https://aka.ms/vs/15/release/vc_redist.x64.exe
-    dest: C:\setup\vc_redist.x64.exe
-  register: download_vc_redist
-
-- name: Install Visual C++ 2017 Redistributable
-  ansible.windows.win_package:
-    path: C:\setup\vc_redist.x64.exe
-    arguments: /quiet /norestart
-  when: download_vc_redist.changed
-```
-
-
-### 6. Deploy GOAD
-
-:::note
-
-You must be connected to your Ludus wireguard VPN for these commands to work
-
-:::
-
-<Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
-```bash
-#terminal-command-goad
-vim build.yml
-# Edit the keyboard layout to your preferred layout (or remove that whole line)
-#terminal-command-goad
-export ANSIBLE_COMMAND="ansible-playbook -i ../ad/SCCM/data/inventory -i ./inventory.yml"
-#terminal-command-goad
-export LAB="SCCM"
-#terminal-command-goad
-../scripts/provisionning.sh
-```
-  </TabItem>
-  <TabItem value="macos" label="macOS">
-```bash
-#terminal-command-goad
-vim build.yml
-# Edit the keyboard layout to your preferred layout (or remove that whole line)
-#terminal-command-goad
-export ANSIBLE_COMMAND="ansible-playbook -i ../ad/SCCM/data/inventory -i ./inventory.yml"
-#terminal-command-goad
-export LAB="SCCM"
-#terminal-command-goad
-export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
-#terminal-command-goad
-../scripts/provisionning.sh
-```
-  </TabItem>
-</Tabs>
-
-Now you wait. `[WARNING]` lines are ok, and some steps may take a long time, don't panic!
-
-This will take a few hours. You'll know it is done when you see:
-
-```
-your lab : SCCM is successfully setup ! have fun ;)
-```
-
-:::tip Install .Net Framework 3.5 with DISM Error
-
-If you encounter errors with `TASK [sccm/install/iis : Install .Net Framework 3.5 with DISM]` or similar, update the failing machine with ludus:
-
-```shell-sessions
-#terminal-command-local
-ludus testing update -n JD-SCCM-MECM # Replace JD with your UserID
-# Wait for all updates to be installed. 
-# Be patient, this will take a long time.
-
-# When you see the following, the updates are complete:
-localhost                  : ok=5    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
-JD-SCCM-MECM               : ok=8    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0 
-```
-
-:::
-
-
-### 7. Snapshot VMs
+### 3. Snapshot VMs
 
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
 ```bash
-export RANGEID=JD # <= change to your ID
+export RANGEID=GOADd126ca # <= change to your GOAD UserID
 vms=("$RANGEID-SCCM-DC" "$RANGEID-SCCM-MECM" "$RANGEID-SCCM-MSSQL" "$RANGEID-SCCM-CLIENT")
 COMMENT="Clean GOAD SCCM setup after ansible run"
 # Loop over the array
@@ -293,6 +125,6 @@ do
 done
 ```
 
-### 8. Hack!
+### 4. Hack!
 
-Access your Kali machine at `http://10.RANGENUMBER.10.99:8444` using the creds `kali:password`.
+With your WireGuard connected on a client machine (your laptop, etc.), access your Kali machine (if you deployed one) at `https://10.RANGENUMBER.10.99:8444` using the creds `kali:password`. Or you can access the lab directly from your client machine with WireGuard connected and attack the 10.RANGENUMBER.10.X subnet.

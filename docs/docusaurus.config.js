@@ -188,6 +188,10 @@ const config = {
             line: 'terminal-command-user-at-debian',
           },
           {
+            className: 'code-block-terminal-command-root-at-debian',
+            line: 'terminal-command-root-at-debian',
+          },          
+          {
             className: 'code-block-terminal-command-powershell',
             line: 'terminal-command-powershell',
           },
