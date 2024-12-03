@@ -26,6 +26,7 @@ type Configuration struct {
 	LudusNATInterface      string `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
 	PreventUserAnsibleAdd  bool   `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
 	LicenseKey             string `mapstructure:"license_key" yaml:"license_key"`
+	ExposeAdminPort        bool   `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
 }
 
 var ServerConfiguration Configuration

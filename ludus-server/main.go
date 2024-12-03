@@ -81,11 +81,15 @@ func serve() {
 		certPath = "/opt/ludus/cert.pem"
 		keyPath = "/opt/ludus/key.pem"
 	}
-	// If we're running as a non-root user, bind to all interfaces, else (running as root) bind to localhost
+	// If we're running as a non-root user, bind to all interfaces, else (running as root) bind to localhost unless the user has opted to expose the admin API globally
 	if os.Geteuid() != 0 {
 		err = router.RunTLS("0.0.0.0:8080", certPath, keyPath)
 	} else {
-		err = router.RunTLS("127.0.0.1:8081", certPath, keyPath)
+		if config.ExposeAdminPort {
+			err = router.RunTLS("0.0.0.0:8081", certPath, keyPath)
+		} else {
+			err = router.RunTLS("127.0.0.1:8081", certPath, keyPath)
+		}
 	}
 	server.ShutdownPlugins()
 	if err != nil {

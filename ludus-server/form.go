@@ -278,6 +278,14 @@ func NewModel() Model {
 		),
 
 		huh.NewGroup(
+			huh.NewConfirm().
+				Key("expose_admin_port").
+				Title("Expose the admin API globally?").
+				Description("Default is 'deny' to listen on 127.0.0.1:8081").
+				Affirmative("Allow").
+				Negative("Deny").
+				Value(&config.ExposeAdminPort),
+
 			huh.NewInput().
 				Key("license_key").
 				Title("Do you have a Ludus license key?").
