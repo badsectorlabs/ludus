@@ -465,6 +465,10 @@
         - item.domain is defined
         - item.domain.role == 'primary-dc'
         - item.domain.fqdn == domain_fqdn
+    - name: Check that we have a primary DC VM Name
+      ansible.builtin.fail:
+        msg: "The primary DC was not found for this VM ({{ inventory_hostname }}). Check your range config and make sure there is a primary-dc defined for the domain {{ domain_fqdn }}"
+      when: dc_vm_name is undefined or dc_vm_name == ''
     - name: Set DC IP
       ansible.builtin.set_fact:
         dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"
@@ -633,25 +637,10 @@
         - ludus_domain_fqdn is defined
     # End set standard Ludus variables
 
-    - name: Show roles that will be executed
-      ansible.builtin.debug:
-        msg: "{{ item }}"
-      loop: "{{ custom_roles_list }}"
-      when: |
-        (only_roles is undefined or only_roles is none) or
-        (only_roles is defined and
-          (item in only_roles or
-          item.name is defined and item.name in only_roles))
+- name: Run the user-defined roles playbook
+  tags: [user-defined-roles]
+  ansible.builtin.import_playbook: "{{ lookup('env','ANSIBLE_HOME') }}/user-defined-roles.yml"
 
-    - name: Include the user-defined role
-      ansible.builtin.include_role:
-        name: "{{ item }}"
-      loop: "{{ custom_roles_list }}"
-      when: |
-        (only_roles is undefined or only_roles is none) or
-        (only_roles is defined and
-          (item in only_roles or
-          item.name is defined and item.name in only_roles))
 # ==========================================================
 # User management
 # ==========================================================
@@ -912,7 +901,7 @@
           You can update your vm with:
           ludus testing update -n [VM NAME]
           Install office manually, or attempt the office install again with:
-          ludus deploy range -t office-install
+          ludus range deploy -t office-install
       when: office_install_failed is defined and office_install_failed
 
 # ==========================================================
