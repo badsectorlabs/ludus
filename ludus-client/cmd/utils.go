@@ -249,3 +249,58 @@ func filterAndPrintTemplateLogs(logs string, verbose bool) {
 		fmt.Println(line)
 	}
 }
+
+func printTaskOutputFromString(logs string, taskName string) {
+	// Split logs into lines
+	lines := strings.Split(logs, "\n")
+
+	// Variables to track state
+	var currentOutput []string
+	var allOutputs [][]string
+	collecting := false
+
+	// Search for all instances of the task and collect their output
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+
+		// Check if we found our task (case insensitive)
+		if strings.Contains(strings.ToLower(line), "task ["+strings.ToLower(taskName)+"]") {
+			// If we were already collecting, save the previous output
+			if collecting && len(currentOutput) > 0 {
+				allOutputs = append(allOutputs, currentOutput)
+			}
+
+			// Start new collection
+			collecting = true
+			currentOutput = []string{line}
+			continue
+		}
+
+		// If we're collecting output
+		if collecting {
+			// Stop current collection when we hit the next task or play
+			if strings.HasPrefix(line, "TASK [") || strings.HasPrefix(line, "PLAY [") {
+				if len(currentOutput) > 0 {
+					allOutputs = append(allOutputs, currentOutput)
+				}
+				collecting = false
+				currentOutput = nil
+				continue
+			}
+
+			// Add non-empty lines to current output
+			if strings.TrimSpace(line) != "" {
+				currentOutput = append(currentOutput, line)
+			}
+		}
+	}
+
+	// Print all collected outputs with separation between multiple instances
+	for i, output := range allOutputs {
+		fmt.Println(strings.Join(output, "\n"))
+		// Add separator between multiple instances
+		if i < len(allOutputs)-1 {
+			fmt.Println("\n---\n")
+		}
+	}
+}

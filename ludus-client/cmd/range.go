@@ -643,6 +643,30 @@ var accessListCmd = &cobra.Command{
 	},
 }
 
+var rangeTaskOutputCmd = &cobra.Command{
+	Use:   "taskoutput",
+	Short: "Get the output of a task by name from the latest deploy logs",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		var apiString string
+
+		if userID != "" {
+			apiString = fmt.Sprintf("/range/logs?userID=%s", userID)
+		} else {
+			apiString = "/range/logs"
+		}
+		responseJSON, success := rest.GenericGet(client, apiString)
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+		rangeLogs, _ := stringAndCursorFromResult(responseJSON)
+		printTaskOutputFromString(rangeLogs, args[0])
+
+	},
+}
+
 func init() {
 	rangeConfigCmd.AddCommand(rangeConfigGet)
 	setupRangeConfigSet(rangeConfigSet)
@@ -668,6 +692,7 @@ func init() {
 	setupGenericRangeActionCmd(accessGrantCmd)
 	setupGenericRangeActionCmd(accessRevokeCmd)
 	rangeCmd.AddCommand(rangeAccessCmd)
+	rangeCmd.AddCommand(rangeTaskOutputCmd)
 	rootCmd.AddCommand(rangeCmd)
 
 }
