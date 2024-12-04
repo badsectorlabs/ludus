@@ -1394,7 +1394,7 @@ manual testing:
 ###########
 # RELEASE #
 ###########
-upload:
+gitlab-upload:
   stage: upload
   tags:
     - ludus-proxmox-runner
@@ -1429,6 +1429,36 @@ upload:
     - cd ..
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file ludus_${CI_COMMIT_TAG}_checksums.txt ${PACKAGE_REGISTRY_URL}/ludus_${CI_COMMIT_TAG}_checksums.txt'
 
+keygen-upload:
+  stage: upload
+  tags:
+    - ludus-proxmox-runner
+  needs:
+    - build all
+  variables:
+    LUDUS_BUILD_TYPE: any-built
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    THIS_VERSION=$(echo ${CI_COMMIT_TAG} | tr -d 'v')
+    curl -sSL https://raw.pkg.keygen.sh/keygen/cli/latest/install.sh | sudo sh
+    export KEYGEN_PRODUCT_ID=81af38fe-d304-4d41-8378-d3d568c8fcf7
+    keygen new --channel stable --version ${THIS_VERSION}
+    cd binaries
+    keygen upload ludus-client_linux-amd64 --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_linux-amd64
+    keygen upload ludus-client_linux-arm64 --release ${THIS_VERSION} --platform 'linux' --arch 'arm64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_linux-arm64
+    keygen upload ludus-client_linux-arm --release ${THIS_VERSION} --platform 'linux' --arch 'arm' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_linux-arm
+    keygen upload ludus-client_macOS-amd64 --release ${THIS_VERSION} --platform 'darwin' --arch 'amd64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_macOS-amd64
+    keygen upload ludus-client_macOS-arm64 --release ${THIS_VERSION} --platform 'darwin' --arch 'arm64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_macOS-arm64
+    keygen upload ludus-client_windows-amd64.exe --release ${THIS_VERSION} --platform 'windows' --arch 'amd64' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-amd64.exe
+    keygen upload ludus-client_windows-386.exe --release ${THIS_VERSION} --platform 'windows' --arch '386' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-386.exe
+    keygen upload ludus-client_windows-arm64.exe --release ${THIS_VERSION} --platform 'windows' --arch 'arm64' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-arm64.exe
+    keygen publish --release ${THIS_VERSION}
+    keygen tag 'latest' --release ${THIS_VERSION}
+    export KEYGEN_PRODUCT_ID=5722ca04-715d-4969-9130-a051532b7579
+    keygen upload ludus-server --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-server
+    keygen publish --release ${THIS_VERSION}
+    keygen tag 'latest' --release ${THIS_VERSION}
 
 release:
   stage: release
@@ -1444,10 +1474,10 @@ release:
   rules:
     - if: $CI_COMMIT_TAG
   script:
-    - wget "https://github.com/orhun/git-cliff/releases/download/v1.3.1/git-cliff-1.3.1-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/git-cliff.tar.gz
+    - wget "https://github.com/orhun/git-cliff/releases/download/v2.7.0/git-cliff-2.7.0-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/git-cliff.tar.gz
     - tar -xvzf /tmp/git-cliff.tar.gz -C /tmp
     - sudo mv /tmp/git-cliff-*/git-cliff /usr/local/bin/
-    - git-cliff -t ${CI_COMMIT_TAG} --current -o CHANGELOG.txt
+    - GITLAB_TOKEN=${CI_JOB_TOKEN} git-cliff --gitlab-repo badsectorlabs/ludus -t ${CI_COMMIT_TAG} --current -o CHANGELOG.txt
     - sudo curl --location --output /usr/local/bin/release-cli "https://gitlab.com/api/v4/projects/gitlab-org%2Frelease-cli/packages/generic/release-cli/latest/release-cli-linux-amd64"
     - sudo chmod +x /usr/local/bin/release-cli
     - 'release-cli create --name "ludus $CI_COMMIT_TAG" --description CHANGELOG.txt --tag-name $CI_COMMIT_TAG --assets-link 
