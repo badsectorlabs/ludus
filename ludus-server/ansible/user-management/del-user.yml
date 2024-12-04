@@ -7,18 +7,14 @@
     - name: Remove the pool for this user
       ansible.builtin.shell: |
         pvesh delete /pools/{{ user_range_id }}
+      register: pool_delete_result
+      failed_when: result.rc != 0 and "pool '{{ user_range_id }}' does not exist" not in pool_delete_result.stdout
 
-    - name: 'Remove the cred directory for user'
-      delegate_to: localhost
+    - name: Remove the ludus user directory for user
       become: false
-      file:
+      ansible.builtin.file:
         path: "{{ ludus_users_dir }}/{{ username }}"
         state: absent
-
-    - name: Grab this user's UID before removal
-      ansible.builtin.user:
-        name: "{{ username }}"
-      register: removed_user
 
     - name: Remove the user from the remote host
       ansible.builtin.user:
@@ -28,12 +24,12 @@
         remove: true
 
     - name: Get wg client public key
-      slurp:
+      ansible.builtin.slurp:
         src: /etc/wireguard/{{ user_range_id }}-client-public-key
       register: wg_client_public_key_slurp
 
     - name: Set the client key fact
-      set_fact:
+      ansible.builtin.set_fact:
         client_public_key: "{{ wg_client_public_key_slurp['content'] | b64decode | trim }}"
 
     - name: Remove the user from wireguard
@@ -47,17 +43,17 @@
         state: absent
 
     - name: Remove wireguard public key
-      file:
+      ansible.builtin.file:
         path: "/etc/wireguard/{{ user_range_id }}-client-public-key"
         state: absent
 
     - name: Remove wireguard private key
-      file:
+      ansible.builtin.file:
         path: "/etc/wireguard/{{ user_range_id }}-client-private-key"
         state: absent
 
     - name: Remove wireguard config
-      file:
+      ansible.builtin.file:
         path: "/etc/wireguard/{{ user_range_id }}_client.conf"
         state: absent
 
@@ -92,7 +88,8 @@
         - ludus_enterprise_license is defined and ludus_enterprise_license
         - lookup('ansible.builtin.fileglob', playbook_dir + '/portforward-management.yml') != []
 
-- hosts: localhost
+- name: Remove the user from the proxmox host
+  hosts: localhost
   become: true
   roles:
     - role: lae.proxmox
