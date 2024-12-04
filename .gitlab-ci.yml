@@ -1443,7 +1443,7 @@ keygen-upload:
     - THIS_VERSION=$(echo ${CI_COMMIT_TAG} | tr -d 'v')
     - curl -sSL https://raw.pkg.keygen.sh/keygen/cli/latest/install.sh | sudo sh
     - export KEYGEN_PRODUCT_ID=81af38fe-d304-4d41-8378-d3d568c8fcf7
-    - keygen new --channel stable --version ${THIS_VERSION}
+    - output=$(keygen new --channel stable --version ${THIS_VERSION} 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
     - cd binaries
     - keygen upload ludus-client_linux-amd64 --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filename ${THIS_VERSION}/ludus-client_linux-amd64
     - keygen upload ludus-client_linux-arm64 --release ${THIS_VERSION} --platform 'linux' --arch 'arm64' --filename ${THIS_VERSION}/ludus-client_linux-arm64
