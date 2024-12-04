@@ -47,9 +47,8 @@
 #       reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters" /v DisabledComponents /t REG_DWORD /d 255 /f
 
 - name: Check if machine is domain joined
-  ansible.windows.win_powershell:
-    script: |
-      (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
+  ansible.windows.win_shell: |
+    (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
   register: domain_check
   when: dns_server is defined
 
