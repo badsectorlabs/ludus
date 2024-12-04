@@ -1442,12 +1442,7 @@ keygen-upload:
   script:
     - THIS_VERSION=$(echo ${CI_COMMIT_TAG} | tr -d 'v')
     - curl -sSL https://raw.pkg.keygen.sh/keygen/cli/latest/install.sh | sudo sh
-    - env
     - export KEYGEN_PRODUCT_ID=81af38fe-d304-4d41-8378-d3d568c8fcf7
-    - export KEYGEN_TOKEN=$KEYGEN_TOKEN
-    - export KEYGEN_HOST=$KEYGEN_HOST
-    - export KEYGEN_ACCOUNT_ID=$KEYGEN_ACCOUNT_ID
-    - env
     - keygen new --channel stable --version ${THIS_VERSION}
     - cd binaries
     - keygen upload ludus-client_linux-amd64 --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_linux-amd64
