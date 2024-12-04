@@ -35,7 +35,7 @@ ludus:
     windows:
       chocolatey_packages:
         - vscodium
-      install_additional_tools: true
+      install_additional_tools: false # TEMPORARY - as of 2024-12-03 the googlechrome package is broken, see https://github.com/chocolatey-community/chocolatey-packages/issues/2589
       # visual_studio_version: 2019 # This takes so long - its 50+GB...
       office_version: 2019
       office_arch: 64bit
