@@ -1477,7 +1477,7 @@ release:
     - wget "https://github.com/orhun/git-cliff/releases/download/v2.7.0/git-cliff-2.7.0-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/git-cliff.tar.gz
     - tar -xvzf /tmp/git-cliff.tar.gz -C /tmp
     - sudo mv /tmp/git-cliff-*/git-cliff /usr/local/bin/
-    - GITLAB_TOKEN=${CI_JOB_TOKEN} git-cliff --gitlab-repo badsectorlabs/ludus -t ${CI_COMMIT_TAG} --current -o CHANGELOG.txt
+    - git-cliff -t ${CI_COMMIT_TAG} --current -o CHANGELOG.txt
     - sudo curl --location --output /usr/local/bin/release-cli "https://gitlab.com/api/v4/projects/gitlab-org%2Frelease-cli/packages/generic/release-cli/latest/release-cli-linux-amd64"
     - sudo chmod +x /usr/local/bin/release-cli
     - 'release-cli create --name "ludus $CI_COMMIT_TAG" --description CHANGELOG.txt --tag-name $CI_COMMIT_TAG --assets-link 
