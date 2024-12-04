@@ -441,33 +441,43 @@ install_file_freebsd() {
 #                 1 = Something went wrong
 #-------------------------------------------------------------------------------
 install_completions() {
-  if [[ "$SHELL" == "/bin/zsh" ]]; then
-    mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/.zsh_completions"
-    ludus completion zsh > "${XDG_CONFIG_HOME:-$HOME/.config}/.zsh_completions/_ludus"
-    print_message "[+] Installed zsh completion file" "ok"
-    print_message "[+] To enable, add the following to your .zshrc:" "info"
-    echo
-    print_message "fpath+=${XDG_CONFIG_HOME:-$HOME/.config}/.zsh_completions" "info"
-    print_message "autoload -U compinit && compinit" "info"
-    echo
-  elif [[ "$SHELL" == "/bin/bash" ]]; then
-    if [[ "${EUID}" == "0" ]]; then
-      mkdir -p /usr/share/bash-completion/completions
-      ludus completion bash > /usr/share/bash-completion/completions/ludus
-      print_message "[+] Installed bash completion file for all users" "ok"
-    else
-      mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion"
-      ludus completion bash > "${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion/ludus"
-      print_message "[+] Installed bash completion file" "ok"
-      print_message "[+] To enable, add the following to your .bashrc:" "info"
-      echo
-      print_message "source ${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion/ludus" "info"
-      echo
-    fi
-  else
-    print_message "[+] Unsupported shell: $SHELL" "error"
-    return 1
-  fi
+  case "$SHELL" in
+    */zsh)
+      mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/zsh/completions"
+      ludus completion zsh > "${XDG_CONFIG_HOME:-$HOME/.config}/zsh/completions/_ludus"
+      print_message "[+] Installed zsh completion file" "ok"
+      if [[ ! "$fpath" == *"${XDG_CONFIG_HOME:-$HOME/.config}/zsh/completions"* ]]; then
+        print_message "[+] To enable, add the following to your .zshrc:" "info"
+        echo
+        print_message "fpath+=\"${XDG_CONFIG_HOME:-$HOME/.config}/zsh/completions\"" "info"
+        print_message "autoload -U compinit && compinit" "info"
+        echo
+      fi
+      ;;
+
+    */bash)
+      if [[ "$EUID" -eq 0 ]]; then
+        completionsdir=$(pkg-config --variable=completionsdir bash-completion 2>/dev/null || echo "/usr/share/bash-completion/completions")
+        mkdir -p "$completionsdir"
+        ludus completion bash > "$completionsdir/ludus"
+        print_message "[+] Installed bash completion file for all users in $completionsdir" "ok"
+      else
+        user_completions_dir="${BASH_COMPLETION_USER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion}/completions"
+        mkdir -p "$user_completions_dir"
+        ludus completion bash > "$user_completions_dir/ludus"
+        print_message "[+] Installed bash completion file in $user_completions_dir" "ok"
+        print_message "[+] To enable, add the following to your .bashrc:" "info"
+        echo
+        print_message "source \"$user_completions_dir/ludus\"" "info"
+        echo
+      fi
+      ;;
+
+    *)
+      print_message "[+] Unsupported shell: $SHELL" "error"
+      return 1
+      ;;
+  esac
   return 0
 }
 
@@ -685,28 +695,32 @@ main() {
   print_message "[+] Ludus client installation complete" "ok"
 
   # Completions
-  if { [[ "$SHELL" == "/bin/zsh" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/.zsh_completions/_ludus" ]]; } || \
-   { [[ "$SHELL" == "/bin/bash" ]] && \
-     [[ ! -f /usr/share/bash-completion/completions/ludus ]] && \
-     { [[ "${EUID}" == "0" ]] || \
-       { [[ "${EUID}" != "0" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion/ludus" ]]; }
-     }
-   }; then
+  if { [[ "$SHELL" == "/bin/zsh" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/zsh/completions/_ludus" ]]; } || \
+    { [[ "$SHELL" == "/bin/bash" ]] && \
+      { [[ "${EUID}" == "0" ]] && [[ ! -f "$(pkg-config --variable=completionsdir bash-completion)/ludus" ]]; } || \
+      { [[ "${EUID}" != "0" ]] && [[ ! -f "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/ludus" ]]; }; }; then
+
     print_message "[?] Would you like to install shell completions so tab works with the 'ludus' command?" "warn"
+    
     if [[ "$SHELL" == "/bin/zsh" ]]; then
       print_message "[?] (y/n): " "warn"
       read -r completions_response </dev/tty
     else
       read -r -p "[?] (y/n): " completions_response </dev/tty
     fi
-      case "${completions_response}" in
-        "y" ) print_message "[+] Installing Ludus completions" "info";
-              install_completions
-              ;;
-        "n" ) print_message "[+] Skipping Ludus completions installation" "info";;
-          * ) print_message "[-_-] Invalid response. Skipping Ludus completions installation" "error"
-              ;;
-      esac
+    
+    case "${completions_response}" in
+      y|Y ) 
+        print_message "[+] Installing Ludus completions" "info"
+        install_completions
+        ;;
+      n|N ) 
+        print_message "[+] Skipping Ludus completions installation" "info"
+        ;;
+      * ) 
+        print_message "[-_-] Invalid response. Skipping Ludus completions installation" "error"
+        ;;
+    esac
   else
     print_message "[+] Shell completions already installed" "info"
   fi
