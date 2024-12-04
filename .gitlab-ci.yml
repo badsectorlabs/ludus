@@ -1445,18 +1445,18 @@ keygen-upload:
     - export KEYGEN_PRODUCT_ID=81af38fe-d304-4d41-8378-d3d568c8fcf7
     - keygen new --channel stable --version ${THIS_VERSION}
     - cd binaries
-    - keygen upload ludus-client_linux-amd64 --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_linux-amd64
-    - keygen upload ludus-client_linux-arm64 --release ${THIS_VERSION} --platform 'linux' --arch 'arm64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_linux-arm64
-    - keygen upload ludus-client_linux-arm --release ${THIS_VERSION} --platform 'linux' --arch 'arm' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_linux-arm
-    - keygen upload ludus-client_macOS-amd64 --release ${THIS_VERSION} --platform 'darwin' --arch 'amd64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_macOS-amd64
-    - keygen upload ludus-client_macOS-arm64 --release ${THIS_VERSION} --platform 'darwin' --arch 'arm64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-client_macOS-arm64
+    - keygen upload ludus-client_linux-amd64 --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filename ${THIS_VERSION}/ludus-client_linux-amd64
+    - keygen upload ludus-client_linux-arm64 --release ${THIS_VERSION} --platform 'linux' --arch 'arm64' --filename ${THIS_VERSION}/ludus-client_linux-arm64
+    - keygen upload ludus-client_linux-arm --release ${THIS_VERSION} --platform 'linux' --arch 'arm' --filename ${THIS_VERSION}/ludus-client_linux-arm
+    - keygen upload ludus-client_macOS-amd64 --release ${THIS_VERSION} --platform 'darwin' --arch 'amd64' --filename ${THIS_VERSION}/ludus-client_macOS-amd64
+    - keygen upload ludus-client_macOS-arm64 --release ${THIS_VERSION} --platform 'darwin' --arch 'arm64' --filename ${THIS_VERSION}/ludus-client_macOS-arm64
     - keygen upload ludus-client_windows-amd64.exe --release ${THIS_VERSION} --platform 'windows' --arch 'amd64' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-amd64.exe
     - keygen upload ludus-client_windows-386.exe --release ${THIS_VERSION} --platform 'windows' --arch '386' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-386.exe
     - keygen upload ludus-client_windows-arm64.exe --release ${THIS_VERSION} --platform 'windows' --arch 'arm64' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-arm64.exe
     - keygen publish --release ${THIS_VERSION}
     - keygen tag 'latest' --release ${THIS_VERSION}
     - export KEYGEN_PRODUCT_ID=5722ca04-715d-4969-9130-a051532b7579
-    - keygen upload ludus-server --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filetype 'bin' --filename ${THIS_VERSION}/ludus-server
+    - keygen upload ludus-server --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filename ${THIS_VERSION}/ludus-server
     - keygen publish --release ${THIS_VERSION}
     - keygen tag 'latest' --release ${THIS_VERSION}
 
