@@ -2,7 +2,16 @@
 title: Kali
 ---
 
-# Kali APT error
+## Kali APT `undefined symbol` error
+
+```
+Traceback (most recent call last):
+  File "/usr/lib/cnf-update-db", line 3, in ‹module>
+    import apt_pkg
+ImportError: /usr/lib/python3/dist-packages/apt_pkg.cpython-312-x86_64-linux-gnu.so: undefined symbol: _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_replaceEmmPKcm, version APTPKG_6.0
+Error: Problem executing scripts APT::Update::Post-Invoke-Success 'if /usr/bin/test - /var/1ib/command-not-found/ -a -e /usr/1ib/cnf-update-db; then /usr/1ib/cnf-update-db › /dev/null; fi'
+Error: Sub-process returned an error code
+```
 
 As of 2024-12-05 there is an APT error with Kali that prevents any packages from being installed after initial install.
 
@@ -26,11 +35,11 @@ build {
 }
 
 ```
-That at least gets you a base Kali tempalte, but without KasmVNC.
-You can install the KasmVNC manually, but ansible won't go past the error
+That at least gets you a base Kali template, but without KasmVNC.
+You can install the KasmVNC manually, but ansible won't go past the error.
 
 
-# Kali GRUB install error
+## Kali GRUB install error
 
 Your Kali install may fail with a GRUB boot loader error (as of 2024-02-08)
 
