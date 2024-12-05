@@ -1455,6 +1455,7 @@ keygen-upload:
     - keygen upload ludus-client_windows-386.exe --release ${THIS_VERSION} --platform 'windows' --arch '386' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-386.exe
     - keygen upload ludus-client_windows-arm64.exe --release ${THIS_VERSION} --platform 'windows' --arch 'arm64' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-arm64.exe
     - keygen publish --release ${THIS_VERSION}
+    - keygen untag --release 'latest'
     - keygen tag 'latest' --release ${THIS_VERSION}
     - export KEYGEN_PRODUCT_ID=5722ca04-715d-4969-9130-a051532b7579
     - keygen upload ludus-server --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filename ${THIS_VERSION}/ludus-server
