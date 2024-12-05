@@ -8,7 +8,7 @@
       ansible.builtin.shell: |
         pvesh delete /pools/{{ user_range_id }}
       register: pool_delete_result
-      failed_when: result.rc != 0 and "pool '{{ user_range_id }}' does not exist" not in pool_delete_result.stdout
+      failed_when: pool_delete_result.rc != 0 and "pool '{{ user_range_id }}' does not exist" not in pool_delete_result.stdout
 
     - name: Remove the ludus user directory for user
       become: false
