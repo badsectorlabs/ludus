@@ -2,6 +2,34 @@
 title: Kali
 ---
 
+# Kali APT error
+
+As of 2024-12-05 there is an APT error with Kali that prevents any packages from being installed after initial install.
+
+A [bug](https://bugs.kali.org/view.php?id=9027) has been reported and is being tracked by the Kali maintainers.
+
+In the meantime, you can comment out the provisioner part of the kali hcl at `/opt/ludus/packer/kali/kali.pkr.hcl`
+
+```
+build {
+  sources = ["source.proxmox-iso.kali"]
+
+//  provisioner "ansible" {
+//    user               = "${var.ssh_username}"
+//    use_proxy          = false
+//    extra_arguments    = ["--extra-vars", "{ansible_python_interpreter: /usr/bin/python3, ansible_password: ${var.ssh_password}, ansible_sudo_pass: ${var.ssh_password}}"]
+//    playbook_file      = "./kali.yml"
+//    ansible_env_vars   = ["ANSIBLE_HOME=${var.ansible_home}", "ANSIBLE_LOCAL_TEMP=${var.ansible_home}/tmp", "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR=${var.ansible_home}/pc", "ANSIBLE_SSH_CONTROL_PATH_DIR=${var.ansible_home}/cp"]
+//    skip_version_check = true
+//  }
+
+}
+
+```
+That at least gets you a base Kali tempalte, but without KasmVNC.
+You can install the KasmVNC manually, but ansible won't go past the error
+
+
 # Kali GRUB install error
 
 Your Kali install may fail with a GRUB boot loader error (as of 2024-02-08)
