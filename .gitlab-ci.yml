@@ -1443,7 +1443,7 @@ keygen-upload:
   script:
     - THIS_VERSION=$(echo ${CI_COMMIT_TAG} | tr -d 'v')
     - curl -sSL https://raw.pkg.keygen.sh/keygen/cli/latest/install.sh | sudo sh
-    - export KEYGEN_PRODUCT_ID=81af38fe-d304-4d41-8378-d3d568c8fcf7
+    # - export KEYGEN_PRODUCT_ID=81af38fe-d304-4d41-8378-d3d568c8fcf7
     - output=$(keygen new --channel stable --version ${THIS_VERSION} 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
     - cd binaries
     - keygen upload ludus-client_linux-amd64 --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filename ${THIS_VERSION}/ludus-client_linux-amd64
@@ -1457,11 +1457,12 @@ keygen-upload:
     - keygen publish --release ${THIS_VERSION}
     - keygen untag --release 'latest'
     - keygen tag 'latest' --release ${THIS_VERSION}
-    - export KEYGEN_PRODUCT_ID=5722ca04-715d-4969-9130-a051532b7579
-    - keygen upload ludus-server --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filename ${THIS_VERSION}/ludus-server
-    - keygen publish --release ${THIS_VERSION}
-    - keygen untag --release 'latest'
-    - keygen tag 'latest' --release ${THIS_VERSION}
+    # We don't upload the server to keygen because it's large and there is no built in update mechanism yet
+    # - export KEYGEN_PRODUCT_ID=[GUID for ludus-server]
+    # - keygen upload ludus-server --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filename ${THIS_VERSION}/ludus-server
+    # - keygen publish --release ${THIS_VERSION}
+    # - keygen untag --release 'latest'
+    # - keygen tag 'latest' --release ${THIS_VERSION}
 
 release:
   stage: release
