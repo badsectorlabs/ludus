@@ -697,7 +697,7 @@ main() {
   # Completions
   if { [[ "$SHELL" == "/bin/zsh" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/zsh/completions/_ludus" ]]; } || \
     { [[ "$SHELL" == "/bin/bash" ]] && \
-      { [[ "${EUID}" == "0" ]] && [[ ! -f "$(pkg-config --variable=completionsdir bash-completion)/ludus" ]]; } || \
+      { [[ "${EUID}" == "0" ]] && command_exists pkg-config && [[ ! -f "$(pkg-config --variable=completionsdir bash-completion)/ludus" ]]; } || \
       { [[ "${EUID}" != "0" ]] && [[ ! -f "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/ludus" ]]; }; }; then
 
     print_message "[?] Would you like to install shell completions so tab works with the 'ludus' command?" "warn"
