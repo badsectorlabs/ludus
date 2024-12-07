@@ -24,7 +24,7 @@ Ludus can **only** be installed on a host that meets the following requirements:
 - Has at least 32 GB of RAM
 - Has at least 200 GB of disk space (fast NVMe recommended)
 - Root access
-- Internet access (not via WiFi)
+- Internet access (not via WiFi). Note: Bonded nics or other advanced networking is not supported. If you use these, you will need to console in and fix the network after install (edit `/etc/network/interfaces`), as Ludus assumes you have a single, standard interface.
 
 Machines with lower specs than listed above may work, but are not tested/supported.
 
