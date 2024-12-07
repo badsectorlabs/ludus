@@ -22,6 +22,7 @@ type LudusPlugin interface {
 type Server struct {
 	plugins          []LudusPlugin
 	Version          string
+	VersionString    string
 	LudusInstallPath string
 	LicenseType      string
 	LicenseMessage   string

@@ -74,6 +74,7 @@ func (s *Server) ParseConfig() {
 		s.LicenseType = "enterprise"
 		s.LicenseMessage = ""
 		s.LicenseKey = ServerConfiguration.LicenseKey
+		s.checkLicense()
 	}
 	fmt.Println("Using configuration file: ", viper.ConfigFileUsed())
 }

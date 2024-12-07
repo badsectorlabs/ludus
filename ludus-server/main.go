@@ -37,36 +37,39 @@ func serve() {
 
 	server := &ludusapi.Server{
 		Version:          LudusVersion,
+		VersionString:    VersionString,
 		LudusInstallPath: ludusInstallPath,
 	}
 
-	// Load plugins
-	pluginsDir := fmt.Sprintf("%s/plugins", ludusInstallPath)
-	pluginsFound := false
-	err := filepath.Walk(pluginsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if filepath.Ext(path) == ".so" {
-			pluginsFound = true
-			if err := server.LoadPlugin(path); err != nil {
-				log.Printf("Error loading plugin %s: %v", path, err)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		log.Printf("Error walking plugins directory: %v", err)
-	}
-	if !pluginsFound {
+	// Setup Gin router
+	router := ludusapi.NewRouter(LudusVersion, server)
+
+	if server.LicenseType == "community" {
 		fmt.Println("LICENSE: Community Edition")
+	}
+
+	// Load plugins
+	pluginsDir := fmt.Sprintf("%s/plugins/community", ludusInstallPath)
+	// Check if plugins directory exists and is a directory, if so load the plugins from it
+	if info, err := os.Stat(pluginsDir); err == nil && info.IsDir() {
+		err := filepath.Walk(pluginsDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if filepath.Ext(path) == ".so" {
+				if err := server.LoadPlugin(path); err != nil {
+					log.Fatalf("Error loading plugin %s: %v", path, err)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			log.Printf("Error walking community plugins directory: %v", err)
+		}
 	}
 
 	// Initialize plugins
 	server.InitializePlugins()
-
-	// Setup Gin router
-	router := ludusapi.NewRouter(LudusVersion, server)
 
 	// Register plugin routes
 	server.RegisterPluginRoutes(router)
@@ -75,13 +78,14 @@ func serve() {
 	keyPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.key"
 
 	// Check if the pve-ssl.pem and pve-ssl.key files exist and we can read them
-	if !fileExists("/etc/pve/nodes/"+config.ProxmoxNode+"/pve-ssl.pem") || !fileExists("/etc/pve/nodes/"+config.ProxmoxNode+"/pve-ssl.key") {
-		log.Println("Could not find/read /etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.pem or /etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.key")
+	if !fileExists(certPath) || !fileExists(keyPath) {
+		log.Println("Could not find/read " + certPath + " or " + keyPath)
 		generateSelfSignedCert()
 		certPath = "/opt/ludus/cert.pem"
 		keyPath = "/opt/ludus/key.pem"
 	}
 	// If we're running as a non-root user, bind to all interfaces, else (running as root) bind to localhost unless the user has opted to expose the admin API globally
+	var err error
 	if os.Geteuid() != 0 {
 		err = router.RunTLS("0.0.0.0:8080", certPath, keyPath)
 	} else {
