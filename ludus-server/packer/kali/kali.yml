@@ -3,6 +3,20 @@
   hosts: all
   become_method: sudo
   tasks:
+    # See: https://bugs.kali.org/view.php?id=9027
+    - name: Install from python-apt from source if needed
+      become: true
+      ansible.builtin.shell:
+        cmd: |
+          apt update 2>&1 | grep 'undefined symbol: _ZNS' >/dev/null && \
+            echo "Python-apt bug found, fixing from source..." >> /tmp/kali-install.log && \
+            DEBIAN_FRONTEND=noninteractive apt install -y python3-setuptools dpkg-dev python3-dev libapt-pkg-dev >> /tmp/kali-install.log 2>&1 && \
+            git clone https://salsa.debian.org/apt-team/python-apt >> /tmp/kali-install.log 2>&1 && cd python-apt && \
+            git checkout 2.9.2 >> /tmp/kali-install.log 2>&1 && \
+            python3 setup.py build >> /tmp/kali-install.log 2>&1 && \
+            python3 setup.py install >> /tmp/kali-install.log 2>&1 || \
+          echo "No python-apt bug found" >> /tmp/kali-install.log
+
     - name: Install packages
       become: true
       ansible.builtin.apt:
