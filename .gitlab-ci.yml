@@ -1475,10 +1475,9 @@ keygen-upload:
     # - keygen tag 'latest' --release ${THIS_VERSION}
     - export KEYGEN_PRODUCT_ID=${LUDUS_ENTERPRISE_KEYGEN_PRODUCT_ID}
     - export KEYGEN_TOKEN=${LUDUS_ENTERPRISE_KEYGEN_TOKEN}
+    - output=$(keygen new --channel stable --version ${CI_COMMIT_TAG} 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
     - keygen upload ludus-enterprise.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-enterprise_${CI_COMMIT_TAG}.so
     - keygen publish --release ${CI_COMMIT_TAG}
-    - keygen untag --release 'latest' || true
-    - keygen tag 'latest' --release ${CI_COMMIT_TAG}
 
 release:
   stage: release
