@@ -50,7 +50,7 @@ ludus:
     dns_rewrites:           # Any values in this array will be added to DNS for the range and return an A record for this VM's IP
       - example.com         # rewrites responses for this domain name only
       - '*.example.com'     # rewrites responses for all example.com subdomains but *not* example.com
-    unmanaged: false        # Set this to true for VMs that cannot report an IP to ansible via proxmox (no qemu-guest-agent, i.e. EDR appliances). You *must* manually configure this VM to have the IP defined in the config or risk leaking data during testing. Default: false
+    unmanaged: false        # Set this to true for VMs that cannot report an IP to ansible via proxmox (no qemu-guest-agent, i.e. EDR appliances). You will have to manually configure this VM to have the IP defined in the config. Default: false
   - vm_name: "{{ range_id }}-ad-win11-22h2-enterprise-x64-1"
     hostname: "{{ range_id }}-WIN11-22H2-1"
     template: win11-22h2-x64-enterprise-template
