@@ -49,7 +49,13 @@ func serve() {
 	}
 
 	// Load plugins
-	pluginsDir := fmt.Sprintf("%s/plugins/community", ludusInstallPath)
+	var pluginsDir string
+	if os.Geteuid() == 0 {
+		pluginsDir = fmt.Sprintf("%s/plugins/community/admin", ludusInstallPath)
+	} else {
+		pluginsDir = fmt.Sprintf("%s/plugins/community/", ludusInstallPath)
+	}
+
 	// Check if plugins directory exists and is a directory, if so load the plugins from it
 	if info, err := os.Stat(pluginsDir); err == nil && info.IsDir() {
 		err := filepath.Walk(pluginsDir, func(path string, info os.FileInfo, err error) error {

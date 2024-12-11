@@ -36,7 +36,10 @@ func (s *Server) checkLicense() {
 
 	fingerprint, err := machineid.ProtectedID(keygen.Product)
 	if err != nil {
-		panic(err)
+		log.Println("LICENSE: unable to get machine fingerprint:", err)
+		s.LicenseValid = false
+		s.LicenseMessage = "Unable to get machine fingerprint"
+		return
 	}
 	ctx := context.Background()
 
@@ -86,11 +89,18 @@ func (s *Server) checkLicense() {
 	s.LicenseValid = true
 
 	// Check for the enterprise plugin and load it if it exists
-	if fileExists(ludusInstallPath + "/plugins/enterprise/ludus-enterprise.so") {
-		err = s.LoadPlugin(ludusInstallPath + "/plugins/enterprise/ludus-enterprise.so")
+	var pluginsDir string
+	if os.Geteuid() == 0 {
+		// pluginsDir = fmt.Sprintf("%s/plugins/enterprise/admin", ludusInstallPath)
+		return // Currently there is no enterprise plugin for the ludus-admin server
+	} else {
+		pluginsDir = fmt.Sprintf("%s/plugins/enterprise/", ludusInstallPath)
+	}
+	if fileExists(pluginsDir + "/ludus-enterprise.so") {
+		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
 		if err != nil {
 			log.Printf("LICENSE: error loading enterprise plugin: %v", err)
-			log.Println("LICENSE: pulling compatible plugin from server")
+			log.Println("LICENSE: pulling compatible plugin from server (version: " + s.Version + ")")
 			// Pull down the enterprise plugin since we have a valid license, perhaps we had a old version
 			err = s.pullEnterprisePlugin()
 			if err != nil {
