@@ -88,6 +88,55 @@
     key: PasswordComplexity
     value: 0
 
+# Well known SID
+# https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
+#
+#   Domain Admins                     :     {{ domain_sid }}-512
+#   Remote Desktop Users              :     S-1-5-32-555
+#   Enterprise Admins                 :     {{ domain_sid }}-519
+#   Schema Admins                     :     {{ domain_sid }}-518
+#   Group Policy Creator Owners       :     {{ domain_sid }}-520
+#
+- name: Gather Domain Admins group name multilingual
+  ansible.windows.win_shell: |
+    (Gwmi win32_group -Filter "Domain='{{ domain_name }}' and SID='{{ domain_sid }}-512'").Name
+  register: domain_admins_group_name
+  when: domain_check
+
+- debug: var=domain_admins_group_name
+
+- name: Gather Remote Desktop Users group name multilingual
+  ansible.windows.win_shell: |
+    (Gwmi win32_group -Filter "SID='S-1-5-32-555'").Name
+  register: rdp_users_group_name
+  when: domain_check
+
+- debug: var=rdp_users_group_name
+
+- name: Gather Enterprise Admins group name multilingual
+  ansible.windows.win_shell: |
+    (Gwmi win32_group -Filter "Domain='{{ domain_name }}' and SID='{{ domain_sid }}-519'").Name
+  register: enterprise_admins_group_name
+  when: domain_check
+
+- debug: var=enterprise_admins_group_name
+
+- name: Gather Schema Admins group name multilingual
+  ansible.windows.win_shell: |
+    (Gwmi win32_group -Filter "Domain='{{ domain_name }}' and SID='{{ domain_sid }}-518'").Name
+  register: schema_admins_group_name
+  when: domain_check
+
+- debug: var=schema_admins_group_name
+
+- name: Gather Group Policy Creator Owners group name multilingual
+  ansible.windows.win_shell: |
+    (Gwmi win32_group -Filter "Domain='{{ domain_name }}' and SID='{{ domain_sid }}-520'").Name
+  register: gpo_creators_group_name
+  when: domain_check
+
+- debug: var=gpo_creators_group_name
+
 - name: Create a domain user
   microsoft.ad.user:
     name: "{{ defaults.ad_domain_user }}"
@@ -98,7 +147,7 @@
     password_never_expires: true
     groups:
       add:
-        - Remote Desktop Users
+        - "{{ (rdp_users_group_name.stdout|split('\n'))[0]|trim }}"  # Remote Desktop Users
 
 - name: Create a Domain Admin user
   microsoft.ad.user:
@@ -110,11 +159,11 @@
     password_never_expires: true
     groups:
       add:
-        - Domain Admins
-        - Remote Desktop Users
-        - Enterprise Admins
-        - Schema Admins
-        - Group Policy Creator Owners
+        - "{{ (domain_admins_group_name.stdout|split('\n'))[0]|trim }}"       # Domain Admins
+        - "{{ (rdp_users_group_name.stdout|split('\n'))[0]|trim }}"           # Remote Desktop Users
+        - "{{ (enterprise_admins_group_name.stdout|split('\n'))[0]|trim }}"   # Enterprise Admins
+        - "{{ (schema_admins_group_name.stdout|split('\n'))[0]|trim }}"       # Schema Admins
+        - "{{ (gpo_creators_group_name.stdout|split('\n'))[0]|trim }}"        # Group Policy Creator Owners
 
 - name: Allow the domain user and domain admin to RDP
   ansible.windows.win_user_right:
