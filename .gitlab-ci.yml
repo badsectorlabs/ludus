@@ -345,7 +345,7 @@ build all:
         cd ludus-enterprise-plugin
         git config --global --add safe.directory $PWD
         GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
-        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -o ../binaries/ludus-enterprise.so
+        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags=embeddocs -o ../binaries/ludus-enterprise.so
       fi
     - echo "Compile complete."
 
