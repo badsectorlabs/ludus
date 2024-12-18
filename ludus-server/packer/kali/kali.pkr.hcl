@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "sha256:2ba1abf570ea0685ca4a97dd9c83a65670ca93043ef951f0cd7bbff914fa724a"
+  default = "sha256:beca4f8fd7f58eda290812f538e1323d3ba1f1a34df4b203e85de4be42525bb6"
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
@@ -11,7 +11,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://cdimage.kali.org/kali-2024.3/kali-linux-2024.3-installer-amd64.iso"
+  default = "https://cdimage.kali.org/kali-2024.4/kali-linux-2024.4-installer-amd64.iso"
 }
 
 variable "vm_cpu_cores" {
