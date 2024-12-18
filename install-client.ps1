@@ -85,14 +85,14 @@ function Fetch-ReleaseLinks {
 #   DESCRIPTION:  Extracts the version number dynamically from the asset release link.
 #                 Assumes all release links possess version numbers.
 #    PARAMETERS:  $releaseLinks = JSON object containing the release links.
-#       RETURNS:  Version string (e.g., "v1.5.4")
+#       RETURNS:  Version string (e.g., "1.5.4")
 #-------------------------------------------------------------------------------
 function Get-Version {
     param (
         [array]$releaseLinks
     )
     $firstAsset = $releaseLinks[0].name
-    if ($firstAsset -match 'v\d+\.\d+\.\d+') {
+    if ($firstAsset -match '\d+\.\d+\.\d+') {
         return $matches[0]
     }
     else {
