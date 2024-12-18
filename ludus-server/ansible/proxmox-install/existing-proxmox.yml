@@ -197,8 +197,8 @@
           groups:
             - ludus_users
   vars:
-    - port: "51820"
-    - server_cidr: "198.51.100.1/24"
+    port: "51820"
+    server_cidr: "198.51.100.1/24"
   tasks:
     - name: Install proxmox and ansible packer plugin
       ansible.builtin.shell:
