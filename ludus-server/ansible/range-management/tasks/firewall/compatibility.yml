@@ -33,6 +33,7 @@
 - name: Remove duplicates in rules_to_replicate
   ansible.builtin.set_fact:
     rules_to_replicate: "{{ rules_to_replicate | unique }}"
+  when: rules_to_replicate is defined and rules_to_replicate | length > 0
 
 - name: Add custom rules to the LUDUS_TESTING chain
   ansible.builtin.command: iptables {{ item }}
