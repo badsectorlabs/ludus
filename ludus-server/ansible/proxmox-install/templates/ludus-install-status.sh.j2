@@ -20,6 +20,17 @@ else
         fi
     done
 
+    # Wait up to 10 seconds for root-api-key file to exist
+    count=0
+    while [ ! -f {{ ludus_install_path }}/install/root-api-key ] && [ $count -lt 10 ]; do
+        sleep 1
+        ((count++))
+    done
+    if [ ! -f {{ ludus_install_path }}/install/root-api-key ]; then
+        echo "Error: Root API key file ({{ ludus_install_path }}/install/root-api-key)not found"
+        exit 1
+    fi
+
     echo
     echo -n "Root API key: "
     cat {{ ludus_install_path }}/install/root-api-key
