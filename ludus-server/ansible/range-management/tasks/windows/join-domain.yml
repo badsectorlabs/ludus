@@ -26,11 +26,20 @@
 - name: Update group policy
   ansible.windows.win_shell: "gpupdate /force"
 
+- name: Gather Remote Desktop Users group name (multilingual)
+  ansible.windows.win_shell: |
+    (Get-WmiObject win32_group -Filter "SID='S-1-5-32-555'").Name
+  register: rdp_users_group_name_command
+
+- name: Set the Remote Desktop Users group name
+  ansible.builtin.set_fact:
+    rdp_users_group_name: "{{ rdp_users_group_name_command.stdout | trim }}"
+
 # "The users have to be part of the RDusers group locally on the server you want to login via RDP, not only in the AD."
 # https://serverfault.com/questions/265531/members-of-remote-desktop-users-group-cannot-login
 - name: Add a domainuser and domainadmin user to local RDUsers group
   ansible.windows.win_group_membership:
-    name: Remote Desktop Users
+    name: "{{ rdp_users_group_name }}"           # Remote Desktop Users
     members:
       - "{{ netbios_name }}\\{{ defaults.ad_domain_admin }}"
       - "{{ netbios_name }}\\{{ defaults.ad_domain_user }}"
