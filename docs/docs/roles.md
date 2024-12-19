@@ -83,3 +83,4 @@ While most existing ansible roles will work with Ludus, this page contains a tab
 | [ludus_tailscale](https://github.com/NocteDefensor/ludus_tailscale) | Provision or remove a device to/from a Tailnet | [@__Mastadon](https://x.com/__Mastadon) | |
 | [ludus_velociraptor_client](https://github.com/fmurer/ludus_velociraptor_client) | Install a Velociraptor Agent on a System in Ludus | [@f_Murer](https://x.com/f_Murer) | Must install from directory |
 | [ludus_velociraptor_server](https://github.com/fmurer/ludus_velociraptor_server) | Install a Velociraptor Server in Ludus | [@f_Murer](https://x.com/f_Murer) | Must install from directory |
+| [bagelByt3s.ludus_adfs](https://github.com/bagelByt3s/ludus_adfs) | Installs an ADFS deployment with optional configurations. | [Beyviel David](https://github.com/bagelByt3s) | Must install from directory |
