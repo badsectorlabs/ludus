@@ -17,6 +17,29 @@
             python3 setup.py install >> /tmp/kali-install.log 2>&1 || \
           echo "No python-apt bug found" >> /tmp/kali-install.log
 
+    - name: Try an apt install
+      become: true
+      ansible.builtin.apt:
+        name:
+          - git
+        state: present
+        update_cache: true
+      register: apt_result
+      ignore_errors: true
+
+    # This is a fix for the "python3-apt must be installed and visible from /usr/bin/python3" error in Kali 2024.4
+    - name: Fix apt for ansible if needed
+      become: true
+      ansible.builtin.shell:
+        cmd: |
+          echo "Python-apt bug 2 found, fixing from source..." >> /tmp/kali-install.log && \
+          DEBIAN_FRONTEND=noninteractive apt install -y python3-setuptools dpkg-dev python3-dev libapt-pkg-dev >> /tmp/kali-install.log 2>&1 && \
+          git clone https://salsa.debian.org/apt-team/python-apt >> /tmp/kali-install.log 2>&1 && cd python-apt && \
+          git checkout 2.9.6 >> /tmp/kali-install.log 2>&1 && \
+          python3 setup.py build >> /tmp/kali-install.log 2>&1 && \
+          python3 setup.py install >> /tmp/kali-install.log 2>&1
+      when: apt_result.failed
+
     - name: Install packages
       become: true
       ansible.builtin.apt:
