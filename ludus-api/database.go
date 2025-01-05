@@ -14,7 +14,7 @@ import (
 var (
 	once     sync.Once
 	db       *gorm.DB
-	database string = fmt.Sprintf("%s/ludus.db", ludusInstallPath)
+	database string = fmt.Sprintf("%s/ludus.db?cache=shared&_journal_mode=WAL", ludusInstallPath)
 )
 
 func InitDb() *gorm.DB {
