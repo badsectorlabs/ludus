@@ -72,7 +72,7 @@ func (s *Server) checkLicense() {
 			log.Println("LICENSE: unable to connect to license server:", err)
 			// If the enterprise plugin is not installed mark the license is not valid
 			// The enterprise plugin can use a fallback on disk license if the network license fails
-			if !fileExists(ludusInstallPath + "/plugins/ludus-enterprise.so") {
+			if !fileExists(ludusInstallPath + "/plugins/enterprise/ludus-enterprise.so") {
 				s.LicenseValid = false
 				s.LicenseMessage = "Unable to connect to license server"
 				return
@@ -94,7 +94,7 @@ func (s *Server) checkLicense() {
 		// pluginsDir = fmt.Sprintf("%s/plugins/enterprise/admin", ludusInstallPath)
 		return // Currently there is no enterprise plugin for the ludus-admin server
 	} else {
-		pluginsDir = fmt.Sprintf("%s/plugins/enterprise/", ludusInstallPath)
+		pluginsDir = fmt.Sprintf("%s/plugins/enterprise", ludusInstallPath)
 	}
 	if fileExists(pluginsDir + "/ludus-enterprise.so") {
 		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
