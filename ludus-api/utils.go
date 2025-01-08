@@ -39,7 +39,14 @@ func checkEmbeddedDocs() bool {
 }
 
 func HashString(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	// Use a lower cost for the hash than the recommended 14
+	// We have to hash the API key each request during the compare, so we don't want to use too much CPU
+	// Also, since the API keys are generated as a random string with 243 bits of entropy,
+	// this offsets the "low cost" of the hash as it would still take
+	// ~ 2.5697 × 10^55 years to crack an API key with 100 million parallel guesses and a average time of .003 seconds per guess
+	// For comparison, the universe is about 13.8 × 10^9 years old
+	// High cost is good for users who pick bad passwords, but since we generate random keys, it is not a risk here
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 6)
 	return string(bytes), err
 }
 
@@ -219,7 +226,7 @@ func updateUsersRangeVMData(c *gin.Context) error {
 		return errors.New("unable to get user ID") // JSON set in getUserID
 	}
 
-	proxmoxClient, err := getProxmoxClientForUser(c)
+	proxmoxClient, err := GetProxmoxClientForUser(c)
 	if err != nil {
 		return errors.New("unable to get proxmox client")
 	}
