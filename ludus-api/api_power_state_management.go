@@ -27,7 +27,7 @@ func PowerAction(c *gin.Context, action string) {
 		return
 	} else {
 		// One or more machine names passed in
-		proxmoxClient, err := getProxmoxClientForUser(c)
+		proxmoxClient, err := GetProxmoxClientForUser(c)
 		if err != nil {
 			return // JSON set in getProxmoxClientForUser
 		}

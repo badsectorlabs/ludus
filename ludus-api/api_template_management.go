@@ -309,7 +309,7 @@ func getTemplatesStatus(c *gin.Context) ([]TemplateStatus, error) {
 		return nil, errors.New("error getting proxmox password for user") // JSON set in getProxmoxPasswordForUser
 	}
 
-	proxmoxClient, err := getProxmoxClientForUser(c)
+	proxmoxClient, err := GetProxmoxClientForUser(c)
 	if err != nil {
 		return nil, err // JSON set in getProxmoxClientForUser
 	}
@@ -689,7 +689,7 @@ func DeleteTemplate(c *gin.Context) {
 
 	// If the template is built, remove it from proxmox
 	if templateStatusArray[index].Built {
-		proxmoxClient, err := getProxmoxClientForUser(c)
+		proxmoxClient, err := GetProxmoxClientForUser(c)
 		if err != nil {
 			return // JSON set in getProxmoxClientForUser
 		}

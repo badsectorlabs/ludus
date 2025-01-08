@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func getProxmoxClientForUser(c *gin.Context) (*proxmox.Client, error) {
+func GetProxmoxClientForUser(c *gin.Context) (*proxmox.Client, error) {
 	user, err := getUserObject(c)
 	if err != nil {
 		return nil, errors.New("unable to get user object") // JSON error is set in getUserObject

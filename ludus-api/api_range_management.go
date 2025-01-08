@@ -232,7 +232,7 @@ func ListAllRanges(c *gin.Context) {
 	}
 
 	// The calling user is an admin can can see all VMs
-	proxmoxClient, err := getProxmoxClientForUser(c)
+	proxmoxClient, err := GetProxmoxClientForUser(c)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Unable to get proxmox client for user: %s", err.Error())})
 		return
