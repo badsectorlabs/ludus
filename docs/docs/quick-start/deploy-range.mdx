@@ -90,15 +90,14 @@ Admins can get WireGuard configurations for other users with the `user wireguard
 
 ```shell-session
 #terminal-command-ludus
- LUDUS_API_KEY='JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt' \
- ludus user wireguard --user JD --url https://127.0.0.1:8081 | tee ludus.conf
+ludus user wireguard | tee ludus.conf
 [Interface]
 PrivateKey = KBxrT+PFLClI+uJo9a6XLm/b23vbqL5KmNQ5Ac6uwGI=
 Address = 198.51.100.2/32
 
 [Peer]
 PublicKey = 5nlDO6gtqVXI89xQNkd2c2L0US7RnPinbAlfiyWHHBM=
-Endpoint = 10.2.99.240:51820
+Endpoint = 203.0.113.54:51820
 AllowedIPs = 10.2.0.0/16, 198.51.100.1/32
 PersistentKeepalive = 25
 ```
@@ -106,8 +105,6 @@ PersistentKeepalive = 25
 **On your local machine**, import this WireGuard configuration (`ludus.conf`) into the [WireGuard GUI client](https://www.wireguard.com/install/) or on the command line with [wg-quick](https://manpages.ubuntu.com/manpages/jammy/man8/wg-quick.8.html) and connect. 
 `wg setconf` is not supported by this configuration.
 Now you can directly interact with range VMs as if you were on the same network.
-
-Import this configuration into a [WireGuard client](https://www.wireguard.com/install/) and once connected, all range VMs are directly accessible.
 
 To get a zip file of RDP configuration files for the Windows machines, use the `range rdp` command.
 
