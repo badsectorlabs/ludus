@@ -182,9 +182,36 @@ Setting `cpu_type = "host"` in your template will essentially "pass through" the
 
 ### Non-Automated OS Template Builds
 
+#### Requirements
+
+Ludus uses remote management (WinRM and Powershell for windows, SSH and python3 for Linux/macOS) to do all the configuration of machines deployed from templates. Thus templates need to have a form of remote management (WinRM/SSH, with proper credentials) enabled and anything ansible needs (powershell for windows, python3 for linux/macOS) installed. Additionally, based on how ludus works, it expects templates to boot with DHCP enabled to get an IP to perform their initial configuration (i.e. getting a static IP set). If you have all those components set up in a VM you built by hand, and you power it off and convert it to a template, Ludus should be able to use that template in ranges without issue.
+
+Windows:
+
+- WinRM must be enabled
+- Powershell must be installed
+- DCHP must be enabled
+- `localuser:password` must be a local admin account
+
+Linux/macOS:
+
+- SSH must be enabled
+- python3 must be installed
+- sudo must be installed
+- DHCP must be enabled
+- `localuser:password` must be an account that has sudo permissions for all commands (`debian:debian` on debian for legacy reasons, see [group_vars](https://gitlab.com/badsectorlabs/ludus/-/tree/main/ludus-server/ansible/range-management/group_vars?ref_type=heads) for all expected credentials)
+
+#### Converting to Template
+
+To convert a VM to a template, power it off and in the Proxmox web UI, right click the VM, then click `Convert to template`.
+
+!['Converting a VM to a Template'](/img/templates/convert-to-template.png)
+
+#### Uploading ISOs
+
 To manually upload ISO files, click the datastore, then `ISO Images`, then `Upload`.
 
-!['The Ludus Network'](/img/templates/iso-upload.png)
+!['ISO Upload'](/img/templates/iso-upload.png)
 
 #### Windows 7
 
