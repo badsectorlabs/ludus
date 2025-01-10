@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "sha256:69efac1df9ec8066341d8c9b62297ddece0e6b805533fdb6dd66bc8034fba27a"
+  default = "sha256:ef7312733a9f5d7d51cfa04ac497671995674ca5e1058d5164d6028f0938d668"
 }
 
 variable "os" {
@@ -10,7 +10,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://software-download.microsoft.com/download/sg/444969d5-f34g-4e03-ac9d-1f9786c69161/19044.1288.211006-0501.21h2_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso"
+  default = "https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66750/19045.2006.220908-0225.22h2_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso"
 }
 
 variable "vm_cpu_cores" {
@@ -30,7 +30,7 @@ variable "vm_memory" {
 
 variable "vm_name" {
   type    = string
-  default = "win10-21h2-x64-enterprise-template"
+  default = "win10-22h2-x64-enterprise-template"
 }
 
 variable "winrm_password" {
@@ -81,10 +81,10 @@ variable "ludus_nat_interface" {
 ####
 
 locals {
-  template_description = "Windows 10 21H2 Enterprise 64-bit template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => localuser:password"
+  template_description = "Windows 10 22H2 Enterprise 64-bit template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => localuser:password"
 }
 
-source "proxmox-iso" "win10-21h2-x64-enterprise" {
+source "proxmox-iso" "win10-22h2-x64-enterprise" {
   additional_iso_files {
     device           = "sata3"
     iso_storage_pool = "${var.iso_storage_pool}"
@@ -143,7 +143,7 @@ source "proxmox-iso" "win10-21h2-x64-enterprise" {
 }
 
 build {
-  sources = ["source.proxmox-iso.win10-21h2-x64-enterprise"]
+  sources = ["source.proxmox-iso.win10-22h2-x64-enterprise"]
 
   provisioner "windows-shell" {
     scripts = ["scripts/disablewinupdate.bat"]
