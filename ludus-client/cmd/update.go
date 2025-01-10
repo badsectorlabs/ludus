@@ -43,7 +43,7 @@ and installs it if available.`,
 			CurrentVersion: VersionString,
 			Channel:        "stable",
 			PublicKey:      licensePublicKey,
-			Filename:       "{{.version}}%2F{{.program}}-client_{{if eq .platform \"darwin\"}}macOS{{else}}{{.platform}}{{end}}-{{.arch}}{{if .ext}}.{{.ext}}{{end}}",
+			Filename:       "{{.version}}%2Fludus-client_{{if eq .platform \"darwin\"}}macOS{{else}}{{.platform}}{{end}}-{{.arch}}{{if .ext}}.{{.ext}}{{end}}",
 			Constraint:     "1.0",
 		}
 
