@@ -14,6 +14,13 @@ func PowerAction(c *gin.Context, action string) {
 	var powerBody PowerBody
 	c.Bind(&powerBody)
 
+	// Get the proxmox client for the user here to check if the ROOT API key is being used
+	// and fail early if it is
+	proxmoxClient, err := GetProxmoxClientForUser(c)
+	if err != nil {
+		return // JSON set in getProxmoxClientForUser
+	}
+
 	if len(powerBody.Machines) == 0 {
 		c.JSON(http.StatusConflict, gin.H{"error": "you must specify a VM, comma separated list of VMs, or 'all'"})
 		return
@@ -27,10 +34,6 @@ func PowerAction(c *gin.Context, action string) {
 		return
 	} else {
 		// One or more machine names passed in
-		proxmoxClient, err := GetProxmoxClientForUser(c)
-		if err != nil {
-			return // JSON set in getProxmoxClientForUser
-		}
 		for _, machineName := range powerBody.Machines {
 			thisVmRef, err := proxmoxClient.GetVmRefByName(machineName)
 			if err != nil {
