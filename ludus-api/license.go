@@ -19,11 +19,11 @@ import (
 )
 
 const (
-	licenseURL                     = "https://license.ludus.cloud"
+	licenseURL                     = "https://api.keygen.sh"
 	licenseAPIVersion              = "1.7"
 	licenseAPIPrefix               = "v1"
-	licenseProductEnterprisePlugin = "5722ca04-715d-4969-9130-a051532b7579"
-	licenseAccount                 = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
+	licenseProductEnterprisePlugin = "f258d15f-4fab-47ca-839c-fc2a85f55b71"
+	licenseAccount                 = "26f20308-539a-4d95-bdad-8edf70553cec"
 	licensePublicKey               = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
 )
 
@@ -80,7 +80,7 @@ func (s *Server) checkLicense() {
 		}
 	}
 	if license.Expiry != nil {
-		log.Printf("LICENSE: active, expires: %s, licensed to %s\n", license.Expiry, license.Name)
+		log.Printf("LICENSE: active, expires: %s, licensed to %s\n", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
 		s.LicenseMessage = fmt.Sprintf("Active, expires: %s, licensed to %s", license.Expiry, license.Name)
 	} else {
 		log.Println("LICENSE: active, does not expire, licensed to", license.Name)

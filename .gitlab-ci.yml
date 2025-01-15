@@ -1473,6 +1473,8 @@ keygen-upload:
     # - keygen publish --release ${THIS_VERSION}
     # - keygen untag --release 'latest'
     # - keygen tag 'latest' --release ${THIS_VERSION}
+    - export KEYGEN_HOST=${LUDUS_ENTERPRISE_KEYGEN_HOST}
+    - export KEYGEN_ACCOUNT_ID=${LUDUS_ENTERPRISE_KEYGEN_ACCOUNT_ID}
     - export KEYGEN_PRODUCT_ID=${LUDUS_ENTERPRISE_KEYGEN_PRODUCT_ID}
     - export KEYGEN_TOKEN=${LUDUS_ENTERPRISE_KEYGEN_TOKEN}
     - output=$(keygen new --channel stable --version ${CI_COMMIT_TAG} 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
