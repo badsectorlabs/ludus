@@ -1,5 +1,5 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
     "title": "Ludus",
     "type": "object",
     "additionalProperties": false,
@@ -235,6 +235,10 @@
                     "minimum": 1,
                     "maximum": 255,
                     "description": "The last octet for this VM's IP address. Must be unique in the VLAN."
+                },
+                "force_ip": {
+                    "type": "boolean",
+                    "description": "If set to rue, the config defined IP address will be used for the VM even if there are other valid IPs available via qemu-guest-agent"
                 },
                 "ram_min_gb": {
                     "type": "integer",
@@ -545,6 +549,9 @@
                 "inbound_wireguard": {
                     "$ref": "#/definitions/InboundWireguard"
                 }
+            },
+            "dependentRequired": {
+                "outbound_wireguard_config": ["outbound_wireguard_vlans"]
             },
             "required": [
             ],

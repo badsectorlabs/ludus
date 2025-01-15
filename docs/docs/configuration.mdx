@@ -22,6 +22,7 @@ ludus:
     template: win2019-server-x64-template  # The template that will be the base for this VM (`ludus templates list` to get a list of them)
     vlan: 10            # The VLAN for this VM. This number will be the third octet of the VM's IP and must be 2<=vlan<=255
     ip_last_octet: 11   # The last octet for this VM's IP address. Must be unique in the VLAN.
+    force_ip: true      # If set to true, the config defined IP address will be used for the VM even if there are other valid IPs available via qemu-guest-agent
     ram_gb: 8           # The amount of RAM for this VM
     cpus: 4             # The number of cpu cores to allocate to this VM (can provision more CPUs than the host physically has)
     windows:            # This key must be set for windows VMs - all subkeys are optional

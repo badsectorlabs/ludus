@@ -298,6 +298,7 @@ def check_ip_addresses(vm_name, ip_addresses):
 
     valid_ips = []
     config_ip = None
+    force_ip = False
 
     if ludus_range_config and range_number and range_id:
         try:
@@ -308,6 +309,8 @@ def check_ip_addresses(vm_name, ip_addresses):
                     resolved_vm_name = compiled_range_id_regex.sub(range_id, vm['vm_name'])
                     if resolved_vm_name == vm_name:
                         config_ip = f"10.{range_number}.{vm['vlan']}.{vm['ip_last_octet']}"
+                        if 'force_ip' in vm:
+                            force_ip = vm['force_ip']
                         break
 
         except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
@@ -333,6 +336,10 @@ def check_ip_addresses(vm_name, ip_addresses):
     # If we have any valid IPs, return the first one
     if valid_ips:
         return valid_ips[0]
+
+    # If the user has specified force_ip, return the IP from the config if there are no other valid IPs
+    if force_ip and config_ip is not None:
+        return config_ip
 
     # If all else fails, return None
     return None
