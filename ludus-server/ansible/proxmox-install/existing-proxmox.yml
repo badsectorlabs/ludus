@@ -284,6 +284,11 @@
         state: started
         enabled: true
         daemon_reload: true
+    
+    - name: Restart dnsmasq
+      ansible.builtin.service:
+        name: dnsmasq
+        state: restarted
 
     - name: Drop a file to indicate stage 3 is complete
       ansible.builtin.file:
