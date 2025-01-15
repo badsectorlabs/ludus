@@ -101,7 +101,6 @@
       when:
         - router.outbound_wireguard_config is defined
         - router.outbound_wireguard_config | length > 0
-        - router.outbound_wireguard_vlans | length > 0
 
     - name: Clear any outbound WireGuard related configurations
       ansible.builtin.include_tasks: tasks/router/clear-outbound-wireguard.yml
@@ -117,7 +116,6 @@
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-outbound-wireguard.yml') != []
         - router.outbound_wireguard_config is defined
         - router.outbound_wireguard_config | length > 0
-        - router.outbound_wireguard_vlans | length > 0
 
 - name: Apply inbound WireGuard to the router (Enterprise)
   tags: [network]
@@ -754,6 +752,7 @@
     nexus_anonymous_access: true
     nexus_branding_header: "Nexus"
     nexus_branding_footer: "Last provisioned {{ ansible_date_time.iso8601 }}"
+    nexus_download_retries: 3
     httpd_setup_enable: false
     nexus_blobstores:
       - name: chocolatey-artifacts
