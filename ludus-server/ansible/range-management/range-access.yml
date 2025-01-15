@@ -40,19 +40,9 @@
         src: "{{ ludus_users_dir }}/{{ target_username }}/range-config.yml"
       register: range_config_contents
 
-    - name: Determine if the user has set defaults
+    - name: Set the router VM name to action
       ansible.builtin.set_fact:
-        user_set_defaults: "{{ 'defaults:' in range_config_contents['content'] | b64decode | regex_replace('\\n', ' ') }}"
-
-    - name: Set the router VM name from server defaults
-      ansible.builtin.set_fact:
-        router_vm_name_to_action: "{{ target_range_id }}-router-debian11-x64" # Must match the default in server-config.yml
-      when: not user_set_defaults
-
-    - name: Set the router VM name from user defined defaults
-      ansible.builtin.set_fact:
-        router_vm_name_to_action: "{{ (range_config_contents['content'] | b64decode | from_yaml).router.vm_name | default(range_id + '-router-debian11-x64') | regex_replace('{{\\s*range_id\\s*}}', target_range_id) }}" # I wish there was an 'eval' or 'render' filter
-      when: user_set_defaults
+        router_vm_name_to_action: "{{ router.vm_name | default(target_range_id + '-router-debian11-x64') }}"
 
     - name: Get the VM id of the router via Proxmox API
       ansible.builtin.shell: |
