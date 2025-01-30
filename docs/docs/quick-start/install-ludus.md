@@ -38,7 +38,7 @@ values during install.
 
 :::tip[Don't trust the binaries?]
 
-    Ludus binaries are built in CI, but you can always [build them from source](../developers/building-from-source) yourself.
+    Ludus binaries are built in CI, but you can always [build them from source](../developers/building-from-source.md) yourself.
 
 :::
 
