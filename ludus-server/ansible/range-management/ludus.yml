@@ -312,7 +312,7 @@
   tags: [dcs]
   hosts: "{{ hostvars['localhost']['primary_dc_vms'] | default([]) }}"
   tasks:
-    - name: Congiure Windows VMs (general)
+    - name: Configure Windows VMs (general)
       ansible.builtin.include_tasks: tasks/windows/configure-windows.yml
     - name: Configure automatic login for Windows
       ansible.builtin.include_tasks: tasks/windows/configure-autologon.yml
@@ -343,7 +343,7 @@
       ansible.builtin.fail:
         msg: "The primary DC does not have an ansible_host value - it is likely unreachable. Reboot the primary DC ({{ dc_vm_name }}) and try again."
       when: dc_ip == "FAIL"
-    - name: Congiure Windows VMs (general)
+    - name: Configure Windows VMs (general)
       ansible.builtin.include_tasks: tasks/windows/configure-windows.yml
     - name: Configure automatic login for Windows
       ansible.builtin.include_tasks: tasks/windows/configure-autologon.yml
@@ -377,7 +377,7 @@
   tags: [windows]
   hosts: "{{ hostvars['localhost']['windows_vms'] | default([]) }}"
   tasks:
-    - name: Congiure Windows VMs (general)
+    - name: Configure Windows VMs (general)
       ansible.builtin.include_tasks: tasks/windows/configure-windows.yml
     - name: Configure automatic login for Windows
       ansible.builtin.include_tasks: tasks/windows/configure-autologon.yml
@@ -616,7 +616,7 @@
 
     - name: Set ludus_dc_vm_name for the primary-dc with the same FQDN as this VM
       ansible.builtin.set_fact:
-        ludus_dc_vm_name: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', ludus_domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
+        ludus_dc_vm_name: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', ludus_domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name | default('') }}"
       when:
         - ludus_domain_fqdn is defined
 
@@ -630,7 +630,7 @@
 
     - name: Set DC Hostname
       ansible.builtin.set_fact:
-        ludus_dc_hostname: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', ludus_domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].hostname }}"
+        ludus_dc_hostname: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', ludus_domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].hostname | default('') }}"
       when:
         - ludus_domain_fqdn is defined
     # End set standard Ludus variables
