@@ -10,9 +10,9 @@ import (
 )
 
 func GetProxmoxClientForUser(c *gin.Context) (*proxmox.Client, error) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return nil, errors.New("unable to get user object") // JSON error is set in getUserObject
+		return nil, errors.New("unable to get user object") // JSON error is set in GetUserObject
 	}
 
 	proxmoxPassword := getProxmoxPasswordForUser(user, c)
