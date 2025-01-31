@@ -25,9 +25,9 @@ type AnsibleItem struct {
 
 // GetRolesAndCollections - retrieves the available Ansible roles and collections for the user
 func GetRolesAndCollections(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 	cmd := exec.Command("ansible-galaxy", "role", "list") // no --format json for roles...
 	cmd.Env = os.Environ()
@@ -131,9 +131,9 @@ func ActionRoleFromInternet(c *gin.Context) {
 	var roleBody RoleBody
 	c.Bind(&roleBody)
 
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 
 	if !isAdmin(c, false) && ServerConfiguration.PreventUserAnsibleAdd {
@@ -226,9 +226,9 @@ func InstallRoleFromTar(c *gin.Context) {
 		return
 	}
 
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 
 	// Save the file to the server
@@ -345,9 +345,9 @@ func ActionCollectionFromInternet(c *gin.Context) {
 		return
 	}
 
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 
 	var collectionString = collectionBody.Collection

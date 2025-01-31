@@ -121,9 +121,9 @@ func DeleteRange(c *gin.Context) {
 
 // GetConfig - retrieves the current configuration of the range
 func GetConfig(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 	rangeConfig, err := GetFileContents(fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername))
 	if err != nil {
@@ -145,9 +145,9 @@ func GetConfigExample(c *gin.Context) {
 
 // GetEtcHosts - retrieves an /etc/hosts file for the range
 func GetEtcHosts(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 	etcHosts, err := GetFileContents(fmt.Sprintf("%s/users/%s/etc-hosts", ludusInstallPath, user.ProxmoxUsername))
 	if err != nil {
@@ -159,9 +159,9 @@ func GetEtcHosts(c *gin.Context) {
 
 // GetRDP - retrieves RDP files as a zip for the range
 func GetRDP(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 
 	playbook := []string{ludusInstallPath + "/ansible/range-management/ludus.yml"}
@@ -183,9 +183,9 @@ func GetRDP(c *gin.Context) {
 
 // GetLogs - retrieves the latest range logs
 func GetLogs(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 
 	ansibleLogPath := fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername)
@@ -275,9 +275,9 @@ func ListAllRanges(c *gin.Context) {
 
 // PutConfig - updates the range config
 func PutConfig(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 
 	usersRange, err := GetRangeObject(c)
@@ -356,9 +356,9 @@ func PutConfig(c *gin.Context) {
 }
 
 func GetAnsibleInventoryForRange(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 	proxmoxPassword := getProxmoxPasswordForUser(user, c)
 	if proxmoxPassword == "" {
@@ -394,9 +394,9 @@ func GetAnsibleTagsForDeployment(c *gin.Context) {
 
 // Find the ansible process for this user and kill it
 func AbortAnsible(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 	ansiblePid, err := findAnsiblePidForUser(user.ProxmoxUsername)
 	if err != nil {
@@ -442,8 +442,8 @@ func RangeAccessAction(c *gin.Context) {
 		return
 	}
 
-	var targetUserObject UserObject
-	targetResult := db.First(&targetUserObject, "user_id = ?", thisRangeAccessActionPayload.TargetUserID)
+	var tarGetUserObject UserObject
+	targetResult := db.First(&tarGetUserObject, "user_id = ?", thisRangeAccessActionPayload.TargetUserID)
 	if errors.Is(targetResult.Error, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s user not found", thisRangeAccessActionPayload.TargetUserID)})
 		return
@@ -484,8 +484,8 @@ func RangeAccessAction(c *gin.Context) {
 	db.First(&sourceUserRangeObject, "user_id = ?", thisRangeAccessActionPayload.SourceUserID)
 
 	extraVars := map[string]interface{}{
-		"target_username":           targetUserObject.ProxmoxUsername,
-		"target_range_id":           targetUserObject.UserID,
+		"target_username":           tarGetUserObject.ProxmoxUsername,
+		"target_range_id":           tarGetUserObject.UserID,
 		"target_range_second_octet": targetUserRangeObject.RangeNumber,
 		"source_username":           sourceUserObject.ProxmoxUsername,
 		"source_range_id":           sourceUserObject.UserID,
@@ -514,7 +514,7 @@ WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`})
 	if thisRangeAccessActionPayload.AccessActionVerb == "grant" {
 		// If this is the first grant, create a record
 		if noRangeAccessResultFound {
-			rangeAccessObject.TargetUserID = targetUserObject.UserID
+			rangeAccessObject.TargetUserID = tarGetUserObject.UserID
 			rangeAccessObject.SourceUserIDs = []string{sourceUserObject.UserID}
 			db.Create(&rangeAccessObject)
 		} else {
@@ -525,7 +525,7 @@ WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`})
 		// Response may have been set by 'target router not up' warning
 		if !c.Writer.Written() {
 			c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Range access to %s's range granted to %s. Have %s pull an updated wireguard config.",
-				targetUserObject.ProxmoxUsername,
+				tarGetUserObject.ProxmoxUsername,
 				sourceUserObject.ProxmoxUsername,
 				sourceUserObject.ProxmoxUsername)})
 		}
@@ -539,7 +539,7 @@ WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`})
 			db.Delete(&rangeAccessObject)
 		}
 		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Range access to %s's range revoked from %s.",
-			targetUserObject.ProxmoxUsername,
+			tarGetUserObject.ProxmoxUsername,
 			sourceUserObject.ProxmoxUsername)})
 	}
 }

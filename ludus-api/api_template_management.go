@@ -299,9 +299,9 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 func getTemplatesStatus(c *gin.Context) ([]TemplateStatus, error) {
 	var user UserObject
 
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return nil, err // JSON set in getUserObject
+		return nil, err // JSON set in GetUserObject
 	}
 
 	proxmoxPassword := getProxmoxPasswordForUser(user, c)
@@ -404,9 +404,9 @@ func templateActions(c *gin.Context, buildTemplates bool, templateName string, p
 		return
 	}
 
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 
 	proxmoxPassword := getProxmoxPasswordForUser(user, c)
@@ -464,9 +464,9 @@ func BuildTemplates(c *gin.Context) {
 
 // GetPackerLogs - retrieves the latest packer logs
 func GetPackerLogs(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 	packerLogPath := fmt.Sprintf("%s/users/%s/packer.log", ludusInstallPath, user.ProxmoxUsername)
 	GetLogsFromFile(c, packerLogPath)
@@ -499,9 +499,9 @@ func PutTemplateTar(c *gin.Context) {
 		return
 	}
 
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 
 	// Get all the templates on the server before we unpack this one for the name check later
@@ -623,9 +623,9 @@ func PutTemplateTar(c *gin.Context) {
 
 // Find the packer process(es) for this user and kill them
 func AbortPacker(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 	// First touch the canary file to prevent more templates being built (in the case of "all" and not parallel)
 	touch(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername))
@@ -675,7 +675,7 @@ func DeleteTemplate(c *gin.Context) {
 	}
 
 	// Check that this is a user template
-	userObject, err := getUserObject(c)
+	userObject, err := GetUserObject(c)
 	if err != nil {
 		return
 	}

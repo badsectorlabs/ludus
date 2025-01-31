@@ -29,9 +29,9 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	callingUser, err := getUserObject(c)
+	callingUser, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 
 	var user UserObject
@@ -205,15 +205,15 @@ func DeleteUser(c *gin.Context) {
 			var targetUserRangeObject RangeObject
 			db.First(&targetUserRangeObject, "user_id = ?", accessObject.TargetUserID)
 
-			var targetUserObject UserObject
-			db.First(&targetUserObject, "user_id = ?", accessObject.TargetUserID)
+			var tarGetUserObject UserObject
+			db.First(&tarGetUserObject, "user_id = ?", accessObject.TargetUserID)
 
 			var sourceUserRangeObject RangeObject
 			db.First(&sourceUserRangeObject, "user_id = ?", user.UserID)
 
 			extraVars := map[string]interface{}{
-				"target_username":           targetUserObject.ProxmoxUsername,
-				"target_range_id":           targetUserObject.UserID,
+				"target_username":           tarGetUserObject.ProxmoxUsername,
+				"target_range_id":           tarGetUserObject.UserID,
 				"target_range_second_octet": targetUserRangeObject.RangeNumber,
 				"source_username":           user.ProxmoxUsername,
 				"source_range_id":           user.UserID,
@@ -309,9 +309,9 @@ func GetAPIKey(c *gin.Context) {
 
 // GetCredentials - get the proxmox creds for the user
 func GetCredentials(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 	proxmoxPassword := getProxmoxPasswordForUser(user, c)
 	if proxmoxPassword == "" {
@@ -322,9 +322,9 @@ func GetCredentials(c *gin.Context) {
 
 // GetWireguardConfig - retrieves a WireGuard configuration file for the user
 func GetWireguardConfig(c *gin.Context) {
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 	wireGuardConfig, err := GetFileContents(fmt.Sprintf("%s/users/%s/%s_client.conf", ludusInstallPath, user.ProxmoxUsername, user.UserID))
 	if err != nil {
@@ -369,9 +369,9 @@ func PasswordReset(c *gin.Context) {
 
 // PostCredentials - updates the users proxmox password
 func PostCredentials(c *gin.Context) {
-	callingUser, err := getUserObject(c)
+	callingUser, err := GetUserObject(c)
 	if err != nil {
-		return // JSON set in getUserObject
+		return // JSON set in GetUserObject
 	}
 
 	type PostCredentials struct {

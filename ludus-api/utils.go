@@ -166,7 +166,7 @@ func getProxmoxPasswordForUser(user UserObject, c *gin.Context) string {
 
 // Gets a user object from the query string (if the user is an admin) or from
 // API key context. Sets the return status and message when returning an error
-func getUserObject(c *gin.Context) (UserObject, error) {
+func GetUserObject(c *gin.Context) (UserObject, error) {
 	var user UserObject
 
 	userID, success := getUserID(c)
