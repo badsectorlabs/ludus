@@ -78,6 +78,8 @@ func (s *Server) checkLicense() {
 				return
 			}
 		}
+		log.Printf("LICENSE: %v\n", err)
+		return
 	}
 	if license.Expiry != nil {
 		log.Printf("LICENSE: active, expires: %s, licensed to %s\n", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
@@ -91,12 +93,12 @@ func (s *Server) checkLicense() {
 	// Check for the enterprise plugin and load it if it exists
 	var pluginsDir string
 	if os.Geteuid() == 0 {
-		// pluginsDir = fmt.Sprintf("%s/plugins/enterprise/admin", ludusInstallPath)
-		return // Currently there is no enterprise plugin for the ludus-admin server
+		pluginsDir = fmt.Sprintf("%s/plugins/enterprise/admin", ludusInstallPath)
 	} else {
 		pluginsDir = fmt.Sprintf("%s/plugins/enterprise", ludusInstallPath)
 	}
-	if fileExists(pluginsDir + "/ludus-enterprise.so") {
+	// Always load the enterprise plugin if it exists first
+	if os.Geteuid() != 0 && fileExists(pluginsDir+"/ludus-enterprise.so") {
 		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
 		if err != nil {
 			log.Printf("LICENSE: error loading enterprise plugin: %v", err)
@@ -107,27 +109,42 @@ func (s *Server) checkLicense() {
 				log.Printf("LICENSE: error getting enterprise plugin: %v", err)
 			}
 		}
-	} else {
+	} else if os.Geteuid() == 0 {
 		log.Println("LICENSE: no enterprise plugin found, pulling compatible plugin from server")
 		err = s.pullEnterprisePlugin()
 		if err != nil {
 			log.Printf("LICENSE: error getting enterprise plugin: %v", err)
 		}
 	}
+	// Load the rest of the plugins
+	if info, err := os.Stat(pluginsDir); err == nil && info.IsDir() {
+		entries, err := os.ReadDir(pluginsDir)
+		if err != nil {
+			log.Printf("Error reading plugins directory: %v", err)
+		}
 
-	// Check license entitlements and pull down any plugins we are licensed to use
-	err = s.pullEntitlements()
-	if err != nil {
-		log.Printf("LICENSE: error getting entitlements: %v", err)
+		for _, entry := range entries {
+			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".so" {
+				// Don't load the enterprise plugin, since we already did that
+				if entry.Name() == "ludus-enterprise.so" {
+					continue
+				}
+				path := filepath.Join(pluginsDir, entry.Name())
+				log.Println("Loading plugin: ", path)
+				if err := s.LoadPlugin(path); err != nil {
+					log.Fatalf("Error loading plugin %s: %v", path, err)
+				}
+			}
+		}
 	}
-
+	s.InitializePlugins()
 }
 
 func (s *Server) pullEnterprisePlugin() error {
 	client := keygen.NewClientWithOptions(&keygen.ClientOptions{
-		Account: licenseAccount,
-		APIURL:  licenseURL,
-		// PublicKey:  licensePublicKey, // This fails to validate?
+		Account:    licenseAccount,
+		APIURL:     licenseURL,
+		PublicKey:  licensePublicKey,
 		APIPrefix:  licenseAPIPrefix,
 		APIVersion: licenseAPIVersion,
 		UserAgent:  "Ludus-Server/" + s.Version,
@@ -191,9 +208,5 @@ func (s *Server) pullEnterprisePlugin() error {
 		log.Printf("LICENSE: unable to load enterprise plugin: %v", err)
 		return err
 	}
-	return nil
-}
-
-func (s *Server) pullEntitlements() error {
 	return nil
 }
