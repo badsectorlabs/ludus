@@ -58,19 +58,18 @@ func serve() {
 
 	// Check if plugins directory exists and is a directory, if so load the plugins from it
 	if info, err := os.Stat(pluginsDir); err == nil && info.IsDir() {
-		err := filepath.Walk(pluginsDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if filepath.Ext(path) == ".so" {
+		entries, err := os.ReadDir(pluginsDir)
+		if err != nil {
+			log.Printf("Error reading plugins directory: %v", err)
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".so" {
+				path := filepath.Join(pluginsDir, entry.Name())
 				if err := server.LoadPlugin(path); err != nil {
 					log.Fatalf("Error loading plugin %s: %v", path, err)
 				}
 			}
-			return nil
-		})
-		if err != nil {
-			log.Printf("Error walking community plugins directory: %v", err)
 		}
 	}
 
@@ -95,6 +94,7 @@ func serve() {
 	if os.Geteuid() != 0 {
 		err = router.RunTLS("0.0.0.0:8080", certPath, keyPath)
 	} else {
+		go watchPluginDirectory()
 		if config.ExposeAdminPort {
 			err = router.RunTLS("0.0.0.0:8081", certPath, keyPath)
 		} else {
