@@ -15,7 +15,7 @@ type LudusPlugin interface {
 	Name() string
 	Initialize(server *Server) error
 	RegisterRoutes(router *gin.Engine)
-	GetEmbeddedFS() fs.FS
+	GetEmbeddedFSs() []fs.FS
 	Shutdown() error
 }
 
@@ -61,9 +61,9 @@ func (s *Server) InitializePlugins() {
 		if err := p.Initialize(s); err != nil {
 			log.Printf("Failed to initialize plugin %s: %v", p.Name(), err)
 		}
-		// If we're not running as root, drop the files from the plugin FS to the host filesystem
-		if os.Geteuid() != 0 {
-			embeddedFSFromPlugin := p.GetEmbeddedFS()
+
+		embeddedFSsFromPlugin := p.GetEmbeddedFSs()
+		for _, embeddedFSFromPlugin := range embeddedFSsFromPlugin {
 			if embeddedFSFromPlugin != nil {
 				log.Println("Dropping files for plugin: ", p.Name())
 				// Write out any files from the plugin FS to the host filesystem
