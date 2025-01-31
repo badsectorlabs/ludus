@@ -262,6 +262,20 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 					}
 				}
 			}
+		} else {
+			// Remove the user-defined-roles.yml file in the event the user previously had a config with roles defined
+			user, err := GetUserObject(c)
+			if err != nil {
+				return fmt.Errorf("failed to get user object: %v", err)
+			}
+
+			_, err = os.Stat(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername))
+			if err == nil {
+				err = os.Remove(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername))
+				if err != nil {
+					return fmt.Errorf("failed to remove user-defined-roles.yml: %v", err)
+				}
+			}
 		}
 	}
 
