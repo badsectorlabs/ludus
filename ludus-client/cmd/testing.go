@@ -15,11 +15,16 @@ import (
 )
 
 var (
-	domain        string
-	ip            string
-	allowFilePath string
-	name          string
-	forceStop     bool
+	domain                 string
+	ip                     string
+	allowFilePath          string
+	name                   string
+	forceStop              bool
+	VMIDs                  string
+	RegisteredOwner        string
+	RegisteredOrganization string
+	Vendor                 string
+	dropFiles              bool
 )
 
 var testingCmd = &cobra.Command{
@@ -322,7 +327,7 @@ func setupTestingDenyCmd(command *cobra.Command) {
 
 var testingUpdateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update a VM or group of VMs",
+	Short: "Perform a Windows update on a VM or group of VMs",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
@@ -350,8 +355,108 @@ var testingUpdateCmd = &cobra.Command{
 }
 
 func setupTestingUpdateCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&name, "name", "n", "", "A VM name (JD-win10-21h2-enterprise-x64-1) or group name (JD_windows_endpoints) to update")
+	command.Flags().StringVarP(&name, "name", "n", "", "A VM name (JD-win10-21h2-enterprise-x64-1) or group name (JD_windows_endpoints) to update with Windows Update")
 	_ = command.MarkFlagRequired("name")
+}
+
+var testingEnableAntiSandboxCmd = &cobra.Command{
+	Use:   "enable-anti-sandbox",
+	Short: "Enable anti-sandbox for a VM or multiple VMs (enterprise)",
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		type AntiSandboxPayload struct {
+			VMIDs     string `json:"vmIDs"`
+			Owner     string `json:"registeredOwner,omitempty"`
+			Org       string `json:"registeredOrganization,omitempty"`
+			Vendor    string `json:"vendor,omitempty"`
+			DropFiles bool   `json:"dropFiles,omitempty"`
+		}
+		var antiSandboxPayload AntiSandboxPayload
+		antiSandboxPayload.VMIDs = VMIDs
+		antiSandboxPayload.Owner = RegisteredOwner
+		antiSandboxPayload.Org = RegisteredOrganization
+		antiSandboxPayload.Vendor = Vendor
+		antiSandboxPayload.DropFiles = dropFiles
+		if antiSandboxPayload.Vendor != "" && antiSandboxPayload.Vendor != "Dell" {
+			logger.Logger.Fatal("The only supported vendor at this time is Dell")
+		}
+
+		if !noPrompt {
+			var choice string
+			logger.Logger.Warnf(`
+!!! This will enable anti-sandbox settings for VMs: %s !!!
+    which will have performance penalties. This should
+    be the last step once a VM is fully configured!
+    The VM(s) will be rebooted during this process.
+
+Do you want to continue? (y/N): `, VMIDs)
+			fmt.Scanln(&choice)
+			if choice != "Y" && choice != "y" {
+				logger.Logger.Fatal("Bailing!")
+			}
+		}
+
+		logger.Logger.Info("Enabling Anti-Sandbox settings for VM(s), this can take some time. Please wait.")
+
+		payload, _ := json.Marshal(antiSandboxPayload)
+
+		var responseJSON []byte
+		var success bool
+		if userID != "" {
+			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/testing/antisandbox?userID=%s", userID), string(payload))
+		} else {
+			responseJSON, success = rest.GenericJSONPost(client, "/testing/antisandbox", string(payload))
+		}
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+		handleAntiSandboxResult(responseJSON)
+	},
+}
+
+func setupEnableAntiSandboxCmd(command *cobra.Command) {
+	command.Flags().StringVarP(&VMIDs, "vmids", "n", "", "A VM ID or name (104) or multiple VM IDs or names (104,105) to enable anti-sandbox on")
+	command.Flags().StringVar(&RegisteredOwner, "owner", "", "The RegisteredOwner value to use for the VMs")
+	command.Flags().StringVar(&RegisteredOrganization, "org", "", "The RegisteredOrganization value to use for the VMs")
+	command.Flags().StringVar(&Vendor, "vendor", "", "The Vendor value to use for the MAC address of the VMs")
+	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
+	command.Flags().BoolVar(&dropFiles, "drop-files", false, "drop random pdf, doc, ppt, and xlsx files on the desktop and downloads folder of the VMs")
+
+	_ = command.MarkFlagRequired("vmids")
+}
+
+func handleAntiSandboxResult(responseJSON []byte) {
+	type errorStruct struct {
+		Item   string `json:"item"`
+		Reason string `json:"reason"`
+	}
+
+	type Data struct {
+		Success []string      `json:"success"`
+		Errors  []errorStruct `json:"errors"`
+	}
+
+	// Unmarshal JSON data
+	var data Data
+	err := json.Unmarshal(responseJSON, &data)
+	if err != nil {
+		logger.Logger.Fatal(err.Error())
+	}
+
+	logger.Logger.Debugf("%v", data)
+
+	if len(data.Errors) > 0 {
+		for _, error := range data.Errors {
+			logger.Logger.Error(error.Item + ": " + error.Reason)
+		}
+	}
+	if len(data.Success) > 0 {
+		for _, allowed := range data.Success {
+			logger.Logger.Info("Successfully enabled anti-sandbox for VM(s): " + allowed)
+		}
+	}
 }
 
 func init() {
@@ -365,5 +470,7 @@ func init() {
 	testingCmd.AddCommand(testingDenyCmd)
 	setupTestingUpdateCmd(testingUpdateCmd)
 	testingCmd.AddCommand(testingUpdateCmd)
+	setupEnableAntiSandboxCmd(testingEnableAntiSandboxCmd)
+	testingCmd.AddCommand(testingEnableAntiSandboxCmd)
 	rootCmd.AddCommand(testingCmd)
 }
