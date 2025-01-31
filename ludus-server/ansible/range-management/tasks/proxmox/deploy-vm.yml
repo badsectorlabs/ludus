@@ -92,6 +92,7 @@
     interface: net0
     bridge: "{{ 'vmbr' + (vmbr_number | string) if vmbr_number is defined else (bridge_interface | default('ludus')) }}"
     tag: "{{ vlan | default(1) }}"
+    model: "{{'e1000' if 'antisandbox' in template_vm_name else 'virtio' }}" # Use virtio unless the template has 'antisandbox' in the name, then use e1000 (no driver required)
   when: clone_vm is changed
   register: network_change
 
