@@ -1,8 +1,7 @@
 # As suggested by https://docs.ansible.com/ansible/latest/os_guide/windows_performance.html#fix-high-cpu-on-boot-for-vms-cloud-instances
 
-- name: Create and enable SSH host keys regeneration service
+- name: Generate native .NET images for CPU
   hosts: all
-  become: true
   tasks:
     - name: Run ngen tasks
       community.windows.win_dotnet_ngen:
