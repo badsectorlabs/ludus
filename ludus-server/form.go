@@ -24,8 +24,9 @@ var (
 	red    = lipgloss.AdaptiveColor{Light: "#A70000", Dark: "#A70000"}
 	config ludusapi.Configuration
 
-	finalConfirm           = false
-	shouldShowAnsibleField = false
+	finalConfirm              = false
+	shouldShowAnsibleField    = false
+	shouldShowAdminPortExpose = false
 )
 
 type Styles struct {
@@ -384,6 +385,8 @@ func (m Model) View() string {
 			proxmox_iso_storage_pool  string
 			ludus_nat_interface       string
 			prevent_user_ansible_add  string
+			expose_admin_port         string
+			license_key               string
 		)
 		if m.form.GetString("proxmox_node") != "" {
 			proxmox_node = "proxmox_node: " + m.form.GetString("proxmox_node")
@@ -419,6 +422,13 @@ func (m Model) View() string {
 			prevent_user_ansible_add = "prevent_user_ansible_add: " + strconv.FormatBool(m.form.GetBool("prevent_user_ansible_add"))
 			shouldShowAnsibleField = true
 		}
+		if m.currentFieldIndex >= 12 || shouldShowAdminPortExpose {
+			expose_admin_port = "expose_admin_port: " + strconv.FormatBool(m.form.GetBool("expose_admin_port"))
+			shouldShowAdminPortExpose = true
+		}
+		if m.form.GetString("license_key") != "" {
+			license_key = "license_key: " + m.form.GetString("license_key")
+		}
 		// Use this to debug the current field counter
 		// prevent_user_ansible_add = fmt.Sprintf("Current field: %d", m.currentFieldIndex)
 
@@ -446,7 +456,9 @@ func (m Model) View() string {
 					proxmox_vm_storage_format + "\n" +
 					proxmox_iso_storage_pool + "\n" +
 					ludus_nat_interface + "\n" +
-					prevent_user_ansible_add + "\n")
+					prevent_user_ansible_add + "\n" +
+					expose_admin_port + "\n" +
+					license_key + "\n")
 		}
 
 		errors := m.form.Errors()
