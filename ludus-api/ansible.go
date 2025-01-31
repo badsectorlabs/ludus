@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,9 +38,9 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	ansiblePlaybookConnectionOptions := &options.AnsibleConnectionOptions{
 		Connection: "local",
 	}
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return "Could not get user", err // JSON set in getUserObject
+		return "Could not get user", err // JSON set in GetUserObject
 	}
 	usersRange, err := GetRangeObject(c)
 	if err != nil {
@@ -199,6 +200,12 @@ func RunPlaybookWithTag(c *gin.Context, playbook string, tag string, verbose boo
 	return server.RunAnsiblePlaybookWithVariables(c, playbookPathArray, nil, nil, tag, verbose, "")
 }
 
+// A helper to expose RunAnsiblePlaybookWithVariables to plugins
+func RunAnsiblePlaybookWithVariables(c *gin.Context, playbook string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
+	playbookPathArray := []string{fmt.Sprintf("%s/ansible/range-management/%s", ludusInstallPath, playbook)}
+	return server.RunAnsiblePlaybookWithVariables(c, playbookPathArray, extraVarsFiles, extraVars, tags, verbose, limit)
+}
+
 type AccessGrantStruct struct {
 	SecondOctet int32  `json:"second_octet"`
 	Username    string `json:"username"`
@@ -239,7 +246,7 @@ func checkRoleExists(c *gin.Context, roleName string) (bool, error) {
 			return slices.Contains(cachedCollections.([]string), collectionName), nil
 		}
 
-		user, err := getUserObject(c)
+		user, err := GetUserObject(c)
 		if err != nil {
 			return false, err
 		}
@@ -283,7 +290,7 @@ func checkRoleExists(c *gin.Context, roleName string) (bool, error) {
 		return slices.Contains(roles.([]string), roleName), nil
 	}
 
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
 		return false, err
 	}
@@ -337,9 +344,9 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(c *gin.Context, playbookPathArray [
 	ansiblePlaybookConnectionOptions := &options.AnsibleConnectionOptions{
 		Connection: "local",
 	}
-	user, err := getUserObject(c)
+	user, err := GetUserObject(c)
 	if err != nil {
-		return "Could not get user", err // JSON set in getUserObject
+		return "Could not get user", err // JSON set in GetUserObject
 	}
 	usersRange, err := GetRangeObject(c)
 	if err != nil {
@@ -395,4 +402,47 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(c *gin.Context, playbookPathArray [
 
 	return buff.String(), nil
 
+}
+
+func GetErrorsFromAnsiblePlaybook(user UserObject) []string {
+	ansibleLogPath := fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername)
+	ansibleLogContents, err := os.ReadFile(ansibleLogPath)
+	if err != nil {
+		return []string{"Could not read ansible log: " + err.Error()}
+	}
+	return getFatalErrorsFromLog(string(ansibleLogContents))
+}
+
+func getFatalErrorsFromLog(input string) []string {
+	scanner := bufio.NewScanner(strings.NewReader(input))
+	fatalRegex := regexp.MustCompile(`^fatal:.*$|^failed:.*$|^ERROR! .*$`)
+	ignoreRegex := regexp.MustCompile(`\.\.\.ignoring$`)
+	errorCount := 0
+	var fatalErrors []string
+
+	var previousLine string
+	for scanner.Scan() {
+		currentLine := scanner.Text()
+		// Check if the current line is an ignoring line and the previous line was a fatal line
+		if ignoreRegex.MatchString(currentLine) && fatalRegex.MatchString(previousLine) {
+			// Skip this fatal line because it's followed by ...ignoring
+			previousLine = "" // Reset previousLine to avoid false positives
+			continue
+		}
+
+		if fatalRegex.MatchString(previousLine) {
+			errorCount += 1
+			fatalErrors = append(fatalErrors, previousLine)
+		}
+
+		// Update previous lines for the next iteration
+		previousLine = currentLine
+	}
+
+	// Check the last line in case the file ends with a fatal line
+	if fatalRegex.MatchString(previousLine) {
+		errorCount += 1
+		fatalErrors = append(fatalErrors, previousLine)
+	}
+	return fatalErrors
 }
