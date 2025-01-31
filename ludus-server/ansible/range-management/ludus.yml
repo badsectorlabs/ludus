@@ -321,8 +321,21 @@
   vars:
     dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
     dc_ip: "{{ ansible_host }}"
-    autologon_user: "{{ defaults.ad_domain_admin }}"
-    autologon_password: "{{ defaults.ad_domain_admin_password }}"
+    # The autologon user should be the user defined user (if defined) or the domain admin
+    autologon_user: |-
+      {{
+        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user
+          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
+        else
+          defaults.ad_domain_admin
+      }}
+    autologon_password: |-
+      {{
+        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password
+          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
+        else
+          defaults.ad_domain_admin_password
+      }}
     netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
     fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
 
@@ -356,9 +369,21 @@
     domain_admin: "{{ defaults.ad_domain_admin }}"
     domain_admin_password: "{{ defaults.ad_domain_admin_password }}"
     domain_safe_mode_password: "{{ defaults.ad_domain_safe_mode_password }}"
-    autologon_user: "{{ defaults.ad_domain_admin }}"
-    autologon_password: "{{ defaults.ad_domain_admin_password }}"
-
+    # The autologon user should be the user defined user (if defined) or the domain admin
+    autologon_user: |-
+      {{
+        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user
+          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
+        else
+          defaults.ad_domain_admin
+      }}
+    autologon_password: |-
+      {{
+        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password
+          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
+        else
+          defaults.ad_domain_admin_password
+      }}
 # ==========================================================
 # Windows Endpoints
 # ==========================================================
@@ -389,9 +414,23 @@
       ansible.builtin.include_tasks: tasks/windows/enable-smb.yml
   vars:
     dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
-    # Set the autologin users to localuser or the domain user (if a domain is defined)
-    autologon_user: "{{ defaults.ad_domain_user if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain | default('')) | length > 0 else 'localuser' }}"
-    autologon_password: "{{ defaults.ad_domain_user_password if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain | default('')) | length > 0 else 'password' }}"
+    # The autologon user should be the user defined user (if defined) or the domain user (if a domain is defined) otherwise localuser
+    autologon_user: |-
+      {{
+        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user
+          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
+        else
+          defaults.ad_domain_user if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain | default('')) | length > 0
+          else 'localuser'
+      }}
+    autologon_password: |-
+      {{
+        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password
+          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
+        else
+          defaults.ad_domain_user_password if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain | default('')) | length > 0
+          else 'password'
+      }}
 
 - name: Collect Windows VMs to install additional tools on
   tags: [additional-tools]
@@ -479,8 +518,21 @@
     domain_admin: "{{ defaults.ad_domain_admin }}"
     domain_admin_password: "{{ defaults.ad_domain_admin_password }}"
     ou_name: "{{ 'Servers' if template_name is defined and 'server' in (template_name | lower) else 'Workstations' }}"
-    autologon_user: "{{ defaults.ad_domain_user }}"
-    autologon_password: "{{ defaults.ad_domain_admin_password }}"
+    # The autologon user should be the user defined user (if defined) or the domain user
+    autologon_user: |-
+      {{
+        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user
+          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
+        else
+          defaults.ad_domain_user
+      }}
+    autologon_password: |-
+      {{
+        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password
+          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
+        else
+          defaults.ad_domain_user_password
+      }}
 
 # ==========================================================
 # Office Install
@@ -616,7 +668,7 @@
 
     - name: Set ludus_dc_vm_name for the primary-dc with the same FQDN as this VM
       ansible.builtin.set_fact:
-        ludus_dc_vm_name: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', ludus_domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name | default('') }}"
+        ludus_dc_vm_name: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', ludus_domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
       when:
         - ludus_domain_fqdn is defined
 
@@ -630,7 +682,7 @@
 
     - name: Set DC Hostname
       ansible.builtin.set_fact:
-        ludus_dc_hostname: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', ludus_domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].hostname | default('') }}"
+        ludus_dc_hostname: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', ludus_domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].hostname }}"
       when:
         - ludus_domain_fqdn is defined
     # End set standard Ludus variables

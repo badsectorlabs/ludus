@@ -68,6 +68,8 @@ ludus:
       office_version: 2019        # The Microsoft office version you would like installed on this VM (2013|2016|2019|2021). Default: undefined (don't install office)
       office_arch: 64bit          # The architecture for the Microsoft office install (64bit|32bit)
       visual_studio_version: 2019 # The version of Microsoft Visual Studio to install (community edition). Note: 2022 cannot target < .NET 4.5. Default: undefined (don't install visual studio)
+      autologon_user: myuser      # The username to use for autologon. Default: localuser unless domain joined, then default.ad_domain_user
+      autologon_password: mypass  # The password to use for autologon. Default: password unless domain joined, then default.ad_domain_user_password
     domain:
       fqdn: ludus.network
       role: member

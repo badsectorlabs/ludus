@@ -390,8 +390,19 @@
                 "visual_studio_version": {
                     "type": "integer",
                     "enum": [ 2017, 2019, 2022 ],
-                    "description": "# The version of Microsoft Visual Studio to install (community edition). Note: 2022 cannot target < .NET 4.5. Default: undefined (don't install visual studio)"
+                    "description": "The version of Microsoft Visual Studio to install (community edition). Note: 2022 cannot target < .NET 4.5. Default: undefined (don't install visual studio)"
+                },
+                "autologon_user": {
+                    "type": "string",
+                    "description": "The username to use for autologon. Default: localuser unless domain joined, then default.ad_domain_user"
+                },
+                "autologon_password": {
+                    "type": "string",
+                    "description": "The password to use for autologon. Default: password unless domain joined, then default.ad_domain_user_password"
                 }
+            },
+            "dependentRequired": {
+                "autologon_user": ["autologon_password"]
             },
             "required": [],
             "title": "Windows"
