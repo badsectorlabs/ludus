@@ -117,6 +117,7 @@ stages:
   - ludus ansible role add -d ludus-server/ci/roles/hello_world --force
   - ludus ansible role add -d ludus-server/ci/roles/first --force
   - ludus ansible role add -d ludus-server/ci/roles/second --force
+  - ludus ansible role add -d ludus-server/ci/roles/third --force
   - ludus range config set -f ludus-server/ci/configs/depends-on.yml
   - ludus range deploy -t user-defined-roles
   - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
