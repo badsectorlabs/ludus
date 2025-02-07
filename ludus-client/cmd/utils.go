@@ -16,6 +16,10 @@ import (
 	"time"
 )
 
+const regexStringForMissingRole = "the role '([\\w._-]+)'"
+
+var regexForMissingRole = regexp.MustCompile(regexStringForMissingRole)
+
 func formatTimeObject(timeObject time.Time, format string) string {
 	localTimeZone, err := time.LoadLocation("Local")
 	if err != nil {
@@ -241,6 +245,30 @@ func filterAndPrintTemplateLogs(logs string, verbose bool) {
 			// Print a message prepended with the current time in the format 2024/05/09 19:36:46
 			fmt.Printf("%s %s\n", formatTimeObject(time.Now(), "2006/01/02 15:04:05"), "Waiting for the VM to boot and complete initial setup...")
 			continue
+		}
+		// Check for a missing role error
+		if strings.Contains(line, "ERROR! the role '") && strings.Contains(line, "was not found in") {
+
+			if verbose {
+				fmt.Println(line)
+			}
+
+			// Extract the missing role name with regex
+			matches := regexForMissingRole.FindStringSubmatch(line)
+			if len(matches) > 1 {
+				fmt.Printf("\n******************************** ERROR - Missing Role *******************************************\n")
+				fmt.Printf("The role '%s' was not found in the inventory\n", matches[1])
+				fmt.Printf("Run the command: ludus ansible role add %s\n", matches[1])
+				fmt.Println("to add the missing role (assuming it's hosted on Ansible Galaxy)")
+				fmt.Printf("*************************************************************************************************\n\n")
+				continue
+			} else {
+				fmt.Printf("\n******************************** ERROR - Missing Role *******************************************\n")
+				fmt.Printf("A role was not found in the inventory\n")
+				fmt.Printf("Raw line: %s\n", line)
+				fmt.Printf("*************************************************************************************************\n\n")
+				continue
+			}
 		}
 		// This will ignore all lines without the '=>', which is most of the verbose stuff
 		if !verbose && !strings.Contains(line, "=>") {
