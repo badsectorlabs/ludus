@@ -27,7 +27,8 @@ func automatedConfigGenerator(writeToFile bool) {
 			Iface string `json:"iface"`
 			// Other fields omitted for brevity
 		}
-		ifaceJSONString := strings.TrimSpace(Run(fmt.Sprintf("pvesh get /nodes/%s/network --output-format json", nodeName), false, false))
+		// We must set the locale to en_US.UTF-8 to get the correct output from pvesh, exporting it via the install script doesn't affect this sub-shell
+		ifaceJSONString := strings.TrimSpace(Run(fmt.Sprintf("LANGUAGE=en_US.UTF-8 LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8 pvesh get /nodes/%s/network --output-format json", nodeName), false, false))
 		var configs []InterfaceConfig
 		err := json.Unmarshal([]byte(ifaceJSONString), &configs)
 		if err != nil {
