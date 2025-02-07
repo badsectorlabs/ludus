@@ -8,6 +8,7 @@ import (
 )
 
 const ludusInstallPath string = "/opt/ludus"
+const LudusInstallPath = ludusInstallPath // Export the path for use in plugins
 
 // Configurations exported
 type Configuration struct {
