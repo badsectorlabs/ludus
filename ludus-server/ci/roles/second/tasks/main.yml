@@ -1,0 +1,37 @@
+---
+- name: Message
+  ansible.builtin.debug:
+    msg: Running second role
+
+- name: Verify file exists on Linux systems
+  ansible.builtin.stat:
+    path: "/first.txt"
+  register: unix_file_check
+  when: ansible_system == 'Linux'
+
+- name: Verify file exists on Windows systems
+  ansible.windows.win_stat:
+    path: "C:\\first.txt"
+  register: win_file_check
+  when: ansible_system == 'Win32NT'
+
+- name: Fail if file does not exist
+  ansible.builtin.fail:
+    msg: "Required file does not exist"
+  when: >
+    (ansible_system == 'Linux' and not unix_file_check.stat.exists) or
+    (ansible_system == 'Win32NT' and not win_file_check.stat.exists)
+
+- name: Create file on Linux systems
+  ansible.builtin.copy:
+    dest: "/second.txt"
+    content: ""
+    force: true
+  when: ansible_system != 'Win32NT'
+
+- name: Create file on Windows systems
+  ansible.windows.win_copy:
+    dest: "C:\\second.txt"
+    content: ""
+    force: true
+  when: ansible_system == 'Win32NT'

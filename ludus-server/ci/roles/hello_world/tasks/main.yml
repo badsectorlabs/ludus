@@ -2,3 +2,10 @@
 - name: Message
   ansible.builtin.debug:
     msg: Hello world!
+
+- name: Create a file
+  become: true
+  ansible.builtin.file:
+    path: /hello_world.txt
+    state: touch
+    mode: '0644'

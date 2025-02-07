@@ -1,0 +1,18 @@
+---
+- name: Message
+  ansible.builtin.debug:
+    msg: Running first role
+
+- name: Create file on Linux systems
+  ansible.builtin.copy:
+    dest: "/first.txt"
+    content: ""
+    force: true
+  when: ansible_system != 'Win32NT'
+
+- name: Create file on Windows systems
+  ansible.windows.win_copy:
+    dest: "C:\\first.txt"
+    content: ""
+    force: true
+  when: ansible_system == 'Win32NT'
