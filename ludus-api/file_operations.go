@@ -244,7 +244,7 @@ func copyFileContents(srcFileName, dstFileName string) error {
 }
 
 // return true if the file exists and is not a directory, else false
-func fileExists(filename string) bool {
+func FileExists(filename string) bool {
 	info, err := os.Stat(filename)
 	if os.IsNotExist(err) {
 		return false

@@ -134,7 +134,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	}
 
 	// Check for a user-defined-roles playbook (included in ludus) and create a placeholder if it doesn't exist
-	if !fileExists(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername)) {
+	if !FileExists(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername)) {
 		logToFile(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername),
 			`- name: Run debug task on localhost
   tags: [user-defined-roles]
