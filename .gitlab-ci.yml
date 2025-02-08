@@ -345,7 +345,7 @@ build all:
     - CGO_ENABLED=0 GOOS=windows GOARCH=386 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-386.exe
     - CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-arm64.exe
     - cd ..
-    # If this is a release, build the enterprise plugin at the same time on the same build machine so the binaries are compatible
+    # If this is a release, build the enterprise and anti-sandbox plugins at the same time on the same build machine so the binaries are compatible
     - |
       if [[ ! -z ${CI_COMMIT_TAG+x} ]]; then
         git clone https://ludus-enterprise:${LUDUS_ENTERPRISE_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-enterprise-plugin.git
@@ -354,6 +354,14 @@ build all:
         git config --global --add safe.directory $PWD
         GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
         CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags=embeddocs -o ../binaries/ludus-enterprise.so
+        cd ..
+        # Build the anti-sandbox plugin
+        git clone https://ludus-antisandbox:${LUDUS_ANTISANDBOX_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-antisandbox-plugin.git
+        go work use ./ludus-antisandbox-plugin
+        cd ludus-antisandbox-plugin
+        git config --global --add safe.directory $PWD
+        GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags=embeddocs -o ../binaries/ludus-antisandbox.so
       fi
     - echo "Compile complete."
 
@@ -1487,6 +1495,7 @@ keygen-upload:
     - export KEYGEN_TOKEN=${LUDUS_ENTERPRISE_KEYGEN_TOKEN}
     - output=$(keygen new --channel stable --version ${CI_COMMIT_TAG} 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
     - keygen upload ludus-enterprise.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-enterprise_${CI_COMMIT_TAG}.so
+    - keygen upload ludus-antisandbox.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-antisandbox_${CI_COMMIT_TAG}.so
     - keygen publish --release ${CI_COMMIT_TAG}
 
 release:
