@@ -94,7 +94,6 @@ func serve() {
 	if os.Geteuid() != 0 {
 		err = router.RunTLS("0.0.0.0:8080", certPath, keyPath)
 	} else {
-		go watchPluginDirectory()
 		if config.ExposeAdminPort {
 			err = router.RunTLS("0.0.0.0:8081", certPath, keyPath)
 		} else {
