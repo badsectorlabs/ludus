@@ -19,7 +19,16 @@ fi
 
 GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
 GIT_ABBREV_REF=$(git rev-parse --abbrev-ref HEAD)
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build  -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${GIT_ABBREV_REF}" ${TAGS} -o ludus-server
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build  -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${GIT_ABBREV_REF}" ${TAGS} -o ludus-server
+if [[ $? -ne 0 ]]; then
+    echo
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "[!] ERROR building ludus server"
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo
+    exit 1
+fi
+
 
 # Check if scutil is available (macOS)
 if command -v scutil &> /dev/null; then
@@ -33,5 +42,10 @@ if [ "$HOSTNAME" == "m1" ]; then
     scp ludus-server lkdev2: && ssh lkdev2 "./ludus-server --update"
 fi
 
+./ludus-server --update
+
+echo
+echo "[=] Ludus server built and installed to /opt/ludus/ludus-server"
+echo
 
 popd || return
