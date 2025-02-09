@@ -221,12 +221,18 @@
   become: true
   when: ansible_distribution == "Ubuntu"
 
+- name: Check if /etc/cloud/cloud.cfg.d exists
+  ansible.builtin.stat:
+    path: /etc/cloud/cloud.cfg.d
+  register: cloud_dir
+  when: ansible_distribution == "Ubuntu"
+
 - name: Disable cloud dhcp network
   ansible.builtin.copy:
     dest: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
     content: "network: {config: disabled}"
   become: true
-  when: ansible_distribution == "Ubuntu"
+  when: ansible_distribution == "Ubuntu" and cloud_dir.stat.exists
 
 - name: Set DNS search domain for systemd-resolved
   ansible.builtin.lineinfile:
