@@ -47,6 +47,14 @@ func (s *Server) LoadPlugin(path string) error {
 		return fmt.Errorf("unexpected type from module symbol")
 	}
 
+	// Check if a plugin with the same name is already loaded
+	for _, existingPlugin := range s.plugins {
+		if existingPlugin.Name() == ludusPlugin.Name() {
+			log.Printf("Plugin %s is already loaded, skipping", ludusPlugin.Name())
+			return nil
+		}
+	}
+
 	s.plugins = append(s.plugins, ludusPlugin)
 	log.Println("Loaded plugin: ", ludusPlugin.Name())
 	return nil
@@ -65,6 +73,10 @@ func (s *Server) InitializePlugins() {
 		embeddedFSsFromPlugin := p.GetEmbeddedFSs()
 		for _, embeddedFSFromPlugin := range embeddedFSsFromPlugin {
 			if embeddedFSFromPlugin != nil {
+				if p.Name() == "Ludus Enterprise" && os.Geteuid() == 0 {
+					log.Println("Not dropping files for plugin: ", p.Name(), " (root)")
+					continue
+				}
 				log.Println("Dropping files for plugin: ", p.Name())
 				// Write out any files from the plugin FS to the host filesystem
 				err := fs.WalkDir(embeddedFSFromPlugin, ".", func(path string, d fs.DirEntry, err error) error {

@@ -128,10 +128,17 @@ func (s *Server) checkLicense() {
 
 	// Additional plugins are loaded by the enterprise plugin.
 
-	s.InitializePlugins()
+	// The server will initialize plugins in the main function
+	// s.InitializePlugins()
 }
 
 func PullPlugin(path string, fileName string, pluginDir string, version string, licenseKey string) error {
+	// Check for a .local-testing file in the plugin directory
+	if _, err := os.Stat(pluginDir + "/.local-testing"); err == nil {
+		log.Printf("LICENSE: In local-testing mode (%s/.local-testing exists), skipping plugin download\n", pluginDir)
+		return nil
+	}
+
 	client := keygen.NewClientWithOptions(&keygen.ClientOptions{
 		Account:    licenseAccount,
 		APIURL:     licenseURL,
