@@ -365,6 +365,11 @@ func GetAnsibleInventoryForRange(c *gin.Context) {
 		return // JSON set in getProxmoxPasswordForUser
 	}
 
+	usersRange, err := GetRangeObject(c)
+	if err != nil {
+		return // JSON set in getRangeObject
+	}
+
 	cmd := exec.Command("ansible-inventory", "-i", ludusInstallPath+"/ansible/range-management/proxmox.py", "--list", "-y")
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
@@ -374,6 +379,9 @@ func GetAnsibleInventoryForRange(c *gin.Context) {
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_HOSTNAME=%s", ServerConfiguration.ProxmoxHostname))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_USERNAME=%s", user.ProxmoxUsername+"@pam"))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_PASSWORD=%s", proxmoxPassword))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_CONFIG=%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_NUMBER=%s", strconv.Itoa(int(usersRange.RangeNumber))))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_ID=%s", user.UserID))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to get the ansible inventory: " + string(out)})

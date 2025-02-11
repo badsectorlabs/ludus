@@ -275,6 +275,10 @@ func updateUsersRangeVMData(c *gin.Context) error {
 				}
 			}
 		}
+		if thisVM.IP == "null" {
+			// Fetch the IP address from the user's range config if the VM is set to use force_ip
+			thisVM.IP = GetIPForVMFromConfig(c, vm["name"].(string))
+		}
 
 		thisVM.RangeNumber = usersRange.RangeNumber
 		thisVM.Name = vm["name"].(string)

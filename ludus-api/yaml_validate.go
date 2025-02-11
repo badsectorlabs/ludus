@@ -139,7 +139,8 @@ type VM struct {
 		FQDN string `json:"fqdn"`
 		Role string `json:"role"`
 	} `json:"domain"`
-	Roles interface{} `yaml:"roles"`
+	Roles   interface{} `yaml:"roles"`
+	ForceIP bool        `json:"force_ip,omitempty"`
 }
 
 type LudusConfig struct {

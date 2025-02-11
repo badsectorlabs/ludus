@@ -345,6 +345,32 @@ def check_ip_addresses(vm_name, ip_addresses):
     return None
 
 
+def get_os_info_from_config(vm_name):
+    ludus_range_config = os.environ.get('LUDUS_RANGE_CONFIG')
+    range_number = os.environ.get('LUDUS_RANGE_NUMBER')
+    range_id = os.environ.get('LUDUS_RANGE_ID')
+
+    if ludus_range_config and range_number and range_id:
+        try:
+            with open(ludus_range_config, 'r') as config_file:
+                config = yaml.safe_load(config_file)
+
+                for vm in config.get('ludus', []):
+                    resolved_vm_name = compiled_range_id_regex.sub(range_id, vm['vm_name'])
+                    if resolved_vm_name == vm_name:
+                        if 'windows' in vm:
+                            return 'windows'
+                        elif 'linux' in vm:
+                            return 'linux'
+                        elif 'macOS' in vm:
+                            return 'macos'
+
+        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+            print(e, file=sys.stderr)
+            pass
+    
+    return None
+
 class SystemInfo(object):
     id = ""
     name = ""
@@ -443,9 +469,19 @@ def main_list(options, config_path):
                     results['_meta']['hostvars'][vm]['proxmox_os_machine'] = system_info.machine
                     results['_meta']['hostvars'][vm]['proxmox_os_kernel'] = system_info.kernel
                     results['_meta']['hostvars'][vm]['proxmox_os_version_id'] = system_info.version_id
+                else:
+                    # If we don't have a functional guest agent but the VM is running, use the IP address from the config if the user set force_ip
+                    if results['_meta']['hostvars'][vm]['proxmox_status'] == 'running':
+                        results['_meta']['hostvars'][vm]['ansible_host'] = check_ip_addresses(results['_meta']['hostvars'][vm]['proxmox_name'], [])
+                        # If nothing is returned, delete the ansible_host IP address field
+                        if results['_meta']['hostvars'][vm]['ansible_host'] is None:
+                            del results['_meta']['hostvars'][vm]['ansible_host']
+                        # Also get the proxmox_os_id as it will be used for grouping, and thus group_vars
+                        results['_meta']['hostvars'][vm]['proxmox_os_id'] = get_os_info_from_config(results['_meta']['hostvars'][vm]['proxmox_name'])
+                        if results['_meta']['hostvars'][vm]['proxmox_os_id'] is None:
+                            del results['_meta']['hostvars'][vm]['proxmox_os_id'] 
             else:
                 results['_meta']['hostvars'][vm]['ansible_host'] = proxmox_api.openvz_ip_address(node, vmid)
-            
             if 'groups' in metadata:
                 # print metadata
                 for group in metadata['groups']:
