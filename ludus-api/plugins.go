@@ -17,6 +17,8 @@ type LudusPlugin interface {
 	RegisterRoutes(router *gin.Engine)
 	GetEmbeddedFSs() []fs.FS
 	Shutdown() error
+	Initialized() bool
+	RoutesRegistered() bool
 }
 
 type Server struct {
@@ -66,18 +68,22 @@ func (s *Server) RegisterPlugin(p LudusPlugin) {
 
 func (s *Server) InitializePlugins() {
 	for _, p := range s.plugins {
+		if p.Initialized() {
+			continue
+		}
+
 		if err := p.Initialize(s); err != nil {
 			log.Printf("Failed to initialize plugin %s: %v", p.Name(), err)
 		}
 
 		embeddedFSsFromPlugin := p.GetEmbeddedFSs()
-		for _, embeddedFSFromPlugin := range embeddedFSsFromPlugin {
+		for index, embeddedFSFromPlugin := range embeddedFSsFromPlugin {
 			if embeddedFSFromPlugin != nil {
 				if p.Name() == "Ludus Enterprise" && os.Geteuid() == 0 {
 					log.Println("Not dropping files for plugin: ", p.Name(), " (root)")
 					continue
 				}
-				log.Println("Dropping files for plugin: ", p.Name())
+				log.Printf("Dropping embedded filesystem %d for plugin: %s\n", index+1, p.Name())
 				// Write out any files from the plugin FS to the host filesystem
 				err := fs.WalkDir(embeddedFSFromPlugin, ".", func(path string, d fs.DirEntry, err error) error {
 					if err != nil {
@@ -104,7 +110,11 @@ func (s *Server) InitializePlugins() {
 
 func (s *Server) RegisterPluginRoutes(router *gin.Engine) {
 	for _, p := range s.plugins {
-		p.RegisterRoutes(router)
+		if !p.RoutesRegistered() {
+			log.Printf("Registering routes for plugin: %s\n", p.Name())
+			p.RegisterRoutes(router)
+		}
+
 	}
 }
 

@@ -29,6 +29,7 @@ type Route struct {
 type Routes []Route
 
 var server *Server
+var Router *gin.Engine
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
@@ -51,6 +52,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 		})
 	}
 	server = ludusServer
+	Router = router
 
 	return router
 }
@@ -131,7 +133,7 @@ func validateAPIKey(c *gin.Context) {
 
 // This function makes sure the request is to a user endpoint if the server is running as root (i.e. :8081)
 func limitRootEndpoints(c *gin.Context) {
-	if os.Geteuid() == 0 && !strings.HasPrefix(c.Request.URL.Path, "/user") && !strings.HasPrefix(c.Request.URL.Path, "/testing/antisandbox") {
+	if os.Geteuid() == 0 && !strings.HasPrefix(c.Request.URL.Path, "/user") && !strings.HasPrefix(c.Request.URL.Path, "/antisandbox/") {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The :8081 endpoint can only be used for user actions. Use the :8080 endpoint for all other actions."})
 		return
 	}
