@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"ludus/logger"
 	"ludus/rest"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -17,20 +18,47 @@ var (
 	dropFiles              bool
 )
 
+func isUsingAdminPort() bool {
+	return strings.Contains(url, ":8081")
+}
+
 var antiSandboxCmd = &cobra.Command{
 	Use:   "antisandbox",
 	Short: "Install and enable anti-sandbox for VMs (enterprise)",
 	Long:  ``,
 }
 
-var antiSandboxInstallCmd = &cobra.Command{
-	Use:   "install",
+var antiSandboxInstallCustomCmd = &cobra.Command{
+	Use:   "install-custom",
 	Short: "Install the custom QEMU and OVMF packages for anti-sandbox features (enterprise)",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		responseJSON, success := rest.GenericJSONPost(client, "/antisandbox/install", "")
+		if !isUsingAdminPort() {
+			logger.Logger.Fatal("Anti-Sandbox is only available on the admin port (:8081)")
+		}
+
+		responseJSON, success := rest.GenericJSONPost(client, "/antisandbox/install-custom", "")
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+		handleGenericResult(responseJSON)
+	},
+}
+
+var antiSandboxInstallStandardCmd = &cobra.Command{
+	Use:   "install-standard",
+	Short: "Install the standard QEMU and OVMF packages (enterprise)",
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		if !isUsingAdminPort() {
+			logger.Logger.Fatal("Anti-Sandbox is only available on the admin port (:8081)")
+		}
+
+		responseJSON, success := rest.GenericJSONPost(client, "/antisandbox/install-normal", "")
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -44,6 +72,10 @@ var antiSandboxEnableCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		if !isUsingAdminPort() {
+			logger.Logger.Fatal("Anti-Sandbox is only available on the admin port (:8081)")
+		}
 
 		type AntiSandboxPayload struct {
 			VMIDs     string `json:"vmIDs"`
@@ -68,7 +100,7 @@ var antiSandboxEnableCmd = &cobra.Command{
 !!! This will enable anti-sandbox settings for VMs: %s !!!
     which will have performance penalties. This should
     be the last step once a VM is fully configured!
-    The VM(s) will be rebooted during this process.
+    The VM(s) will be hard rebooted during this process.
 
 Do you want to continue? (y/N): `, VMIDs)
 			fmt.Scanln(&choice)
@@ -139,7 +171,8 @@ func handleAntiSandboxResult(responseJSON []byte) {
 }
 
 func init() {
-	antiSandboxCmd.AddCommand(antiSandboxInstallCmd)
+	antiSandboxCmd.AddCommand(antiSandboxInstallCustomCmd)
+	antiSandboxCmd.AddCommand(antiSandboxInstallStandardCmd)
 	setupAntiSandboxEnableCmd(antiSandboxEnableCmd)
 	antiSandboxCmd.AddCommand(antiSandboxEnableCmd)
 	rootCmd.AddCommand(antiSandboxCmd)
