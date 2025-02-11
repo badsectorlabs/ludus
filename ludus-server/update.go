@@ -53,6 +53,11 @@ Move the updated binary to a different location and run it with --update to comp
 	// Start ludus and ludus-admin
 	Run("systemctl start ludus", false, true)
 	Run("systemctl start ludus-admin", false, true)
+
+	checkAndUpdateDependencies()
+	checkPackerPluginVersions()
+	updateAnsibleRoles()
+
 	fmt.Printf("Ludus updated to %s\n", LudusVersion)
 }
 
