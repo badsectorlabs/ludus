@@ -76,6 +76,13 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 		inventory = ludusInstallPath + "/ansible/range-management/proxmox.py"
 	}
 
+	// Check if the user specified a limit, and if so, make sure it has 'localhost' in it
+	if limit != "" {
+		if !strings.Contains(limit, "localhost") {
+			limit = fmt.Sprintf("%s,localhost", limit)
+		}
+	}
+
 	ansiblePlaybookOptions := &playbook.AnsiblePlaybookOptions{
 		Inventory:     inventory,
 		ExtraVarsFile: append(serverAndUserConfigs, extraVarsFiles...),
