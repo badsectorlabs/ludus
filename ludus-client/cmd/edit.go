@@ -16,10 +16,11 @@ import (
 )
 
 var (
-	editor   string
-	tempPath string
-	textArea *tview.TextArea
-	app      *tview.Application
+	editor     string
+	tempPath   string
+	readInPath string
+	textArea   *tview.TextArea
+	app        *tview.Application
 )
 
 // getDefaultTempPath returns the default temporary file path based on OS
@@ -37,7 +38,6 @@ func editWithExternalEditor(content []byte, editorCmd string, tempFilePath strin
 	if err := os.WriteFile(tempFilePath, content, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write temp file: %v", err)
 	}
-	defer os.Remove(tempFilePath)
 
 	// Prepare editor command
 	cmd := exec.Command(editorCmd, tempFilePath)
@@ -94,43 +94,60 @@ var rangeConfigEditCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		// Get current config
+		var oldContent string
+		var err error
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/range/config?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/range/config")
-		}
-		if !success {
-			return
-		}
 
-		type Result struct {
-			RangeConfig string `json:"result"`
-		}
+		// Get current config from local file
+		if readInPath != "" {
+			// Read in the file
+			oldContentBytes, err := os.ReadFile(readInPath)
+			if err != nil {
+				logger.Logger.Fatal(err.Error())
+			}
+			oldContent = string(oldContentBytes)
+		} else { // Get the config from the server
+			if userID != "" {
+				responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/range/config?userID=%s", userID))
+			} else {
+				responseJSON, success = rest.GenericGet(client, "/range/config")
+			}
+			if !success {
+				return
+			}
 
-		var result Result
-		err := json.Unmarshal(responseJSON, &result)
-		if err != nil {
-			logger.Logger.Fatal(err.Error())
+			type Result struct {
+				RangeConfig string `json:"result"`
+			}
+
+			var result Result
+			err := json.Unmarshal(responseJSON, &result)
+			if err != nil {
+				logger.Logger.Fatal(err.Error())
+			}
+			oldContent = result.RangeConfig
 		}
 
 		var newContent []byte
 
 		if editor != "" {
 			// Use external editor
-			newContent, err = editWithExternalEditor([]byte(result.RangeConfig), editor, tempPath)
+			newContent, err = editWithExternalEditor([]byte(oldContent), editor, tempPath)
 			if err != nil {
 				logger.Logger.Fatal(err.Error())
 			}
 		} else {
 			// Use built-in editor
-			app := createBuiltinEditor(result.RangeConfig)
+			app := createBuiltinEditor(oldContent)
 			if err := app.Run(); err != nil {
 				logger.Logger.Fatal(err.Error())
 			}
 			newContent = []byte(textArea.GetText())
+			// Write the new content to the temp file
+			if err := os.WriteFile(tempPath, newContent, 0644); err != nil {
+				logger.Logger.Fatal(err.Error())
+			}
 		}
 
 		// Send updated config back to server
@@ -141,6 +158,9 @@ var rangeConfigEditCmd = &cobra.Command{
 		}
 
 		if didFailOrWantJSON(success, responseJSON) {
+			if !success && !jsonFormat {
+				logger.Logger.Fatal("Load your edits with:\nludus range config edit --file " + tempPath)
+			}
 			return
 		}
 		handleGenericResult(responseJSON)
@@ -150,6 +170,7 @@ var rangeConfigEditCmd = &cobra.Command{
 func setupRangeConfigEdit(command *cobra.Command) {
 	command.Flags().StringVarP(&editor, "editor", "e", "", "external editor to use (e.g., vim, nano, code)")
 	command.Flags().StringVarP(&tempPath, "temp-file-path", "t", getDefaultTempPath(), "temporary file path for external editor")
+	command.Flags().StringVarP(&readInPath, "file", "f", "", "path to a file to read in for editing (default: get config from server)")
 	command.Flags().BoolVar(&force, "force", false, "force the configuration to be updated, even with testing enabled")
 }
 

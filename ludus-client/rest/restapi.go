@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -121,7 +120,7 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 	}
 
 	if error {
-		os.Exit(1)
+		return nil, false
 	}
 
 	if resp.StatusCode() == 200 || resp.StatusCode() == 201 {
