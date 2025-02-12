@@ -14,6 +14,7 @@ var (
 	noPromptFlag       bool
 	nodeName           string
 	autoGenerateConfig bool
+	noAnsibleUpdate    bool
 )
 
 func init() {
@@ -23,6 +24,7 @@ func init() {
 	flag.BoolVar(&versionFlag, "version", false, "print the version of this ludus server")
 	flag.BoolVar(&helpFlag, "h", false, "display help information")
 	flag.BoolVar(&helpFlag, "help", false, "display help information")
+	flag.BoolVar(&noAnsibleUpdate, "no-dep-update", false, "skip the dependency update check")
 	flag.Usage = printHelp
 }
 

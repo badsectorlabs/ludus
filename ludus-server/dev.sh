@@ -42,7 +42,7 @@ if [ "$HOSTNAME" == "m1" ]; then
     scp ludus-server lkdev2: && ssh lkdev2 "./ludus-server --update"
 fi
 
-./ludus-server --update
+./ludus-server --update --no-dep-update
 
 echo
 echo "[=] Ludus server built and installed to /opt/ludus/ludus-server"
