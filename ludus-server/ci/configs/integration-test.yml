@@ -4,10 +4,13 @@ ludus:
     template: win2022-server-x64-template
     vlan: 10
     ip_last_octet: 11
+    force_ip: true
     ram_gb: 6
     cpus: 4
     windows:
       sysprep: true
+      autologon_user: superadmin
+      autologon_password: password123
     domain:
       fqdn: ludus.domain
       role: primary-dc
