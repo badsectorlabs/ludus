@@ -135,7 +135,7 @@
         state: started
 
 # The 'until' is a way to fail if the VM has a self-assigned 169.254.0.0/16 or a Docker 172.17.0.0/16 IP
-# Since all VMs are created with DHCP, we need to check that the last octet of the IP address is >= 100
+# Since all VMs are created with DHCP, we need to check that the last octet of the IP address is >= 100 if it starts with 10
 # If the user has specified force_ip, the inventory will return the config IP if the VM is still booting and hasn't DHCP'd yet
 - name: Wait for VM to acquire an IP address
   delegate_to: localhost
@@ -144,8 +144,13 @@
   changed_when: false
   until: >
     nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('') |
-    regex_search('^(?!169\.254|172\.17)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') is not none and
-    (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[-1] | int >= 100
+      regex_search('^(?!169\.254|172\.17)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') is not none
+    and
+    (
+      (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[-1] | int >= 100
+      and
+      (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 10)
+    )
   retries: 30
   delay: 5
   when: clone_vm is changed and not unmanaged
