@@ -149,7 +149,7 @@
     (
       (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[-1] | int >= 100
       and
-      (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 10)
+      (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 10
     )
   retries: 30
   delay: 5
