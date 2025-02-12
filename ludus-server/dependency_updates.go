@@ -13,8 +13,8 @@ import (
 
 const (
 	// Minimum required versions
-	minPackerVersion              = "1.11.2" // No v in the version string
-	minPackerProxmoxPluginVersion = "1.2.2"  // No v in the version string
+	minPackerVersion              = "1.9.4"  // No v in the version string
+	minPackerProxmoxPluginVersion = "1.1.8"  // No v in the version string
 	minPackerAnsiblePluginVersion = "1.1.1"  // No v in the version string
 	minAnsibleCoreVersion         = "2.16.0" // 2.16.14 is the last version that supports Python 2.7 on the target hosts
 	ansiblePyPiVersionToInstall   = "9.13.0" // 9.13.0 is the last version that supports Python 2.7 on the target hosts

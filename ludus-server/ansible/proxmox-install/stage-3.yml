@@ -39,7 +39,7 @@
               ████████████████████████████████████████████████░░░░░░░░░░░░ 80%
   roles:
     - role: geerlingguy.packer
-      packer_version: "1.11.2"
+      packer_version: "1.9.4"
     - role: lae.proxmox
       pve_group: "{{ proxmox_node }}"
       pve_run_system_upgrades: false
@@ -85,7 +85,7 @@
   tasks:
     - name: Install proxmox and ansible packer plugin
       ansible.builtin.shell:
-        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/proxmox v1.2.2;
+        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/proxmox v1.1.8;
         PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/ansible v1.1.1
       register: packer_plugin_install
 
