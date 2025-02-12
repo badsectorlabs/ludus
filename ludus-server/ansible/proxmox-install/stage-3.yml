@@ -75,6 +75,10 @@
           roles: ["DatastoreUser"]
           groups:
             - ludus_users
+        - path: "/nodes/{{ inventory_hostname }}"
+          roles: ["AccessNetwork"]
+          groups:
+            - ludus_users
   vars:
     port: "51820"
     server_cidr: "198.51.100.1/24"

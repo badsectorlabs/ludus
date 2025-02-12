@@ -54,9 +54,24 @@ Move the updated binary to a different location and run it with --update to comp
 	Run("systemctl start ludus", false, true)
 	Run("systemctl start ludus-admin", false, true)
 
-	checkAndUpdateDependencies()
-	checkPackerPluginVersions()
-	updateAnsibleRoles()
+	if !noAnsibleUpdate {
+		err := checkAndCreateNetworkAccessRole() // Required for direct PVE downloads via packer
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = checkAndUpdateDependencies()
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = checkPackerPluginVersions()
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = updateAnsibleRoles()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	fmt.Printf("Ludus updated to %s\n", LudusVersion)
 }

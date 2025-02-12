@@ -93,6 +93,9 @@
             - "Datastore.AllocateSpace"
             - "Datastore.AllocateTemplate"
             - "Datastore.Audit"
+        - name: AccessNetwork
+          privileges:
+            - "Sys.AccessNetwork"
       pve_groups:
         - name: ludus_users
           comment: Ludus users

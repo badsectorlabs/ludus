@@ -132,6 +132,9 @@
             - "Datastore.AllocateSpace"
             - "Datastore.AllocateTemplate"
             - "Datastore.Audit"
+        - name: AccessNetwork
+          privileges:
+            - "Sys.AccessNetwork"
       pve_groups:
         - name: ludus_users
           comment: Ludus users
@@ -194,6 +197,10 @@
             - ludus_users
         - path: "/storage/{{ proxmox_iso_storage_pool }}"
           roles: ["DatastoreUser"]
+          groups:
+            - ludus_users
+        - path: "/nodes/{{ inventory_hostname }}"
+          roles: ["AccessNetwork"]
           groups:
             - ludus_users
   vars:
