@@ -32,7 +32,9 @@ func automatedConfigGenerator(writeToFile bool) {
 		var configs []InterfaceConfig
 		err := json.Unmarshal([]byte(ifaceJSONString), &configs)
 		if err != nil {
-			log.Fatal("Error unmarshaling JSON while getting networks:", err)
+			log.Printf("Error unmarshaling JSON while getting networks: %v", err)
+			// Assume there is no vmbr1000 interface if we can't get the network information
+			configs = []InterfaceConfig{}
 		}
 
 		vmbr1000Found := false
