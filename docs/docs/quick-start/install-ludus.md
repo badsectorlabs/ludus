@@ -80,6 +80,14 @@ the machine, elevate to root, and run `ludus-install-status`.
 In advanced setups `/opt/ludus/config.yml` can be modified after install to accommodate different storage pools,
 ZFS, etc.
 
+To have the Ludus server processes pick up any changes to the config file, you must restart the Ludus services with:
+
+```shell-session
+#terminal-command-ludus-root
+systemctl restart ludus
+#terminal-command-ludus-root
+systemctl restart ludus-admin
+```
 
 ```yaml title="/opt/ludus/config.yml"
 ---
