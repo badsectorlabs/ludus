@@ -108,7 +108,7 @@ type state int
 const (
 	statusNormal state = iota
 	stateDone
-	numberOfFields = 12 // 11 fields + 1 confirm, update this if you add any new fields
+	numberOfFields = 14 // 13 fields + 1 confirm, update this if you add any new fields
 )
 
 type Model struct {
