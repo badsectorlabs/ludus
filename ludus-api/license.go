@@ -1,9 +1,11 @@
 package ludusapi
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"crypto"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +26,8 @@ const (
 	licenseAPIPrefix               = "v1"
 	licenseProductEnterprisePlugin = "f258d15f-4fab-47ca-839c-fc2a85f55b71"
 	licenseAccount                 = "26f20308-539a-4d95-bdad-8edf70553cec"
-	licensePublicKey               = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
+	licensePublicKey               = "a3d9ac19af50b558b22e634531caddfa6a41bbeaee3685d796c02bbcd93aef59"
+	binaryPublicKey                = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
 )
 
 func (s *Server) checkLicense() {
@@ -149,12 +152,16 @@ func PullPlugin(path string, fileName string, pluginDir string, version string, 
 		LicenseKey: licenseKey,
 	})
 	ctx := context.Background()
+	// Uncomment this to debug the plugin downloads
+	// keygen.Logger = keygen.NewLogger(keygen.LogLevelDebug)
 
-	response, err := client.Get(ctx, path, nil, nil)
+	artifact := &keygen.Artifact{}
+	response, err := client.Get(ctx, path, nil, artifact)
 	if err != nil {
 		log.Printf("LICENSE: unable to download plugin %s: %v", fileName, err)
 		return err
 	}
+	artifact.URL = response.Headers.Get("Location")
 	// Write the enterprise plugin to disk
 	if !FileExists(pluginDir) {
 		err := os.MkdirAll(pluginDir, 0755)
@@ -171,21 +178,8 @@ func PullPlugin(path string, fileName string, pluginDir string, version string, 
 	}
 	defer pluginFile.Close()
 
-	// Parse the JSON response to get the download URL
-	var jsonResponse struct {
-		Data struct {
-			Links struct {
-				Redirect string `json:"redirect"`
-			} `json:"links"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(bytes.NewReader(response.Body)).Decode(&jsonResponse); err != nil {
-		log.Printf("LICENSE: unable to parse response JSON: %v", err)
-		return err
-	}
-
 	// Download the actual plugin binary
-	pluginResp, err := http.Get(jsonResponse.Data.Links.Redirect)
+	pluginResp, err := http.Get(artifact.URL)
 	if err != nil {
 		log.Printf("LICENSE: unable to download plugin binary %s: %v", fileName, err)
 		return err
@@ -197,6 +191,60 @@ func PullPlugin(path string, fileName string, pluginDir string, version string, 
 	if err != nil {
 		log.Printf("LICENSE: unable to write %s plugin: %v", fileName, err)
 		return err
+	}
+
+	// Verify the signature
+	if err := VerifySignature(pluginPath, artifact.Signature, binaryPublicKey, licenseProductEnterprisePlugin); err != nil {
+		log.Printf("LICENSE: unable to verify signature for %s plugin: %v", fileName, err)
+		return err
+	}
+	log.Printf("LICENSE: successfully verified signature for %s plugin", fileName)
+
+	return nil
+}
+
+func VerifySignature(filePath string, signatureString string, publicKeyHex string, context string) error {
+
+	signature, err := base64.RawStdEncoding.DecodeString(signatureString)
+	if err != nil {
+		return err
+	}
+
+	// Read and hash the file content
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// Create SHA-512 hash of file contents
+	h := crypto.SHA512.New()
+	if _, err := io.Copy(h, file); err != nil {
+		return err
+	}
+	checksum := h.Sum(nil)
+
+	// Decode the public key from hex
+	publicKey, err := hex.DecodeString(publicKeyHex)
+	if err != nil {
+		return errors.New("failed to decode ed25519ph public key")
+	}
+
+	// Verify public key length
+	if l := len(publicKey); l != ed25519.PublicKeySize {
+		return errors.New("invalid ed25519ph public key")
+	}
+
+	// Set up verification options with context
+	opts := &ed25519.Options{
+		Hash:    crypto.SHA512,
+		Context: context,
+	}
+
+	// Verify the signature
+	err = ed25519.VerifyWithOptions(publicKey, checksum, signature, opts)
+	if err != nil {
+		return fmt.Errorf("failed to verify ed25519ph signature: %v", err)
 	}
 
 	return nil
