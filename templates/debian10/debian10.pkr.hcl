@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "sha512:bc469019b9057073d36ff8f5402c95ff0a0363657358336dc9a05fc6af66276229aa727ec46cf17b84d308f44b825de7f24ea1a256062a14e0f605cd70bae02f"
+  default = "sha512:466add7fb5ba7caebd27bf6b8b326a24857295673045d643950869f5f0440c44ae833dea49c7b8a674afbf82c3f41ceb5062948aea443d581bc827db62cc5249"
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
@@ -11,7 +11,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://cdimage.debian.org/cdimage/archive/10.12.0/amd64/iso-cd/debian-10.12.0-amd64-netinst.iso"
+  default = "https://cdimage.debian.org/cdimage/archive/10.13.0/amd64/iso-cd/debian-10.13.0-amd64-netinst.iso"
 }
 
 variable "vm_cpu_cores" {
