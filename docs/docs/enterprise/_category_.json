@@ -1,0 +1,9 @@
+{
+    "label": "🏛️ Enterprise",
+    "position": 4,
+    "link": {
+        "type": "generated-index",
+        "description": "Enterprise features for Ludus",
+        "slug": "category/enterprise"
+    }
+}
