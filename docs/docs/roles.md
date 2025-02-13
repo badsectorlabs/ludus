@@ -84,3 +84,9 @@ While most existing ansible roles will work with Ludus, this page contains a tab
 | [ludus_velociraptor_client](https://github.com/fmurer/ludus_velociraptor_client) | Install a Velociraptor Agent on a System in Ludus | [@f_Murer](https://x.com/f_Murer) | Must install from directory |
 | [ludus_velociraptor_server](https://github.com/fmurer/ludus_velociraptor_server) | Install a Velociraptor Server in Ludus | [@f_Murer](https://x.com/f_Murer) | Must install from directory |
 | [bagelByt3s.ludus_adfs](https://github.com/bagelByt3s/ludus_adfs) | Installs an ADFS deployment with optional configurations. | [Beyviel David](https://github.com/bagelByt3s) | Must install from directory |
+| [ludus_caldera_server](https://github.com/frack113/ludus_caldera_server) | Installs [Caldera Server](https://caldera.mitre.org/) main branch on linux | [@frack113](https://x.com/frack113) | |
+| [ludus_caldera_agent](https://github.com/frack113/ludus_caldera_agent) | Installs [Caldera Agent](https://caldera.mitre.org/) on Windows | [@frack113](https://x.com/frack113) | |
+| [ludus_aurora_agent](https://github.com/frack113/ludus_aurora_agent) | Installs [Aurora Agent](https://www.nextron-systems.com/aurora/) on Windows | [@frack113](https://x.com/frack113) | You must have a package and a valid license (edit the role before using) |
+| [ludus_graylog_server](https://github.com/frack113/my-ludus-roles) | Installs Graylog server on Ubuntu 22.04 | [@frack113](https://x.com/frack113) | Must install from directory |
+| [0xRedpoll.ludus_cobaltstrike_teamserver](https://github.com/0xRedpoll/ludus_cobaltstrike_teamserver) | Install and provision a Cobalt Strike teamserver in Ludus | [@0xRedpoll](https://github.com/0xRedpoll) ||
+| [ludus-ad-vulns](https://github.com/Primusinterp/ludus-ad-vulns) | Adds vulnerabilities in an Active Directory. | [@Primusinterp](https://github.com/Primusinterp) | Must install from directory |
