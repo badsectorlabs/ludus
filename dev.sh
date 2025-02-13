@@ -58,7 +58,6 @@ rsync -av --progress \
     --no-owner --no-group \
     --exclude='.vscode/' \
     --exclude='docs/' \
-    --exclude='scripts/' \
     --include='ludus-antisandbox-plugin/' \
     --include='ludus-enterprise-plugin/' \
     --filter=':- ./*/.gitignore' \
