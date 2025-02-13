@@ -20,7 +20,7 @@
           "openapi" : "3.0.3",
           "info" : {
             "description" : "This API controls Ludus user management, range deployment, power state, and testing state.",
-            "version" : "1.7.0",
+            "version" : "1.8.0",
             "title" : "Ludus API",
             "license" : {
               "name" : "GNU AGPLv3",
@@ -52,6 +52,9 @@
           }, {
             "name" : "Ansible Management",
             "description" : "Actions to manage Ansible roles and collections on the ludus host"
+          }, {
+            "name" : "Anti-Sandbox Management",
+            "description" : "Actions to manage the use of the Anti-Sandbox plugin"
           } ],
           "paths" : {
             "/" : {
@@ -1825,6 +1828,187 @@
                   },
                   "500" : {
                     "description" : "error starting update process"
+                  }
+                }
+              }
+            },
+            "/antisandbox/enable" : {
+              "post" : {
+                "tags" : [ "Anti-Sandbox Management" ],
+                "summary" : "Enable anti-sandbox for a VM or multiple VMs (enterprise)",
+                "operationId" : "antiSandboxEnable",
+                "description" : "Modifieds the given VM names or VM IDs to not look like virtualized\nsandbox hosts. (Enterrpise and Windows only)\n",
+                "parameters" : [ {
+                  "in" : "query",
+                  "name" : "userID",
+                  "description" : "pass an optional userID to act on behalf of. Only admins can provide userIDs that are not their own.\n",
+                  "required" : false,
+                  "schema" : {
+                    "properties" : {
+                      "userID" : {
+                        "$ref" : "#/components/schemas/userID"
+                      }
+                    }
+                  }
+                } ],
+                "requestBody" : {
+                  "content" : {
+                    "application/json" : {
+                      "schema" : {
+                        "type" : "object",
+                        "properties" : {
+                          "vmIDs" : {
+                            "type" : "string",
+                            "example" : "104,105",
+                            "description" : "VM IDs or names to enable anti-sandbox"
+                          },
+                          "registeredOwner" : {
+                            "type" : "string",
+                            "example" : "Acme Corp IT",
+                            "description" : "The string to use as the \"RegisteredOwner\" at HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
+                          },
+                          "registeredOrganization" : {
+                            "type" : "string",
+                            "example" : "Acme Corp",
+                            "description" : "The string to use as the \"RegisteredOrganization\" at HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
+                          },
+                          "vendor" : {
+                            "type" : "string",
+                            "enum" : [ "Dell" ],
+                            "description" : "The computer vendor to use for all hardware values (currently only Dell is supported)"
+                          },
+                          "dropFiles" : {
+                            "type" : "boolean",
+                            "example" : true,
+                            "description" : "If true, will drop a random assortment of files on the autologon_user's desktop and in the autologon_user's download folder (default false)"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses" : {
+                  "200" : {
+                    "description" : "Anti-sandbox process completed",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "success" : {
+                              "type" : "array",
+                              "items" : {
+                                "type" : "string",
+                                "example" : 104
+                              }
+                            },
+                            "errors" : {
+                              "type" : "array",
+                              "items" : {
+                                "type" : "object",
+                                "properties" : {
+                                  "item" : {
+                                    "type" : "string",
+                                    "example" : 105
+                                  },
+                                  "reason" : {
+                                    "type" : "string",
+                                    "example" : "Failed to get VM state no status found"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "500" : {
+                    "description" : "Error enabling anti-sandbox for VM(s)"
+                  }
+                }
+              }
+            },
+            "/antisandbox/install-custom" : {
+              "post" : {
+                "tags" : [ "Anti-Sandbox Management" ],
+                "summary" : "Enable anti-sandbox for a VM or multiple VMs (enterprise)",
+                "operationId" : "antiSandboxInstallCustom",
+                "description" : "Installs the modified QEMU and OVMF packages that presents as Dell hardware (Enterprise only)\n",
+                "responses" : {
+                  "200" : {
+                    "description" : "Anti-sandbox install completed",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "result" : {
+                              "type" : "string",
+                              "example" : "Anti-Sandbox QEMU and OVMF installed - will take effect on VM's next power cycle"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "500" : {
+                    "description" : "Error installing anti-sandbox packages",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "Error installing custom OMVF, check /tmp/anti-sandbox-debug.log: ..."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "/antisandbox/install-standard" : {
+              "post" : {
+                "tags" : [ "Anti-Sandbox Management" ],
+                "summary" : "Enable anti-sandbox for a VM or multiple VMs (enterprise)",
+                "operationId" : "antiSandboxInstallStandard",
+                "description" : "Installs the standard QEMU and OVMF packages (Enterprise only)\n",
+                "responses" : {
+                  "200" : {
+                    "description" : "Anti-sandbox install completed",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "result" : {
+                              "type" : "string",
+                              "example" : "Standard QEMU and OVMF installed - will take effect on VM's next power cycle"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "500" : {
+                    "description" : "Error installing anti-sandbox packages",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "Error installing standard OMVF, check /tmp/anti-sandbox-debug.log: ..."
+                            }
+                          }
+                        }
+                      }
+                    }
                   }
                 }
               }
