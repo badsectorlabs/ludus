@@ -1,3 +1,7 @@
+---
+title: "👏 Contributing Guide"
+---
+
 # Contributing Guide #
 
 Thank you for your interest in contributing to Ludus. This is a
@@ -165,7 +169,7 @@ Examples of good commit messages:
 
 ## Developer's Certificate of Origin (DCO) ##
 
-By submitting code you are agree and can certify the below:
+By submitting code you agree to and can certify the below:
 
 ```
     Developer's Certificate of Origin 1.1
@@ -195,7 +199,7 @@ By submitting code you are agree and can certify the below:
         this project or the open source license(s) involved.
 ```
 
-All your code patches (**documentation are excluded**) should
+All your code patches should
 contain a sign-off at the end of the patch/commit description body. It
 can be automatically added on adding `-s` parameter to `git commit`.
 

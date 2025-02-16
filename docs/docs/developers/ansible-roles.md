@@ -1,8 +1,8 @@
 ---
-title: Ansible Roles
+title: 🎭Ansible Roles
 ---
 
-# Ansible Roles for Ludus
+# 🎭 Ansible Roles for Ludus
 
 ## Role structure
 

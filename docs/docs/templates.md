@@ -35,9 +35,9 @@ These templates include:
 - win2012r2-server-x64
 - win2016-server-x64
 - win2019-server-x64
-- commando-vm
-- flare-vm
-- remnux
+- commando-vm (requires ansible role: badsectorlabs.ludus_commandovm)
+- flare-vm (requires ansible role: badsectorlabs.ludus_flarevm)
+- remnux (requires ansible role: badsectorlabs.ludus_remnux)
 
 ## Adding Templates to Ludus
 
@@ -85,6 +85,10 @@ Templates in Ludus must contain certain variables to function correctly.
 To create a new template, copy an [existing working template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates) and modify it as necessary.
 Templates for different Linux flavors and Windows are provided.
 While macOS VMs are supported by Ludus, their automated templating is not (see [Non-Automated OS Template Builds](#non-automated-os-template-builds)).
+
+Examples of community-contributed templates:
+
+- [Croko-fr ludus-templates](https://github.com/Croko-fr/ludus-templates)
 
 Every Ludus template is a packer file (`.pkr.hcl` and `.pkr.json` supported, but `.pkr.hcl` preferred), and any supporting files (resources, scripts, etc.).
 The template file MUST include the `.pkr.` portion of the file name to be recognized as valid by Ludus.
