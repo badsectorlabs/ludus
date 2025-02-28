@@ -326,8 +326,14 @@ func getTemplatesStatus(c *gin.Context) ([]TemplateStatus, error) {
 	for vmCounter := range vms {
 		vm := vms[vmCounter].(map[string]interface{})
 		// Only include VM templates
-		if int(vm["template"].(float64)) == 1 {
-			templates = append(templates, vm["name"].(string))
+		// Make sure the vm object has a template key
+		if _, ok := vm["template"]; ok {
+			if int(vm["template"].(float64)) == 1 {
+				// Make sure the vm object has a name key
+				if _, ok := vm["name"]; ok {
+					templates = append(templates, vm["name"].(string))
+				}
+			}
 		}
 	}
 
