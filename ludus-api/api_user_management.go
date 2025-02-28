@@ -75,7 +75,7 @@ func AddUser(c *gin.Context) {
 			usersRange.TestingEnabled = false
 
 			// Find the next available range number for the new user
-			usersRange.RangeNumber = findNextAvailableRangeNumber(db)
+			usersRange.RangeNumber = findNextAvailableRangeNumber(db, ServerConfiguration.ReservedRangeNumbers)
 
 			result := db.Create(&usersRange)
 			if result.Error != nil {

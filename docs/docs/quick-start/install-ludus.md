@@ -105,4 +105,5 @@ ludus_nat_interface: ludus        # The name of the interface Ludus will create 
 prevent_user_ansible_add: false   # Set this to true to prevent non-admin users from adding Ansible roles or collections to the server
 license_key: community            # Set this to your license key if you have one, or leave as community for community edition
 expose_admin_port: false          # Set this to true to expose the admin API globally
+reserved_range_numbers:           # An array of range numbers that should not be used by users (see networking docs for more info), example: [1,2,3,4]
 ```
