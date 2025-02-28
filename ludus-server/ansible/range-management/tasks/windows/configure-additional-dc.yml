@@ -52,6 +52,8 @@
         section: System Access
         key: PasswordComplexity
         value: 0
+      register: password_policy_result
+      failed_when: password_policy_result.msg is defined and 'Illegal operation attempted on a registry key that has been marked for deletion.' not in password_policy_result.msg
     - name: Promote this server to Additional DC
       microsoft.ad.domain_controller:
         dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
