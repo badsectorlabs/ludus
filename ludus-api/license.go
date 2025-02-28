@@ -46,6 +46,13 @@ func (s *Server) checkLicense() {
 	}
 	ctx := context.Background()
 
+	var pluginsDir string
+	if os.Geteuid() == 0 {
+		pluginsDir = fmt.Sprintf("%s/plugins/enterprise/admin", ludusInstallPath)
+	} else {
+		pluginsDir = fmt.Sprintf("%s/plugins/enterprise", ludusInstallPath)
+	}
+	enterpriseLoaded := false
 	// Validate the license for the current fingerprint
 	license, err := keygen.Validate(ctx, fingerprint)
 	switch {
@@ -59,7 +66,7 @@ func (s *Server) checkLicense() {
 			s.LicenseMessage = "Machine limit has been exceeded"
 			return
 		case err != nil:
-			log.Println("LICENSE: machine activation failed!")
+			log.Printf("LICENSE: machine activation failed: %v\n", err)
 			s.LicenseValid = false
 			s.LicenseMessage = "Machine activation failed"
 			return
@@ -79,6 +86,14 @@ func (s *Server) checkLicense() {
 				s.LicenseValid = false
 				s.LicenseMessage = "Unable to connect to license server"
 				return
+			} else {
+				log.Println("LICENSE: enterprise plugin is present, attempting to load it")
+				err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
+				if err != nil {
+					log.Printf("LICENSE: error loading enterprise plugin as part of network fallback: %v", err)
+				} else {
+					enterpriseLoaded = true
+				}
 			}
 		}
 		log.Printf("LICENSE: %v\n", err)
@@ -93,14 +108,6 @@ func (s *Server) checkLicense() {
 	}
 	s.LicenseValid = true
 
-	// Check for the enterprise plugin and load it if it exists
-	var pluginsDir string
-	if os.Geteuid() == 0 {
-		pluginsDir = fmt.Sprintf("%s/plugins/enterprise/admin", ludusInstallPath)
-	} else {
-		pluginsDir = fmt.Sprintf("%s/plugins/enterprise", ludusInstallPath)
-	}
-	enterpriseLoaded := false
 	// Always load the enterprise plugin if it exists first
 	if FileExists(pluginsDir + "/ludus-enterprise.so") {
 		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
