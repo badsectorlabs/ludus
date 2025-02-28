@@ -188,6 +188,10 @@ func formatAndPrintError(errorLine string, errorCount int) {
 	formattedLine = strings.ReplaceAll(formattedLine, "\\n", "\n")
 	fmt.Printf("\n******************************************** ERROR %d ********************************************\n", errorCount)
 	fmt.Println(formattedLine)
+	if strings.Contains(formattedLine, "hashes do not match") && strings.Contains(formattedLine, "Consider passing the actual checksums through with") {
+		fmt.Printf("\nSome chocolatey packages pull from external sources and do not update their checksums frequently.")
+		fmt.Printf("\nConsider setting `chocolatey_ignore_checksums: true` in your range configuration to ignore checksums and bypass this error.\n")
+	}
 	fmt.Println("*************************************************************************************************")
 	checkErrorForAnsibleTemporaryDirectory(errorLine)
 }
