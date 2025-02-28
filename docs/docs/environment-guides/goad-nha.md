@@ -58,6 +58,17 @@ ludus templates list
 
 ### 2. On the Ludus host, clone and setup the GOAD project
 
+:::tip
+
+By default, GOAD will use Ludus to create a new users (`GOADxxxx`) for each new lab. If you want to use a specific name/user:
+1. Create the user with Ludus
+2. Set the API key for that user
+3. Disable impersonation by setting `use_impersonation = no` in `~/.goad/goad.ini`
+
+GOAD will deploy to whatever user you currently "are" (based on exported Ludus API key).
+
+:::
+
 ```bash
 git clone https://github.com/Orange-Cyberdefense/GOAD.git
 cd GOAD
