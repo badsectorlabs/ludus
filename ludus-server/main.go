@@ -21,6 +21,7 @@ var ludusPath string
 var GitCommitHash string
 var VersionString string
 var LudusVersion string = VersionString + "+" + GitCommitHash
+var existingProxmox bool
 
 // Embed the ansible directory into the binary for simple distribution
 //
@@ -137,7 +138,7 @@ func main() {
 	checkRoot()
 
 	// If this is a proxmox 8 machine, print some warnings and set the bool
-	existingProxmox := checkForProxmox8()
+	existingProxmox = checkForProxmox8()
 
 	getInstallStep(existingProxmox)
 	// Use pip to install ansible because Debian's ansible apt package is 4 versions out of date (2.10, current is 2.14)

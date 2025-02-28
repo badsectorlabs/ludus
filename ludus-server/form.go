@@ -572,11 +572,19 @@ func generateFinalMessage() string {
 		Underline(true).
 		Foreground(gold)
 	cmd := cmdStyle.Render("ludus-install-status")
-	l := list.New(
-		fmt.Sprintf("%s install will cause the machine to reboot twice.", title),
-		"Install will continue automatically after each reboot.",
-		fmt.Sprintf("Check the progress of the install by running:\n'%s' from a root shell.", cmd),
-	)
+	var l *list.List
+	if !existingProxmox {
+		l = list.New(
+			fmt.Sprintf("%s install will cause the machine to reboot twice.", title),
+			"Install will continue automatically after each reboot.",
+			fmt.Sprintf("Check the progress of the install by running:\n'%s' from a root shell.", cmd),
+		)
+	} else {
+		l = list.New(
+			fmt.Sprintf("%s install has started.", title),
+			fmt.Sprintf("Check the progress of the install by running:\n'%s' from a root shell.", cmd),
+		)
+	}
 	startingText := lipgloss.NewStyle().
 		MarginLeft(1).
 		MarginRight(5).
