@@ -40,9 +40,13 @@
         src: "{{ ludus_users_dir }}/{{ target_username }}/range-config.yml"
       register: range_config_contents
 
-    - name: Set the router VM name to action
-      ansible.builtin.set_fact:
-        router_vm_name_to_action: "{{ router.vm_name | default(target_range_id + '-router-debian11-x64') }}"
+    - name: Get the VM name of the router from the target range config
+      ansible.builtin.set_fact: 
+        router_vm_name_to_action: "{{ range_config_contents['content'] | b64decode | from_yaml | json_query('router.vm_name') | default(target_range_id + '-router-debian11-x64') }}"
+
+    # - name: Set the router VM name to action
+    #   ansible.builtin.set_fact:
+    #     router_vm_name_to_action: "{{ router.vm_name | default(target_range_id + '-router-debian11-x64') }}"
 
     - name: Get the VM id of the router via Proxmox API
       ansible.builtin.shell: |
