@@ -118,7 +118,7 @@
     name: bginfo
     data: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File "C:\ludus\background\set-bg.ps1"'
     state: present
-  when: not bginfo_run_key_stat.exists
+  when: not bginfo_run_key_stat.exists and defaults.enable_dynamic_wallpaper
 
 - name: Set desktop wallpaper settings (if key does not exist)
   ansible.windows.win_regedit:
@@ -126,7 +126,7 @@
     name: TileWallpaper
     data: '0'
     state: present
-  when: not bginfo_run_key_stat.exists
+  when: not bginfo_run_key_stat.exists and defaults.enable_dynamic_wallpaper
 
 - name: Set desktop wallpaper style (if key does not exist)
   ansible.windows.win_regedit:
@@ -134,7 +134,7 @@
     name: WallpaperStyle
     data: '10'
     state: present
-  when: not bginfo_run_key_stat.exists
+  when: not bginfo_run_key_stat.exists and defaults.enable_dynamic_wallpaper
 
 - name: Disable Telemetry
   ansible.windows.win_shell: ".\\disable-telemetry.ps1"

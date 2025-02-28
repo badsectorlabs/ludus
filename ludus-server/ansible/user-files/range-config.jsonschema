@@ -76,6 +76,11 @@
                 "timezone": {
                     "type": "string",
                     "description": "The Unix TZ format timezone string to set for all VMs in the range"
+                },
+                "enable_dynamic_wallpaper": {
+                    "type": "boolean",
+                    "description": "Enable dynamic wallpaper for all Windows VMs in the range",
+                    "default": true
                 }
             },
             "required": [
@@ -87,7 +92,9 @@
                 "ad_domain_user_password",
                 "ad_forest_functional_level",
                 "snapshot_with_RAM",
-                "stale_hours"
+                "stale_hours",
+                "timezone",
+                "enable_dynamic_wallpaper"
             ],
             "title": "Defaults"
         },
