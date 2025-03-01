@@ -164,3 +164,5 @@ defaults:
   ad_domain_user: john-doe
   ad_domain_user_password: password123
   ad_domain_safe_mode_password: P@ssword123
+  timezone: "America/Los Angeles"
+  enable_dynamic_wallpaper: false
