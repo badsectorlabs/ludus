@@ -26,8 +26,17 @@ var (
 // getDefaultTempPath returns the default temporary file path based on OS
 func getDefaultTempPath() string {
 	if runtime.GOOS == "windows" {
+		driveLetter := os.Getenv("HOMEDRIVE")
+		if driveLetter == "" {
+			driveLetter = "C:" // fallback to C: if HOMEDRIVE is not set
+		}
 		username := os.Getenv("USERNAME")
-		return filepath.Join("C:", "Users", username, "AppData", "Local", "Temp", "ludus-config.yml")
+		if username == "" {
+			panic("Unable to determine username (USERNAME env variable is empty), cannot create temporary file path")
+		}
+		// Go treats drive letters as special cases when doing filepath.Join, see: https://github.com/golang/go/issues/26953
+		return driveLetter + "\\" + filepath.Join("Users", username, "AppData", "Local", "Temp", "ludus-config.yml")
+
 	}
 	return "/tmp/ludus-config.yml"
 }
