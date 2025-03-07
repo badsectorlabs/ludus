@@ -207,4 +207,5 @@ defaults:
   ad_domain_user_password: password
   ad_domain_safe_mode_password: password
   timezone: America/New_York
+  enable_dynamic_wallpaper: false
 ```
