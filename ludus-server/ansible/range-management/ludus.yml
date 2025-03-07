@@ -412,6 +412,8 @@
       ansible.builtin.include_tasks: tasks/windows/enable-rdp.yml
     - name: Enable SMB
       ansible.builtin.include_tasks: tasks/windows/enable-smb.yml
+    - name: Enable Network Sharing
+      ansible.builtin.include_tasks: tasks/windows/enable-network-sharing.yml
   vars:
     dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
     # The autologon user should be the user defined user (if defined) or the domain user (if a domain is defined) otherwise localuser
