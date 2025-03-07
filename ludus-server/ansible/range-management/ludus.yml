@@ -872,6 +872,100 @@
           - ==================================================================================================
 
 # ==========================================================
+# Ludus Share Setup
+# ==========================================================
+- name: Deploy Ludus Share VM
+  tags: [never, share]
+  hosts: localhost
+  serial: 5
+  tasks:
+    - name: Deploy VM
+      ansible.builtin.include_tasks: tasks/proxmox/deploy-vm.yml
+      vars:
+        template_vm_name: debian-12-x64-server-template
+        vm_name: ADMIN-share
+        bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - 192.0.2.0/24
+        vm_groups: '"admin"'
+        is_linux: true
+        is_windows: false
+        os_type: l26
+        use_tablet_pointer: true
+        ram_gb: 4
+        balloon_size: 0 # don't balloon because java (nexus) will die with OOM with only 1GB of RAM
+        cpu_cores: 4
+        num_vcpus: 4
+        vm_pool: ADMIN
+        unmanaged: false
+
+- name: Configure Ludus Share VM IP and Hostname
+  tags: [never, share]
+  hosts: ADMIN-share
+  tasks:
+    - name: Configure IP and Hostname
+      ansible.builtin.include_tasks: tasks/proxmox/configure-ip-and-hostname.yml
+      vars:
+        bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - 192.0.2.0/24
+        static_ip: "192.0.2.3"
+        cidr_netmask: "24"
+        default_gateway: "192.0.2.254"
+        vm_hostname: "share"
+        dns_server: "192.0.2.254"
+        vlan: 1
+
+- name: Configure Nexus nuget cache VM requirements
+  tags: [never, share]
+  hosts: ADMIN-share
+  become: true
+  tasks:
+    - name: Install pre-reqs
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - software-properties-common
+        update_cache: true
+
+    - name: Include role
+      ansible.builtin.include_role:
+        name: vladgh.samba.server
+      vars:
+        samba_netbios_name: SHARE
+        samba_server_string: SHARE
+        samba_realm: LUDUS
+        samba_workgroup: WORKGROUP
+        samba_log: /var/log/samba.log
+        samba_log_size: 60000
+        samba_log_level: '3 passdb:5 auth:10 winbind:2 '
+        samba_map_to_guest: Never
+        samba_shares_root: /srv/samba
+        samba_shares:
+          - name: readonlyshare
+            comment: 'Share that is ready only'
+            guest_ok: true
+            readable: true
+            writeable: false
+            browseable: true
+            path: /srv/samba/readonlyshare
+            user: nobody
+          - name: readwriteshare
+            comment: 'Share that is readable and writeable by everyone'
+            guest_ok: true
+            public: true
+            readable: true
+            writeable: false
+            browseable: true
+            path: /srv/samba/readwriteshare
+            user: debian
+
+- name: Configure Windows VMs to allow anonymous access to SMB Shares
+  tags: [never, share, allow-share-access]
+  hosts: windows
+  tasks:
+    - name: Allow anonymous access to SMB Shares
+      ansible.windows.win_shell: |
+        Set-SmbClientConfiguration -RequireSecuritySignature $false
+        Set-SmbClientConfiguration -EnableInsecureGuestLogons $true
+
+# ==========================================================
 # Write RDP Files
 # ==========================================================
 - name: Write out etc-hosts

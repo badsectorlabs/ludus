@@ -28,7 +28,10 @@ Ludus user routers are assigned a static IP in this network where their range nu
 
 #### Reserved IPs in the NAT'd Network
 
-If the Nexus cache server was created by a Ludus admin, it has a static IP of `192.0.2.2` in order to be available to all Ludus user's VMs.
+| IP | Description |
+| --- | --- |
+| 192.0.2.2 | Nexus cache server |
+| 192.0.2.3 | Ludus share server |
 
 The remaining 49 IPs in the `.1 - .50` range are reserved for future use.
 
