@@ -82,6 +82,15 @@ Ludus updated to v1.5.0+2d39950
 
 <Tabs groupId="operating-systems">
   <TabItem value="linux" label="Linux">
+Run the update command
+
+```shell
+#terminal-command-local
+ludus update client
+```
+
+OR
+
 The same installer script used to install the server/client will update the client on a Linux machine.
 
 ```shell
@@ -103,6 +112,15 @@ chmod +x install.sh
   </TabItem>
   <TabItem value="macos" label="macOS">
 
+Run the update command
+
+```shell
+#terminal-command-local
+ludus update client
+```
+
+OR
+
 The same installer script used to install the server/client will update the client on a macOS machine.
 
 
@@ -123,17 +141,16 @@ chmod +x install.sh
 ```
   </TabItem>
   <TabItem value="windows" label="Windows">
-1. Download the client [release binary](https://gitlab.com/badsectorlabs/ludus/-/releases) (or build from source) of the version you wish to update to.
-2. Copy the correct Ludus client binary to your Windows device.
-3. `cd` to the directory that contains the binary or move the binary to a location in your PATH.
+
+Run the update command
 
 ```
-PS C:\> .\ludus-client_windows_[arch]-[version].exe
-Ludus client v1.5.0
+PS C:\> ludus update client
+```
 
-Ludus is a CLI application to control a Ludus server
-This application can manage users as well as ranges.
-...
+OR 
+```
+PS C:\> irm https://ludus.cloud/install-client.ps1 | iex
 ```
   </TabItem>
 </Tabs>
