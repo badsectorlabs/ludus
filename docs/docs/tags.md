@@ -20,7 +20,7 @@ This is useful after an initial deployment to skip steps that are not needed on 
 | custom-groups | Sets custom ansible groups for VMs, which are reflected in the inventory returned by `ludus range inventory` |
 | dcs | Configure primary and alternate domain controllers |
 | debug | Runs a one-off task. Only useful when developing Ludus (edit the debug task and use this tag) |
-| dns-rewrites | Setup any user defined DNS rewrite rules on the DNS server of the router |
+| dns-rewrites | Setup all DNS mappings for VMs and any user defined DNS rewrite rules on the DNS server of the router |
 | domain-join | Join Windows VMs to the domain |
 | generate-rdp | Creates the RDP zip file for all Windows VMs. Should not be called directly. Use `ludus range rdp` |
 | install-office | Install Microsoft Office on Windows VMs |
@@ -63,7 +63,7 @@ The `network` tag is required in the event the VM is in a VLAN that was not prev
 
 ```shell-session
 # terminal-command-local
-ludus range deploy -t vm-deploy,network
+ludus range deploy -t vm-deploy,network,dns-rewrites
 # terminal-command-local
 ludus range deploy --limit <VM NAME>
 ```
