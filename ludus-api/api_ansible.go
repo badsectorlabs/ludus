@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,8 @@ type AnsibleItem struct {
 	Type    string
 	Global  bool
 }
+
+var coreAnsibleRoles = []string{"lae.proxmox", "geerlingguy.packer", "ansible-thoteam.nexus3-oss"}
 
 // GetRolesAndCollections - retrieves the available Ansible roles and collections for the user
 func GetRolesAndCollections(c *gin.Context) {
@@ -148,6 +151,11 @@ func ActionRoleFromInternet(c *gin.Context) {
 
 	if roleBody.Action != "install" && roleBody.Action != "remove" {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "action must be one of 'install' or 'remove'"})
+		return
+	}
+
+	if roleBody.Action == "remove" && slices.Contains(coreAnsibleRoles, roleBody.Role) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "You cannot remove this core Ludus role as it is required for Ludus to function"})
 		return
 	}
 
