@@ -204,3 +204,8 @@
       - "{{ netbios_name }}\\{{ defaults.ad_domain_user }}"
       - "{{ netbios_name }}\\{{ defaults.ad_domain_admin }}"
     action: add
+
+- name: Set the DNS Cache time to 2 seconds (helps DNS blocks at the router be more effective)
+  ansible.windows.win_shell: |
+    Set-DnsServerCache -MaxTTL 00:00:02
+
