@@ -140,9 +140,13 @@ var rangeConfigEditCmd = &cobra.Command{
 
 		var newContent []byte
 
-		if editor != "" {
+		if editor != "" || os.Getenv("LUDUS_EDITOR") != "" {
 			// Use external editor
-			newContent, err = editWithExternalEditor([]byte(oldContent), editor, tempPath)
+			editorToUse := editor
+			if editorToUse == "" {
+				editorToUse = os.Getenv("LUDUS_EDITOR")
+			}
+			newContent, err = editWithExternalEditor([]byte(oldContent), editorToUse, tempPath)
 			if err != nil {
 				logger.Logger.Fatal(err.Error())
 			}
