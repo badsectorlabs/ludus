@@ -138,6 +138,10 @@ func ActionRoleFromInternet(c *gin.Context) {
 	if err != nil {
 		return // JSON set in GetUserObject
 	}
+	if user.ProxmoxUsername == "root" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Don't use the ROOT API key for ansible actions, use a user API key instead."})
+		return
+	}
 
 	if !isAdmin(c, false) && ServerConfiguration.PreventUserAnsibleAdd {
 		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to perform this ansible action"})
