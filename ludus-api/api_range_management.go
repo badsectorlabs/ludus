@@ -16,6 +16,9 @@ import (
 	"gorm.io/gorm"
 )
 
+var ansibleTags = []string{"all", "additional-tools", "allow-share-access", "assign-ip", "custom-choco", "custom-groups", "dcs", "debug", "dns-rewrites",
+	"domain-join", "install-office", "install-visual-studio", "network", "nexus", "share", "sysprep", "user-defined-roles", "vm-deploy", "windows"}
+
 // DeployRange - deploys the range according to the range config
 func DeployRange(c *gin.Context) {
 
@@ -34,6 +37,14 @@ func DeployRange(c *gin.Context) {
 		// By default run "all" as the ansible tag
 		tags = "all"
 	} else {
+		// If the user specified a tag or list of tags, make sure they exist
+		tagsArray := strings.Split(deployBody.Tags, ",")
+		for _, tag := range tagsArray {
+			if !slices.Contains(ansibleTags, tag) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The tag '%s' does not exist on the Ludus server", tag)})
+				return
+			}
+		}
 		tags = deployBody.Tags
 	}
 
