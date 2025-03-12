@@ -182,6 +182,7 @@
     port: 5986
     delay: 3
     state: started
+    timeout: 900 # Slower CPU hosts can take longer to start
   delegate_to: localhost
   register: wait_result
   when: is_windows is defined and is_windows and clone_vm is changed and not unmanaged
