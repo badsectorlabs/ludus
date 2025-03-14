@@ -298,11 +298,6 @@ var snapshotsRollbackCmd = &cobra.Command{
 			}
 		}
 
-		if len(snapshotVMIDsIntArray) == 0 {
-			logger.Logger.Fatalf("No VM IDs provided")
-			return
-		}
-
 		snapshotRollbackPayload := SnapshotGenericPayload{
 			Name:  args[0],
 			VMIDs: snapshotVMIDsIntArray,

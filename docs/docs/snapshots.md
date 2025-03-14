@@ -95,9 +95,7 @@ ludus snapshots revert <snapshot-name>
 
 Example:
 ```bash
-ludus snapshots revert pre-attack --vmids 104,105
-# or using the short flag
-ludus snapshots revert pre-attack -n 104,105
+ludus snapshots revert pre-attack
 ```
 
 By default, this reverts all VMs in your range.
@@ -134,5 +132,6 @@ ludus snapshots rm old-snapshot
 
 ## Notes
 
+- If you revert to a snapshot that does not include RAM (taken with `-r or --noRAM`), the VM will be powered off
 - When ZFS storage is used for VMs, [snapshots must be reverted in the order they were taken](https://forum.proxmox.com/threads/cannt-get-snapshot-branches-task-error-cant-rollback-____-is-not-most-recent-snapshot.81416/). Directory (default) and LVM-thin storage types do not have this limitation and users can create "branching" snapshots.
 - Testing mode uses the snapshot name `ludus_automated_clean_snapshot`. If you remove this snapshot while in testing mode, you will not be able to stop testing. Ludus does not prevent you from creating or modifying a snapshot with this name.
