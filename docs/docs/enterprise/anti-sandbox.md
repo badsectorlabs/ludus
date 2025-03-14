@@ -112,6 +112,8 @@ When you are ready to enable Anti-Sandbox, note the VMID for the VM and run the 
 
 ```shell-session
 #terminal-command-local
+ludus snapshot create -n 179 -d "Clean snapshot before enabling anti-sandbox" pre-antisandbox
+#terminal-command-local
 ludus antisandbox enable -n 179
 [INFO]  Enabling Anti-Sandbox settings for VM(s), this can take some time. Please wait.
 [INFO]  Successfully enabled anti-sandbox for VM(s): 179

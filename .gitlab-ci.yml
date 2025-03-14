@@ -25,6 +25,7 @@ stages:
   - post-deploy-user-ansible
   - post-deploy-user-user
   - post-deploy-user-templates
+  - post-deploy-user-snapshots
   - integration
   - manual
   - upload
@@ -232,6 +233,19 @@ stages:
   - ludus templates list
   - ludus templates rm -n debian-10-x64-server-template
   - '! ludus templates list | grep "debian-10-x64-server-template"'
+
+.snapshot-tests: &snapshot-tests
+  - ludus snapshots list
+  - ludus snapshots create test-full-range-snapshot
+  - ludus snapshots list
+  - ludus snapshots revert test-full-range-snapshot
+  - ludus snapshots rm test-full-range-snapshot
+  - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
+  - ludus snapshots create test-win11-snapshot -n $WIN11VMID
+  - ludus snapshots list -n $WIN11VMID
+  - ludus snapshots revert test-win11-snapshot -n $WIN11VMID
+  - ludus snapshots rm test-win11-snapshot -n $WIN11VMID
+  - ludus snapshots list -n $WIN11VMID
 
 #################
 # DOCUMENTATION #
@@ -781,7 +795,7 @@ post-deploy testing-as-admin:
 post-deploy power-as-admin:
   stage: post-deploy-admin-power
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   dependencies:
     - build all
   rules:
@@ -1310,6 +1324,42 @@ post-deploy templates-as-user:
   script:
     - *ci-setup-user
     - *template-tests
+
+post-deploy snapshots-as-user:
+  stage: post-deploy-user-snapshots
+  tags:
+    - ludus-proxmox-runner
+  dependencies:
+    - build all
+  rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/snapshots.go
+      - ludus-server/src/api_snapshot_management.go
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_user
+  timeout: 45m
+  retry:
+    max: 2
+    when: script_failure  
+  script:
+    - *ci-setup-user
+    - *snapshot-tests
 
 ####################
 # FINAL BOSS FIGHT #

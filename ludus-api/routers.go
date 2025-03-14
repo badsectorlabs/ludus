@@ -459,6 +459,34 @@ var routes = Routes{
 	},
 
 	{
+		"GetSnapshots",
+		http.MethodGet,
+		"/snapshots/list",
+		GetSnapshots,
+	},
+
+	{
+		"RollbackSnapshot",
+		http.MethodPost,
+		"/snapshots/rollback",
+		RollbackSnapshot,
+	},
+
+	{
+		"CreateSnapshot",
+		http.MethodPost,
+		"/snapshots/create",
+		CreateSnapshot,
+	},
+
+	{
+		"RemoveSnapshot",
+		http.MethodPost,
+		"/snapshots/remove",
+		RemoveSnapshot,
+	},
+
+	{
 		"UpdateVMs",
 		http.MethodPost,
 		"/testing/update",
