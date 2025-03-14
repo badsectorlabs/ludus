@@ -241,12 +241,21 @@ stages:
   - ludus snapshots revert test-full-range-snapshot
   - ludus snapshots rm test-full-range-snapshot
   - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
-  - ludus snapshots create test-win11-snapshot -n $WIN11VMID
+  - ludus snapshots create test-win11-snapshot -n $WIN11VMID -d "Test snapshot"
   - ludus snapshots list -n $WIN11VMID
   - ludus snapshots revert test-win11-snapshot -n $WIN11VMID
   - ludus snapshots rm test-win11-snapshot -n $WIN11VMID
   - ludus snapshots list -n $WIN11VMID
-
+  - ludus snapshots create test-win11-snapshot-2 -n $WIN11VMID -d "Test snapshot 2" -r
+  - ludus snapshots list -n $WIN11VMID
+  - ludus snapshots revert test-win11-snapshot-2 -n $WIN11VMID
+  - ludus snapshots rm test-win11-snapshot-2 -n $WIN11VMID
+  - ludus snapshots list -n $WIN11VMID
+  - ludus range status
+  - ludus power on -n all
+  - sleep 10
+  - ludus range status
+  
 #################
 # DOCUMENTATION #
 #################
@@ -1356,7 +1365,7 @@ post-deploy snapshots-as-user:
   timeout: 45m
   retry:
     max: 2
-    when: script_failure  
+    when: script_failure
   script:
     - *ci-setup-user
     - *snapshot-tests
