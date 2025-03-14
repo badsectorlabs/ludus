@@ -338,6 +338,7 @@
       }}
     netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
     fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
+    enabled_gpos: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].windows.gpos | default([]) }}"
 
 - name: Configure additional DCs
   tags: [dcs]

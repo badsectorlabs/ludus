@@ -218,6 +218,77 @@
         "Ludus": {
             "type": "object",
             "additionalProperties": false,
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "domain": {
+                                "properties": {
+                                    "role": {
+                                        "const": "primary-dc"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "windows": {
+                                "properties": {
+                                    "gpos": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "enum": [
+                                                "disable_defender"
+                                            ]
+                                        },
+                                        "description": "The GPOs to enable for the domain. Only applies to a primary-dc. Default: none"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "else": {
+                        "properties": {
+                            "windows": {
+                                "not": {
+                                    "required": ["gpos"]
+                                }
+                            }
+                        }
+                    }
+                }
+            ],
+            "oneOf": [
+                {
+                    "required": ["windows"],
+                    "not": {
+                        "anyOf": [
+                            { "required": ["linux"] },
+                            { "required": ["macOS"] }
+                        ]
+                    }
+                },
+                {
+                    "required": ["linux"],
+                    "not": {
+                        "anyOf": [
+                            { "required": ["windows"] },
+                            { "required": ["macOS"] }
+                        ]
+                    }
+                },
+                {
+                    "required": ["macOS"],
+                    "not": {
+                        "anyOf": [
+                            { "required": ["windows"] },
+                            { "required": ["linux"] }
+                        ]
+                    }
+                }
+            ],
             "properties": {
                 "vm_name": {
                     "type": "string",
@@ -406,6 +477,16 @@
                 "autologon_password": {
                     "type": "string",
                     "description": "The password to use for autologon. Default: password unless domain joined, then default.ad_domain_user_password"
+                },
+                "gpos": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "disable_defender"
+                        ]
+                    },
+                    "description": "The GPOs to enable for the domain. Only applies to a primary-dc. Default: none"
                 }
             },
             "dependentRequired": {

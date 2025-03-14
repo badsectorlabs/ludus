@@ -27,6 +27,8 @@ ludus:
     cpus: 4             # The number of cpu cores to allocate to this VM (can provision more CPUs than the host physically has)
     windows:            # This key must be set for windows VMs - all subkeys are optional
       sysprep: false    # Set to true to run sysprep before any other tasks on this VM. Default: false
+      gpos:
+        - disable_defender # Create and link a GPO this disables Windows Defender for every domain joined Windows machine
     domain:               # Define this key to put this machine in a domain
       fqdn: ludus.network # The FQDN of the domain
       role: primary-dc    # The role of the VM in the domain (primary-dc|alt-dc|member)

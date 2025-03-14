@@ -136,8 +136,76 @@
     state: present
   when: not bginfo_run_key_stat.exists and defaults.enable_dynamic_wallpaper
 
-- name: Disable Telemetry
-  ansible.windows.win_shell: ".\\disable-telemetry.ps1"
-  args:
-    chdir: 'c:\ludus\scripts'
-  register: disable_telemetry
+# Now that we have GPO for this, we shouldn't do this by default
+# - name: Disable Telemetry
+#   ansible.windows.win_shell: ".\\disable-telemetry.ps1"
+#   args:
+#     chdir: 'c:\ludus\scripts'
+#   register: disable_telemetry
+
+- name: Create Microsoft Edge Policies registry key
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Edge
+    state: present
+
+- name: Disable Microsoft Edge First Run window
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Edge
+    name: HideFirstRunExperience
+    data: 1
+    type: dword
+    state: present
+
+# Disable Chrome first run popup
+- name: Create Google Chrome Policies registry key
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    state: present
+
+- name: Disable Chrome promotional tabs
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PromotionalTabsEnabled
+    data: 0
+    type: dword
+    state: present
+
+- name: Disable Chrome promotions
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PromotionsEnabled
+    data: 0
+    type: dword
+    state: present
+
+- name: Disable Chrome Privacy Sandbox prompt
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PrivacySandboxPromptEnabled
+    data: 0
+    type: dword
+    state: present
+
+- name: Disable Chrome Privacy Sandbox ad measurement
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PrivacySandboxAdMeasurementEnabled
+    data: 0
+    type: dword
+    state: present
+
+- name: Disable Chrome Privacy Sandbox ad topics
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PrivacySandboxAdTopicsEnabled
+    data: 0
+    type: dword
+    state: present
+
+- name: Disable Chrome Privacy Sandbox site enabled ads
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PrivacySandboxSiteEnabledAdsEnabled
+    data: 0
+    type: dword
+    state: present

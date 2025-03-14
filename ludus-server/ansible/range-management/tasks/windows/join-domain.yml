@@ -37,15 +37,20 @@
 
 # "The users have to be part of the RDusers group locally on the server you want to login via RDP, not only in the AD."
 # https://serverfault.com/questions/265531/members-of-remote-desktop-users-group-cannot-login
-- name: Add a domainuser and domainadmin user to local RDUsers group
+- name: Allow any domain users to RDP by adding the domain group to the  RDUsers group
   ansible.windows.win_group_membership:
     name: "{{ rdp_users_group_name }}"           # Remote Desktop Users
     members:
-      - "{{ netbios_name }}\\{{ defaults.ad_domain_admin }}"
-      - "{{ netbios_name }}\\{{ defaults.ad_domain_user }}"
+      - "{{ netbios_name }}\\Domain Users"
     state: present
 
 - name: Set DNS search domain to include domain
   ansible.windows.win_powershell:
     script: |
       Set-DnsClientGlobalSetting -SuffixSearchList @("{{ netbios_name }}.{{ fqdn_tail }}","home.arpa")
+
+- name: Reboot after domain join (again) to apply group policy (if GPOs are enabled)
+  ansible.windows.win_reboot:
+  when:
+    - domain_joined.reboot_required
+    - (ludus | selectattr('vm_name', 'match', dc_vm_name))[0].windows.gpos | default([]) | length > 0
