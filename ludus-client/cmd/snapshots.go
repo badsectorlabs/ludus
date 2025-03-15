@@ -216,7 +216,7 @@ var snapshotsCreateCmd = &cobra.Command{
 
 		apiPath := "/snapshots/create"
 		if userID != "" {
-			apiPath = fmt.Sprintf("%s&userID=%s", apiPath, userID)
+			apiPath = fmt.Sprintf("%s?userID=%s", apiPath, userID)
 		}
 
 		var snapshotVMIDsIntArray []int
@@ -282,7 +282,7 @@ var snapshotsRollbackCmd = &cobra.Command{
 
 		apiPath := "/snapshots/rollback"
 		if userID != "" {
-			apiPath = fmt.Sprintf("%s&userID=%s", apiPath, userID)
+			apiPath = fmt.Sprintf("%s?userID=%s", apiPath, userID)
 		}
 
 		var snapshotVMIDsIntArray []int
