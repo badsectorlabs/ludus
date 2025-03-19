@@ -89,5 +89,6 @@ While most existing ansible roles will work with Ludus, this page contains a tab
 | [ludus_aurora_agent](https://github.com/frack113/ludus_aurora_agent) | Installs [Aurora Agent](https://www.nextron-systems.com/aurora/) on Windows | [@frack113](https://x.com/frack113) | You must have a package and a valid license (edit the role before using) |
 | [ludus_graylog_server](https://github.com/frack113/my-ludus-roles) | Installs Graylog server on Ubuntu 22.04 | [@frack113](https://x.com/frack113) | Must install from directory |
 | [0xRedpoll.ludus_cobaltstrike_teamserver](https://github.com/0xRedpoll/ludus_cobaltstrike_teamserver) | Install and provision a Cobalt Strike teamserver in Ludus | [@0xRedpoll](https://github.com/0xRedpoll) ||
+| [0xRedpoll.ludus_mythic_teamserver](https://github.com/0xRedpoll/ludus_mythic_teamserver) | Installs and spins up a Mythic Teamserver on a Debian or Ubuntu server | [@0xRedpoll](https://github.com/0xRedpoll) ||
 | [ludus-ad-vulns](https://github.com/Primusinterp/ludus-ad-vulns) | Adds vulnerabilities in an Active Directory. | [@Primusinterp](https://github.com/Primusinterp) | Must install from directory |
 | [ludus_juiceshop](https://github.com/xurger/ludus_juiceshop) | Installs [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) | [xurger](https://github.com/xurger) | Must install from directory |
