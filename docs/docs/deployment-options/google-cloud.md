@@ -111,13 +111,9 @@ resource "google_compute_instance" "{InstanceName}" {
 
 ## Install
 
-1. Copy the `ludus-server` binary to the VM once it has deployed.
-2. Make the `ludus-server` binary executable with `chmod +x ludus-server`.
-3. Run the `ludus-server` binary: `./ludus-server` but do not agree to the prompt - the public IP is likely wrong.
-4. Edit the config file at `/opt/ludus/config.yml` and update the public IP to the public IP of the GCP instance.
-5. Run `/opt/ludus/ludus-server` and agree to the prompt to start the install.
-6. When the VM reboots, SSH back in and run `ludus-install-status` as root to monitor the install.
-7. Once the install succeeds, follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user).
+1. Run `curl -s https://ludus.cloud/install | bash` and enter `y` and `I understand` to start the install but *carefully* read each option and change the Public IP. It is almost certainly wrong. Enter the hostname from GCP as the node name (i.e. `debian-vm-be83d9b` instead of `ludus`) and the correct Public IP when prompted and continue through the options.
+2. When the VM reboots, SSH back in and run `ludus-install-status` as root to monitor the install.
+3. Once the install succeeds, follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user).
 
 ## Troubleshooting
 
