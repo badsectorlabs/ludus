@@ -233,6 +233,34 @@
         src: hosts.j2
         dest: /etc/hosts
 
+    # Disable IPv6 as it can cause issues with ansible installs
+    # See: https://gitlab.com/badsectorlabs/ludus/-/issues/85
+    # and: https://github.com/ansible/galaxy/issues/3002
+    # and: https://github.com/orgs/community/discussions/10539
+    - name: Disable IPv6 1
+      ansible.posix.sysctl:
+        name: net.ipv6.conf.all.disable_ipv6
+        value: "1"
+        state: present
+        sysctl_set: false
+        reload: false    
+    
+    - name: Disable IPv6 2
+      ansible.posix.sysctl:
+        name: net.ipv6.conf.default.disable_ipv6
+        value: "1"
+        state: present
+        sysctl_set: false
+        reload: false
+
+    - name: Disable IPv6 3
+      ansible.posix.sysctl:
+        name: net.ipv6.conf.lo.disable_ipv6
+        value: "1"
+        state: present
+        sysctl_set: false
+        reload: false
+    
     - name: Update install progress
       ansible.builtin.include_tasks: tasks/update-install-progress.yml
       vars:
