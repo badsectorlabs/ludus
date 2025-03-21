@@ -606,6 +606,33 @@
         visual_studio_version: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.visual_studio_version | string }}"
 
 # ==========================================================
+# Linux packages
+# ==========================================================
+- name: Collect Linux VMs to install packages on
+  tags: [linux-packages]
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect Linux VMs to install packages on
+      ansible.builtin.set_fact:
+        linux_packages_vms: "{{ ((linux_packages_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when: 'item.linux is defined and item.linux.packages is defined'
+
+- name: Install Linux packages
+  tags: [linux-packages]
+  hosts: "{{ hostvars['localhost']['linux_packages_vms'] | default([]) }}"
+  serial: 5
+  become: true
+  tasks:
+    - name: Install Linux packages
+      ansible.builtin.package:
+        name: "{{ item }}"
+        state: present
+        update_cache: true # Passed down to the package manager of the system, but they all seem to support this option https://stackoverflow.com/a/70650223/3006990
+      loop: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).linux.packages }}"
+
+# ==========================================================
 # User-Defined Roles
 # ==========================================================
 - name: Collect VMs with user-defined roles

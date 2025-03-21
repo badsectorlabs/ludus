@@ -92,7 +92,10 @@ ludus:
     ip_last_octet: 1
     ram_gb: 8
     cpus: 4
-    linux: true
+    linux:
+      packages: # You can define packages to install on Linux hosts
+        - curl
+        - python3
     testing:
       snapshot: false
       block_internet: false

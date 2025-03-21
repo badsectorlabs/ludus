@@ -363,8 +363,25 @@
                     "$ref": "#/definitions/Domain"
                 },
                 "linux": {
-                    "type": "boolean",
-                    "description": "Set this to true for linux VMs - leave undefined or false for Windows/macOS VMs"
+                    "anyOf": [
+                        {
+                            "type": "boolean",
+                            "description": "Set this to true for linux VMs - leave undefined or false for Windows/macOS VMs"
+                        },
+                        {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "packages": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "description": "List of packages to install using ansible.builtin.package"
+                                }
+                            },
+                        }
+                    ]
                 },
                 "macOS": {
                     "type": "boolean",

@@ -23,6 +23,7 @@ This is useful after an initial deployment to skip steps that are not needed on 
 | dns-rewrites | Setup all DNS mappings for VMs and any user defined DNS rewrite rules on the DNS server of the router |
 | domain-join | Join Windows VMs to the domain |
 | generate-rdp | Creates the RDP zip file for all Windows VMs. Should not be called directly. Use `ludus range rdp` |
+| linux-packages | Install user-defined packages on Linux hosts |
 | install-office | Install Microsoft Office on Windows VMs |
 | install-visual-studio | Install Visual Studio on Windows VMs |
 | network | Setup all VLANs and network rules on the router, including any firewall rules, inbound, and outbound WireGuard. Does **not** setup DNS rewrites (use `dns-rewrites` for that) |
@@ -39,7 +40,7 @@ This is useful after an initial deployment to skip steps that are not needed on 
 # terminal-command-local
 ludus range gettags
 additional-tools, allow-share-access, assign-ip, custom-choco, custom-groups, dcs, debug, dns-rewrites,
-domain-join, generate-rdp, install-office, install-visual-studio, network, nexus,
+domain-join, generate-rdp, linux-packages, install-office, install-visual-studio, network, nexus,
 share, sysprep, user-defined-roles, vm-deploy, windows
 ```
 

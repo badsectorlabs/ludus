@@ -75,9 +75,24 @@ ludus:
     template: kali-x64-desktop-template
     vlan: 99
     ip_last_octet: 1
-    ram_gb: 6
+    ram_gb: 4
     cpus: 2
     linux: true
+    testing:
+      snapshot: false
+      block_internet: false
+
+  - vm_name: "{{ range_id }}-kali-2"
+    hostname: "{{ range_id }}-kali-2"
+    template: kali-x64-desktop-template
+    vlan: 99
+    ip_last_octet: 2
+    ram_gb: 4
+    cpus: 2
+    linux:
+      packages:
+        - curl
+        - netexec
     testing:
       snapshot: false
       block_internet: false
@@ -144,6 +159,27 @@ network:
       vlan_dst: 20
       protocol: tcp
       ports: 22
+      action: REJECT
+    - name: Block all traffic from a specific WG client to a vlan
+      vlan_src: wireguard
+      ip_last_octet_src: 12
+      vlan_dst: 20
+      protocol: all
+      ports: all
+      action: REJECT
+    - name: Block tcp traffic from a specific WG clients to a vlan
+      vlan_src: wireguard
+      ip_last_octet_src: 12-15
+      vlan_dst: 30
+      protocol: tcp
+      ports: all
+      action: REJECT
+    - name: Block all traffic from a specific IP to any wireguard client
+      vlan_src: 10
+      ip_last_octet_src: 11
+      vlan_dst: wireguard
+      protocol: all
+      ports: all
       action: REJECT
 
 router:
