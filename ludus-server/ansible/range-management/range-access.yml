@@ -99,6 +99,16 @@
   tags: [grant]
   hosts: "{{ hostvars['localhost']['router_vm_name_to_action'] }}"
   tasks:
+    - name: Get current iptables rules count
+      ansible.builtin.command: iptables -t filter -L LUDUS_DEFAULTS --line-numbers
+      register: iptables_rules
+      check_mode: false
+      changed_when: false
+
+    - name: Set rule count
+      ansible.builtin.set_fact:
+        rule_count: "{{ iptables_rules.stdout_lines | select('match', '^[0-9]') | list | length }}"
+
     - name: Modify router firewall to allow new user's WireGuard IP
       ansible.builtin.iptables:
         chain: LUDUS_DEFAULTS
@@ -108,6 +118,7 @@
         jump: ACCEPT
         state: present
         action: insert
+        rule_num: "{{ rule_count }}" # This is the second to last rule in the chain, the last is a deny all so we want to be above that but below the user defined rules
         comment: "Access Grant: WireGuard client access rule for {{ source_username }}"
         numeric: true
 
@@ -156,7 +167,6 @@
         protocol: all
         jump: ACCEPT
         state: absent
-        action: insert
         comment: "Access Grant: WireGuard client access rule for {{ source_username }}"
         numeric: true
 

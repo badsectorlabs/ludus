@@ -77,9 +77,14 @@ Two keys exists to set the default for traffic leaving the network: `external_de
 
 Rules can act on entire vlans by not defining `ip_last_octet_src` or `ip_last_octet_dst`, ranges of machines `ip_last_octet_src: 21-25`, or single machines `ip_last_octet_src: 21`.
 
-`vlan_dst` can accept the special value `public` which allows traffic to the internet, but not other VLANs. This is useful for cases where the `external_default` is `REJECT`.
+`vlan_src` and `vlan_dst` can accept the special values:
+ - `public` which allows traffic to the internet, but not other VLANs. This is useful for cases where the `external_default` is `REJECT`. In the rule this is converted to `! 10.ID.0.0/16`.
+ - `all` which is all VLANs, and is converted to `10.ID.0.0/16` in the rule.
+ - `wireguard` which is the wireguard users subnet. This is converted to `198.51.100.0/24` unless an `ip_last_octet_[src|dst]` is defined.
 
 The `ports` key is optional, and if omitted `all` is assumed. A range of ports can be defined using the `start:end` syntax. These values should be quoted to avoid yaml interpreting them as hex values.
+
+All user defined rules are added to the `LUDUS_USER_RULES` chain except rules that use `wireguard` as a vlan src or dst; those are applied to the `LUDUS_DEFAULTS` chain so they can override the default WireGuard client access rule or any access grant rules. Rules with `wireguard` as a vlan src or dst will take priority over testing mode rules, but since they only operate against hosts in the 198.51.100.0/24 range, this should not cause any issue.
 
 :::note
 
@@ -93,6 +98,7 @@ An example of a different types of user defined firewall rules are listed below.
 network:
   external_default: ACCEPT
   inter_vlan_default: REJECT
+  wireguard_vlan_default: ACCEPT
   always_blocked_networks:
     - 192.168.1.0/24
   rules:
@@ -144,6 +150,27 @@ network:
       protocol: tcp
       ports: "8080:8088"
       action: ACCEPT
+    - name: Block all traffic from a specific WG client to a vlan
+      vlan_src: wireguard
+      ip_last_octet_src: 12
+      vlan_dst: 20
+      protocol: all
+      ports: all
+      action: REJECT
+    - name: Block tcp traffic from a specific WG clients to a vlan
+      vlan_src: wireguard
+      ip_last_octet_src: 12-15
+      vlan_dst: 30
+      protocol: tcp
+      ports: all
+      action: REJECT
+    - name: Block all traffic from a specific IP to any wireguard client
+      vlan_src: 10
+      ip_last_octet_src: 11
+      vlan_dst: wireguard
+      protocol: all
+      ports: all
+      action: REJECT
 ```
 
 See more details about the range config schema (which includes the network object) [here](./configuration).

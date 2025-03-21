@@ -113,6 +113,11 @@
                     "enum": [ "ACCEPT", "REJECT", "DROP" ],
                     "description": "The default rule to apply to traffic leaving the range out to the internet. Default: ACCEPT"
                 },
+                "wireguard_vlan_default": {
+                    "type": "string",
+                    "enum": [ "ACCEPT", "REJECT", "DROP" ],
+                    "description": "The default rule to apply to traffic leaving the range to the WireGuard subnet. Default: ACCEPT"
+                },
                 "always_blocked_networks": {
                     "type": "array",
                     "items": [
@@ -143,10 +148,18 @@
                     "description": "The rule name will be added as a comment in iptables"
                 },
                 "vlan_src": {
-                    "type": "integer",
-                    "minimum": 2,
-                    "maximum": 255,
-                    "description": "Traffic source VLAN"
+                    "anyOf": [
+                        {
+                            "type": "integer",
+                            "minimum": 2,
+                            "maximum": 255,
+                            "description": "Traffic source VLAN"
+                        },
+                        {
+                            "type": "string",
+                            "enum": [ "public", "all", "wireguard" ]
+                        }
+                    ]
                 },
                 "ip_last_octet_src": {
                     "anyOf": [
@@ -171,7 +184,7 @@
                         },
                         {
                             "type": "string",
-                            "enum": [ "public", "all" ]
+                            "enum": [ "public", "all", "wireguard" ]
                         }
                     ],
                     "description": "Traffic destination VLAN"

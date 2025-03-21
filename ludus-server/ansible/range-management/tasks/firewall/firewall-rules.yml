@@ -2,32 +2,97 @@
   ansible.builtin.debug:
     msg: "{{ item }}"
 
-- name: Set src for simple rule
+- name: Set src for simple rule (all)
   ansible.builtin.set_fact:
-    src: "{{ '10.' + range_second_octet | string + '.' + item.vlan_src | string + '.0/24' if item.vlan_src | string != 'all' else '10.' + range_second_octet | string + '.0.0/16' }}"
+    src: "10.{{ range_second_octet }}.0.0/16"
   when:
     - item.ip_last_octet_src is undefined
+    - item.vlan_src | string == "all"
 
-- name: Set dst for simple rule
+- name: Set src for simple rule (public)
   ansible.builtin.set_fact:
-    dst: "{{ '10.' + range_second_octet | string + '.' + item.vlan_dst | string + '.0/24' if item.vlan_dst | string != 'all' else '10.' + range_second_octet | string + '.0.0/16' }}"
+    src: "! 10.{{ range_second_octet }}.0.0/16"
   when:
-    - item.vlan_dst != 'public'
-    - item.ip_last_octet_dst is undefined
+    - item.ip_last_octet_src is undefined
+    - item.vlan_src | string == "public"
 
-- name: Set dst for simple rule (public)
+- name: Set src for simple rule (wireguard)
   ansible.builtin.set_fact:
-    dst: "! 10.{{ range_second_octet }}.0.0/16"
+    src: "198.51.100.0/24"
   when:
-    - item.vlan_dst == 'public'
-    - item.ip_last_octet_dst is undefined
+    - item.ip_last_octet_src is undefined
+    - item.vlan_src | string == "wireguard"
 
-- name: Set src for an IP rule
+- name: Set src for simple rule (vlan)
+  ansible.builtin.set_fact:
+    src: "10.{{ range_second_octet }}.{{ item.vlan_src }}.0/24"
+  when:
+    - item.ip_last_octet_src is undefined
+    - item.vlan_src | string != "all"
+    - item.vlan_src | string != "public"
+    - item.vlan_src | string != "wireguard"
+
+- name: Set src for an IP rule (vlan)
   ansible.builtin.set_fact:
     src: 10.{{ range_second_octet }}.{{ item.vlan_src }}.{{ item.ip_last_octet_src }}
   when:
     - item.ip_last_octet_src is defined
     - '"-" not in (item.ip_last_octet_src | string)'
+    - item.vlan_src | string != "wireguard"
+
+- name: Set src for an IP rule (vlan range)
+  ansible.builtin.set_fact:
+    src: 10.{{ range_second_octet }}.{{ item.vlan_src }}.{{ item.ip_last_octet_src.split('-')[0] }}-10.{{ range_second_octet }}.{{ item.vlan_src }}.{{ item.ip_last_octet_src.split('-')[1] }}
+  when:
+    - item.ip_last_octet_src is defined
+    - '"-" in (item.ip_last_octet_src | string)'
+    - item.vlan_src | string != "wireguard"
+
+- name: Set the src for a wireguard rule with IP
+  ansible.builtin.set_fact:
+    src: "198.51.100.{{ item.ip_last_octet_src }}"
+  when:
+    - item.ip_last_octet_src is defined
+    - '"-" not in (item.ip_last_octet_src | string)'
+    - item.vlan_src | string == "wireguard"
+
+- name: Set the src for a wireguard rule with IP range
+  ansible.builtin.set_fact:
+    src: "198.51.100.{{ item.ip_last_octet_src.split('-')[0] }}-198.51.100.{{ item.ip_last_octet_src.split('-')[1] }}"
+  when:
+    - item.ip_last_octet_src is defined
+    - '"-" in (item.ip_last_octet_src | string)'
+    - item.vlan_src | string == "wireguard"
+
+- name: Set dst for simple rule (all)
+  ansible.builtin.set_fact:
+    dst: "10.{{ range_second_octet }}.0.0/16"
+  when:
+    - item.ip_last_octet_dst is undefined
+    - item.vlan_dst | string == "all"
+
+- name: Set dst for simple rule (public)
+  ansible.builtin.set_fact:
+    dst: "! 10.{{ range_second_octet }}.0.0/16"
+  when:
+    - item.ip_last_octet_dst is undefined
+    - item.vlan_dst | string == "public"
+
+- name: Set dst for simple rule (wireguard)
+  ansible.builtin.set_fact:
+    dst: "198.51.100.0/24"
+  when:
+    - item.ip_last_octet_dst is undefined
+    - item.vlan_dst | string == "wireguard"
+
+- name: Set dst for simple rule (vlan)
+  ansible.builtin.set_fact:
+    dst: "10.{{ range_second_octet }}.{{ item.vlan_dst }}.0/24"
+  when:
+    - item.ip_last_octet_dst is undefined
+    - item.vlan_dst | string != "all"
+    - item.vlan_dst | string != "public"
+    - item.vlan_dst | string != "wireguard"
 
 - name: Set dst for an IP rule
   ansible.builtin.set_fact:
@@ -35,13 +100,7 @@
   when:
     - item.ip_last_octet_dst is defined
     - '"-" not in (item.ip_last_octet_dst | string)'
-
-- name: Set src for an IP rule (range)
-  ansible.builtin.set_fact:
-    src: 10.{{ range_second_octet }}.{{ item.vlan_src }}.{{ item.ip_last_octet_src.split('-')[0] }}-10.{{ range_second_octet }}.{{ item.vlan_src }}.{{ item.ip_last_octet_src.split('-')[1] }}
-  when:
-    - item.ip_last_octet_src is defined
-    - '"-" in (item.ip_last_octet_src | string)'
+    - item.vlan_dst | string != "wireguard"
 
 - name: Set dst for an IP rule (range)
   ansible.builtin.set_fact:
@@ -49,6 +108,23 @@
   when:
     - item.ip_last_octet_dst is defined
     - '"-" in (item.ip_last_octet_dst | string)'
+    - item.vlan_dst | string != "wireguard"
+
+- name: Set the dst for a wireguard rule with IP
+  ansible.builtin.set_fact:
+    dst: "198.51.100.{{ item.ip_last_octet_dst }}"
+  when:
+    - item.ip_last_octet_dst is defined
+    - '"-" not in (item.ip_last_octet_dst | string)'
+    - item.vlan_dst | string == "wireguard"
+
+- name: Set the dst for a wireguard rule with IP range
+  ansible.builtin.set_fact:
+    dst: "198.51.100.{{ item.ip_last_octet_dst.split('-')[0] }}-198.51.100.{{ item.ip_last_octet_dst.split('-')[1] }}"
+  when:
+    - item.ip_last_octet_dst is defined
+    - '"-" in (item.ip_last_octet_dst | string)'
+    - item.vlan_dst | string == "wireguard"
 
 # Handle all cases for protocol (undefined, 'all', or a string)
 - name: Set protocol (undefined or all)
@@ -80,7 +156,7 @@
 
 - name: Apply a standard firewall rule
   ansible.builtin.iptables:
-    chain: LUDUS_USER_RULES
+    chain: "{{ 'LUDUS_DEFAULTS' if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else 'LUDUS_USER_RULES' }}"
     source: "{{ src }}"
     destination: "{{ dst }}"
     protocol: "{{ proto }}"
@@ -98,7 +174,7 @@
 
 - name: Apply a src range firewall rule
   ansible.builtin.iptables:
-    chain: LUDUS_USER_RULES
+    chain: "{{ 'LUDUS_DEFAULTS' if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else 'LUDUS_USER_RULES' }}"
     src_range: "{{ src }}"
     destination: "{{ dst }}"
     protocol: "{{ proto }}"
@@ -115,7 +191,7 @@
 
 - name: Apply a dst range firewall rule
   ansible.builtin.iptables:
-    chain: LUDUS_USER_RULES
+    chain: "{{ 'LUDUS_DEFAULTS' if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else 'LUDUS_USER_RULES' }}"
     source: "{{ src }}"
     dst_range: "{{ dst }}"
     protocol: "{{ proto }}"
@@ -132,7 +208,7 @@
 
 - name: Apply a src and dst range firewall rule
   ansible.builtin.iptables:
-    chain: LUDUS_USER_RULES
+    chain: "{{ 'LUDUS_DEFAULTS' if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else 'LUDUS_USER_RULES' }}"
     src_range: "{{ src }}"
     dst_range: "{{ dst }}"
     protocol: "{{ proto }}"
