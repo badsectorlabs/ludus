@@ -379,7 +379,7 @@
                                     },
                                     "description": "List of packages to install using ansible.builtin.package"
                                 }
-                            },
+                            }
                         }
                     ]
                 },
