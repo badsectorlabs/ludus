@@ -43,18 +43,29 @@
 # This is a bit wild but since we don't have Get-ADDomain on clients, we can get the SID of the krbtgt account then just take the first part of the SID
 - name: Get the domain SID for this domain
   ansible.windows.win_shell: |
-    $domainSid = [System.Security.Principal.NTAccount]::new((Get-WmiObject Win32_ComputerSystem).Domain, "krbtgt").Translate([System.Security.Principal.SecurityIdentifier]).Value
-    Write-Host $domainSid.Substring(0, $domainSid.LastIndexOf("-"))
+    [System.Security.Principal.NTAccount]::new((Get-WmiObject Win32_ComputerSystem).Domain, "krbtgt").Translate([System.Security.Principal.SecurityIdentifier]).Value
   register: domain_sid_command
 
 - name: Set the domain SID
   ansible.builtin.set_fact:
-    domain_sid: "{{ domain_sid_command.stdout | trim }}"
+    domain_sid: "{{ domain_sid_command.stdout | trim | regex_replace('-502', '') }}"
+
+# Ansible is fun sometimes.
+- name: Set a backslash
+  ansible.builtin.set_fact:
+    backslash: '\'
 
 - name: Gather Domain Users group name by SID (multilingual)
   ansible.windows.win_shell: |
     (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-513'").Name
   register: domain_users_group_name_command
+  # We must run as the domain/autologon to get the domain group info. Assumes the autologon user is a domain user.
+  vars:
+    ansible_become: true
+    ansible_become_method: runas
+    ansible_become_user: '{{ autologon_user if backslash in autologon_user else netbios_name + backslash + autologon_user }}'
+    ansible_become_password: '{{ autologon_password }}'
+    ansible_become_flags: "logon_type=interactive logon_flags=with_profile"
 
 - name: Set the Domain Users group name
   ansible.builtin.set_fact:
