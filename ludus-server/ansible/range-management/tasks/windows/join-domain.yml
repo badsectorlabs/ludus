@@ -43,7 +43,8 @@
 # This is a bit wild but since we don't have Get-ADDomain on clients, we can get the SID of the krbtgt account then just take the first part of the SID
 - name: Get the domain SID for this domain
   ansible.windows.win_shell: |
-    ([System.Security.Principal.NTAccount]::new((Get-WmiObject Win32_ComputerSystem).Domain, "krbtgt").Translate([System.Security.Principal.SecurityIdentifier]).Value).Substring(0, $domainSid.LastIndexOf("-"))
+    $domainSid = [System.Security.Principal.NTAccount]::new((Get-WmiObject Win32_ComputerSystem).Domain, "krbtgt").Translate([System.Security.Principal.SecurityIdentifier]).Value
+    Write-Host $domainSid.Substring(0, $domainSid.LastIndexOf("-"))
   register: domain_sid_command
 
 - name: Set the domain SID
