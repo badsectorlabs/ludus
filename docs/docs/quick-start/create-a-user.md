@@ -27,7 +27,7 @@ Initials are commonly used for the userID.
 :::warning
 
 If the user name you specify (converted to lowercase and spaces replaced with `-`) exists
-on the system already, it's PAM password will be changed by Ludus! This user's groups will be modified (i.e. removed from sudoers) as well. You should use a username that is not present on the system when installing Ludus.
+on the system already, Ludus will refuse to overwrite it. Choose a new user name for your Ludus user.
 
 :::
 

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/user"
 	"strconv"
 	"strings"
@@ -347,4 +348,10 @@ func chownFileToUsername(filePath string, username string) {
 		fmt.Printf("Failed to change ownership of the file: %s\n", err)
 		return
 	}
+}
+
+// userExists checks if a user exists on the host system
+func userExistsOnHostSystem(username string) bool {
+	cmd := exec.Command("id", username)
+	return cmd.Run() == nil
 }

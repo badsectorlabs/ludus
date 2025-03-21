@@ -68,6 +68,12 @@ func AddUser(c *gin.Context) {
 				return
 			}
 
+			// Check if the username already exists on the host system
+			if userExistsOnHostSystem(user.ProxmoxUsername) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "User with that name already exists on the host system. Ludus uses the PAM for user authentication, so you must use a unique username for each Ludus user."})
+				return
+			}
+
 			// Make a range for the user
 			var usersRange RangeObject
 			usersRange.UserID = user.UserID
