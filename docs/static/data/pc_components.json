@@ -1,0 +1,329 @@
+{
+    "ram": [
+        {
+            "id": "ram-crucial-128",
+            "name": "Crucial 128GB 5600 MT/s",
+            "link": "https://amzn.to/3FCMtfe",
+            "size_gb": 128,
+            "speed": 5600,
+            "type": "DDR5",
+            "price": 313
+        },
+        {
+            "id": "ram-crucial-96",
+            "name": "Crucial 96GB 5600 MT/s",
+            "link": "https://amzn.to/4llQnK7",
+            "size_gb": 96,
+            "speed": 5600,
+            "type": "DDR5",
+            "price": 203
+        },
+        {
+            "id": "ram-crucial-64",
+            "name": "Crucial 64GB 5600 MT/s",
+            "link": "https://amzn.to/4iGgZ6u",
+            "size_gb": 64,
+            "speed": 5600,
+            "type": "DDR5",
+            "price": 147
+        },
+        {
+            "id": "ram-crucial-32",
+            "name": "Crucial 32GB 5600 MT/s",
+            "link": "https://amzn.to/4hNPs1I",
+            "size_gb": 32,
+            "speed": 5600,
+            "type": "DDR5",
+            "price": 78
+        },
+        {
+            "id": "ram-mushkin-96",
+            "name": "Mushkin 96GB 4800 MT/s",
+            "link": "https://amzn.to/43W7xaI",
+            "size_gb": 96,
+            "speed": 4800,
+            "type": "DDR5",
+            "price": 249
+        },
+        {
+            "id": "ram-mushkin-64",
+            "name": "Mushkin 64GB 4800 MT/s",
+            "link": "https://amzn.to/4b4uDgh",
+            "size_gb": 64,
+            "speed": 4800,
+            "type": "DDR5",
+            "price": 155
+        },
+        {
+            "id": "ram-silicon-power-64",
+            "name": "Silicon Power 64GB 5600 MT/s",
+            "link": "https://amzn.to/3DWaf5w",
+            "size_gb": 64,
+            "speed": 5600,
+            "type": "DDR5",
+            "price": 130
+        }
+    ],
+    "disk": [
+        {
+            "id": "disk-samsung-990-pro-1tb",
+            "name": "Samsung 990 PRO 1TB",
+            "link": "https://amzn.to/3FGIBdk",
+            "size_gb": 1000,
+            "speed": 7450,
+            "type": "NVMe",
+            "price": 99
+        },
+        {
+            "id": "disk-samsung-990-pro-2tb",
+            "name": "Samsung 990 PRO 2TB",
+            "link": "https://amzn.to/4l4DDag",
+            "size_gb": 2000,
+            "speed": 7450,
+            "type": "NVMe",
+            "price": 169
+        },
+        {
+            "id": "disk-samsung-990-pro-4tb",
+            "name": "Samsung 990 PRO 4TB",
+            "link": "https://amzn.to/43XJ7xp",
+            "size_gb": 4000,
+            "speed": 7450,
+            "type": "NVMe",
+            "price": 279
+        },        
+        {
+            "id": "disk-crucial-T500-500GB",
+            "name": "Crucial T500 500GB",
+            "link": "https://amzn.to/4c9JhEj",
+            "size_gb": 500,
+            "speed": 7200,
+            "type": "NVMe",
+            "price": 65
+        },
+        {
+            "id": "disk-crucial-T500-1TB",
+            "name": "Crucial T500 1TB",
+            "link": "https://amzn.to/41KeJoY",
+            "size_gb": 1000,
+            "speed": 7300,
+            "type": "NVMe",
+            "price": 89
+        },
+        {
+            "id": "disk-crucial-T500-2TB",
+            "name": "Crucial T500 2TB",
+            "link": "https://amzn.to/43ZtuFL",
+            "size_gb": 2000,
+            "speed": 7400,
+            "type": "NVMe",
+            "price": 144
+        },
+        {
+            "id": "disk-crucial-T500-4TB",
+            "name": "Crucial T500 4TB",
+            "link": "https://amzn.to/4c47ko5",
+            "size_gb": 4000,
+            "speed": 7400,
+            "type": "NVMe",
+            "price": 292
+        },        
+        {
+            "id": "disk-wd-black-sn850x-1tb",
+            "name": "WD Black SN850X 1TB",
+            "link": "https://amzn.to/3xNpYAp",
+            "size_gb": 1000,
+            "speed": 7300,
+            "type": "NVMe",
+            "price": 89
+        },
+        {
+            "id": "disk-wd-black-sn850x-2tb",
+            "name": "WD Black SN850X 2TB",
+            "link": "https://amzn.to/421b3hs",
+            "size_gb": 2000,
+            "speed": 7300,
+            "type": "NVMe",
+            "price": 145
+        },
+        {
+            "id": "disk-wd-black-sn850x-4tb",
+            "name": "WD Black SN850X 4TB",
+            "link": "https://amzn.to/41IXwMC",
+            "size_gb": 4000,
+            "speed": 7300,
+            "type": "NVMe",
+            "price": 279
+        },
+        {
+            "id": "disk-wd-black-sn850x-8tb",
+            "name": "WD Black SN850X 8TB",
+            "link": "https://amzn.to/3DV99XA",
+            "size_gb": 8000,
+            "speed": 7300,
+            "type": "NVMe",
+            "price": 599
+        }
+    ],
+    "cpu": [
+        {
+            "id": "cpu-amd-7950x",
+            "name": "AMD 7950X",
+            "link": "https://amzn.to/423Ef7I",
+            "cores": 16,
+            "threads": 32,
+            "base_clock": 4.5,
+            "boost_clock": 5.7,
+            "tdp": 105,
+            "price": 499,
+            "passmark": 62678
+        },
+        {
+            "id": "cpu-amd-8845hs",
+            "name": "AMD Ryzen 7 8845HS",
+            "link": null,
+            "cores": 8,
+            "threads": 16,
+            "base_clock": 3.8,
+            "boost_clock": 5.1,
+            "tdp": 45,
+            "price": 0,
+            "passmark": 28821
+        },
+         {
+            "id": "cpu-amd-hx-370",
+            "name": "AMD Ryzen AI 9 HX 370",
+            "link": null,
+            "cores": 12,
+            "threads": 24,
+            "base_clock": 2.0,
+            "boost_clock": 5.1,
+            "tdp": 54,
+            "price": 0,
+            "passmark": 35211
+        },
+        {
+            "id": "cpu-amd-ryzen-9-7945hx",
+            "name": "AMD Ryzen 9 7945HX",
+            "link": null,
+            "cores": 16,
+            "threads": 32,
+            "base_clock": 2.5,
+            "boost_clock": 5.7,
+            "tdp": 54,
+            "price": 0,
+            "passmark": 54834
+        },
+        {
+            "id": "cpu-amd-ryzen-9-7940hs",
+            "name": "AMD Ryzen 9 7940HS",
+            "link": null,
+            "cores": 8,
+            "threads": 16,
+            "base_clock": 4.0,
+            "boost_clock": 5.1,
+            "tdp": 45,
+            "price": 0,
+            "passmark": 30326
+        }
+        
+    ],
+    "chassis": [
+        {
+            "id": "chassis-nucbox-k8-plus-barebones",
+            "name": "GMKTek NucBox K8 Plus Barebones",
+            "link": "https://www.gmktec.com/products/amd-ryzen-7-8845hs-mini-pc-nucbox-k8-plus",
+            "price": 389,
+            "cpu_included": "AMD Ryzen 7 8845HS",
+            "ram_included": null,
+            "disk_included": null,
+            "power": "Included",
+            "cooling": "Included",
+            "number_of_disks": 2
+        },
+        {
+            "id": "chassis-minisforum-ai-x1-pro",
+            "name": "Minisforum AI X1 Pro",
+            "link": "https://store.minisforum.com/products/minisforum-ai-x1-pro?variant=46442478502133",
+            "price": 1089,
+            "cpu_included": "AMD Ryzen AI 9 HX 370",
+            "ram_included": 96,
+            "disk_included": 2000,
+            "power": "Included",
+            "cooling": "Included",
+            "number_of_disks": 0 
+        },
+        {
+            "id": "chassis-minisforum-ms-a1",
+            "name": "Minisforum MS-A1 barebones",
+            "link": "https://store.minisforum.com/products/minisforum-ms-a1",
+            "price": 259,
+            "cpu_included": null,
+            "ram_included": null,
+            "disk_included": null,
+            "power": "Included",
+            "cooling": "Included",
+            "number_of_disks": 4
+        },
+        {
+            "id": "chassis-minisforum-ms-a1-amd-9950x",
+            "name": "Minisforum MS-A1 AMD 9950X",
+            "link": "https://store.minisforum.com/products/minisforum-ms-a1?variant=46168812159221",
+            "price": 259,
+            "cpu_included": "AMD 9950X",
+            "ram_included": null,
+            "disk_included": null,
+            "power": "Included",
+            "cooling": "Included",
+            "number_of_disks": 4
+        },
+        {
+            "id": "chassis-atomman-g7-pt-barebones",
+            "name": "AtomMan G7 PT Barebones",
+            "link": "https://store.minisforum.com/products/atomman-g7-pt",
+            "price": 999,
+            "cpu_included": "AMD Ryzen 9 7945HX",
+            "ram_included": null,
+            "disk_included": null,
+            "power": "Included",
+            "cooling": "Included",
+            "number_of_disks": 2
+        },
+        {
+            "id": "chassis-atomman-g7-pt",
+            "name": "AtomMan G7 PT",
+            "link": "https://store.minisforum.com/products/atomman-g7-pt",
+            "price": 1199,
+            "cpu_included": "AMD Ryzen 9 7945HX",
+            "ram_included": 32,
+            "disk_included": 1000,
+            "power": "Included",
+            "cooling": "Included",
+            "number_of_disks": 2
+        },
+        {
+            "id": "chassis-acemagic-f3a-barebones",
+            "name": "AceMagic F3A Barebones",
+            "link": "https://acemagic.com/products/acemagic-f3a-mini-pc",
+            "price": 679,
+            "cpu_included": "AMD Ryzen AI 9 HX 370",
+            "ram_included": null,
+            "disk_included": null,
+            "power": "Included",
+            "cooling": "Included",
+            "number_of_disks": 2
+        },
+        {
+            "id": "chassis-minisforum-um790-pro-barebones",
+            "name": "Minisforum UM790 Pro Barebones",
+            "link": "https://store.minisforum.com/products/minisforum-um790-pro?_pos=1&_sid=26650c996&_ss=r&variant=43865372492021",
+            "price": 385,
+            "cpu_included": "AMD Ryzen 9 7940HS",
+            "ram_included": null,
+            "disk_included": null,
+            "power": "Included",
+            "cooling": "Included",
+            "number_of_disks": 2
+        }
+    ]
+}
