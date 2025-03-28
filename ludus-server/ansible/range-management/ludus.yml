@@ -942,7 +942,7 @@
         dns_server: "192.0.2.254"
         vlan: 1
 
-- name: Configure Nexus nuget cache VM requirements
+- name: Configure Ludus share VM requirements
   tags: [never, share]
   hosts: ADMIN-share
   become: true
