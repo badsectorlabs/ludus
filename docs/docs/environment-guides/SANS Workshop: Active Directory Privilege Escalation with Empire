@@ -1,0 +1,221 @@
+---
+title: "SANS Workshop: Active Directory Privilege Escalation with Empire!"
+---
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+# SANS Workshop: Active Directory Privilege Escalation with Empire!
+
+:::success Props!
+
+Huge shout out to [@ladhaAleem](https://twitter.com/LadhaAleem) for creating this project and converting the SANS Workshop: Active Directory Privilege Escalation with Empire! workshop created by [Jean-François Maes]https://www.sans.org/profiles/jeanfrancois-maes/) to an ansible playbook and making it work with Ludus as well!
+:::
+
+## Description from SANS Workshop: Active Directory Privilege Escalation with Empire!
+
+Welcome to this workshop where we are going to dive into a core active directory component - Kerberos!
+
+This lab is a self-guided Active Directory security exercise designed to help participants understand Kerberos-based privilege escalation attacks. Originally part of a SANS workshop, this lab is now freely available for local deployment on VMware, VirtualBox, and Ludus.
+
+Participants will build their own AD lab, configure attack tools, and execute real-world attack techniques to escalate privileges in an Active Directory environment.
+
+This workshop is ideally suited for blue teamers that want to peek behind the curtain and understand how adversaries attack AD and pentesters that may not be as familiar with AD environments yet.
+
+Attacks Covered
+🔹 Kerberoasting – Extracting service tickets to crack passwords
+🔹 DCSyncing – Extracting credentials by simulating a domain controller
+🔹 SID History Abuse – Hopping across parent/child domain trusts
+🔹 Unconstrained Delegation Abuse – Capturing privileged credentials
+
+### Note
+
+Note: The following labs are related only to the usage of Empire & Starkiller and no other tools
+
+Have fun !
+
+### Access the workbook here:
+
+- https://logout.gitbook.io/ad-privesc-with-empire 
+
+
+## Deployment
+
+### 1. Add the Windows 2019 template to Ludus
+
+```bash
+#terminal-command-local
+git clone https://gitlab.com/badsectorlabs/ludus
+#terminal-command-local
+cd ludus/templates
+#terminal-command-local
+ludus templates add -d win2019-server-x64
+[INFO]  Successfully added template
+#terminal-command-local
+ludus templates build
+[INFO]  Template building started - this will take a while. Building 1 template(s) at a time.
+# Wait until the templates finish building, you can monitor them with `ludus templates logs -f` or `ludus templates status`
+#terminal-command-local
+ludus templates list
++----------------------------------------+-------+
+|                TEMPLATE                | BUILT |
++----------------------------------------+-------+
+| debian-11-x64-server-template          | TRUE  |
+| debian-12-x64-server-template          | TRUE  |
+| kali-x64-desktop-template              | TRUE  |
+| win11-22h2-x64-enterprise-template     | TRUE  |
+| win2022-server-x64-template            | TRUE  |
+| win2019-server-x64-template            | TRUE  |
++----------------------------------------+-------+
+```
+
+### 2. Deploy VMs
+
+Set and deploy the configuration for the lab.
+
+```bash
+#terminal-command-local
+git clone https://github.com/aleemladha/SANS-Workshop-Lab
+#terminal-command-local
+ludus range config set -f SANS-Workshop-Lab/ad/SANS/providers/ludus/config.yml
+#terminal-command-local
+ludus range deploy
+# Wait for the range to successfully deploy
+# You can watch the logs with `ludus range logs -f`
+# Or check the status with `ludus range status`
+```
+
+
+### 3. Install requirements
+
+Install ansible and its requirements for the NetExec lab on your local machine.
+
+```shell-session
+# You can use a virtualenv here if you would like
+#terminal-command-local
+python3 -m pip install ansible-core
+#terminal-command-local
+python3 -m pip install pywinrm
+#terminal-command-local
+git clone https://github.com/aleemladha/SANS-Workshop-Lab
+#terminal-command-local
+cd SANS-Workshop-Lab/ansible
+#terminal-command-local
+ansible-galaxy install -r requirements.yml
+```
+
+### 4. Setup  the inventory files
+
+The inventory file is already present in the providers folder and replace RANGENUMBER with your range number with sed (commands provided below)
+
+
+<Tabs groupId="operating-systems">
+  <TabItem value="linux" label="Linux">
+```bash
+#terminal-command-local
+cd SANS-Workshop-Lab/ansible
+# go the the ansible directory as above
+#terminal-command-local
+export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
+# `sudo apt install jq` if you don't have jq
+#terminal-command-local
+sed -i "s/RANGENUMBER/$RANGENUMBER/g" ../ad/SANS/providers/ludus/inventory.yml
+```
+  </TabItem>
+  <TabItem value="macos" label="macOS">
+```bash
+#terminal-command-local
+cd SANS-Workshop-Lab/ansible
+# paste in the inventory file above
+#terminal-command-local
+export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
+# `brew install jq` if you don't have jq
+#terminal-command-local
+sed -i '' "s/RANGENUMBER/$RANGENUMBER/g" ../ad/SANS/providers/ludus/inventory.yml
+```
+  </TabItem>
+</Tabs>
+
+
+### 5. Deploy the SANS Workshop
+
+:::note
+
+If not running on the Ludus host, you must be connected to your Ludus wireguard VPN for these commands to work
+
+:::
+
+<Tabs groupId="operating-systems">
+  <TabItem value="linux" label="Linux">
+```bash
+#terminal-command-local
+cd SANS-Workshop-Lab/ansible
+# in the ansible folder perform the following
+#terminal-command-local
+export ANSIBLE_COMMAND="ansible-playbook -i ../ad/SANS/data/inventory -i ../ad/SANS/providers/ludus/inventory.yml"
+#terminal-command-local
+export LAB="SANS"
+#terminal-command-local
+chmod +x ../scripts/provisionning.sh
+#terminal-command-local
+../scripts/provisionning.sh
+```
+  </TabItem>
+  <TabItem value="macos" label="macOS">
+```bash
+#terminal-command-local
+cd SANS-Workshop-Lab/ansible
+# In the ansible folder perform the following
+#terminal-command-local
+export ANSIBLE_COMMAND="ansible-playbook -i ../ad/SANS/data/inventory -i ../ad/SANS/providers/ludus/inventory.yml"
+#terminal-command-local
+export LAB="SANS"
+#terminal-command-local
+export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
+#terminal-command-local
+../scripts/provisionning.sh
+```
+  </TabItem>
+</Tabs>
+
+Now you wait. `[WARNING]` lines are ok, and some steps may take a long time, don't panic!
+
+This will take a few hours. You'll know it is done when you see:
+
+```
+The Empire's dominion is complete! But Rebel operatives remain hidden. Your mission: eliminate them.
+```
+:::note
+
+You must be connected to your Ludus wireguard VPN for these commands to work
+
+
+### 6. Snapshot VMs
+
+Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
+
+```bash
+export RANGEID=JD # <= change to your ID
+vms=("$RANGEID-dc01" "$RANGEID-dc02" "$RANGEID-srv02" "$RANGEID-kali")
+COMMENT="Clean SANS Lab setup after ansible run"
+# Loop over the array
+for vm in "${vms[@]}"
+do
+  echo "[+] Create snapshot for $vm"
+  id=$(qm list | grep $vm  | awk '{print $1}')
+  echo "[+] VM id is : $id"
+  qm snapshot "$id" 'snapshot-'$(date '+%Y-%m-%d--%H-%M') --vmstate 1 --description "$COMMENT"
+done
+```
+
+### 7. Hack!
+
+Access your Kali machine at `https://10.RANGENUMBER.50.99:8444` using the creds `kali:password`.
+
+Setup Empire & Starkiller at `https://logout.gitbook.io/ad-privesc-with-empire/installing-the-environment/empire`
+
+Once done follow lab 2 in the workbook.
+
+:::note
+
+Replace this part with your RANGENUMBER 'xfreerdp /v:10.RANGENUMBER.20.10 /u:jross /p:'0nz2xQ44GumoWpl' +clipboard'
+
