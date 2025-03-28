@@ -213,9 +213,27 @@ Access your Kali machine at `https://10.RANGENUMBER.50.99:8444` using the creds 
 
 Setup Empire & Starkiller at `https://logout.gitbook.io/ad-privesc-with-empire/installing-the-environment/empire`
 
-Once done follow lab 2 in the workbook.
+Once done, follow lab 2 in the workbook above
 
 :::note
 
 Replace this part with your RANGENUMBER 'xfreerdp /v:10.RANGENUMBER.20.10 /u:jross /p:'0nz2xQ44GumoWpl' +clipboard'
+
+If you want a challange and want to the lab with defender , go to ad/SANS/data/inventory file, change the last part to look like this
+
+```
+; allow defender
+; usage : security.yml
+[defender_on]
+dc01
+dc02
+dc03
+srv02
+
+; disable defender
+; usage : security.yml
+[defender_off]
+
+
+```
 
