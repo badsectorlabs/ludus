@@ -123,17 +123,7 @@ The added Kali VM should look like this at the end of the `ludus:` block:
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
 ```bash
-export RANGEID=GOADd126ca # <= change to your GOAD UserID
-vms=("$RANGEID-SCCM-DC" "$RANGEID-SCCM-MECM" "$RANGEID-SCCM-MSSQL" "$RANGEID-SCCM-CLIENT")
-COMMENT="Clean GOAD SCCM setup after ansible run"
-# Loop over the array
-for vm in "${vms[@]}"
-do
-  echo "[+] Create snapshot for $vm"
-  id=$(qm list | grep $vm  | awk '{print $1}')
-  echo "[+] VM id is : $id"
-  qm snapshot "$id" 'snapshot-'$(date '+%Y-%m-%d--%H-%M') --vmstate 1 --description "$COMMENT"
-done
+ludus snapshot create clean-setup -d "Clean GOAD SCCM setup after ansible run"
 ```
 
 ### 4. Hack!
