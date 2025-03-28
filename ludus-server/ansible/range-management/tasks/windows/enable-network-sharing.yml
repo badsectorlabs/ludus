@@ -1,0 +1,16 @@
+---
+- name: Enable File and Printer Sharing
+  community.windows.win_firewall_rule:
+    group: "@FirewallAPI.dll,-28502" # "File and Printer Sharing" group from (New-Object -ComObject HNetCfg.FwPolicy2).Rules because of this bug https://github.com/ansible-collections/community.windows/issues/495
+    enabled: true
+  when:
+    - firewall_service_running is defined
+    - firewall_service_running
+
+- name: Enable Network Discovery
+  community.windows.win_firewall_rule:
+    group: "@FirewallAPI.dll,-32752" # "Network Discovery" group from (New-Object -ComObject HNetCfg.FwPolicy2).Rules because of this bug https://github.com/ansible-collections/community.windows/issues/495
+    enabled: true
+  when:
+    - firewall_service_running is defined
+    - firewall_service_running

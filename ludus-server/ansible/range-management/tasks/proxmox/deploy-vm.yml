@@ -92,6 +92,7 @@
     interface: net0
     bridge: "{{ 'vmbr' + (vmbr_number | string) if vmbr_number is defined else (bridge_interface | default('ludus')) }}"
     tag: "{{ vlan | default(1) }}"
+    model: "{{'e1000' if 'antisandbox' in template_vm_name else 'virtio' }}" # Use virtio unless the template has 'antisandbox' in the name, then use e1000 (no driver required)
   when: clone_vm is changed
   register: network_change
 
@@ -134,6 +135,9 @@
         state: started
 
 # The 'until' is a way to fail if the VM has a self-assigned 169.254.0.0/16 or a Docker 172.17.0.0/16 IP
+# Since all VMs are created with DHCP, we need to check that the last octet of the IP address is >= 100 if it starts with 10
+# If the IP starts with 192, we accept the IP as valid as it is the router WAN network and a user can't force that IP
+# If the user has specified force_ip, the inventory will return the config IP if the VM is still booting and hasn't DHCP'd yet
 - name: Wait for VM to acquire an IP address
   delegate_to: localhost
   ansible.builtin.command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host {{ vm_name }}
@@ -141,7 +145,17 @@
   changed_when: false
   until: >
     nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('') |
-    regex_search('^(?!169\.254|172\.17)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') is not none
+      regex_search('^(?!169\.254|172\.17)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') is not none
+    and
+    (
+      (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 192
+      or
+      (
+        (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[-1] | int >= 100
+        and
+        (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 10
+      )
+    )
   retries: 30
   delay: 5
   when: clone_vm is changed and not unmanaged
@@ -153,27 +167,30 @@
 
 # The VM interface update changes the IP of the VM with DHCP, without this the inventory has the old IP still
 - name: Refresh inventory if needed
+  ansible.builtin.include_tasks: refresh_inventory.yml
   when: clone_vm is changed and not unmanaged
-  block:
-    - name: Refresh inventory
-      ansible.builtin.meta: refresh_inventory
+
+- name: Show last_deployed_ip
+  ansible.builtin.debug:
+    var: last_deployed_ip
 
 - name: Wait for the host's control interface (WinRM via HTTPS) to come up
-  local_action:
-    module: wait_for
+  ansible.builtin.wait_for:
     host: "{{ last_deployed_ip }}"
     port: 5986
     delay: 3
     state: started
+    timeout: 900 # Slower CPU hosts can take longer to start
+  delegate_to: localhost
   register: wait_result
   when: is_windows is defined and is_windows and clone_vm is changed and not unmanaged
 
 - name: Wait for the host's control interface (SSH) to come up
-  local_action:
-    module: wait_for
+  ansible.builtin.wait_for:
     host: "{{ last_deployed_ip }}"
     port: 22
     delay: 3
     state: started
+  delegate_to: localhost
   register: wait_result
   when: ((is_linux is defined and is_linux) or (is_macos is defined and is_macos)) and clone_vm is changed and not unmanaged

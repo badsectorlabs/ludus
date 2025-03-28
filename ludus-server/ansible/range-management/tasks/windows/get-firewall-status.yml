@@ -7,7 +7,7 @@
 
 - name: Set fact for firewall service status
   ansible.builtin.set_fact:
-    firewall_service_running: "{{ (firewall_status.services | selectattr('name', 'eq', 'mpssvc') | first | default('')).state == 'started' }}"
+    firewall_service_running: "{{ firewall_status.services | default([]) | selectattr('name', 'eq', 'mpssvc') | map(attribute='state') | first | default('') == 'started' }}"
   when:
     - firewall_service_running is undefined
     - firewall_status is defined

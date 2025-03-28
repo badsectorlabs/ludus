@@ -1,0 +1,18 @@
+- name: Reset SSH Host Keys
+  hosts: all
+  tasks:
+    - name: Find SSH Host Keys
+      ansible.builtin.find:
+        paths: /etc/ssh/
+        recurse: false
+        file_type: file
+        use_regex: true
+        patterns: 'ssh_host_.*'
+      register: ssh_keys
+
+    - name: Remove SSH Host Keys
+      ansible.builtin.file:
+        path: '{{ item.path }}'
+        state: absent
+      loop: "{{ ssh_keys.files }}"
+      become: true

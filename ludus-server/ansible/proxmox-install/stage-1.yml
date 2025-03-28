@@ -79,8 +79,13 @@
         path: /root/.bashrc
         block: |
           alias ll='ls $LS_OPTIONS -lart'
-          alias ludus-install-status="if [[ -f {{ ludus_install_path }}/install/.stage-3-complete ]]; then echo 'Ludus install completed successfully' && echo -n \"Root API key: \" && cat {{ ludus_install_path }}/install/root-api-key && echo; else tail -f {{ ludus_install_path }}/install/install.log; fi"
         create: true
+
+    - name: Setup ludus-install-status script
+      ansible.builtin.template:
+        src: ludus-install-status.sh.j2
+        dest: /usr/local/bin/ludus-install-status
+        mode: '0755'
 
     - name: Install bridge-utils, git, python3-pip, dnsmasq, jq, and other required packages
       ansible.builtin.apt:
@@ -193,18 +198,24 @@
         dest: /etc/network/interfaces
       register: _configure_interfaces
 
+    - name: Check for GRUB
+      ansible.builtin.stat:
+        path: /etc/default/grub
+      register: _pve_grub_stat
+
     - name: Disable Spectre and Meltdown mitigations - Speed is king! Also disable APST and ASPM to prevent disk I/O issues.
       ansible.builtin.lineinfile:
         dest: /etc/default/grub
         line: 'GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX noibrs noibpb nopti nospectre_v2 nospectre_v1 l1tf=off nospec_store_bypass_disable no_stf_barrier mds=off srbds=off mitigations=off nvme_core.default_ps_max_latency_us=0 pcie_aspm=off"'
         insertafter: '^GRUB_CMDLINE_LINUX="'
       register: _pve_grub
+      when: _pve_grub_stat.stat.exists
 
     - name: Update GRUB configuration
       ansible.builtin.command: update-grub
       register: _pve_grub_update
       failed_when: ('error' in _pve_grub_update.stderr)
-      when: "_pve_grub is changed"
+      when: _pve_grub_stat.stat.exists and _pve_grub is changed
 
     - name: Check if /etc/cloud/templates/hosts.debian.tmpl exists
       ansible.builtin.stat:
@@ -222,6 +233,34 @@
         src: hosts.j2
         dest: /etc/hosts
 
+    # Disable IPv6 as it can cause issues with ansible installs
+    # See: https://gitlab.com/badsectorlabs/ludus/-/issues/85
+    # and: https://github.com/ansible/galaxy/issues/3002
+    # and: https://github.com/orgs/community/discussions/10539
+    - name: Disable IPv6 1
+      ansible.posix.sysctl:
+        name: net.ipv6.conf.all.disable_ipv6
+        value: "1"
+        state: present
+        sysctl_set: false
+        reload: false    
+    
+    - name: Disable IPv6 2
+      ansible.posix.sysctl:
+        name: net.ipv6.conf.default.disable_ipv6
+        value: "1"
+        state: present
+        sysctl_set: false
+        reload: false
+
+    - name: Disable IPv6 3
+      ansible.posix.sysctl:
+        name: net.ipv6.conf.lo.disable_ipv6
+        value: "1"
+        state: present
+        sysctl_set: false
+        reload: false
+    
     - name: Update install progress
       ansible.builtin.include_tasks: tasks/update-install-progress.yml
       vars:

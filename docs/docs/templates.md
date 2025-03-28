@@ -1,5 +1,5 @@
 ---
-sidebar_position: 7
+sidebar_position: 9
 title: "📜 Templates"
 ---
 
@@ -28,12 +28,16 @@ These templates include:
 
 - debian10
 - rocky-9-x64-server
+- ubuntu-20.04-x64-server
 - ubuntu-22.04-x64-server
 - win10-21h1-x64-enterprise
 - win11-23h2-x64-enterprise
 - win2012r2-server-x64
 - win2016-server-x64
 - win2019-server-x64
+- commando-vm (requires ansible role: badsectorlabs.ludus_commandovm)
+- flare-vm (requires ansible role: badsectorlabs.ludus_flarevm)
+- remnux (requires ansible role: badsectorlabs.ludus_remnux)
 
 ## Adding Templates to Ludus
 
@@ -81,6 +85,10 @@ Templates in Ludus must contain certain variables to function correctly.
 To create a new template, copy an [existing working template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates) and modify it as necessary.
 Templates for different Linux flavors and Windows are provided.
 While macOS VMs are supported by Ludus, their automated templating is not (see [Non-Automated OS Template Builds](#non-automated-os-template-builds)).
+
+Examples of community-contributed templates:
+
+- [Croko-fr ludus-templates](https://github.com/Croko-fr/ludus-templates)
 
 Every Ludus template is a packer file (`.pkr.hcl` and `.pkr.json` supported, but `.pkr.hcl` preferred), and any supporting files (resources, scripts, etc.).
 The template file MUST include the `.pkr.` portion of the file name to be recognized as valid by Ludus.
@@ -144,8 +152,7 @@ For best performance of VMs in Proxmox, it is recommended to set the following o
     disk_size         = "${var.vm_disk_size}"
     format            = "${var.proxmox_storage_format}"
     storage_pool      = "${var.proxmox_storage_pool}"
-    type              = "scsi"
-    ssd               = true
+    type              = "virtio"
     discard           = true # allows Proxmox to reclaim space when files are deleted
     io_thread         = true 
   }
@@ -179,9 +186,43 @@ Setting `cpu_type = "host"` in your template will essentially "pass through" the
 
 ### Non-Automated OS Template Builds
 
+:::note
+
+Templates must be in the `SHARED` pool to be accessible to all Ludus users
+
+:::
+
+#### Requirements
+
+Ludus uses remote management (WinRM and Powershell for windows, SSH and python3 for Linux/macOS) to do all the configuration of machines deployed from templates. Thus templates need to have a form of remote management (WinRM/SSH, with proper credentials) enabled and anything ansible needs (powershell for windows, python3 for linux/macOS) installed. Additionally, based on how ludus works, it expects templates to boot with DHCP enabled to get an IP to perform their initial configuration (i.e. getting a static IP set). If you have all those components set up in a VM you built by hand, and you power it off and convert it to a template, Ludus should be able to use that template in ranges without issue.
+
+Windows:
+
+- WinRM must be enabled
+- Powershell must be installed
+- DCHP must be enabled
+- `localuser:password` must be a local admin account
+
+Linux/macOS:
+
+- SSH must be enabled
+- python3 must be installed
+- sudo must be installed
+- DHCP must be enabled
+- `localuser:password` must be an account that has sudo permissions for all commands (`debian:debian` on debian for legacy reasons, see [group_vars](https://gitlab.com/badsectorlabs/ludus/-/tree/main/ludus-server/ansible/range-management/group_vars?ref_type=heads) for all expected credentials)
+
+
+#### Converting to Template
+
+To convert a VM to a template, power it off and in the Proxmox web UI, right click the VM, then click `Convert to template`.
+
+!['Converting a VM to a Template'](/img/templates/convert-to-template.png)
+
+#### Uploading ISOs
+
 To manually upload ISO files, click the datastore, then `ISO Images`, then `Upload`.
 
-!['The Ludus Network'](/img/templates/iso-upload.png)
+!['ISO Upload'](/img/templates/iso-upload.png)
 
 #### Windows 7
 

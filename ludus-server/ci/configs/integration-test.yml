@@ -4,10 +4,13 @@ ludus:
     template: win2022-server-x64-template
     vlan: 10
     ip_last_octet: 11
+    force_ip: true
     ram_gb: 6
     cpus: 4
     windows:
       sysprep: true
+      autologon_user: superadmin
+      autologon_password: password123
     domain:
       fqdn: ludus.domain
       role: primary-dc
@@ -72,9 +75,24 @@ ludus:
     template: kali-x64-desktop-template
     vlan: 99
     ip_last_octet: 1
-    ram_gb: 6
+    ram_gb: 4
     cpus: 2
     linux: true
+    testing:
+      snapshot: false
+      block_internet: false
+
+  - vm_name: "{{ range_id }}-kali-2"
+    hostname: "{{ range_id }}-kali-2"
+    template: kali-x64-desktop-template
+    vlan: 99
+    ip_last_octet: 2
+    ram_gb: 4
+    cpus: 2
+    linux:
+      packages:
+        - curl
+        - netexec
     testing:
       snapshot: false
       block_internet: false
@@ -142,9 +160,37 @@ network:
       protocol: tcp
       ports: 22
       action: REJECT
+    - name: Block all traffic from a specific WG client to a vlan
+      vlan_src: wireguard
+      ip_last_octet_src: 12
+      vlan_dst: 20
+      protocol: all
+      ports: all
+      action: REJECT
+    - name: Block tcp traffic from a specific WG clients to a vlan
+      vlan_src: wireguard
+      ip_last_octet_src: 12-15
+      vlan_dst: 30
+      protocol: tcp
+      ports: all
+      action: REJECT
+    - name: Block all traffic from a specific IP to any wireguard client
+      vlan_src: 10
+      ip_last_octet_src: 11
+      vlan_dst: wireguard
+      protocol: all
+      ports: all
+      action: REJECT
+
+router:
+  vm_name: "{{ range_id }}-router"
+  hostname: "{{ range_id }}-router"
+  template: debian-11-x64-server-template
+  ram_gb: 2
+  ram_min_gb: 1
+  cpus: 2
 
 defaults:
-  router_vm_name: "{{ range_id }}-router-debian11-x64"
   snapshot_with_RAM: true
   stale_hours: 1
   ad_domain_functional_level: WinThreshold
@@ -154,3 +200,5 @@ defaults:
   ad_domain_user: john-doe
   ad_domain_user_password: password123
   ad_domain_safe_mode_password: P@ssword123
+  timezone: "America/Los_Angeles"
+  enable_dynamic_wallpaper: false

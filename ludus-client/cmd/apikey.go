@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	logger "ludus/logger"
 
@@ -17,6 +18,11 @@ var apiKeyCmd = &cobra.Command{
 keyring. This is implemented differently on different OS's but
 is more secure than writing unencrypted to a file.`,
 	Run: func(cmd *cobra.Command, args []string) {
+
+		// Check if LUDUS_API_KEY is already set in environment
+		if envKey := os.Getenv("LUDUS_API_KEY"); envKey != "" {
+			logger.Logger.Fatal("LUDUS_API_KEY environment variable is already set. No need to store in system keyring.")
+		}
 
 		logger.Logger.Info(fmt.Sprintf("Enter your Ludus API Key for %s: ", url))
 		fmt.Scanln(&apiKey)

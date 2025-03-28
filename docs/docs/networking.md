@@ -28,20 +28,23 @@ Ludus user routers are assigned a static IP in this network where their range nu
 
 #### Reserved IPs in the NAT'd Network
 
-If the Nexus cache server was created by a Ludus admin, it has a static IP of `192.0.2.2` in order to be available to all Ludus user's VMs.
+| IP | Description |
+| --- | --- |
+| 192.0.2.2 | Nexus cache server |
+| 192.0.2.3 | Ludus share server |
 
 The remaining 49 IPs in the `.1 - .50` range are reserved for future use.
 
 ### CI/CD Network (ludusci)
 
-If the Ludus admin has set up [CI/CD](cicd), the CI/CD network is `203.0.113.0/24` on interface `ludusci`. This network is necessary because the CI/CD Ludus VMs will themselves set up a `vmbr1000` with a range of `192.0.2.0/24` which would conflict with the "public" IP of the CI/CD Ludus VM if it was in the host's `vmbr1000` (a DHCP'd `192.0.2.50-100` IP).
+If the Ludus admin has set up [CI/CD](./developers/cicd.md), the CI/CD network is `203.0.113.0/24` on interface `ludusci`. This network is necessary because the CI/CD Ludus VMs will themselves set up a `vmbr1000` with a range of `192.0.2.0/24` which would conflict with the "public" IP of the CI/CD Ludus VM if it was in the host's `vmbr1000` (a DHCP'd `192.0.2.50-100` IP).
 
 ## User Networks
 
 Ludus assigns a unique Linux bridge interface in Proxmox to each user which is capable of supporting 255 VLANs (1-255). The user's `vmbr` number is 1000 + their Ludus range number (e.g. a Ludus user with range number 2 would have `vmbr1002`).
-This interface can be thought of conceptually as a virtual switch.
+This interface can be thought of conceptually as a virtual switch. If you wish to capture packets on this interface see [Packet Capture](#packet-capture).
 
-All user networks are /24 with the format `10.{{ ludus range number }}.{{ VLAN }}.{{ ip_last_octet }}`. Because all user networks are within 10.0.0.0/8, admins deploying Ludus into a network within 10.0.0.0/8 will need to avoid issuing users with a range number that overlaps the existing range. As range numbers are issued sequentially, it is up to the Ludus admin to recognize this conflict and create a dummy user for any 10.0.0.0/16 networks that overlap with the network Ludus itself is deploy into. For example, if the Ludus server itself has an IP of 10.10.0.123, the tenth created user will cause routing issues if the user is also on the 10.10.0.0/16 network. This user should be created as a dummy user and not an actual user of Ludus.
+All user networks are /16 with VLANs of /24 in the format `10.{{ ludus range number }}.{{ VLAN }}.{{ ip_last_octet }}`. Because all user networks are within 10.0.0.0/8, admins deploying Ludus into a network within 10.0.0.0/8 will need to avoid issuing users with a range number that overlaps the existing range. Ludus admins should set the `reserved_range_numbers` array in `/opt/ludus/config.yml` for any networks that would conflict. For example, if the Ludus server itself has an IP of 10.10.0.123, the tenth created user will cause routing issues if the user is also on the 10.10.0.0/16 network. The admin should set `reserved_range_numbers: [10]` to prevent this.
 
 VMs are limited to a single network interface when deployed with Ludus.
 
@@ -74,9 +77,14 @@ Two keys exists to set the default for traffic leaving the network: `external_de
 
 Rules can act on entire vlans by not defining `ip_last_octet_src` or `ip_last_octet_dst`, ranges of machines `ip_last_octet_src: 21-25`, or single machines `ip_last_octet_src: 21`.
 
-`vlan_dst` can accept the special value `public` which allows traffic to the internet, but not other VLANs. This is useful for cases where the `external_default` is `REJECT`.
+`vlan_src` and `vlan_dst` can accept the special values:
+ - `public` which allows traffic to the internet, but not other VLANs. This is useful for cases where the `external_default` is `REJECT`. In the rule this is converted to `! 10.ID.0.0/16`.
+ - `all` which is all VLANs, and is converted to `10.ID.0.0/16` in the rule.
+ - `wireguard` which is the wireguard users subnet. This is converted to `198.51.100.0/24` unless an `ip_last_octet_[src|dst]` is defined.
 
 The `ports` key is optional, and if omitted `all` is assumed. A range of ports can be defined using the `start:end` syntax. These values should be quoted to avoid yaml interpreting them as hex values.
+
+All user defined rules are added to the `LUDUS_USER_RULES` chain except rules that use `wireguard` as a vlan src or dst; those are applied to the `LUDUS_DEFAULTS` chain so they can override the default WireGuard client access rule or any access grant rules. Rules with `wireguard` as a vlan src or dst will take priority over testing mode rules, but since they only operate against hosts in the 198.51.100.0/24 range, this should not cause any issue.
 
 :::note
 
@@ -90,6 +98,9 @@ An example of a different types of user defined firewall rules are listed below.
 network:
   external_default: ACCEPT
   inter_vlan_default: REJECT
+  wireguard_vlan_default: ACCEPT
+  always_blocked_networks:
+    - 192.168.1.0/24
   rules:
     - name: Only allow TCP 443 from VLAN 10 to VLAN 20
       vlan_src: 10
@@ -139,6 +150,57 @@ network:
       protocol: tcp
       ports: "8080:8088"
       action: ACCEPT
+    - name: Block all traffic from a specific WG client to a vlan
+      vlan_src: wireguard
+      ip_last_octet_src: 12
+      vlan_dst: 20
+      protocol: all
+      ports: all
+      action: REJECT
+    - name: Block tcp traffic from a specific WG clients to a vlan
+      vlan_src: wireguard
+      ip_last_octet_src: 12-15
+      vlan_dst: 30
+      protocol: tcp
+      ports: all
+      action: REJECT
+    - name: Block all traffic from a specific IP to any wireguard client
+      vlan_src: 10
+      ip_last_octet_src: 11
+      vlan_dst: wireguard
+      protocol: all
+      ports: all
+      action: REJECT
 ```
 
-See more details about the range config schema (which includes the network object) [here](https://docs.ludus.cloud/docs/configuration).
+See more details about the range config schema (which includes the network object) [here](./configuration).
+
+## Testing Mode
+
+Each range has a Debian based router/firewall VM.
+This VM controls how traffic is routed between VLANs/subnets in the range as well as traffic out of the range to other networks/the internet.
+The router uses `iptables` to control traffic flow, using three custom chains in the filter table.
+Note that the FORWARD chain, which controls traffic from outside the router with a destination that is not the route itself has a policy of `DROP` meaning that if no rule matches the traffic will not be forwarded.
+This is a "deny by default" policy, and prevents accidental traffic from leaving the range in the event that IP addresses change or machines are added while testing mode is enabled.
+
+!['iptables diagram'](/img/network/iptables.png)
+
+For the default [basic AD network](./environment-guides/basic-ad-network), when not in testing mode the iptables filter table has the following rules.
+
+!['iptables not in testing'](/img/network/iptables-screenshot-not-testing.png)
+
+When testing mode is enabled, and the user has allowed `example.com` and `8.8.8.8`, the iptables filter table has the following rules.
+
+!['iptables in testing'](/img/network/iptables-screenshot-testing.png)
+
+## Packet Capture
+
+By default, the bridge interfaces in Proxmox are MAC aware, which means they will "learn" which MACs are on which "ports" and only send traffic for a MAC to its "port." This means that VMs on the same VLAN only see traffic destined for their MAC (and broadcast) by default. If you wish to use some type of packet capture appliance like Zeek or Suricata, the `bridge-ageing` parameter needs to be set to `0` on the Proxmox host for the bridge interface of the range. This effectively turns the bridge interface into a hub, where all traffic on a VLAN is sent to all machines.
+
+To complete this step, open up a shell to your proxmox host and enter the following commands:
+
+`brctl setageing vmbr10XX 0` where `vmbr10XX` is the Linux bridge for your Ludus range (1000 + range number/range second octet)
+
+You can confirm this settings with the `ip -d link show vmbr10XX` command which should show `ageing_time 0`.
+
+To make this change persist reboots of the Ludus server, add `bridge-ageing 0` to the options for the interface in `/etc/network/interfaces`

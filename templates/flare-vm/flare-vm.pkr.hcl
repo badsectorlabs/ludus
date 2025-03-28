@@ -14,11 +14,6 @@ variable "iso_url" {
   default = "https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66751/22621.525.220925-0207.ni_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso"
 }
 
-variable "iso_storage_pool" {
-  type    = string
-  default = "local"
-}
-
 variable "vm_cpu_cores" {
   type    = string
   default = "2"
@@ -75,6 +70,9 @@ variable "proxmox_skip_tls_verify" {
 variable "proxmox_pool" {
   type = string
 }
+variable "iso_storage_pool" {
+  type = string
+}
 variable "ansible_home" {
   type = string
 }
@@ -126,7 +124,7 @@ source "proxmox-iso" "flare-vm" {
   # Required for Win11
   bios = "ovmf"
   efi_config {
-    efi_storage_pool  = "local"
+    efi_storage_pool  = "${var.proxmox_storage_pool}"
     pre_enrolled_keys = true
     efi_type          = "4m"
   }
@@ -140,8 +138,7 @@ source "proxmox-iso" "flare-vm" {
     disk_size         = "${var.vm_disk_size}"
     format            = "${var.proxmox_storage_format}"
     storage_pool      = "${var.proxmox_storage_pool}"
-    type              = "scsi"
-    ssd               = true
+    type              = "virtio"
     discard           = true
     io_thread         = true
   }
@@ -196,6 +193,7 @@ build {
     ]
     ansible_env_vars = ["ANSIBLE_HOME=${var.ansible_home}", "ANSIBLE_LOCAL_TEMP=${var.ansible_home}/tmp", "ANSIBLE_REMOTE_TEMP=${var.ansible_home}/remote_tmp", "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR=${var.ansible_home}/pc", "ANSIBLE_SSH_CONTROL_PATH_DIR=${var.ansible_home}/cp"]
     skip_version_check = true # Due to https://github.com/hashicorp/packer-plugin-ansible/issues/157
+    timeout = "4h"
   }
 
 }

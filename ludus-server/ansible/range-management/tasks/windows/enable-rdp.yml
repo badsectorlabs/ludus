@@ -16,10 +16,14 @@
   community.windows.win_firewall_rule:
     group: "Remote Desktop"
     enabled: true
-  when: firewall_service_running
+  when:
+    - firewall_service_running is defined
+    - firewall_service_running
 
 - name: Ensure Remote Desktop Group rules are enabled 2
   community.windows.win_firewall_rule:
     group: "@FirewallAPI.dll,-28752" # See https://github.com/ansible-collections/community.windows/issues/495
     enabled: true
-  when: firewall_service_running
+  when:
+    - firewall_service_running is defined
+    - firewall_service_running

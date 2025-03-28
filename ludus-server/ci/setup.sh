@@ -19,6 +19,8 @@ if [ -z "$GITLAB_TOKEN" ] || [ -z "$GITLAB_URL" ]; then
   exit 1
 fi
 
+ansible-galaxy role install gantsign.golang
+
 # Export variables needed for dynamic inventory
 export PROXMOX_URL=https://127.0.0.1:8006/
 export PROXMOX_NODE=ludus

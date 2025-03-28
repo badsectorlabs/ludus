@@ -1,9 +1,0 @@
-{
-    "label": "👷 Developers",
-    "position": 4,
-    "link": {
-        "type": "generated-index",
-        "description": "Guides for developers working on Ludus itself, templates, or ansible roles for Ludus.",
-        "slug": "category/developers"
-    }
-}

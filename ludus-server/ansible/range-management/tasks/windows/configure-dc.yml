@@ -76,17 +76,98 @@
     - "wevtutil el | Select-String -notmatch \"Microsoft-Windows-LiveId\" | Foreach-Object {wevtutil cl \"$_\"}"
     - "Set-SmbServerConfiguration -AuditSmb1Access $true -Force"
 
-- name: Disable Telemetry
-  ansible.windows.win_shell: ".\\disable-telemetry.ps1"
-  args:
-    chdir: 'c:\ludus\scripts'
-  register: disable_telemetry
-
 - name: Disable password complexity
   community.windows.win_security_policy:
     section: System Access
     key: PasswordComplexity
     value: 0
+
+# Well known SIDs
+# https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
+#
+#   Domain Admins                     :     {{ domain_sid }}-512
+#   Remote Desktop Users              :     S-1-5-32-555
+#   Enterprise Admins                 :     {{ domain_sid }}-519
+#   Schema Admins                     :     {{ domain_sid }}-518
+#   Group Policy Creator Owners       :     {{ domain_sid }}-520
+
+- name: Get the domain SID for this domain
+  ansible.windows.win_shell: |
+    (Get-ADDomain).DomainSID.Value
+  register: domain_sid_command
+
+- name: Set the domain SID
+  ansible.builtin.set_fact:
+    domain_sid: "{{ domain_sid_command.stdout | trim }}"
+
+- name: Debug Domain SID
+  ansible.builtin.debug:
+    var: domain_sid
+
+- name: Gather Domain Admins group name by SID (multilingual)
+  ansible.windows.win_shell: |
+    (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-512'").Name
+  register: domain_admins_group_name_command
+
+- name: Set the Domain Admins group name
+  ansible.builtin.set_fact:
+    domain_admins_group_name: "{{ domain_admins_group_name_command.stdout | trim }}"
+
+- name: Debug Domain Admins group name
+  ansible.builtin.debug:
+    var: domain_admins_group_name
+
+- name: Gather Remote Desktop Users group name (multilingual)
+  ansible.windows.win_shell: |
+    (Get-WmiObject win32_group -Filter "SID='S-1-5-32-555'").Name
+  register: rdp_users_group_name_command
+
+- name: Set the Remote Desktop Users group name
+  ansible.builtin.set_fact:
+    rdp_users_group_name: "{{ rdp_users_group_name_command.stdout | trim }}"
+
+- name: Debug Remote Desktop Users group name
+  ansible.builtin.debug:
+    var: rdp_users_group_name
+
+- name: Gather Enterprise Admins group name (multilingual)
+  ansible.windows.win_shell: |
+    (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-519'").Name
+  register: enterprise_admins_group_name_command
+
+- name: Set the Enterprise Admins group name
+  ansible.builtin.set_fact:
+    enterprise_admins_group_name: "{{ enterprise_admins_group_name_command.stdout | trim }}"
+
+- name: Debug Enterprise Admins group name
+  ansible.builtin.debug:
+    var: enterprise_admins_group_name
+
+- name: Gather Schema Admins group name (multilingual)
+  ansible.windows.win_shell: |
+    (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-518'").Name
+  register: schema_admins_group_name_command
+
+- name: Set the Schema Admins group name
+  ansible.builtin.set_fact:
+    schema_admins_group_name: "{{ schema_admins_group_name_command.stdout | trim }}"
+
+- name: Debug Schema Admins group name
+  ansible.builtin.debug:
+    var: schema_admins_group_name
+
+- name: Gather Group Policy Creator Owners group name (multilingual)
+  ansible.windows.win_shell: |
+    (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-520'").Name
+  register: gpo_creators_group_name_command
+
+- name: Set the Group Policy Creator Owners group name
+  ansible.builtin.set_fact:
+    gpo_creators_group_name: "{{ gpo_creators_group_name_command.stdout | trim }}"
+
+- name: Debug Group Policy Creator Owners group name
+  ansible.builtin.debug:
+    var: gpo_creators_group_name
 
 - name: Create a domain user
   microsoft.ad.user:
@@ -98,7 +179,7 @@
     password_never_expires: true
     groups:
       add:
-        - Remote Desktop Users
+        - "{{ rdp_users_group_name }}"  # Remote Desktop Users
 
 - name: Create a Domain Admin user
   microsoft.ad.user:
@@ -110,8 +191,11 @@
     password_never_expires: true
     groups:
       add:
-        - Domain Admins
-        - Remote Desktop Users
+        - "{{ domain_admins_group_name }}"       # Domain Admins
+        - "{{ rdp_users_group_name }}"           # Remote Desktop Users
+        - "{{ enterprise_admins_group_name }}"   # Enterprise Admins
+        - "{{ schema_admins_group_name }}"       # Schema Admins
+        - "{{ gpo_creators_group_name }}"        # Group Policy Creator Owners
 
 - name: Allow the domain user and domain admin to RDP
   ansible.windows.win_user_right:
@@ -120,3 +204,8 @@
       - "{{ netbios_name }}\\{{ defaults.ad_domain_user }}"
       - "{{ netbios_name }}\\{{ defaults.ad_domain_admin }}"
     action: add
+
+- name: Set the DNS Cache time to 2 seconds (helps DNS blocks at the router be more effective)
+  ansible.windows.win_shell: |
+    Set-DnsServerCache -MaxTTL 00:00:02
+

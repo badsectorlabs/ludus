@@ -36,7 +36,11 @@ var testingStatusCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		responseJSON, success := rest.GenericGet(client, "/range")
+		if userID == "" {
+			userID = strings.Split(apiKey, ".")[0]
+		}
+
+		responseJSON, success := rest.GenericGet(client, fmt.Sprintf("/range?userID=%s", userID))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -284,7 +288,7 @@ func testingAllowDenyCmd(use, short, long string) *cobra.Command {
 
 			var responseJSON []byte
 			var success bool
-			if userID == "" {
+			if userID != "" {
 				responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/testing/%s?userID=%s", use, userID), string(payload))
 			} else {
 				responseJSON, success = rest.GenericJSONPost(client, "/testing/"+use, string(payload))
@@ -318,7 +322,7 @@ func setupTestingDenyCmd(command *cobra.Command) {
 
 var testingUpdateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update a VM or group of VMs",
+	Short: "Perform a Windows update on a VM or group of VMs",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
@@ -333,7 +337,7 @@ var testingUpdateCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID == "" {
+		if userID != "" {
 			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/testing/update?userID=%s", userID), string(payload))
 		} else {
 			responseJSON, success = rest.GenericJSONPost(client, "/testing/update", string(payload))
@@ -346,7 +350,7 @@ var testingUpdateCmd = &cobra.Command{
 }
 
 func setupTestingUpdateCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&name, "name", "n", "", "A VM name (JD-win10-21h2-enterprise-x64-1) or group name (JD_windows_endpoints) to update")
+	command.Flags().StringVarP(&name, "name", "n", "", "A VM name (JD-win10-21h2-enterprise-x64-1) or group name (JD_windows_endpoints) to update with Windows Update")
 	_ = command.MarkFlagRequired("name")
 }
 

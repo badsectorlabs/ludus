@@ -1,6 +1,6 @@
 - name: Get the VM id of the router via Proxmox API
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ defaults.router_vm_name }}").vmid'
+    curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ router.vm_name | default(range_id + '-router-debian11-x64') }}").vmid'
   register: router_id_command
   when: router_vm_id is not defined
 
@@ -107,14 +107,14 @@
           address 10.{{ range_second_octet }}.{{ item }}.254/24
           post-up   iptables -t nat -A POSTROUTING -s '10.{{ range_second_octet }}.{{ item }}.0/24' ! -d {{ wg_server_allowed_ips }} -o {{ router_external_interface }} -j MASQUERADE
           post-down iptables -t nat -D POSTROUTING -s '10.{{ range_second_octet }}.{{ item }}.0/24' ! -d {{ wg_server_allowed_ips }} -o {{ router_external_interface }} -j MASQUERADE
-  delegate_to: "{{ defaults.router_vm_name }}"
+  delegate_to: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
   become: true
   register: interfaces_status
   when: network_add is changed
 
 - name: Enable new interface
   ansible.builtin.shell: ifup {{ hostvars['localhost']['interface_name'] }}
-  delegate_to: "{{ defaults.router_vm_name }}"
+  delegate_to: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
   become: true
   when: interfaces_status is changed
 
@@ -122,7 +122,7 @@
   ansible.builtin.template:
     src: router-dnsmasq.conf.j2
     dest: /etc/dnsmasq.d/dnsmasq-{{ hostvars['localhost']['interface_name'] }}.conf
-  delegate_to: "{{ defaults.router_vm_name }}"
+  delegate_to: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
   become: true
   when: interfaces_status is changed
 
@@ -131,6 +131,6 @@
     name: dnsmasq
     enabled: true
     state: restarted
-  delegate_to: "{{ defaults.router_vm_name }}"
+  delegate_to: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
   become: true
   when: interfaces_status is changed

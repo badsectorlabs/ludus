@@ -69,7 +69,7 @@ if [[ $ACTION == "run" ]]; then
 
     echo "Deploying ranges..."
 
-    # Loop through user IDs from 1 to 30
+    # Loop through user IDs
     for user_id in $(seq ${NUMBER_OF_USERS}); do
         # Wait for a running task to finish if there are already 3 running
         while [ ${#RUNNING_TASKS[@]} -ge ${NUMBER_OF_CONCURRENT_DEPLOYS} ]; do
@@ -81,6 +81,13 @@ if [[ $ACTION == "run" ]]; then
             done
             sleep 5
         done
+
+        # Check if the current user has a range that is at SUCCESS already
+        check_status $user_id
+        if [[ "$status" == "SUCCESS" ]]; then
+            echo "User ID: ${USER_PREFIX}${user_id} already has a range at SUCCESS, skipping"
+            continue
+        fi
 
         # Start a new task
         LUDUS_API_KEY=${ADMIN_API_KEY} ludus range config set -f stress-test-config.yml --url ${URL_FOR_LUDUS_TESTS} --user ${USER_PREFIX}${user_id}
@@ -107,7 +114,7 @@ elif [[ $ACTION == "destroy" ]]; then
     sleep 3
     echo "Destroying ranges..."
 
-    # Loop through user IDs from 1 to 30
+    # Loop through user IDs
     for user_id in $(seq ${NUMBER_OF_USERS}); do
         # Wait for a running task to finish if there are already 3 running
         while [ ${#RUNNING_TASKS[@]} -ge ${NUMBER_OF_CONCURRENT_DEPLOYS} ]; do

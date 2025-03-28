@@ -46,12 +46,24 @@
 #       Get-NetAdapterBinding -ComponentID ms_tcpip6 | ForEach-Object {Disable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6}
 #       reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters" /v DisabledComponents /t REG_DWORD /d 255 /f
 
-- name: Set DNS (Windows)
+- name: Check if machine is domain joined
+  ansible.windows.win_shell: |
+    (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
+  register: domain_check
+  when: dns_server is defined
+
+- name: Set DNS skip_dns_change fact
+  ansible.builtin.set_fact:
+    skip_dns_change: "{{ domain_check.stdout | trim == 'True' }}"
+  when: dns_server is defined
+
+# We only set the DNS server is not domain joined as things like GOAD set up domains outside of Ludus
+- name: Set DNS (Windows) if not domain joined
   ansible.windows.win_dns_client:
     adapter_names: '*'
     dns_servers:
       - "{{ dns_server }}"
-  when: ansible_os_family == "Windows" and dns_server is defined
+  when: dns_server is defined and not skip_dns_change
 
 - name: Get bginfo.exe if needed
   run_once: true
@@ -94,15 +106,106 @@
     dest: C:\ludus\background\bginfo.exe
   when: not bginfo_stat.stat.exists
 
-- name: Install bginfo
-  ansible.windows.win_powershell:
-    script: |
-      Set-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run -Name bginfo -Value 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File "C:\ludus\background\set-bg.ps1"'
-      Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name TileWallpaper -Value '0' # fitted bg
-      Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name WallpaperStyle -Value '10' # stretch
+- name: Check Run key for background script
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+    name: bginfo
+  register: bginfo_run_key_stat
 
-- name: Disable Telemetry
-  ansible.windows.win_shell: ".\\disable-telemetry.ps1"
-  args:
-    chdir: 'c:\ludus\scripts'
-  register: disable_telemetry
+- name: Install bginfo Run key (if key does not exist)
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+    name: bginfo
+    data: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File "C:\ludus\background\set-bg.ps1"'
+    state: present
+  when: not bginfo_run_key_stat.exists and defaults.enable_dynamic_wallpaper
+
+- name: Set desktop wallpaper settings (if key does not exist)
+  ansible.windows.win_regedit:
+    path: HKCU:\Control Panel\Desktop
+    name: TileWallpaper
+    data: '0'
+    state: present
+  when: not bginfo_run_key_stat.exists and defaults.enable_dynamic_wallpaper
+
+- name: Set desktop wallpaper style (if key does not exist)
+  ansible.windows.win_regedit:
+    path: HKCU:\Control Panel\Desktop
+    name: WallpaperStyle
+    data: '10'
+    state: present
+  when: not bginfo_run_key_stat.exists and defaults.enable_dynamic_wallpaper
+
+# Now that we have GPO for this, we shouldn't do this by default
+# - name: Disable Telemetry
+#   ansible.windows.win_shell: ".\\disable-telemetry.ps1"
+#   args:
+#     chdir: 'c:\ludus\scripts'
+#   register: disable_telemetry
+
+- name: Create Microsoft Edge Policies registry key
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Edge
+    state: present
+
+- name: Disable Microsoft Edge First Run window
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Edge
+    name: HideFirstRunExperience
+    data: 1
+    type: dword
+    state: present
+
+# Disable Chrome first run popup
+- name: Create Google Chrome Policies registry key
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    state: present
+
+- name: Disable Chrome promotional tabs
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PromotionalTabsEnabled
+    data: 0
+    type: dword
+    state: present
+
+- name: Disable Chrome promotions
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PromotionsEnabled
+    data: 0
+    type: dword
+    state: present
+
+- name: Disable Chrome Privacy Sandbox prompt
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PrivacySandboxPromptEnabled
+    data: 0
+    type: dword
+    state: present
+
+- name: Disable Chrome Privacy Sandbox ad measurement
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PrivacySandboxAdMeasurementEnabled
+    data: 0
+    type: dword
+    state: present
+
+- name: Disable Chrome Privacy Sandbox ad topics
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PrivacySandboxAdTopicsEnabled
+    data: 0
+    type: dword
+    state: present
+
+- name: Disable Chrome Privacy Sandbox site enabled ads
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    name: PrivacySandboxSiteEnabledAdsEnabled
+    data: 0
+    type: dword
+    state: present

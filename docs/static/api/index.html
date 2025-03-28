@@ -20,7 +20,7 @@
           "openapi" : "3.0.3",
           "info" : {
             "description" : "This API controls Ludus user management, range deployment, power state, and testing state.",
-            "version" : "1.0.0",
+            "version" : "1.9.0",
             "title" : "Ludus API",
             "license" : {
               "name" : "GNU AGPLv3",
@@ -52,6 +52,12 @@
           }, {
             "name" : "Ansible Management",
             "description" : "Actions to manage Ansible roles and collections on the ludus host"
+          }, {
+            "name" : "Anti-Sandbox Management",
+            "description" : "Actions to manage the use of the Anti-Sandbox plugin"
+          }, {
+            "name" : "Snapshot Management",
+            "description" : "Actions to manage snapshots"
           } ],
           "paths" : {
             "/" : {
@@ -120,6 +126,10 @@
                               "type" : {
                                 "type" : "string",
                                 "example" : "role"
+                              },
+                              "global" : {
+                                "type" : "boolean",
+                                "example" : false
                               }
                             }
                           }
@@ -168,6 +178,10 @@
                           "action" : {
                             "type" : "string",
                             "example" : "install"
+                          },
+                          "global" : {
+                            "type" : "boolean",
+                            "example" : false
                           }
                         }
                       }
@@ -428,7 +442,7 @@
                 "tags" : [ "User Management" ],
                 "summary" : "List user details",
                 "operationId" : "listUser",
-                "description" : "By passing in the appropriate options, you can search for\navailable users in Ludus\n",
+                "description" : "Get a single user object (default: the caller's). Specify a specific user to get with the userID query parameter. To get all users, the caller must be an admin and must use the /user/all endpoint.\n",
                 "parameters" : [ {
                   "in" : "query",
                   "name" : "userID",
@@ -672,7 +686,7 @@
                 "tags" : [ "User Management" ],
                 "summary" : "Reset and retrieve the Ludus API key for a user",
                 "operationId" : "getAPIKey",
-                "description" : "Reset and return the API key for the user specified in the query (admins only)\n",
+                "description" : "Reset and return the API key for the user specified in the query. By default this will reset the caller's API key. To reset a specific user's API key, specify their userID using the query parameter userID.\n",
                 "parameters" : [ {
                   "in" : "query",
                   "name" : "userID",
@@ -978,6 +992,19 @@
                 "summary" : "Update the range configuration",
                 "operationId" : "putConfig",
                 "description" : "Updates the range configuration with the provided yaml file\n",
+                "parameters" : [ {
+                  "in" : "query",
+                  "name" : "userID",
+                  "description" : "pass an optional userID to query. \nDefaults to the user's range (admins can query other ranges)\n",
+                  "schema" : {
+                    "properties" : {
+                      "userID" : {
+                        "$ref" : "#/components/schemas/userID"
+                      }
+                    }
+                  },
+                  "required" : false
+                } ],
                 "requestBody" : {
                   "content" : {
                     "multipart/form-data" : {
@@ -1342,6 +1369,11 @@
                             "type" : "string",
                             "example" : "JS",
                             "description" : "the userID of the user that will be gaining/losing access"
+                          },
+                          "force" : {
+                            "type" : "boolean",
+                            "example" : false,
+                            "description" : "force the access action even if the target router is inaccessible"
                           }
                         }
                       }
@@ -1803,6 +1835,187 @@
                 }
               }
             },
+            "/antisandbox/enable" : {
+              "post" : {
+                "tags" : [ "Anti-Sandbox Management" ],
+                "summary" : "Enable anti-sandbox for a VM or multiple VMs (enterprise)",
+                "operationId" : "antiSandboxEnable",
+                "description" : "Modifieds the given VM names or VM IDs to not look like virtualized\nsandbox hosts. (Enterrpise and Windows only)\n",
+                "parameters" : [ {
+                  "in" : "query",
+                  "name" : "userID",
+                  "description" : "pass an optional userID to act on behalf of. Only admins can provide userIDs that are not their own.\n",
+                  "required" : false,
+                  "schema" : {
+                    "properties" : {
+                      "userID" : {
+                        "$ref" : "#/components/schemas/userID"
+                      }
+                    }
+                  }
+                } ],
+                "requestBody" : {
+                  "content" : {
+                    "application/json" : {
+                      "schema" : {
+                        "type" : "object",
+                        "properties" : {
+                          "vmIDs" : {
+                            "type" : "string",
+                            "example" : "104,105",
+                            "description" : "VM IDs or names to enable anti-sandbox"
+                          },
+                          "registeredOwner" : {
+                            "type" : "string",
+                            "example" : "Acme Corp IT",
+                            "description" : "The string to use as the \"RegisteredOwner\" at HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
+                          },
+                          "registeredOrganization" : {
+                            "type" : "string",
+                            "example" : "Acme Corp",
+                            "description" : "The string to use as the \"RegisteredOrganization\" at HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
+                          },
+                          "vendor" : {
+                            "type" : "string",
+                            "enum" : [ "Dell" ],
+                            "description" : "The computer vendor to use for all hardware values (currently only Dell is supported)"
+                          },
+                          "dropFiles" : {
+                            "type" : "boolean",
+                            "example" : true,
+                            "description" : "If true, will drop a random assortment of files on the autologon_user's desktop and in the autologon_user's download folder (default false)"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses" : {
+                  "200" : {
+                    "description" : "Anti-sandbox process completed",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "success" : {
+                              "type" : "array",
+                              "items" : {
+                                "type" : "string",
+                                "example" : 104
+                              }
+                            },
+                            "errors" : {
+                              "type" : "array",
+                              "items" : {
+                                "type" : "object",
+                                "properties" : {
+                                  "item" : {
+                                    "type" : "string",
+                                    "example" : 105
+                                  },
+                                  "reason" : {
+                                    "type" : "string",
+                                    "example" : "Failed to get VM state no status found"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "500" : {
+                    "description" : "Error enabling anti-sandbox for VM(s)"
+                  }
+                }
+              }
+            },
+            "/antisandbox/install-custom" : {
+              "post" : {
+                "tags" : [ "Anti-Sandbox Management" ],
+                "summary" : "Install the custom QEMU/OMVF packages",
+                "operationId" : "antiSandboxInstallCustom",
+                "description" : "Installs the modified QEMU and OVMF packages that presents as Dell hardware (Enterprise only)\n",
+                "responses" : {
+                  "200" : {
+                    "description" : "Anti-sandbox install completed",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "result" : {
+                              "type" : "string",
+                              "example" : "Anti-Sandbox QEMU and OVMF installed - will take effect on VM's next power cycle"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "500" : {
+                    "description" : "Error installing anti-sandbox packages",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "Error installing custom OMVF, check /tmp/anti-sandbox-debug.log: ..."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "/antisandbox/install-standard" : {
+              "post" : {
+                "tags" : [ "Anti-Sandbox Management" ],
+                "summary" : "Install the standard QEMU/OMVF packages",
+                "operationId" : "antiSandboxInstallStandard",
+                "description" : "Installs the standard QEMU and OVMF packages (Enterprise only)\n",
+                "responses" : {
+                  "200" : {
+                    "description" : "Anti-sandbox install completed",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "result" : {
+                              "type" : "string",
+                              "example" : "Standard QEMU and OVMF installed - will take effect on VM's next power cycle"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "500" : {
+                    "description" : "Error installing anti-sandbox packages",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "error" : {
+                              "type" : "string",
+                              "example" : "Error installing standard OMVF, check /tmp/anti-sandbox-debug.log: ..."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
             "/templates" : {
               "get" : {
                 "tags" : [ "Template Management" ],
@@ -2253,6 +2466,281 @@
                   }
                 }
               }
+            },
+            "/snapshots/list" : {
+              "get" : {
+                "tags" : [ "Snapshot Management" ],
+                "summary" : "Get all snapshots for a range",
+                "operationId" : "getSnapshots",
+                "description" : "Returns a list of snapshots for a range\n",
+                "parameters" : [ {
+                  "in" : "query",
+                  "name" : "userID",
+                  "description" : "pass an optional userID to get the logs for. \nDefaults to the user's range (admins can query other ranges)\n",
+                  "required" : false,
+                  "schema" : {
+                    "properties" : {
+                      "userID" : {
+                        "$ref" : "#/components/schemas/userID"
+                      }
+                    }
+                  }
+                }, {
+                  "in" : "query",
+                  "name" : "vmids",
+                  "description" : "pass an optional comma separated list of VMIDs to get the snapshots for\n",
+                  "required" : false,
+                  "schema" : {
+                    "properties" : {
+                      "vmids" : {
+                        "type" : "string",
+                        "example" : "100,101"
+                      }
+                    }
+                  }
+                } ],
+                "responses" : {
+                  "200" : {
+                    "description" : "array of snapshots for a range",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "snapshots" : {
+                              "type" : "array",
+                              "items" : {
+                                "$ref" : "#/components/schemas/SnapshotInfo"
+                              }
+                            },
+                            "errors" : {
+                              "type" : "array",
+                              "items" : {
+                                "$ref" : "#/components/schemas/ErrorInfo"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "500" : {
+                    "description" : "error getting snapshots"
+                  }
+                }
+              }
+            },
+            "/snapshots/create" : {
+              "post" : {
+                "tags" : [ "Snapshot Management" ],
+                "summary" : "Take a snapshot of a VM or multiple VMs",
+                "operationId" : "snapshotsTake",
+                "description" : "Takes a snapshot of one or more VMs as specified by VMID(s)\n",
+                "parameters" : [ {
+                  "in" : "query",
+                  "name" : "userID",
+                  "description" : "pass an optional userID to act on behalf of. Only admins can provide userIDs that are not their own.\n",
+                  "required" : false,
+                  "schema" : {
+                    "properties" : {
+                      "userID" : {
+                        "$ref" : "#/components/schemas/userID"
+                      }
+                    }
+                  }
+                } ],
+                "requestBody" : {
+                  "content" : {
+                    "application/json" : {
+                      "schema" : {
+                        "$ref" : "#/components/schemas/SnapshotCreatePayload"
+                      }
+                    }
+                  }
+                },
+                "responses" : {
+                  "200" : {
+                    "description" : "snapshot success and error arrays",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "success" : {
+                              "type" : "array",
+                              "items" : {
+                                "type" : "integer",
+                                "example" : 179
+                              }
+                            },
+                            "errors" : {
+                              "type" : "array",
+                              "items" : {
+                                "$ref" : "#/components/schemas/ErrorInfo"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "500" : {
+                    "description" : "internal error creating snapshots"
+                  }
+                }
+              }
+            },
+            "/snapshots/rollback" : {
+              "post" : {
+                "tags" : [ "Snapshot Management" ],
+                "summary" : "Roll back to a snapshot of a VM or multiple VMs",
+                "operationId" : "snapshotsRollback",
+                "description" : "Rolls back one or more VMs as specified by VMID(s) to a specified snapshot\n",
+                "parameters" : [ {
+                  "in" : "query",
+                  "name" : "userID",
+                  "description" : "pass an optional userID to act on behalf of. Only admins can provide userIDs that are not their own.\n",
+                  "required" : false,
+                  "schema" : {
+                    "properties" : {
+                      "userID" : {
+                        "$ref" : "#/components/schemas/userID"
+                      }
+                    }
+                  }
+                } ],
+                "requestBody" : {
+                  "content" : {
+                    "application/json" : {
+                      "schema" : {
+                        "type" : "object",
+                        "properties" : {
+                          "name" : {
+                            "type" : "string",
+                            "description" : "Snapshot name",
+                            "example" : "My cool snapshot"
+                          },
+                          "vmids" : {
+                            "type" : "array",
+                            "items" : {
+                              "type" : "integer",
+                              "format" : "int32"
+                            },
+                            "description" : "Array of VMIDs to snapshot, if blank all VMs in the range will be snapshotted",
+                            "example" : [ 179, 180 ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses" : {
+                  "200" : {
+                    "description" : "snapshot success and error arrays",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "success" : {
+                              "type" : "array",
+                              "items" : {
+                                "type" : "integer",
+                                "example" : 179
+                              }
+                            },
+                            "errors" : {
+                              "type" : "array",
+                              "items" : {
+                                "$ref" : "#/components/schemas/ErrorInfo"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "500" : {
+                    "description" : "internal error rolling back snapshots"
+                  }
+                }
+              }
+            },
+            "/snapshots/remove" : {
+              "post" : {
+                "tags" : [ "Snapshot Management" ],
+                "summary" : "Delete a snapshot from a VM or multiple VMs",
+                "operationId" : "snapshotsRemove",
+                "description" : "Deletes a snapshot from one or more VMs as specified by VMID(s)\n",
+                "parameters" : [ {
+                  "in" : "query",
+                  "name" : "userID",
+                  "description" : "pass an optional userID to act on behalf of. Only admins can provide userIDs that are not their own.\n",
+                  "required" : false,
+                  "schema" : {
+                    "properties" : {
+                      "userID" : {
+                        "$ref" : "#/components/schemas/userID"
+                      }
+                    }
+                  }
+                } ],
+                "requestBody" : {
+                  "content" : {
+                    "application/json" : {
+                      "schema" : {
+                        "type" : "object",
+                        "properties" : {
+                          "name" : {
+                            "type" : "string",
+                            "description" : "Snapshot name",
+                            "example" : "My cool snapshot"
+                          },
+                          "vmids" : {
+                            "type" : "array",
+                            "items" : {
+                              "type" : "integer",
+                              "format" : "int32"
+                            },
+                            "description" : "Array of VMIDs to snapshot, if blank all VMs in the range will be snapshotted",
+                            "example" : [ 179, 180 ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses" : {
+                  "200" : {
+                    "description" : "snapshot success and error arrays",
+                    "content" : {
+                      "application/json" : {
+                        "schema" : {
+                          "type" : "object",
+                          "properties" : {
+                            "success" : {
+                              "type" : "array",
+                              "items" : {
+                                "type" : "integer",
+                                "example" : 179
+                              }
+                            },
+                            "errors" : {
+                              "type" : "array",
+                              "items" : {
+                                "$ref" : "#/components/schemas/ErrorInfo"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "500" : {
+                    "description" : "internal error creating snapshots"
+                  }
+                }
+              }
             }
           },
           "components" : {
@@ -2272,7 +2760,7 @@
               },
               "UserObject" : {
                 "type" : "object",
-                "required" : [ "name", "userID", "dateCreated", "dateLastActive", "isAdmin", "encryptedAPIKey", "proxmoxUsername" ],
+                "required" : [ "name", "userID", "isAdmin" ],
                 "properties" : {
                   "name" : {
                     "type" : "string",
@@ -2378,6 +2866,10 @@
                       "example" : "example.com"
                     }
                   },
+                  "rangeState" : {
+                    "type" : "string",
+                    "example" : "SUCCESS"
+                  },
                   "VMs" : {
                     "type" : "array",
                     "items" : {
@@ -2446,6 +2938,93 @@
                     "items" : {
                       "$ref" : "#/components/schemas/IP"
                     }
+                  }
+                }
+              },
+              "SnapshotInfo" : {
+                "type" : "object",
+                "properties" : {
+                  "name" : {
+                    "type" : "string",
+                    "description" : "Snapshot identifier. Value 'current' identifies the current VM",
+                    "example" : "My snapshot"
+                  },
+                  "includesRAM" : {
+                    "type" : "boolean",
+                    "description" : "1 if the snapshot includes RAM, 0 if it does not",
+                    "example" : true
+                  },
+                  "description" : {
+                    "type" : "string",
+                    "description" : "Description of the snapshot",
+                    "example" : "Took this snapshot before testing something"
+                  },
+                  "snaptime" : {
+                    "type" : "integer",
+                    "format" : "uint",
+                    "description" : "Snapshot creation time (unix)",
+                    "example" : 1740779020
+                  },
+                  "parent" : {
+                    "type" : "string",
+                    "description" : "Parent snapshot identifier",
+                    "example" : "Other snapshot"
+                  },
+                  "vmid" : {
+                    "type" : "integer",
+                    "format" : "int32",
+                    "description" : "The VMID of the VM",
+                    "example" : 179
+                  },
+                  "vmname" : {
+                    "type" : "string",
+                    "description" : "The name of the VM",
+                    "example" : "JD-ad-win11-22h2-enterprise-x64-1"
+                  }
+                }
+              },
+              "ErrorInfo" : {
+                "type" : "object",
+                "properties" : {
+                  "vmid" : {
+                    "type" : "integer",
+                    "format" : "int32",
+                    "description" : "The VMID of the VM",
+                    "example" : 180
+                  },
+                  "vmname" : {
+                    "type" : "string",
+                    "description" : "The name of the VM",
+                    "example" : "JD-ad-win11-22h2-enterprise-x64-2"
+                  },
+                  "error" : {
+                    "type" : "string",
+                    "description" : "Error message",
+                    "example" : "Error parsing VM ID abc: strconv.Atoi: parsing \"abc\": invalid syntax"
+                  }
+                }
+              },
+              "SnapshotCreatePayload" : {
+                "type" : "object",
+                "properties" : {
+                  "name" : {
+                    "type" : "string",
+                    "description" : "Snapshot name",
+                    "example" : "My cool snapshot"
+                  },
+                  "description" : {
+                    "type" : "string",
+                    "description" : "Snapshot Description",
+                    "example" : "Taking this snapshot before doing some testing"
+                  },
+                  "vmids" : {
+                    "type" : "array",
+                    "items" : {
+                      "type" : "integer",
+                      "format" : "int32"
+                    },
+                    "description" : "Array of VMIDs to snapshot, if blank all VMs in the range will be snapshotted",
+                    "example" : [ 179, 180 ]
                   }
                 }
               }

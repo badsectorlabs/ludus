@@ -1,0 +1,9 @@
+---
+- name: Import GPO PowerShell module
+  community.windows.win_psmodule:
+    name: GroupPolicy
+    state: present
+
+- name: Disable Windows Defender
+  ansible.builtin.include_tasks: disable_defender.yml
+  when: '"disable_defender" in enabled_gpos'

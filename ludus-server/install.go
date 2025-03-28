@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -43,7 +42,10 @@ func getInstallStep(existingProxmox bool) {
 		copy(fmt.Sprintf("%s/%s", ludusPath, exeName), installedBinaryPath)
 		chownFileToUsername(installedBinaryPath, "root")
 		os.Chmod(installedBinaryPath, 0711)
-		copy(fmt.Sprintf("%s/config.yml", ludusPath), fmt.Sprintf("%s/config.yml", ludusInstallPath))
+		// If the config file exists (was auto created or dropped by a user), copy it to the install path
+		if fileExists(fmt.Sprintf("%s/config.yml", ludusPath)) {
+			copy(fmt.Sprintf("%s/config.yml", ludusPath), fmt.Sprintf("%s/config.yml", ludusInstallPath))
+		}
 	}
 
 	if fileExists(fmt.Sprintf("%s/install/.stage-3-complete", ludusInstallPath)) {
@@ -55,67 +57,9 @@ func getInstallStep(existingProxmox bool) {
 		log.Println("Step 1 complete, running step 2. The machine will reboot at the end of this step.")
 	} else {
 		if interactiveInstall {
-			var yes string
-
-			configBytes, err := os.ReadFile("config.yml")
-			if err != nil {
-				log.Fatal(err)
-			}
-			configStr := string(configBytes)
-
-			if existingProxmox {
-				log.Printf("Using the following config:\n%s\n", configStr)
-				log.Print(`
-    ~~~ You are installing Ludus on an existing Proxmox 8 host - here be dragons ~~~
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!! Ludus will install: ansible, packer, dnsmasq, sshpass, curl, jq, iptables-persistent !!!
-!!!                     gpg-agent, dbus, dbus-user-session, and vim                      !!!
-!!! Ludus will install python packages: proxmoxer, requests, netaddr, pywinrm,           !!!
-!!!                                     dnspython, and jmespath                          !!!
-!!! Ludus will create the proxmox groups ludus_users and ludus_admins                    !!!
-!!! Ludus will create the proxmox pools SHARED and ADMIN                                 !!!
-!!! Ludus will create a wireguard server wg0 with IP range 198.51.100.0/24               !!!
-!!! Ludus will create an interface 'vmbr1000' with IP range 192.0.2.0/24 that NATs       !!!
-!!! Ludus will create user ranges with IPs in the 10.0.0.0/16 network                    !!!
-!!! Ludus will create user interfaces starting at vmbr1001 incrementing for each user    !!!
-!!! Ludus will create the pam user 'ludus' and pam users for all Ludus users added       !!!
-!!! Ludus will create the ludus-admin and ludus systemd services                         !!!
-!!! Ludus will listen on 127.0.0.1:8081 and 0.0.0.0:8080                                 !!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-Carefully consider the above block. If all items are compatible with your existing setup, you
-may continue. Ludus comes with NO WARRANTY and no guarantee your existing setup will continue
-to function. The Ludus install process will not reboot your host.
-
-If you wish to continue type 'I understand the risks': `)
-				r := bufio.NewReader(os.Stdin)
-				res, err := r.ReadString('\n')
-				if err != nil {
-					log.Fatal(err)
-				}
-				if strings.ToLower(strings.TrimSpace(res)) != "i understand the risks" {
-					log.Fatal("Exiting")
-				}
-			} else {
-				log.Printf("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
-				log.Println("!!! Only run Ludus install on a clean Debian 12 machine that will be dedicated to Ludus !!!")
-				log.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-
-				log.Printf("Using the following config:\n%s\n", configStr)
-
-				log.Print(`
-Ludus install will cause the machine to reboot twice. Install will continue
-automatically after each reboot. Check the progress of the install by running: 
-'ludus-install-status' from a root shell.
-	
-Do you want to continue? (y/N): `)
-				fmt.Scanln(&yes)
-				if yes != "Y" && yes != "y" {
-					log.Fatal("Exiting")
-				}
-			}
+			runInteractiveInstall(existingProxmox)
 		}
-		// We need to write the canary file if no on an existing proxmox install no matter if this is interactive or not
+		// We need to write the canary file if not on an existing proxmox install no matter if this is interactive or not
 		if !existingProxmox {
 			debainInstallFile, err := os.Create(fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath))
 			if err != nil {

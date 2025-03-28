@@ -29,8 +29,8 @@ Ludus is an automation overlay on top of Proxmox, not a 100% replacement for man
 Ludus is *only* compatible with virtualization capable Debian 12 or Proxmox 8. No other environments or hosting solutions will be supported.
 
 ### Requirements
-- x86_64 (aka amd64 aka 64-bit "Intel") CPU
-- A host capable of virtualization running Debian 12 or Proxmox 8 (e.g. "bare metal", Azure Dv3 and Ev3, AWS *.metal, [supported Google Cloud VMs](https://cloud.google.com/compute/docs/instances/nested-virtualization/managing-constraint))
+- x86_64 (aka amd64 aka 64-bit "Intel") CPU with a [Passmark](https://www.cpubenchmark.net/cpu_list.php) score > 6,000
+- A host capable of virtualization running Debian 12 or Proxmox 8 (e.g. "bare metal", Azure Dv3 and Ev3, AWS *.metal, [supported Google Cloud VMs](https://cloud.google.com/compute/docs/instances/nested-virtualization/managing-constraint) see [Deployment Options](./category/deployment-options))
 - at least 32GB RAM per user/range that will be deployed
 - at least 200GB storage for initial templates and at least 50GB per user/range that will be deployed (large, fast NVMe drives recommended)
 - no more than 150 users per Ludus host
@@ -40,6 +40,8 @@ Ludus is *only* compatible with virtualization capable Debian 12 or Proxmox 8. N
     - 1 public IP address
     - the ability to allow in arbitrary ports (i.e. port forwarding or control of the cloud firewall)
 
+Machines with lower specs than listed above may work, but are not tested/supported.
+
 ### User Quick Start
 
 If you are a Ludus user and your Ludus server has already been installed, getting started is easy!
@@ -48,4 +50,4 @@ If you are a Ludus user and your Ludus server has already been installed, gettin
 2. Download or compile the Ludus client
 3. Import and connect the WireGuard VPN
 4. Run `ludus apikey` and give it your API key
-5. Use the **[Ludus CLI](./cli)** to manage your range!
+5. Use the **[Ludus CLI](./cli.md)** to manage your range!

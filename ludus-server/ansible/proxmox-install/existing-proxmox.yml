@@ -8,6 +8,12 @@
     pve_interface: "{{ proxmox_interface | default(ansible_default_ipv4.interface) }}"
   serial: 1
   tasks:
+    - name: Setup ludus-install-status script
+      ansible.builtin.template:
+        src: ludus-install-status.sh.j2
+        dest: /usr/local/bin/ludus-install-status
+        mode: '0755'
+
     - name: Install bridge-utils, git, python3-pip, dnsmasq, jq, and other required packages
       ansible.builtin.apt:
         name:
@@ -126,6 +132,9 @@
             - "Datastore.AllocateSpace"
             - "Datastore.AllocateTemplate"
             - "Datastore.Audit"
+        - name: AccessNetwork
+          privileges:
+            - "Sys.AccessNetwork"
       pve_groups:
         - name: ludus_users
           comment: Ludus users
@@ -174,14 +183,34 @@
         - path: /
           roles: ["ResourceAudit"]
           groups: ["ludus_users"]
+        - path: "/storage/{{ proxmox_vm_storage_pool }}"
+          roles: ["PVEDatastoreAdmin"]
+          groups:
+            - ludus_admins
+        - path: "/storage/{{ proxmox_iso_storage_pool }}"
+          roles: ["PVEDatastoreAdmin"]
+          groups:
+            - ludus_admins
+        - path: "/storage/{{ proxmox_vm_storage_pool }}"
+          roles: ["DatastoreUser"]
+          groups:
+            - ludus_users
+        - path: "/storage/{{ proxmox_iso_storage_pool }}"
+          roles: ["DatastoreUser"]
+          groups:
+            - ludus_users
+        - path: "/nodes/{{ inventory_hostname }}"
+          roles: ["AccessNetwork"]
+          groups:
+            - ludus_users
   vars:
-    - port: "51820"
-    - server_cidr: "198.51.100.1/24"
+    port: "51820"
+    server_cidr: "198.51.100.1/24"
   tasks:
     - name: Install proxmox and ansible packer plugin
       ansible.builtin.shell:
-        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/proxmox;
-        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/ansible
+        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/proxmox v1.1.8;
+        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/ansible v1.1.1
       register: packer_plugin_install
 
     - name: Ensure group "pveusers" exists
@@ -262,6 +291,11 @@
         state: started
         enabled: true
         daemon_reload: true
+    
+    - name: Restart dnsmasq
+      ansible.builtin.service:
+        name: dnsmasq
+        state: restarted
 
     - name: Drop a file to indicate stage 3 is complete
       ansible.builtin.file:

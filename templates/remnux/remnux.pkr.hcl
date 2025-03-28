@@ -123,8 +123,7 @@ source "proxmox-iso" "remnux" {
     disk_size         = "${var.vm_disk_size}"
     format            = "${var.proxmox_storage_format}"
     storage_pool      = "${var.proxmox_storage_pool}"
-    type              = "scsi"
-    ssd               = true
+    type              = "virtio"
     discard           = true
     io_thread         = true
   }
@@ -171,5 +170,6 @@ build {
     extra_arguments = ["--extra-vars", "{ansible_python_interpreter: /usr/bin/python3, ansible_password: ${var.ssh_password}, ansible_sudo_pass: ${var.ssh_password}}"]
     ansible_env_vars = ["ANSIBLE_HOME=${var.ansible_home}", "ANSIBLE_LOCAL_TEMP=${var.ansible_home}/tmp", "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR=${var.ansible_home}/pc", "ANSIBLE_SSH_CONTROL_PATH_DIR=${var.ansible_home}/cp"]
     skip_version_check = true
+    timeout = "4h"
   }
 }

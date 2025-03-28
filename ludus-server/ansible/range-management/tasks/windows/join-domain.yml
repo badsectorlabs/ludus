@@ -26,17 +26,67 @@
 - name: Update group policy
   ansible.windows.win_shell: "gpupdate /force"
 
+- name: Gather Remote Desktop Users group name (multilingual)
+  ansible.windows.win_shell: |
+    (Get-WmiObject win32_group -Filter "SID='S-1-5-32-555'").Name
+  register: rdp_users_group_name_command
+
+- name: Set the Remote Desktop Users group name
+  ansible.builtin.set_fact:
+    rdp_users_group_name: "{{ rdp_users_group_name_command.stdout | trim }}"
+
+# Well known SIDs
+# https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
+#
+#   Domain Users: {{ domain_sid }}-513
+
+# This is a bit wild but since we don't have Get-ADDomain on clients, we can get the SID of the krbtgt account then just take the first part of the SID
+- name: Get the domain SID for this domain
+  ansible.windows.win_shell: |
+    [System.Security.Principal.NTAccount]::new((Get-WmiObject Win32_ComputerSystem).Domain, "krbtgt").Translate([System.Security.Principal.SecurityIdentifier]).Value
+  register: domain_sid_command
+
+- name: Set the domain SID
+  ansible.builtin.set_fact:
+    domain_sid: "{{ domain_sid_command.stdout | trim | regex_replace('-502', '') }}"
+
+# Ansible is fun sometimes.
+- name: Set a backslash
+  ansible.builtin.set_fact:
+    backslash: '\'
+
+- name: Gather Domain Users group name by SID (multilingual)
+  ansible.windows.win_shell: |
+    (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-513'").Name
+  register: domain_users_group_name_command
+  # We must run as the domain/autologon to get the domain group info. Assumes the autologon user is a domain user.
+  vars:
+    ansible_become: true
+    ansible_become_method: runas
+    ansible_become_user: '{{ autologon_user if backslash in autologon_user else netbios_name + backslash + autologon_user }}'
+    ansible_become_password: '{{ autologon_password }}'
+    ansible_become_flags: "logon_type=interactive logon_flags=with_profile"
+
+- name: Set the Domain Users group name
+  ansible.builtin.set_fact:
+    domain_users_group_name: "{{ domain_users_group_name_command.stdout | trim }}"
+
 # "The users have to be part of the RDusers group locally on the server you want to login via RDP, not only in the AD."
 # https://serverfault.com/questions/265531/members-of-remote-desktop-users-group-cannot-login
-- name: Add a domainuser and domainadmin user to local RDUsers group
+- name: Allow any domain users to RDP by adding the domain group to the  RDUsers group
   ansible.windows.win_group_membership:
-    name: Remote Desktop Users
+    name: "{{ rdp_users_group_name }}"           # Remote Desktop Users
     members:
-      - "{{ netbios_name }}\\{{ defaults.ad_domain_admin }}"
-      - "{{ netbios_name }}\\{{ defaults.ad_domain_user }}"
+      - "{{ netbios_name }}\\{{ domain_users_group_name }}"
     state: present
 
 - name: Set DNS search domain to include domain
   ansible.windows.win_powershell:
     script: |
       Set-DnsClientGlobalSetting -SuffixSearchList @("{{ netbios_name }}.{{ fqdn_tail }}","home.arpa")
+
+- name: Reboot after domain join (again) to apply group policy (if GPOs are enabled)
+  ansible.windows.win_reboot:
+  when:
+    - domain_joined.reboot_required
+    - (ludus | selectattr('vm_name', 'match', dc_vm_name))[0].windows.gpos | default([]) | length > 0

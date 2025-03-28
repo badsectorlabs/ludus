@@ -2,3 +2,110 @@
 skip_list:
   - risky-file-permissions
   - yaml[line-length]
+
+mock_roles:
+  - ansible-thoteam.nexus3-oss
+  - lae.proxmox
+
+extra_vars:
+  range_id: "JD"
+  range_second_octet: 2
+  ludus_install_path: /opt/ludus
+  ludus_users_dir: "{{ ludus_install_path }}/users"
+  wg_port: "51820"
+  wg_server_allowed_ips: "198.51.100.0/24"
+  ludus:
+    - vm_name: "{{ range_id }}-ad-dc-win2022-server-x64"
+      hostname: "{{ range_id }}-DC01-2022"
+      template: win2022-server-x64-template
+      vlan: 10
+      ip_last_octet: 11
+      ram_gb: 8
+      cpus: 4
+      windows:
+        sysprep: false
+      domain:
+        fqdn: ludus.domain
+        role: primary-dc
+    - vm_name: "{{ range_id }}-ad-win11-22h2-enterprise-x64-1"
+      hostname: "{{ range_id }}-WIN11-22H2-1"
+      template: win11-22h2-x64-enterprise-template
+      vlan: 10
+      ip_last_octet: 21
+      ram_gb: 8
+      cpus: 4
+      windows:
+        install_additional_tools: true
+        office_version: 2019
+        office_arch: 64bit
+      domain:
+        fqdn: ludus.domain
+        role: member
+    - vm_name: "{{ range_id }}-kali"
+      hostname: "{{ range_id }}-kali"
+      template: kali-x64-desktop-template
+      vlan: 99
+      ip_last_octet: 1
+      ram_gb: 8
+      cpus: 4
+      linux: true
+      testing:
+        snapshot: false
+        block_internet: false
+
+  router:
+    vm_name: "{{ range_id }}-router-debian11-x64"
+    hostname: "{{ range_id }}-router"
+    ram_gb: 2
+    ram_min_gb: 0.5
+    cpus: 2
+    roles:
+      ludus_guacamole_server
+    role_vars:
+
+    outbound_wireguard_config: |-
+      [Interface]
+      PrivateKey = <private
+    outbound_wireguard_vlans:
+      - 10
+      - 99
+
+  defaults:
+    snapshot_with_RAM: true                  # When entering testing mode, capture the RAM state which allows reverting to a running VM
+    stale_hours: 0                           # How many hours until a pre-existing snapshot should be deleted and retaken (if entering and exiting testing mode quickly)
+    ad_domain_functional_level: Win2012R2    # The functional level of each Windows domain created by Ludus - options are: "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", or "WinThreshold"
+    ad_forest_functional_level: Win2012R2    # The functional level of each Windows forest created by Ludus - options are: "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", or "WinThreshold"
+    ad_domain_admin: domainadmin             # The domain admin username for every Windows domain
+    ad_domain_admin_password: password       # The domain admin password for every Windows domain
+    ad_domain_user: domainuser               # The domain user username for every Windows domain
+    ad_domain_user_password: password        # The domain user password for every Windows domain
+    ad_domain_safe_mode_password: password   # The domain safe mode password for every Windows domain
+    timezone: America/New_York               # The timezone for all VMs, use the TZ identifier format from https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+
+  network:
+    inter_vlan_default: REJECT
+    rules:
+      - name: Only allow windows to kali on 443
+        vlan_src: 10
+        vlan_dst: 99
+        protocol: tcp
+        ports: 443
+        action: ACCEPT
+      - name: Only allow windows to kali on 80
+        vlan_src: 10
+        vlan_dst: 99
+        protocol: tcp
+        ports: 80
+        action: ACCEPT
+      - name: Only allow windows to kali on 8080
+        vlan_src: 10
+        vlan_dst: 99
+        protocol: tcp
+        ports: 8080
+        action: ACCEPT
+      - name: Allow kali to all windows
+        vlan_src: 99
+        vlan_dst: 10
+        protocol: all
+        ports: all
+        action: ACCEPT

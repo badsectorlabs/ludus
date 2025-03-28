@@ -18,7 +18,13 @@ var GitCommitHash string
 var LudusVersion string = VersionString + "+" + GitCommitHash
 
 const (
-	keyringService = "ludus-api"
+	keyringService       = "ludus-api"
+	licenseURL           = "https://license.ludus.cloud"
+	licenseAPIVersion    = "1.7"
+	licenseAPIPrefix     = "v1"
+	licenseProductClient = "81af38fe-d304-4d41-8378-d3d568c8fcf7"
+	licenseAccount       = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
+	licensePublicKey     = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
 )
 
 var (
@@ -122,8 +128,14 @@ func initConfig() {
 	if len(apiKey) == 0 {
 		apiKey, err = keyring.Get(keyringService, url)
 	}
-	// Fail if there is no API key if they aren't running the apikey or version subcommand
-	if err != nil && !strings.Contains(strings.Join(os.Args, " "), " apikey") && !strings.Contains(strings.Join(os.Args, " "), " version") {
+	// Fail if there is no API key if they aren't running the apikey, version, update client, completion, or __complete subcommands
+	if err != nil && !strings.Contains(strings.Join(os.Args, " "), " apikey") &&
+		!strings.Contains(strings.Join(os.Args, " "), " version") &&
+		!strings.Contains(strings.Join(os.Args, " "), " completion") &&
+		!strings.Contains(strings.Join(os.Args, " "), " __complete") &&
+		!strings.Contains(strings.Join(os.Args, " "), " __completeNoDesc") &&
+		!strings.Contains(strings.Join(os.Args, " "), " update client") {
+
 		logger.Logger.Fatalf(fmt.Sprintf("No Ludus API key found in system keyring for %s.\nSet one using the `apikey` command."+
 			"\nYou can also set the LUDUS_API_KEY env variable if you are on a headless system.", url))
 	} else {

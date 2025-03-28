@@ -1,0 +1,42 @@
+---
+- name: Message
+  ansible.builtin.debug:
+    msg: Running third role
+
+- name: Verify file exists on Linux systems
+  ansible.builtin.stat:
+    path: "/first.txt"
+  register: unix_file_check
+  when: ansible_system == 'Linux'
+
+- name: Verify file exists on Windows systems
+  ansible.windows.win_stat:
+    path: "C:\\first.txt"
+  register: win_file_check
+  when: ansible_system == 'Win32NT'
+
+- name: Fail if file does not exist
+  ansible.builtin.fail:
+    msg: "Required file does not exist"
+  when: >
+    (ansible_system == 'Linux' and not unix_file_check.stat.exists) or
+    (ansible_system == 'Win32NT' and not win_file_check.stat.exists)
+
+- name: Verify file exists on Linux systems
+  ansible.builtin.stat:
+    path: "/second.txt"
+  register: unix_file_check2
+  when: ansible_system == 'Linux'
+
+- name: Verify file exists on Windows systems
+  ansible.windows.win_stat:
+    path: "C:\\second.txt"
+  register: win_file_check2
+  when: ansible_system == 'Win32NT'
+
+- name: Fail if file does not exist
+  ansible.builtin.fail:
+    msg: "Required file does not exist"
+  when: >
+    (ansible_system == 'Linux' and not unix_file_check2.stat.exists) or
+    (ansible_system == 'Win32NT' and not win_file_check2.stat.exists)

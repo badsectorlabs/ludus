@@ -68,9 +68,23 @@
   color: rgb(202, 168, 71);
 }
 
+.code-block-terminal-command-root-at-debian:before {
+  content: 'root@debian12:~$';
+  margin-right: 10px;
+  color: rgb(202, 168, 71);
+}
+
 .code-block-terminal-command-powershell:before {
   content: 'PS C:\>';
   margin-right: 10px;
   color: rgb(202, 168, 71);
 }
 
+:root {
+  --ifm-container-width-xl: 90%;
+  --ifm-container-width: 1280px;
+}
+
+.docs-doc-id-configuration .col {
+  max-width: 100% !important;
+}

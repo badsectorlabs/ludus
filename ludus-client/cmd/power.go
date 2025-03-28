@@ -43,7 +43,13 @@ func genericPowerCmd(value string) *cobra.Command {
 
 			payload, _ := json.Marshal(powerPayload)
 
-			responseJSON, success := rest.GenericJSONPut(client, "/range/power"+value, string(payload))
+			var responseJSON []byte
+			var success bool
+			if userID != "" {
+				responseJSON, success = rest.GenericJSONPut(client, fmt.Sprintf("/range/power%s?userID=%s", value, userID), string(payload))
+			} else {
+				responseJSON, success = rest.GenericJSONPut(client, "/range/power"+value, string(payload))
+			}
 			if didFailOrWantJSON(success, responseJSON) {
 				return
 			}
@@ -57,7 +63,7 @@ var powerOffCmd = genericPowerCmd("off")
 var powerOnCmd = genericPowerCmd("on")
 
 func setupPowerCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&powerCmdNames, "name", "n", "", "A VM name (JE-win10-21h2-enterprise-x64-1) or names separated by commas or 'all'")
+	command.Flags().StringVarP(&powerCmdNames, "name", "n", "", "A VM name (JS-win10-21h2-enterprise-x64-1) or names separated by commas or 'all'")
 	_ = command.MarkFlagRequired("name")
 }
 

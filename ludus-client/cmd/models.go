@@ -17,6 +17,7 @@ type AnsibleItem struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 	Type    string `json:"type"`
+	Global  bool   `json:"global"`
 }
 
 type RangeObject struct {

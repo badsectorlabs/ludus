@@ -1,5 +1,5 @@
 ---
-sidebar_position: 10
+sidebar_position: 12
 title: "🛡️ Security"
 ---
 
@@ -24,6 +24,17 @@ sudo /sbin/iptables-save > /etc/iptables/rules.v4
 
 You may also wish to limit access to the Proxmox web interface (tcp/8006) in the same way.
 
+## Always Blocked Networks
+
+If you wish to always prevent range networks from reaching a specific network, such as the LAN the Ludus host is deployed on, you can define a list of CIDRs that the range router will prevent access to in the `always_blocked_networks` key in your range config.
+
+```
+network: 
+  always_blocked_networks:   # Define any networks that ranges should never be able to reach (i.e. the LAN where the Ludus host is located)
+    - 192.168.1.0/24         # entries must be in CIDR format
+```
+
+
 ## SSH Access
 
 Users that have SSH access to the Ludus host can interact with any deployed VM if they tunnel traffic through the Ludus host, or initiate connections with utilities on the Ludus host.
@@ -33,12 +44,12 @@ You may set the following iptables rules to limit access to the range routers fr
 
 ```
 # For each user
-iptables -A OUTPUT -d 10.{{ USER RANGE SECOND OCTET }}.0.0/16 ! -o ens18 -m owner --uid-owner {{ UID }} -m comment --comment "Allow {{ USERNAME }} to reach their range" -j ACCEPT
+iptables -A OUTPUT -d 10.{{ USER RANGE SECOND OCTET }}.0.0/16 ! -o {{ LUDUS EXTERNAL INTERFACE }} -m owner --uid-owner {{ UID }} -m comment --comment "Allow {{ USERNAME }} to reach their range" -j ACCEPT
 
 # After all user rules have been added
-iptables -A OUTPUT -d 10.0.0.0/8 ! -o ens18 -m owner --uid-owner 0-999 -m comment --comment "Ludus: allow system processes to 10/8" -j ACCEPT
-iptables -A OUTPUT -d 10.0.0.0/8 ! -o ens18 -m owner --uid-owner {{ LUDUS USER UID }} -m comment --comment "Ludus: default allow ludus access to all user ranges" -j ACCEPT
-iptables -A OUTPUT -d 10.0.0.0/8 ! -o ens18 -m comment --comment "Ludus: default deny access to user ranges" -j DROP
+iptables -A OUTPUT -d 10.0.0.0/8 ! -o {{ LUDUS EXTERNAL INTERFACE }} -m owner --uid-owner 0-999 -m comment --comment "Ludus: allow system processes to 10/8" -j ACCEPT
+iptables -A OUTPUT -d 10.0.0.0/8 ! -o {{ LUDUS EXTERNAL INTERFACE }} -m owner --uid-owner {{ LUDUS USER UID }} -m comment --comment "Ludus: default allow ludus access to all user ranges" -j ACCEPT
+iptables -A OUTPUT -d 10.0.0.0/8 ! -o {{ LUDUS EXTERNAL INTERFACE }} -m comment --comment "Ludus: default deny access to user ranges" -j DROP
 
 iptables-save /etc/iptables/rules.v4
 ```

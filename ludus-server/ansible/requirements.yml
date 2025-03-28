@@ -1,19 +1,21 @@
 ---
 collections:
   - name: ansible.windows
-    version: 2.3.0
+    version: 2.7.0
   - name: ansible.posix
-    version: 1.5.4
+    version: 1.6.2
   - name: ansible.utils
-    version: 3.1.0
+    version: 5.1.2
   - name: community.general
-    version: 8.4.0
+    version: 10.3.0
   - name: community.windows
-    version: 2.2.0
+    version: 2.3.0
   - name: chocolatey.chocolatey
-    version: 1.5.1
+    version: 1.5.3
   - name: microsoft.ad
-    version: 1.5.0
+    version: 1.8.0
+  - name: vladgh.samba
+    version: 3.4.0
 
 roles:
   - name: lae.proxmox
@@ -22,5 +24,3 @@ roles:
     version: 1.0.2
   - name: ansible-thoteam.nexus3-oss
     version: v2.5.2
-  - name: gantsign.golang
-    version: 3.3.1

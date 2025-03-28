@@ -1,5 +1,5 @@
 ---
-sidebar_position: 9
+sidebar_position: 11
 title: "🗄️ Nexus Cache"
 ---
 
@@ -26,7 +26,7 @@ ludus range logs -f
 ```
 
 Once the deployment has finished, you must manually toggle the chocolatey-proxy repository to Nuget V2 via the web interface!
-1. RDP into a windows box (or use the Proxmox web UI console)
+1. RDP into a windows box (or use the Proxmox web UI console) OR add `192.0.2.2/32` to the `AllowedIPs` block of your wireguard config and reload it.
 2. Browse to: http://192.0.2.2:8081
 3. Log in with `admin:<your proxmox password>`
 4. Navigate to Repositories -> chocolatey-proxy

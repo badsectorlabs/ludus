@@ -67,10 +67,14 @@ Get-ChildItem -Recurse -Path $DriverPath -Filter "*.cat" | % {
 $CertStore.Close()
 
 if ([System.Environment]::Is64BitOperatingSystem) { 
-    F:\virtio-win-gt-x64.msi /quiet /passive
+    msiexec /i "F:\virtio-win-gt-x64.msi" /quiet /passive
+    Write-Host ( "Installed x64 VirtIO drivers for Windows" )
+    msiexec /i "F:\guest-agent\qemu-ga-x86_64.exe" /quiet /passive
+    Write-Host ( "Installed x64 QEMU Guest Agent" )
 } 
 else {
-    F:\virtio-win-gt-x86.msi /quiet /passive
+    msiexec /i "F:\virtio-win-gt-x86.msi" /quiet /passive
+    Write-Host ( "Installed x86 VirtIO drivers for Windows" )
+    msiexec /i "F:\guest-agent\qemu-ga-i386.msi" /quiet /passive
+    Write-Host ( "Installed x86 QEMU Guest Agent for Windows" )
 }
-
-F:\virtio-win-guest-tools.exe /quiet /passive

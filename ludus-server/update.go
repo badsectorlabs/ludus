@@ -16,7 +16,7 @@ func updateLudus() {
 	// This assumes that ludus is the only thing that would run
 	// packer or ansible on the system - an ok assumption for
 	// a dedicated ludus machine
-	ansiblePackerPIDs := Run("pgrep -f 'ansible|packer'", false, false)
+	ansiblePackerPIDs := Run("pgrep 'ansible|packer'", false, false)
 	if ansiblePackerPIDs != "Command processed (no output)." {
 		log.Fatal(`Ansible or Packer processes are running on this host.
 Refusing to update to prevent interruption of template builds
@@ -53,6 +53,26 @@ Move the updated binary to a different location and run it with --update to comp
 	// Start ludus and ludus-admin
 	Run("systemctl start ludus", false, true)
 	Run("systemctl start ludus-admin", false, true)
+
+	if !noAnsibleUpdate {
+		err := checkAndCreateNetworkAccessRole() // Required for direct PVE downloads via packer
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = checkAndUpdateDependencies()
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = checkPackerPluginVersions()
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = updateAnsibleRoles()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	fmt.Printf("Ludus updated to %s\n", LudusVersion)
 }
 

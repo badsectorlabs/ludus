@@ -1,0 +1,54 @@
+{
+  "bundles": {
+    "client": {
+      "name": "client",
+      "description": "Ludus client",
+      "created": "2025-03-11T18:22:05.002Z",
+      "lastUsed": "2025-03-19T19:53:32.330Z",
+      "tags": [
+        "client",
+        "cli"
+      ],
+      "files": [
+        "ludus-client"
+      ]
+    },
+    "backend": {
+      "name": "backend",
+      "description": "Ludus API backend",
+      "created": "2025-03-11T18:22:51.820Z",
+      "lastUsed": "2025-03-11T18:22:51.820Z",
+      "tags": [
+        "backend",
+        "api"
+      ],
+      "files": [
+        "ludus-api"
+      ]
+    },
+    "ansible": {
+      "name": "ansible",
+      "description": "Ludus ansible files",
+      "created": "2025-03-11T18:23:15.348Z",
+      "lastUsed": "2025-03-11T18:23:15.348Z",
+      "tags": [
+        "ansible"
+      ],
+      "files": [
+        "ludus-server/ansible"
+      ]
+    },
+    "range-ansible": {
+      "name": "range-ansible",
+      "description": "Ludus Ansible for Range Management",
+      "created": "2025-03-11T18:23:35.801Z",
+      "lastUsed": "2025-03-11T18:23:35.801Z",
+      "tags": [
+        "ansible"
+      ],
+      "files": [
+        "ludus-server/ansible/range-management"
+      ]
+    }
+  }
+}

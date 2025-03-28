@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "sha512:bc469019b9057073d36ff8f5402c95ff0a0363657358336dc9a05fc6af66276229aa727ec46cf17b84d308f44b825de7f24ea1a256062a14e0f605cd70bae02f"
+  default = "sha512:466add7fb5ba7caebd27bf6b8b326a24857295673045d643950869f5f0440c44ae833dea49c7b8a674afbf82c3f41ceb5062948aea443d581bc827db62cc5249"
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
@@ -11,7 +11,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://cdimage.debian.org/cdimage/archive/10.12.0/amd64/iso-cd/debian-10.12.0-amd64-netinst.iso"
+  default = "https://cdimage.debian.org/cdimage/archive/10.13.0/amd64/iso-cd/debian-10.13.0-amd64-netinst.iso"
 }
 
 variable "vm_cpu_cores" {
@@ -105,8 +105,7 @@ source "proxmox-iso" "debian10" {
     disk_size         = "${var.vm_disk_size}"
     format            = "${var.proxmox_storage_format}"
     storage_pool      = "${var.proxmox_storage_pool}"
-    type              = "scsi"
-    ssd               = true
+    type              = "virtio"
     discard           = true
     io_thread         = true
   }
@@ -135,4 +134,13 @@ source "proxmox-iso" "debian10" {
 
 build {
   sources = ["source.proxmox-iso.debian10"]
+
+  provisioner "ansible" {
+    playbook_file = "ansible/reset-ssh-host-keys.yml"
+    use_proxy     = false
+    user = "${var.ssh_username}"
+    extra_arguments = ["--extra-vars", "{ansible_python_interpreter: /usr/bin/python3, ansible_password: ${var.ssh_password}, ansible_sudo_pass: ${var.ssh_password}}"]
+    ansible_env_vars = ["ANSIBLE_HOME=${var.ansible_home}", "ANSIBLE_LOCAL_TEMP=${var.ansible_home}/tmp", "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR=${var.ansible_home}/pc", "ANSIBLE_SSH_CONTROL_PATH_DIR=${var.ansible_home}/cp"]
+    skip_version_check = true
+  }
 }

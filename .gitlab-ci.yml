@@ -25,6 +25,7 @@ stages:
   - post-deploy-user-ansible
   - post-deploy-user-user
   - post-deploy-user-templates
+  - post-deploy-user-snapshots
   - integration
   - manual
   - upload
@@ -91,6 +92,7 @@ stages:
 .ansible-tests: &ansible-tests
   # Add and remove a role
   - ludus ansible role list
+  - ludus ansible role rm geerlingguy.docker || true
   - ludus ansible role add geerlingguy.docker
   - ludus ansible role list | grep geerlingguy.docker
   - ludus ansible role rm geerlingguy.docker
@@ -107,11 +109,29 @@ stages:
   - '! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1'
   # Test collections
   - ludus ansible collection list
-  - ludus ansible collection add maxhoesel.smallstep
+  - ludus ansible collection add maxhoesel.smallstep || true
   - ludus ansible collection list | grep maxhoesel.smallstep
   # Force install a collection
   - ludus ansible collection add maxhoesel.smallstep --version 0.24.4 --force
   - ludus ansible collection list | grep maxhoesel.smallstep | grep 0.24.4
+  # Depends on tests
+  - ludus ansible role add -d ludus-server/ci/roles/hello_world --force
+  - ludus ansible role add -d ludus-server/ci/roles/first --force
+  - ludus ansible role add -d ludus-server/ci/roles/second --force
+  - ludus ansible role add -d ludus-server/ci/roles/third --force
+  - ludus range config set -f ludus-server/ci/configs/depends-on.yml
+  - ludus range deploy -t user-defined-roles
+  - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+  # Depends on - dependency that doesn't exist test
+  - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
+  - 'ludus range config set -f ludus-server/ci/configs/depends-on-not-found.yml 2>&1 | egrep "ERROR: Dependency not found \w+-ad-dc-win2022-server-x64-1:geerlingguy.docker"'
+  # Depends on circular dependency test
+  - 'ludus range config set -f ludus-server/ci/configs/depends-on-circular.yml 2>&1 | egrep "ERROR: Circular dependency found for \w+-ad-win11-22h2-enterprise-x64-1:geerlingguy.docker"'
+  - set -o pipefail
+  - ludus range config set -f ludus-server/ci/configs/depends-on-complex.yml
+  - ludus range deploy -t user-defined-roles
+  - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+
 
 .testing-mode-tests: &testing-mode-tests
   - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
@@ -214,6 +234,28 @@ stages:
   - ludus templates rm -n debian-10-x64-server-template
   - '! ludus templates list | grep "debian-10-x64-server-template"'
 
+.snapshot-tests: &snapshot-tests
+  - ludus snapshots list
+  - ludus snapshots create test-full-range-snapshot
+  - ludus snapshots list
+  - ludus snapshots revert test-full-range-snapshot
+  - ludus snapshots rm test-full-range-snapshot
+  - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
+  - ludus snapshots create test-win11-snapshot -n $WIN11VMID -d "Test snapshot"
+  - ludus snapshots list -n $WIN11VMID
+  - ludus snapshots revert test-win11-snapshot -n $WIN11VMID
+  - ludus snapshots rm test-win11-snapshot -n $WIN11VMID
+  - ludus snapshots list -n $WIN11VMID
+  - ludus snapshots create test-win11-snapshot-2 -n $WIN11VMID -d "Test snapshot 2" -r
+  - ludus snapshots list -n $WIN11VMID
+  - ludus snapshots revert test-win11-snapshot-2 -n $WIN11VMID
+  - ludus snapshots rm test-win11-snapshot-2 -n $WIN11VMID
+  - ludus snapshots list -n $WIN11VMID
+  - ludus range status
+  - ludus power on -n all
+  - sleep 10
+  - ludus range status
+  
 #################
 # DOCUMENTATION #
 #################
@@ -268,6 +310,7 @@ documentation:
   - yarn install
   - yarn build
   - rm -f ./build/video/*
+  - rm -f ./build/img/hardware/Debian_12_RAID0.mp4
   - mv ./build ../built-docs
   artifacts:
     paths:
@@ -303,10 +346,10 @@ build all:
     - cd ludus-server
     - | # If we have docs from the previous stage, embed them, otherwise build without docs
       if [[ -d ../built-docs ]]; then
-        mv ../built-docs ./src/docs
-        go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -tags=embeddocs -o ../binaries/ludus-server
+        mv ../built-docs ../ludus-api/docs
+        CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -tags=embeddocs -o ../binaries/ludus-server
       else
-        go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -o ../binaries/ludus-server
+        CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -o ../binaries/ludus-server
       fi
     - cd ..
     - echo "Compiling the client code..."
@@ -314,15 +357,35 @@ build all:
     # Use the fork that doesn't break the terminal on control+c for Linux and macOS
     - git clone https://github.com/zimeg/spinner
     - cd spinner && git checkout unhide-interrupts && cd .. && go mod edit -replace github.com/briandowns/spinner=./spinner
-    - go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-amd64
-    - GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-arm64
-    - GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_macOS-amd64
-    - GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_macOS-arm64
+    - CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-amd64
+    - CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-arm64
+    - CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_linux-arm
+    - CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_macOS-amd64
+    - CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_macOS-arm64
     # The forked spinner library doesn't compile for windows, so switch back to the original
     - go mod edit -dropreplace=github.com/briandowns/spinner
-    - GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-amd64.exe
-    - GOOS=windows GOARCH=386 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-386.exe
-    - GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-arm64.exe
+    - CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-amd64.exe
+    - CGO_ENABLED=0 GOOS=windows GOARCH=386 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-386.exe
+    - CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-arm64.exe
+    - cd ..
+    # If this is a release, build the enterprise and anti-sandbox plugins at the same time on the same build machine so the binaries are compatible
+    - |
+      if [[ ! -z ${CI_COMMIT_TAG+x} ]]; then
+        git clone https://ludus-enterprise:${LUDUS_ENTERPRISE_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-enterprise-plugin.git
+        go work use ./ludus-enterprise-plugin
+        cd ludus-enterprise-plugin
+        git config --global --add safe.directory $PWD
+        GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags=embeddocs -o ../binaries/ludus-enterprise.so
+        cd ..
+        # Build the anti-sandbox plugin
+        git clone https://ludus-antisandbox:${LUDUS_ANTISANDBOX_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-antisandbox-plugin.git
+        go work use ./ludus-antisandbox-plugin
+        cd ludus-antisandbox-plugin
+        git config --global --add safe.directory $PWD
+        GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags=embeddocs -o ../binaries/ludus-antisandbox.so
+      fi
     - echo "Compile complete."
 
 ###########
@@ -741,7 +804,7 @@ post-deploy testing-as-admin:
 post-deploy power-as-admin:
   stage: post-deploy-admin-power
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   dependencies:
     - build all
   rules:
@@ -1271,6 +1334,42 @@ post-deploy templates-as-user:
     - *ci-setup-user
     - *template-tests
 
+post-deploy snapshots-as-user:
+  stage: post-deploy-user-snapshots
+  tags:
+    - ludus-proxmox-runner
+  dependencies:
+    - build all
+  rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/snapshots.go
+      - ludus-server/src/api_snapshot_management.go
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_user
+  timeout: 45m
+  retry:
+    max: 2
+    when: script_failure
+  script:
+    - *ci-setup-user
+    - *snapshot-tests
+
 ####################
 # FINAL BOSS FIGHT #
 ####################
@@ -1381,7 +1480,7 @@ manual testing:
 ###########
 # RELEASE #
 ###########
-upload:
+gitlab-upload:
   stage: upload
   tags:
     - ludus-proxmox-runner
@@ -1393,14 +1492,70 @@ upload:
   rules:
     - if: $CI_COMMIT_TAG
   script:
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-server ${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm64-${CI_COMMIT_TAG}'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_macOS-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_macOS-amd64-${CI_COMMIT_TAG}'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_macOS-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_macOS-arm64-${CI_COMMIT_TAG}'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-amd64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-386.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-386-${CI_COMMIT_TAG}.exe'
-      - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-arm64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-server ${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm64-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-arm ${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_macOS-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_macOS-amd64-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_macOS-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_macOS-arm64-${CI_COMMIT_TAG}'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-amd64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-386.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-386-${CI_COMMIT_TAG}.exe'
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-arm64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe'
+    - touch ludus_${CI_COMMIT_TAG}_checksums.txt
+    - cd binaries
+    - sha256sum ludus-server >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_linux-amd64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_linux-arm64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_linux-arm >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_macOS-amd64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_macOS-arm64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_windows-amd64.exe >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_windows-386.exe >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_windows-arm64.exe >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - cd ..
+    - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file ludus_${CI_COMMIT_TAG}_checksums.txt ${PACKAGE_REGISTRY_URL}/ludus_${CI_COMMIT_TAG}_checksums.txt'
+
+keygen-upload:
+  stage: upload
+  tags:
+    - ludus-proxmox-runner
+  needs:
+    - build all
+    - gitlab-upload # Just so they don't try to run at the same time
+  variables:
+    LUDUS_BUILD_TYPE: any-built
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - THIS_VERSION=$(echo ${CI_COMMIT_TAG} | tr -d 'v')
+    - curl -sSL https://raw.pkg.keygen.sh/keygen/cli/latest/install.sh | sudo sh
+    - output=$(keygen new --channel stable --version ${THIS_VERSION} 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
+    - cd binaries
+    - keygen upload ludus-client_linux-amd64 --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filename ${THIS_VERSION}/ludus-client_linux-amd64
+    - keygen upload ludus-client_linux-arm64 --release ${THIS_VERSION} --platform 'linux' --arch 'arm64' --filename ${THIS_VERSION}/ludus-client_linux-arm64
+    - keygen upload ludus-client_linux-arm --release ${THIS_VERSION} --platform 'linux' --arch 'arm' --filename ${THIS_VERSION}/ludus-client_linux-arm
+    - keygen upload ludus-client_macOS-amd64 --release ${THIS_VERSION} --platform 'darwin' --arch 'amd64' --filename ${THIS_VERSION}/ludus-client_macOS-amd64
+    - keygen upload ludus-client_macOS-arm64 --release ${THIS_VERSION} --platform 'darwin' --arch 'arm64' --filename ${THIS_VERSION}/ludus-client_macOS-arm64
+    - keygen upload ludus-client_windows-amd64.exe --release ${THIS_VERSION} --platform 'windows' --arch 'amd64' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-amd64.exe
+    - keygen upload ludus-client_windows-386.exe --release ${THIS_VERSION} --platform 'windows' --arch '386' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-386.exe
+    - keygen upload ludus-client_windows-arm64.exe --release ${THIS_VERSION} --platform 'windows' --arch 'arm64' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-arm64.exe
+    - keygen publish --release ${THIS_VERSION}
+    - keygen untag --release 'latest'
+    - keygen tag 'latest' --release ${THIS_VERSION}
+    # We don't upload the server to keygen because it's large and there is no built in update mechanism yet
+    # - export KEYGEN_PRODUCT_ID=[GUID for ludus-server]
+    # - keygen upload ludus-server --release ${THIS_VERSION} --platform 'linux' --arch 'amd64' --filename ${THIS_VERSION}/ludus-server
+    # - keygen publish --release ${THIS_VERSION}
+    # - keygen untag --release 'latest'
+    # - keygen tag 'latest' --release ${THIS_VERSION}
+    - export KEYGEN_HOST=${LUDUS_ENTERPRISE_KEYGEN_HOST}
+    - export KEYGEN_ACCOUNT_ID=${LUDUS_ENTERPRISE_KEYGEN_ACCOUNT_ID}
+    - export KEYGEN_PRODUCT_ID=${LUDUS_ENTERPRISE_KEYGEN_PRODUCT_ID}
+    - export KEYGEN_TOKEN=${LUDUS_ENTERPRISE_KEYGEN_TOKEN}
+    - output=$(keygen new --channel stable --version ${CI_COMMIT_TAG} 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
+    - keygen upload ludus-enterprise.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-enterprise_${CI_COMMIT_TAG}.so
+    - keygen upload ludus-antisandbox.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-antisandbox_${CI_COMMIT_TAG}.so
+    - keygen publish --release ${CI_COMMIT_TAG}
 
 release:
   stage: release
@@ -1408,7 +1563,7 @@ release:
     - ludus-proxmox-runner
   needs:
     - build all
-    - upload
+    - gitlab-upload
   variables:
     LUDUS_BUILD_TYPE: any-built
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
@@ -1416,7 +1571,7 @@ release:
   rules:
     - if: $CI_COMMIT_TAG
   script:
-    - wget "https://github.com/orhun/git-cliff/releases/download/v1.3.1/git-cliff-1.3.1-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/git-cliff.tar.gz
+    - wget "https://github.com/orhun/git-cliff/releases/download/v2.7.0/git-cliff-2.7.0-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/git-cliff.tar.gz
     - tar -xvzf /tmp/git-cliff.tar.gz -C /tmp
     - sudo mv /tmp/git-cliff-*/git-cliff /usr/local/bin/
     - git-cliff -t ${CI_COMMIT_TAG} --current -o CHANGELOG.txt
@@ -1424,8 +1579,10 @@ release:
     - sudo chmod +x /usr/local/bin/release-cli
     - 'release-cli create --name "ludus $CI_COMMIT_TAG" --description CHANGELOG.txt --tag-name $CI_COMMIT_TAG --assets-link 
       "[{\"name\":\"ludus-server-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}\"},
+      {\"name\":\"ludus_${CI_COMMIT_TAG}_checksums.txt\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus_${CI_COMMIT_TAG}_checksums.txt\"},
       {\"name\":\"ludus-client_linux-amd64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_linux-arm64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm64-${CI_COMMIT_TAG}\"},
+      {\"name\":\"ludus-client_linux-arm-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_macOS-amd64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_macOS-amd64-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_macOS-arm64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_macOS-arm64-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\"},

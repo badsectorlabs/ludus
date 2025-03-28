@@ -21,6 +21,8 @@
     source: http://192.0.2.2:8081/repository/raw/install.ps1
   when: not choco_test.failed
 
+- include_tasks: tasks/windows/update-dotnet-framework.yml
+
 # TODO: use the URL module and clean this up
 # Check the most recent commit of the office deployment project to see if contains a chocomilk update string and grab the version from that
 # This is required because chocolatey will not use the most recent version until the package maintainer approves it - leading to 404 errors from the installer

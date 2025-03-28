@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "sha256:c150608cad5f8ec71608d0713d487a563d9b916a0199b1414b6ba09fce788ced"
+  default = "sha256:beca4f8fd7f58eda290812f538e1323d3ba1f1a34df4b203e85de4be42525bb6"
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
@@ -11,12 +11,12 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://cdimage.kali.org/kali-2024.1/kali-linux-2024.1-installer-amd64.iso"
+  default = "https://cdimage.kali.org/kali-2024.4/kali-linux-2024.4-installer-amd64.iso"
 }
 
 variable "vm_cpu_cores" {
   type    = string
-  default = "2"
+  default = "4"
 }
 
 variable "vm_disk_size" {
@@ -114,8 +114,7 @@ source "proxmox-iso" "kali" {
     disk_size         = "${var.vm_disk_size}"
     format            = "${var.proxmox_storage_format}"
     storage_pool      = "${var.proxmox_storage_pool}"
-    type              = "scsi"
-    ssd               = true
+    type              = "virtio"
     discard           = true
     io_thread         = true
   }

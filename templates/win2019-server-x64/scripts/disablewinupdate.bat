@@ -17,8 +17,8 @@ reg add "HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\WindowsUpdate" /
 reg add "HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\WindowsUpdate\AU" /v NoAutoUpdate /t REG_DWORD /d 1 /f
 
 :: disable the update prompt scheduled tasks
-schtasks.exe /change /tn "\Microsoft\Windows\UpdateOrchestrator\USO_UxBroker_Display" /disable
-schtasks.exe /change /tn "\Microsoft\Windows\UpdateOrchestrator\MusUx_UpdateInterval" /disable
-schtasks.exe /change /tn "\Microsoft\Windows\WindowsUpdate\sih" /disable
+schtasks.exe /change /tn "\Microsoft\Windows\UpdateOrchestrator\USO_UxBroker_Display" /disable >nul 2>&1
+schtasks.exe /change /tn "\Microsoft\Windows\UpdateOrchestrator\MusUx_UpdateInterval" /disable >nul 2>&1
+schtasks.exe /change /tn "\Microsoft\Windows\WindowsUpdate\sih" /disable >nul 2>&1
 
 exit /b

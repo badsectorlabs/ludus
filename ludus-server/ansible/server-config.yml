@@ -4,7 +4,6 @@
 ############################
 
 defaults:
-  router_vm_name: "{{ range_id }}-router-debian11-x64" # Must match the router_vm_name_to_action line in range-access.yml
   snapshot_with_RAM: true
   stale_hours: 0
   ad_domain_functional_level: Win2012R2
@@ -14,6 +13,8 @@ defaults:
   ad_domain_user: domainuser
   ad_domain_user_password: password
   ad_domain_safe_mode_password: password
+  timezone: "America/New_York"
+  enable_dynamic_wallpaper: true
 
 ########################################################################################
 #### Nothing below needs to be manually changed unless you know what you are doing #####

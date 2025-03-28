@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "md5:70721288BBCDFE3239D8F8C0FAE55F1F"
+  default = "sha256:1ce702a578a3cb1ac3d14873980838590f06d5b7101c5daaccbac9d73f1fb50f"
 }
 
 variable "os" {
@@ -10,7 +10,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://software-download.microsoft.com/download/pr/Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO"
+  default = "https://software-static.download.prss.microsoft.com/pr/download/Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO"
 }
 
 variable "vm_cpu_cores" {
@@ -112,8 +112,7 @@ source "proxmox-iso" "win2016-server-x64" {
     disk_size         = "${var.vm_disk_size}"
     format            = "${var.proxmox_storage_format}"
     storage_pool      = "${var.proxmox_storage_pool}"
-    type              = "scsi"
-    ssd               = true
+    type              = "virtio"
     discard           = true
     io_thread         = true
   }

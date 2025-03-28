@@ -125,6 +125,21 @@
       Set-DnsClientGlobalSetting -SuffixSearchList @("home.arpa")
   when: ansible_os_family == "Windows" and dns_server is defined
 
+- name: Lookup the timezone string for Windows
+  ansible.builtin.set_fact:
+    windows_tz: "{{ lookup('ansible.builtin.csvfile', defaults.timezone, col='1', file='tz_mappings.csv', delimiter=',', default='NOT FOUND') }}"
+  when: ansible_os_family == "Windows" and defaults.timezone is defined
+
+- name: Fail this host if we can't find the timezone
+  ansible.builtin.fail:
+    msg: "Could not find the Windows timezone string for {{ defaults.timezone }}"
+  when: ansible_os_family == "Windows" and defaults.timezone is defined and windows_tz == "NOT FOUND"
+
+- name: Set the timezone (Windows)
+  community.windows.win_timezone:
+    timezone: "{{ windows_tz }}"
+  when: ansible_os_family == "Windows" and defaults.timezone is defined
+
 # Hostname - Windows
 - name: Hostname change (Windows)
   ansible.windows.win_hostname:
@@ -198,6 +213,26 @@
   when:
     - ansible_distribution == "Ubuntu"
     - netplan_file.stat.exists
+
+- name: Remove netplan cloud-init
+  ansible.builtin.file:
+    path: /etc/netplan/50-cloud-init.yaml
+    state: absent
+  become: true
+  when: ansible_distribution == "Ubuntu"
+
+- name: Check if /etc/cloud/cloud.cfg.d exists
+  ansible.builtin.stat:
+    path: /etc/cloud/cloud.cfg.d
+  register: cloud_dir
+  when: ansible_distribution == "Ubuntu"
+
+- name: Disable cloud dhcp network
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+    content: "network: {config: disabled}"
+  become: true
+  when: ansible_distribution == "Ubuntu" and cloud_dir.stat.exists
 
 - name: Set DNS search domain for systemd-resolved
   ansible.builtin.lineinfile:
@@ -328,6 +363,11 @@
   when: ansible_system == "Linux"
   become: true
 
+- name: Set the timezone (Linux)
+  ansible.builtin.timezone:
+    name: "{{ defaults.timezone }}"
+  when: ansible_system == "Linux" and defaults.timezone is defined
+
 # Can't use the built in reboot because it won't do async https://github.com/ansible/ansible/issues/71517
 - name: Reboot to set ip and hostname (Linux)
   become: true
@@ -393,6 +433,12 @@
   become: true
   register: macos_hostname
   when: ansible_system == "Darwin"
+
+- name: Set the timezone (macOS)
+  ansible.builtin.shell: |
+    systemsetup -settimezone {{ defaults.timezone }}
+  become: true
+  when: ansible_system == "Darwin" and defaults.timezone is defined
 
 - name: Refresh inventory
   ansible.builtin.meta: refresh_inventory

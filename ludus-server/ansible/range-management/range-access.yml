@@ -40,19 +40,14 @@
         src: "{{ ludus_users_dir }}/{{ target_username }}/range-config.yml"
       register: range_config_contents
 
-    - name: Determine if the user has set defaults
-      ansible.builtin.set_fact:
-        user_set_defaults: "{{ 'defaults:' in range_config_contents['content'] | b64decode | regex_replace('\\n', ' ') }}"
+    - name: Get the VM name of the router from the target range config
+      ansible.builtin.set_fact: 
+        router_vm_name_to_action: "{{ range_config_contents['content'] | b64decode | from_yaml | json_query('router.vm_name') | regex_replace('{{\\s*range_id\\s*}}', target_range_id) }}"
 
-    - name: Set the router VM name from server defaults
+    - name: Set the router VM name to action from default
       ansible.builtin.set_fact:
-        router_vm_name_to_action: "{{ target_range_id }}-router-debian11-x64" # Must match the default in server-config.yml
-      when: not user_set_defaults
-
-    - name: Set the router VM name from user defined defaults
-      ansible.builtin.set_fact:
-        router_vm_name_to_action: "{{ (range_config_contents['content'] | b64decode | from_yaml).defaults.router_vm_name | regex_replace('{{\\s*range_id\\s*}}', target_range_id) }}" # I wish there was an 'eval' or 'render' filter
-      when: user_set_defaults
+        router_vm_name_to_action: "{{ target_range_id + '-router-debian11-x64' }}"
+      when: router_vm_name_to_action is not defined or router_vm_name_to_action == "" or router_vm_name_to_action == "None"
 
     - name: Get the VM id of the router via Proxmox API
       ansible.builtin.shell: |
@@ -104,6 +99,16 @@
   tags: [grant]
   hosts: "{{ hostvars['localhost']['router_vm_name_to_action'] }}"
   tasks:
+    - name: Get current iptables rules count
+      ansible.builtin.command: iptables -t filter -L LUDUS_DEFAULTS --line-numbers
+      register: iptables_rules
+      check_mode: false
+      changed_when: false
+
+    - name: Set rule count
+      ansible.builtin.set_fact:
+        rule_count: "{{ iptables_rules.stdout_lines | select('match', '^[0-9]') | list | length }}"
+
     - name: Modify router firewall to allow new user's WireGuard IP
       ansible.builtin.iptables:
         chain: LUDUS_DEFAULTS
@@ -113,6 +118,7 @@
         jump: ACCEPT
         state: present
         action: insert
+        rule_num: "{{ rule_count }}" # This is the second to last rule in the chain, the last is a deny all so we want to be above that but below the user defined rules
         comment: "Access Grant: WireGuard client access rule for {{ source_username }}"
         numeric: true
 
@@ -161,7 +167,6 @@
         protocol: all
         jump: ACCEPT
         state: absent
-        action: insert
         comment: "Access Grant: WireGuard client access rule for {{ source_username }}"
         numeric: true
 

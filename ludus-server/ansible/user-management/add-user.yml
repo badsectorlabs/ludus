@@ -51,13 +51,6 @@
       set_fact:
         user_proxmox_password: "{{ lookup('password', ludus_users_dir + '/' + username + '/proxmox_password length=20 chars=ascii_letters,digits') }}"
 
-    # TODO: Store this in the keyring
-    - name: 'Generating ssh key for user'
-      delegate_to: localhost
-      become: false
-      community.crypto.openssh_keypair:
-        path: "{{ ludus_users_dir }}/{{ username }}/proxmox_ssh_key"
-
     - name: Add the user to the host
       ansible.builtin.user:
         name: "{{ username }}"
@@ -65,12 +58,6 @@
         groups:
           - pveusers
       register: created_user
-
-    - name: Deploy SSH key for user
-      authorized_key:
-        user: "{{ username }}"
-        key: "{{ lookup('file', ludus_users_dir + '/' + username + '/proxmox_ssh_key.pub') }}"
-        state: present
 
     - name: Enable helpful aliases
       become: true
@@ -176,37 +163,35 @@
       loop:
         - 1
 
-- name: Add user to proxmox
-  hosts: localhost
-  become: true
-  roles:
-    - role: lae.proxmox
-      pve_group: "{{ proxmox_node }}"
-      pve_run_system_upgrades: false
-      pve_reboot_on_kernel_update: false
-      pve_cluster_enabled: false
-      pve_zfs_enabled: false
-      pve_groups:
-        - name: ludus_users
-          comment: Ludus users
-      pve_users:
-        - name: "{{ username }}@pam"
-          password: "{{ user_proxmox_password }}"
-          groups: ["ludus_users"]
-      pve_acls:
-        - path: "/pool/{{ user_range_id }}"
-          roles: ["PVEAdmin", "PVESDNAdmin"]
-          users:
-            - "{{ username }}@pam"
-        - path: "/pool/{{ user_range_id }}"
-          roles: ["PVEAdmin", "PVESDNAdmin"]
-          groups:
-            - ludus_admins
-        - path: "/storage/local"
-          roles: ["PVEDatastoreAdmin"]
-          users:
-            - "{{ username }}@pam"
-  tasks:
+    - name: Add a portforward for this user (Enterprise)
+      ansible.builtin.include_tasks: portforward-management.yml
+      vars:
+        port_to_forward_on_ludus_host: "{{ 51000 + second_octet }}"
+        host_to_forward_to: "192.0.2.{{ 100 + second_octet }}"
+        port_to_forward_to: 51820 # hardcoded to the WireGuard server port
+        state_var: present
+      when:
+        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/portforward-management.yml') != []
+        - portforward_enabled is defined
+        - portforward_enabled
+
+    - name: Add the user to proxmox
+      ansible.builtin.shell:
+        cmd: pveum user add {{ username }}@pam --password {{ user_proxmox_password }} -group ludus_users
+
+    - name: Set the acls for the user on their own pool
+      ansible.builtin.shell:
+        cmd: pveum aclmod /pool/{{ user_range_id }} -user {{ username }}@pam -role PVEAdmin -role PVESDNAdmin
+
+    - name: Set the acls users pool for admins
+      ansible.builtin.shell:
+        cmd: pveum aclmod /pool/{{ user_range_id }} -group ludus_admins -role PVEAdmin -role PVESDNAdmin
+
+    - name: Set acls for local "/storage/local"
+      ansible.builtin.shell:
+        cmd: pveum aclmod /storage/local -user {{ username }}@pam -role PVEDatastoreAdmin
+
     - name: Add user to ludus_admins
       ansible.builtin.shell: pveum user modify {{ username }}@pam --groups ludus_admins --append
       when: user_is_admin is defined and user_is_admin

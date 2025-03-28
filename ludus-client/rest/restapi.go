@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -121,7 +120,7 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 	}
 
 	if error {
-		os.Exit(1)
+		return nil, false
 	}
 
 	if resp.StatusCode() == 200 || resp.StatusCode() == 201 {
@@ -195,6 +194,24 @@ func PostFileAndForce(client *resty.Client, apiPath string, data []byte, filenam
 		SetFileReader("file", filename, bytes.NewReader(data)).
 		SetFormData(map[string]string{
 			"force": fmt.Sprintf("%t", force),
+		}).
+		Put(apiPath)
+
+	s.Stop()
+
+	return processRESTResult(resp, err)
+}
+
+func PostFileAndForceAndGlobal(client *resty.Client, apiPath string, data []byte, filename string, force bool, ansibleGlobal bool) ([]byte, bool) {
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	s.Suffix = " Waiting for server..."
+	s.Start()
+
+	resp, err := client.R().
+		SetFileReader("file", filename, bytes.NewReader(data)).
+		SetFormData(map[string]string{
+			"force":  fmt.Sprintf("%t", force),
+			"global": fmt.Sprintf("%t", ansibleGlobal),
 		}).
 		Put(apiPath)
 

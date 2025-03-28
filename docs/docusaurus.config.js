@@ -26,6 +26,7 @@ const config = {
   onBrokenLinks: 'throw',
   onBrokenMarkdownLinks: 'warn',
 
+
   // Even if you don't use internationalization, you can use this field to set
   // useful metadata like html lang. For example, if your site is Chinese, you
   // may want to replace "en" with "zh-Hans".
@@ -186,6 +187,10 @@ const config = {
             className: 'code-block-terminal-command-user-at-debian',
             line: 'terminal-command-user-at-debian',
           },
+          {
+            className: 'code-block-terminal-command-root-at-debian',
+            line: 'terminal-command-root-at-debian',
+          },          
           {
             className: 'code-block-terminal-command-powershell',
             line: 'terminal-command-powershell',

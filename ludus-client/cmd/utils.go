@@ -16,7 +16,11 @@ import (
 	"time"
 )
 
-func formatTimeObject(timeObject time.Time) string {
+const regexStringForMissingRole = "the role '([\\w._-]+)'"
+
+var regexForMissingRole = regexp.MustCompile(regexStringForMissingRole)
+
+func formatTimeObject(timeObject time.Time, format string) string {
 	localTimeZone, err := time.LoadLocation("Local")
 	if err != nil {
 		logger.Logger.Warnf("Error loading time zone: %s\n", err)
@@ -28,7 +32,7 @@ func formatTimeObject(timeObject time.Time) string {
 		}
 	}
 	localTimeObject := timeObject.In(localTimeZone)
-	return localTimeObject.Format("2006-01-02 15:04")
+	return localTimeObject.Format(format)
 }
 
 func handleGenericResult(responseJSON []byte) {
@@ -184,6 +188,10 @@ func formatAndPrintError(errorLine string, errorCount int) {
 	formattedLine = strings.ReplaceAll(formattedLine, "\\n", "\n")
 	fmt.Printf("\n******************************************** ERROR %d ********************************************\n", errorCount)
 	fmt.Println(formattedLine)
+	if strings.Contains(formattedLine, "hashes do not match") && strings.Contains(formattedLine, "Consider passing the actual checksums through with") {
+		fmt.Printf("\nSome chocolatey packages pull from external sources and do not update their checksums frequently.")
+		fmt.Printf("\nConsider setting `chocolatey_ignore_checksums: true` in your range configuration for this VM to ignore checksums and bypass this error.\n")
+	}
 	fmt.Println("*************************************************************************************************")
 	checkErrorForAnsibleTemporaryDirectory(errorLine)
 }
@@ -226,5 +234,108 @@ func printFatalErrorsFromString(input string) {
 	if fatalRegex.MatchString(previousLine) {
 		errorCount += 1
 		formatAndPrintError(previousLine, errorCount)
+	}
+}
+
+// Parse the logs and skip printing lines that contain
+// 'Error getting WinRM host: 500 QEMU guest agent is not running' or
+// 'Error getting SSH address: 500 QEMU guest agent is not running'
+func filterAndPrintTemplateLogs(logs string, verbose bool) {
+	scanner := bufio.NewScanner(strings.NewReader(logs))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "Error getting WinRM host: 500 QEMU guest agent is not running") ||
+			strings.Contains(line, "Error getting SSH address: 500 QEMU guest agent is not running") {
+			// Print a message prepended with the current time in the format 2024/05/09 19:36:46
+			fmt.Printf("%s %s\n", formatTimeObject(time.Now(), "2006/01/02 15:04:05"), "Waiting for the VM to boot and complete initial setup...")
+			continue
+		}
+		// Check for a missing role error
+		if strings.Contains(line, "ERROR! the role '") && strings.Contains(line, "was not found in") {
+
+			if verbose {
+				fmt.Println(line)
+			}
+
+			// Extract the missing role name with regex
+			matches := regexForMissingRole.FindStringSubmatch(line)
+			if len(matches) > 1 {
+				fmt.Printf("\n******************************** ERROR - Missing Role *******************************************\n")
+				fmt.Printf("The role '%s' was not found in the inventory\n", matches[1])
+				fmt.Printf("Run the command: ludus ansible role add %s\n", matches[1])
+				fmt.Println("to add the missing role (assuming it's hosted on Ansible Galaxy)")
+				fmt.Printf("*************************************************************************************************\n\n")
+				continue
+			} else {
+				fmt.Printf("\n******************************** ERROR - Missing Role *******************************************\n")
+				fmt.Printf("A role was not found in the inventory\n")
+				fmt.Printf("Raw line: %s\n", line)
+				fmt.Printf("*************************************************************************************************\n\n")
+				continue
+			}
+		}
+		// This will ignore all lines without the '=>', which is most of the verbose stuff, as well as the python3-apt error
+		if !verbose &&
+			(!strings.Contains(line, "=>") ||
+				strings.Contains(line, "proxmox-iso.kali: fatal: [default]: FAILED! => {\"changed\": false, \"msg\": \"python3-apt must be installed and visible from /usr/bin/python3.\"}")) {
+
+			continue
+		}
+		fmt.Println(line)
+	}
+}
+
+func printTaskOutputFromString(logs string, taskName string) {
+	// Split logs into lines
+	lines := strings.Split(logs, "\n")
+
+	// Variables to track state
+	var currentOutput []string
+	var allOutputs [][]string
+	collecting := false
+
+	// Search for all instances of the task and collect their output
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+
+		// Check if we found our task (case insensitive)
+		if strings.Contains(strings.ToLower(line), "task ["+strings.ToLower(taskName)+"]") {
+			// If we were already collecting, save the previous output
+			if collecting && len(currentOutput) > 0 {
+				allOutputs = append(allOutputs, currentOutput)
+			}
+
+			// Start new collection
+			collecting = true
+			currentOutput = []string{line}
+			continue
+		}
+
+		// If we're collecting output
+		if collecting {
+			// Stop current collection when we hit the next task or play
+			if strings.HasPrefix(line, "TASK [") || strings.HasPrefix(line, "PLAY [") {
+				if len(currentOutput) > 0 {
+					allOutputs = append(allOutputs, currentOutput)
+				}
+				collecting = false
+				currentOutput = nil
+				continue
+			}
+
+			// Add non-empty lines to current output
+			if strings.TrimSpace(line) != "" {
+				currentOutput = append(currentOutput, line)
+			}
+		}
+	}
+
+	// Print all collected outputs with separation between multiple instances
+	for i, output := range allOutputs {
+		fmt.Println(strings.Join(output, "\n"))
+		// Add separator between multiple instances
+		if i < len(allOutputs)-1 {
+			fmt.Println("\n---\n")
+		}
 	}
 }

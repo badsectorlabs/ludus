@@ -52,10 +52,10 @@ func formatRangeResponse(data RangeObject, withVMs bool) {
 	// Create table
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetAlignment(tablewriter.ALIGN_CENTER)
-	table.SetHeader([]string{"User ID", "Range Number", "Last Deployment", "Number of VMs", "Deployment Status", "Testing Enabled"})
-	lastDeployment := formatTimeObject(data.LastDeployment)
+	table.SetHeader([]string{"User ID", "Range Network", "Last Deployment", "Number of VMs", "Deployment Status", "Testing Enabled"})
+	lastDeployment := formatTimeObject(data.LastDeployment, "2006-01-02 15:04")
 
-	table.Append([]string{data.UserID, fmt.Sprint(data.RangeNumber), lastDeployment, fmt.Sprint(data.NumberOfVMs), data.RangeState, strings.ToUpper(strconv.FormatBool(data.TestingEnabled))})
+	table.Append([]string{data.UserID, fmt.Sprintf("10.%d.0.0/16", data.RangeNumber), lastDeployment, fmt.Sprint(data.NumberOfVMs), data.RangeState, strings.ToUpper(strconv.FormatBool(data.TestingEnabled))})
 
 	if data.TestingEnabled {
 		table.SetColumnColor(nil, nil, nil, nil, getRangeStateColor(data), tablewriter.Colors{tablewriter.FgBlackColor, tablewriter.Bold, tablewriter.BgGreenColor})
@@ -131,11 +131,11 @@ var rangeListCmd = &cobra.Command{
 			}
 			table := tablewriter.NewWriter(os.Stdout)
 			table.SetAlignment(tablewriter.ALIGN_CENTER)
-			table.SetHeader([]string{"User ID", "Range Number", "Last Deployment", "VM Count", "Deployment Status", "Testing Enabled"})
+			table.SetHeader([]string{"User ID", "Range Network", "Last Deployment", "VM Count", "Deployment Status", "Testing Enabled"})
 			for _, rangeObject := range data {
-				lastDeployment := formatTimeObject(rangeObject.LastDeployment)
+				lastDeployment := formatTimeObject(rangeObject.LastDeployment, "2006-01-02 15:04")
 
-				rowValues := []string{rangeObject.UserID, fmt.Sprint(rangeObject.RangeNumber), lastDeployment, fmt.Sprint(rangeObject.NumberOfVMs), rangeObject.RangeState, strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled))}
+				rowValues := []string{rangeObject.UserID, fmt.Sprintf("10.%d.0.0/16", rangeObject.RangeNumber), lastDeployment, fmt.Sprint(rangeObject.NumberOfVMs), rangeObject.RangeState, strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled))}
 
 				var testingColor tablewriter.Colors
 				if rangeObject.TestingEnabled {
@@ -346,9 +346,10 @@ func setupRangeLogsCmd(command *cobra.Command) {
 }
 
 var rangeErrorsCmd = &cobra.Command{
-	Use:   "errors",
-	Short: "Parse the latest deploy logs from your range and print any non-ignored fatal errors",
-	Args:  cobra.NoArgs,
+	Use:     "errors",
+	Short:   "Parse the latest deploy logs from your range and print any non-ignored fatal errors",
+	Args:    cobra.NoArgs,
+	Aliases: []string{"error"},
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
@@ -499,7 +500,7 @@ var rangeAbortCmd = &cobra.Command{
 
 var rangeRDPGET = &cobra.Command{
 	Use:   "rdp",
-	Short: "Get a zip of RDP configuration files for all Windows hosts in a rage",
+	Short: "Get a zip of RDP configuration files for all Windows hosts in a range",
 	Long: `The RDP zip file will contain two configs for each Windows box:
 one for the domainadmin user, and another for the domainuser user`,
 	Args: cobra.NoArgs,
@@ -562,6 +563,7 @@ type RangeAccessActionPayload struct {
 	AccessActionVerb string `json:"action"`
 	TargetUserID     string `json:"targetUserID"`
 	SourceUserID     string `json:"sourceUserID"`
+	Force            bool   `json:"force"`
 }
 
 func genericRangeActionCmd(use string, short string, aliases []string) *cobra.Command {
@@ -582,6 +584,7 @@ func genericRangeActionCmd(use string, short string, aliases []string) *cobra.Co
 				AccessActionVerb: use,
 				TargetUserID:     targetUserID,
 				SourceUserID:     sourceUserID,
+				Force:            force,
 			}
 
 			responseJSON, success = rest.GenericJSONPost(client, "/range/access", accessBody)
@@ -600,6 +603,7 @@ var accessRevokeCmd = genericRangeActionCmd("revoke", "revoke access to a target
 func setupGenericRangeActionCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&targetUserID, "target", "t", "", "the userID of the range to grant/revoke access to/from")
 	command.Flags().StringVarP(&sourceUserID, "source", "s", "", "the userID of the user to gaining or losing access")
+	command.Flags().BoolVar(&force, "force", false, "force the access action even if the target router is inaccessible")
 }
 
 var accessListCmd = &cobra.Command{
@@ -639,6 +643,30 @@ var accessListCmd = &cobra.Command{
 	},
 }
 
+var rangeTaskOutputCmd = &cobra.Command{
+	Use:   "taskoutput",
+	Short: "Get the output of a task by name from the latest deploy logs",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		var apiString string
+
+		if userID != "" {
+			apiString = fmt.Sprintf("/range/logs?userID=%s", userID)
+		} else {
+			apiString = "/range/logs"
+		}
+		responseJSON, success := rest.GenericGet(client, apiString)
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+		rangeLogs, _ := stringAndCursorFromResult(responseJSON)
+		printTaskOutputFromString(rangeLogs, args[0])
+
+	},
+}
+
 func init() {
 	rangeConfigCmd.AddCommand(rangeConfigGet)
 	setupRangeConfigSet(rangeConfigSet)
@@ -664,6 +692,7 @@ func init() {
 	setupGenericRangeActionCmd(accessGrantCmd)
 	setupGenericRangeActionCmd(accessRevokeCmd)
 	rangeCmd.AddCommand(rangeAccessCmd)
+	rangeCmd.AddCommand(rangeTaskOutputCmd)
 	rootCmd.AddCommand(rangeCmd)
 
 }

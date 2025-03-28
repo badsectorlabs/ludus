@@ -31,7 +31,7 @@ dns:
   ratelimit_whitelist: []
   refuse_any: true
   upstream_dns:
-    - https://dns.cloudflare.com/dns-query
+    - https://1.1.1.1/dns-query
   upstream_dns_file: ""
   bootstrap_dns:
     - 1.1.1.1
@@ -96,7 +96,7 @@ tls:
   private_key_path: ""
   strict_sni_check: false
 filters:
-  - enabled: true
+  - enabled: false
     url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
     name: AdGuard DNS filter
     id: 1
@@ -104,7 +104,7 @@ filters:
     url: https://adaway.org/hosts.txt
     name: AdAway Default Blocklist
     id: 2
-  - enabled: true
+  - enabled: false
     url: https://raw.githubusercontent.com/crazy-max/WindowsSpyBlocker/master/data/dnscrypt/spy.txt
     name: Windows Spy
     id: 1669833241

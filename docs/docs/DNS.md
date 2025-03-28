@@ -1,5 +1,5 @@
 ---
-sidebar_position: 8
+sidebar_position: 10
 title: "📟 DNS"
 ---
 
@@ -23,7 +23,7 @@ outside of its domain to the router.
 
 :::
 
-By default, the AdGuard Home instance uses the [Windows Spy](https://github.com/crazy-max/WindowsSpyBlocker) list to block some requests to Microsoft Telemetry.
+By default, the AdGuard Home instance includes but does not enable the [Windows Spy](https://github.com/crazy-max/WindowsSpyBlocker) list to block some requests to Microsoft Telemetry.
 This blocking is of uncertain value.
 
 ## Query Log

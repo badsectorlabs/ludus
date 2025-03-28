@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# Check if the user is root
+if [ "$EUID" -ne 0 ]; then
+    echo "You must be root to check the Ludus install status"
+    exit 1
+fi
+
+if [[ -f {{ ludus_install_path }}/install/.stage-3-complete ]]; then 
+    echo 'Ludus install completed successfully'
+    echo -n "Root API key: "
+    cat {{ ludus_install_path }}/install/root-api-key
+    echo
+else 
+    tail -f {{ ludus_install_path }}/install/install.log | while read line; do
+        echo "$line"
+        if echo "$line" | grep -q "Ludus install complete"; then
+            echo "Install complete!"
+            break
+        fi
+    done
+
+    # Wait up to 10 seconds for root-api-key file to exist
+    count=0
+    while [ ! -f {{ ludus_install_path }}/install/root-api-key ] && [ $count -lt 10 ]; do
+        sleep 1
+        ((count++))
+    done
+    if [ ! -f {{ ludus_install_path }}/install/root-api-key ]; then
+        echo "Error: Root API key file ({{ ludus_install_path }}/install/root-api-key)not found"
+        exit 1
+    fi
+
+    echo
+    echo -n "Root API key: "
+    cat {{ ludus_install_path }}/install/root-api-key
+    echo
+fi

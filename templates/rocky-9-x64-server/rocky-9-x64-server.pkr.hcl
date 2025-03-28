@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "sha256:eef8d26018f4fcc0dc101c468f65cbf588f2184900c556f243802e9698e56729"
+  default = "file:https://download.rockylinux.org/pub/rocky/9/isos/x86_64/Rocky-9-latest-x86_64-minimal.iso.CHECKSUM"
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
@@ -11,7 +11,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://download.rockylinux.org/pub/rocky/9/isos/x86_64/Rocky-9.3-x86_64-minimal.iso"
+  default = "https://download.rockylinux.org/pub/rocky/9/isos/x86_64/Rocky-9-latest-x86_64-minimal.iso"
 }
 
 variable "vm_cpu_cores" {
@@ -85,7 +85,7 @@ locals {
   template_description = "Rocky 9 template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => localuser:password"
 }
 
-source "proxmox-iso" "rocky85" {
+source "proxmox-iso" "rocky9" {
   boot_command = [
      "<tab> text inst.ks=http://{{ .HTTPIP }}:{{ .HTTPPort }}/rocky-9-preseed.cfg<enter><wait>"
   ]
@@ -130,5 +130,14 @@ source "proxmox-iso" "rocky85" {
 }
 
 build {
-  sources = ["source.proxmox-iso.rocky85"]
+  sources = ["source.proxmox-iso.rocky9"]
+
+  provisioner "ansible" {
+    playbook_file = "ansible/reset-ssh-host-keys.yml"
+    use_proxy     = false
+    user = "${var.ssh_username}"
+    extra_arguments = ["--extra-vars", "{ansible_python_interpreter: /usr/bin/python3, ansible_password: ${var.ssh_password}, ansible_sudo_pass: ${var.ssh_password}}"]
+    ansible_env_vars = ["ANSIBLE_HOME=${var.ansible_home}", "ANSIBLE_LOCAL_TEMP=${var.ansible_home}/tmp", "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR=${var.ansible_home}/pc", "ANSIBLE_SSH_CONTROL_PATH_DIR=${var.ansible_home}/cp"]
+    skip_version_check = true
+  }
 }
