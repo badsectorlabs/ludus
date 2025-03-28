@@ -58,7 +58,7 @@ var antiSandboxInstallStandardCmd = &cobra.Command{
 			logger.Logger.Fatal("Anti-Sandbox is only available on the admin port (:8081)")
 		}
 
-		responseJSON, success := rest.GenericJSONPost(client, "/antisandbox/install-normal", "")
+		responseJSON, success := rest.GenericJSONPost(client, "/antisandbox/install-standard", "")
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -123,7 +123,7 @@ Do you want to continue? (y/N): `, VMIDs)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		handleAntiSandboxResult(responseJSON)
+		handleSuccessErrorArrayResult(responseJSON, "anti-sandbox")
 	},
 }
 
@@ -138,7 +138,7 @@ func setupAntiSandboxEnableCmd(command *cobra.Command) {
 	_ = command.MarkFlagRequired("vmids")
 }
 
-func handleAntiSandboxResult(responseJSON []byte) {
+func handleSuccessErrorArrayResult(responseJSON []byte, feature string) {
 	type errorStruct struct {
 		Item   string `json:"item"`
 		Reason string `json:"reason"`
@@ -165,7 +165,7 @@ func handleAntiSandboxResult(responseJSON []byte) {
 	}
 	if len(data.Success) > 0 {
 		for _, allowed := range data.Success {
-			logger.Logger.Info("Successfully enabled anti-sandbox for VM(s): " + allowed)
+			logger.Logger.Info("Successfully enabled " + feature + " for VM(s): " + allowed)
 		}
 	}
 }
