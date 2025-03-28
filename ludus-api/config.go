@@ -71,7 +71,7 @@ func (s *Server) ParseConfig() {
 	if ServerConfiguration.LicenseKey == "" || ServerConfiguration.LicenseKey == "community" {
 		s.LicenseType = "community"
 		s.LicenseValid = true
-		s.LicenseMessage = ""
+		s.LicenseMessage = "community license"
 	} else {
 		s.LicenseType = "enterprise"
 		s.LicenseMessage = ""
