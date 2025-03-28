@@ -59,7 +59,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 
 // Index is the index handler.
 func Index(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Ludus Server %s", LudusVersion)})
+	c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Ludus Server %s - %s", LudusVersion, server.LicenseMessage)})
 }
 
 // Ensure the user is an admin, otherwise returns a 401 response
