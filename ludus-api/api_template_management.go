@@ -121,6 +121,9 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 	var packerVerbose string
 	if verbose {
 		packerVerbose = "1"
+		// Remove the verbose log file, if this packer build fails in verbose mode we append the debug log to the regular log file
+		// so we need to make sure we don't spam the user with a ton of debug logs from old builds
+		os.Remove(packerLogFileDebug)
 	} else {
 		packerVerbose = "0"
 		// Since the log file is only used in verbose mode, we need to write to the log file path with a message to alert the user that
