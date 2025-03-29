@@ -343,7 +343,7 @@ var snapshotRemoveCmd = &cobra.Command{
 
 		apiPath := "/snapshots/remove"
 		if userID != "" {
-			apiPath = fmt.Sprintf("%s&userID=%s", apiPath, userID)
+			apiPath = fmt.Sprintf("%s?userID=%s", apiPath, userID)
 		}
 
 		var snapshotVMIDsIntArray []int
