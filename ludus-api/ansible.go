@@ -106,6 +106,13 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	if err != nil {
 		return "Failed to open ansible log file", errors.New("failed to open ansible log file")
 	}
+	// If we are running as root, chown this log file to ludus:ludus to prevent potential issues when running future commands as a regular user
+	defer func() {
+		if os.Geteuid() != 0 {
+			changeFileOwner(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "ludus")
+		}
+	}()
+	// defer is last in, first out, so this will close the file and then chown it
 	defer ansibleLogFile.Close()
 
 	execute := execute.NewDefaultExecute(
@@ -141,8 +148,9 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	}
 
 	// Check for a user-defined-roles playbook (included in ludus) and create a placeholder if it doesn't exist
-	if !FileExists(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername)) {
-		logToFile(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername),
+	userDefinedRolePath := fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername)
+	if !FileExists(userDefinedRolePath) {
+		logToFile(userDefinedRolePath,
 			`- name: Run debug task on localhost
   tags: [user-defined-roles]
   hosts: localhost
@@ -152,6 +160,10 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
       ansible.builtin.debug:
         msg: "No user-defined roles to run"`,
 			false)
+		// If we are running as root, chown this file to ludus:ludus to prevent potential issues when deploying as a regular user
+		if os.Geteuid() != 0 {
+			changeFileOwner(userDefinedRolePath, "ludus")
+		}
 	}
 
 	// Only notify if this is a range deployment
