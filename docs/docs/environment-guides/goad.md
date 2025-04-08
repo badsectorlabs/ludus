@@ -127,7 +127,7 @@ The added Kali VM should look like this at the end of the `ludus:` block:
 Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
 
 ```bash
-ludus snapshot create clean-setup -d "Clean GOAD setup after ansible run"
+ludus --user GOADGOADd126ca snapshot create clean-setup -d "Clean GOAD setup after ansible run"
 ```
 
 ### 4. Hack!
