@@ -23,6 +23,7 @@ While Ludus is free and open source, Ludus Enterprise is a paid service that pro
 | CTFd integration | ❌ | ✅ |
 | [Private Role Catalog](./private-roles.md) | ❌ | ✅ |
 | [Outbound WireGuard](./outbound-wireguard.md) | ❌ | ✅ |
+| [Windows Licensing](./kms.md) | ❌ | ✅ |
 | [Anti-Sandbox](./anti-sandbox.md) | ❌ | 🔌 Add-on |
 | Arbitrary credential support | ❌ | 🚧 In development |   
 | Web Interface | ❌ | 🚧 In development |
