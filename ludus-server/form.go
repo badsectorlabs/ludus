@@ -136,6 +136,10 @@ func NewModel() Model {
 				Validate(func(s string) error {
 					if s == "" {
 						return fmt.Errorf("Proxmox node cannot be empty")
+					} else if strings.Contains(s, " ") {
+						return fmt.Errorf("Proxmox node cannot contain spaces")
+					} else if strings.Contains(s, ".") {
+						return fmt.Errorf("Proxmox node cannot contain dots, use only the base hostname, not the FQDN")
 					}
 					return nil
 				}).
