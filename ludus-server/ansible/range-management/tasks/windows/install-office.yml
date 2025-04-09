@@ -29,7 +29,7 @@
 - name: Get latest office chocolatey version (ugly)
   delegate_to: localhost
   ansible.builtin.shell: |
-    curl -s https://api.github.com/repos/open-circle-ltd/chocolatey.microsoft-office-deployment/commits\?per_page\=5 | jq -r '.[].commit.message' | grep -Po '(?<=chocomilk: Update to )[\d\.]*' | head -{{ office_installer_version_lookback }} | tail -1
+    curl -s https://api.github.com/repos/open-circle-ltd/chocolatey.microsoft-office-deployment/commits\?per_page\=25 | jq -r '.[].commit.message' | grep -Po '(?<=chocomilk: Update to )[\d\.]*' | head -{{ office_installer_version_lookback }} | tail -1
   register: latest_office_chocolatey_version
   when: office_version != "2013"
 
@@ -131,9 +131,3 @@
     data: 1
     type: dword
   when: office_version == "2013"
-
-# - name: Activate Office 2016 32 bit
-#   ansible.windows.win_shell: cscript ospp.vbs /inpkey:{{ office_2016_key }}
-#   args:
-#     chdir: C:\Program Files (x86)\Microsoft Office\Office16
-#   when: office_version == "2016"

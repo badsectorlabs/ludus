@@ -1076,7 +1076,7 @@
           You can update your vm with:
           ludus testing update -n [VM NAME]
           Install office manually, or attempt the office install again with:
-          ludus range deploy -t office-install
+          ludus range deploy -t install-office
       when: office_install_failed is defined and office_install_failed
 
 # ==========================================================
