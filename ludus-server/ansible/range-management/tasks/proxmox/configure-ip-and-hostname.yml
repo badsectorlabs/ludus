@@ -1,3 +1,4 @@
+
 #######################################
 ## Check if we need to change the IP ##
 #######################################
@@ -85,8 +86,7 @@
 ## Windows ##
 #############
 # Static IP - Windows
-- name: Set up static IP address (Windows)
-  # Windows sometimes screws up and sets a static IP but thinks it still needs DHCP. Kicking the adapter fixes it
+- name: Primary Method - Set up static IP address (Windows)
   ansible.windows.win_shell: |
     $eAdapter = Get-NetIpAddress -InterfaceAlias 'Ethernet*'
     $eAdapter | New-NetIpAddress -IpAddress {{ static_ip }} -PrefixLength {{ cidr_netmask }} -DefaultGateway {{ default_gateway }}
@@ -94,9 +94,55 @@
     Enable-NetAdapter -Name $eAdapter -Confirm: $false
   async: 100 # Using "fire-and-forget" asynchronous execution for this task, otherwise it will always fail and time out
   poll: 0
+  ignore_errors: True
+  register: potential_error_old_hardware
   when: ansible_os_family == "Windows"
 
-- name: Change ansible's ip address for the host (Windows)
+- name: Set old_hardware fact (Windows)
+  ansible.builtin.set_fact:
+    old_hardware: "{{ (potential_error_old_hardware | default({})).failed | default(false) }}"
+  when: ansible_os_family == "Windows"
+
+- name: Is fallback needed?
+  ansible.builtin.debug:
+    msg: "{{ potential_error_old_hardware }}"
+  when:
+    - ansible_os_family == "Windows"
+
+# -- Fallback Method: Use netsh script if the static IP wasn’t applied --
+- name: "Fallback - Create file with ip changes with netsh.exe"
+  community.windows.win_lineinfile:
+    path: C:\static-ip.ps1
+    create: true
+    line: |
+      sleep 60
+      ipconfig /renew
+      netsh.exe interface ipv4 set address name=Ethernet source=static addr={{ static_ip }}/{{ cidr_netmask }} gateway={{ default_gateway }}
+      ipconfig /renew
+  when: ansible_os_family == "Windows" and old_hardware
+
+- name: "Fallback - Set registry key for script execution on next reboot"
+  ansible.windows.win_regedit:
+    path: HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce
+    name: RunMyScript
+    data: 'powershell.exe -ExecutionPolicy Unrestricted -File C:\static-ip.ps1'
+    type: string
+  when: ansible_os_family == "Windows" and old_hardware
+
+- name: "Fallback - Set registry key for script execution on next reboot"
+  ansible.windows.win_regedit:
+    path: HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce
+    name: RunMyScript
+    data: 'powershell.exe -ExecutionPolicy Unrestricted -File C:\static-ip.ps1'
+    type: string
+  when: ansible_os_family == "Windows" and old_hardware
+
+- name: "Fallback - Reboot the machine to apply static IP (Fallback Method)"
+  ansible.windows.win_reboot:
+    msg: "Rebooting to apply fallback static IP configuration"
+  when: ansible_os_family == "Windows" and old_hardware
+
+- name: "Change ansible's ip address for the host (Windows)"
   ansible.builtin.set_fact:
     ansible_host: "{{ static_ip }}"
   when: ansible_os_family == "Windows"
@@ -111,6 +157,12 @@
   become: false
   register: wait_result
   when: ansible_os_family == "Windows"
+
+- name: Clean up static IP script after reboot
+  ansible.windows.win_file:
+    path: C:\static-ip.ps1
+    state: absent
+  when: ansible_os_family == "Windows" and old_hardware
 
 - name: Set DNS (Windows)
   ansible.windows.win_dns_client:
