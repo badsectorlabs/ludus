@@ -59,6 +59,12 @@ func editWithExternalEditor(content []byte, editorCmd string, tempFilePath strin
 		return nil, fmt.Errorf("editor process failed: %v", err)
 	}
 
+	// If using VS Code or Cursor, wait for user to press enter
+	if editorCmd == "code" || editorCmd == "cursor" {
+		fmt.Println("Forking editor detected - Press Enter when you have finished editing the file.")
+		fmt.Scanln()
+	}
+
 	// Read modified content
 	newContent, err := os.ReadFile(tempFilePath)
 	if err != nil {
