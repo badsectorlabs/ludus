@@ -22,7 +22,7 @@
       proxmox_pool:
         name: SHARED
         state: present
-        comment: "Templates shared will all Ludus users"
+        comment: "Templates shared with all Ludus users"
 
     - name: Configure Proxmox pools (ADMIN)
       proxmox_pool:
