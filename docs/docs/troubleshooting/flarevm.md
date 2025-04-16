@@ -2,7 +2,7 @@
 title: Flare-VM
 ---
 
-## Disable Defender 1 Error(Blocked by antivirus)
+## Disable Defender 1 Error (Blocked by antivirus)
 
 ```
  TASK [badsectorlabs.ludus_flarevm : Disable Defender 1] ************************
@@ -58,5 +58,4 @@ ludus range deploy
 # Or check the status with `ludus range status`
 ```
 
-Issue reference:
-- https://gitlab.com/badsectorlabs/ludus/-/issues/86
+Issue reference: [Issue 86](https://gitlab.com/badsectorlabs/ludus/-/issues/86)
