@@ -14,10 +14,17 @@ If you encounter the issue when following this tutorial https://docs.ludus.cloud
 1. Use flare-vm template instead of win11-xxx-template.
 
 ```bash
-git clone https://gitlab.com/badsectorlabs/ludus
+#terminal-command-local
+git clone https://gitlab.com/badsectorlabs/ludus.git
+#terminal-command-local
 cd ludus/templates
+#terminal-command-local
 ludus templates add -d flare-vm
+#terminal-command-local
 ludus templates build
+# Wait for the template to successfully build
+# You can watch the logs with `ludus template logs -f`
+# Or check the status with `ludus template status` and `ludus templates list`
 ```
 
 2. After successfully building, change the template value in `config.yml` to `flare-vm-template`
