@@ -66,6 +66,19 @@
     ansible_become_user: '{{ autologon_user if backslash in autologon_user else netbios_name + backslash + autologon_user }}'
     ansible_become_password: '{{ autologon_password }}'
     ansible_become_flags: "logon_type=interactive logon_flags=with_profile"
+  ignore_errors: true
+
+- name: Gather Domain Users group name as domain admin if the autologon user login failed (possibly not created in the domain yet)
+  ansible.windows.win_shell: |
+    (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-513'").Name
+  register: domain_users_group_name_command
+  when: domain_users_group_name_command is failed
+  vars:
+    ansible_become: true
+    ansible_become_method: runas
+    ansible_become_user: '{{ netbios_name }}\\{{ domain_admin }}'
+    ansible_become_password: '{{ domain_admin_password }}'
+    ansible_become_flags: "logon_type=interactive logon_flags=with_profile"
 
 - name: Set the Domain Users group name
   ansible.builtin.set_fact:
