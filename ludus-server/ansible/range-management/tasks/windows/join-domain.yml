@@ -58,7 +58,7 @@
 - name: Gather Domain Users group name by SID (multilingual)
   ansible.windows.win_shell: |
     (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-513'").Name
-  register: domain_users_group_name_command
+  register: domain_users_group_name_command_autologon
   # We must run as the domain/autologon to get the domain group info. Assumes the autologon user is a domain user.
   vars:
     ansible_become: true
@@ -71,18 +71,24 @@
 - name: Gather Domain Users group name as domain admin if the autologon user login failed (possibly not created in the domain yet)
   ansible.windows.win_shell: |
     (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-513'").Name
-  register: domain_users_group_name_command
-  when: domain_users_group_name_command is failed
+  register: domain_users_group_name_command_domain_admin
+  when: domain_users_group_name_command_autologon is failed
   vars:
     ansible_become: true
     ansible_become_method: runas
-    ansible_become_user: '{{ netbios_name }}\\{{ domain_admin }}'
+    ansible_become_user: '{{ netbios_name }}\{{ domain_admin }}'
     ansible_become_password: '{{ domain_admin_password }}'
     ansible_become_flags: "logon_type=interactive logon_flags=with_profile"
 
-- name: Set the Domain Users group name
+- name: Set the Domain Users group name from autologon
   ansible.builtin.set_fact:
-    domain_users_group_name: "{{ domain_users_group_name_command.stdout | trim }}"
+    domain_users_group_name: "{{ domain_users_group_name_command_autologon.stdout | trim }}"
+  when: domain_users_group_name_command_autologon is not failed
+
+- name: Set the Domain Users group name from DA
+  ansible.builtin.set_fact:
+    domain_users_group_name: "{{ domain_users_group_name_command_domain_admin.stdout | trim }}"
+  when: domain_users_group_name_command_domain_admin is not skipped
 
 # "The users have to be part of the RDusers group locally on the server you want to login via RDP, not only in the AD."
 # https://serverfault.com/questions/265531/members-of-remote-desktop-users-group-cannot-login
