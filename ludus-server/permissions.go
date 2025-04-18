@@ -20,6 +20,6 @@ func checkAndCreateNetworkAccessRole() error {
 	}
 
 	Run(fmt.Sprintf("pveum acl modify /nodes/%s -group ludus_users -role AccessNetwork", hostname), false, false)
-
+	Run(fmt.Sprintf("pveum acl modify /nodes/%s -group ludus_users -role ResourceAudit", hostname), false, false)
 	return nil
 }
