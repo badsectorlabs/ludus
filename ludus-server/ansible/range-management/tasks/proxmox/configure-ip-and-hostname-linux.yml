@@ -1,0 +1,257 @@
+#######################################
+## Check if we need to change the IP ##
+#######################################
+- name: Check if the IP has been statically set correctly (Linux)
+  ansible.builtin.shell: |
+    ip address show | egrep 'inet 10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
+  register: linux_ip_address_line
+  failed_when: linux_ip_address_line.rc > 1
+
+- name: Ending play for this host (Linux)
+  ansible.builtin.debug:
+    msg: "Ending IP/Hostname play for {{ ansible_host }} as it is already configured. IP line: {{ linux_ip_address_line.stdout }}"
+  when:
+    - linux_ip_address_line.stdout | length > 0
+    - '"dynamic" not in linux_ip_address_line.stdout'
+    - static_ip in linux_ip_address_line.stdout
+
+- name: End play if configured (Linux)
+  ansible.builtin.meta: end_host
+  when:
+    - linux_ip_address_line.stdout | length > 0
+    - '"dynamic" not in linux_ip_address_line.stdout'
+    - static_ip in linux_ip_address_line.stdout
+
+###########
+## Linux ##
+###########
+- name: Install dbus for systemd hostname changes
+  ansible.builtin.apt:
+    name:
+      - dbus
+      - libpam-systemd
+    state: present
+  when: ansible_os_family == "Debian"
+  become: true
+
+- name: Install ifupdown to enable interfaces
+  ansible.builtin.apt:
+    name:
+      - ifupdown
+    state: present
+  when: ansible_distribution == "Ubuntu"
+  become: true
+
+- name: Check if /etc/cloud exists and is a directory
+  ansible.builtin.stat:
+    path: /etc/cloud
+  register: cloud_dir
+  when: ansible_distribution == "Ubuntu"
+
+- name: Ensure /etc/cloud/cloud-init.disabled exists to stop cloud-init from DHCPing the interface
+  ansible.builtin.file:
+    path: /etc/cloud/cloud-init.disabled
+    state: touch
+  when:
+    - ansible_distribution == "Ubuntu"
+    - cloud_dir.stat.exists
+    - cloud_dir.stat.isdir
+  become: true
+
+- name: Check if /etc/netplan/00-installer-config.yaml exists
+  ansible.builtin.stat:
+    path: /etc/netplan/00-installer-config.yaml
+  become: true
+  register: netplan_file
+  when: ansible_distribution == "Ubuntu"
+
+- name: Delete /etc/netplan/00-installer-config.yaml
+  ansible.builtin.file:
+    path: /etc/netplan/00-installer-config.yaml
+    state: absent
+  become: true
+  when:
+    - ansible_distribution == "Ubuntu"
+    - netplan_file.stat.exists
+
+- name: Remove netplan cloud-init
+  ansible.builtin.file:
+    path: /etc/netplan/50-cloud-init.yaml
+    state: absent
+  become: true
+  when: ansible_distribution == "Ubuntu"
+
+- name: Remove netplan netcfg
+  ansible.builtin.file:
+    path: /etc/netplan/01-netcfg.yaml
+    state: absent
+  become: true
+  when: ansible_distribution == "Ubuntu"
+
+- name: Check if /etc/cloud/cloud.cfg.d exists
+  ansible.builtin.stat:
+    path: /etc/cloud/cloud.cfg.d
+  register: cloud_dir
+  when: ansible_distribution == "Ubuntu"
+
+- name: Disable cloud dhcp network
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+    content: "network: {config: disabled}"
+  become: true
+  when: ansible_distribution == "Ubuntu" and cloud_dir.stat.exists
+
+- name: Set DNS search domain for systemd-resolved
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/resolved.conf
+    line: Domains=home.arpa
+  become: true
+  when: ansible_distribution == "Ubuntu"
+
+- name: Set DNS server for systemd-resolved
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/resolved.conf
+    line: "DNS={{ dns_server }}"
+  become: true
+  when: ansible_distribution == "Ubuntu" and dns_server is defined
+
+# Get the data needed for all Linux
+# I tried to do this with uri and json_query, but JMESPath is a mess.
+- name: get MAC for vlan interface (Linux)
+  ansible.builtin.shell: |
+    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ proxmox_vmid }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ vlan }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
+  register: vlan_mac_command
+  delegate_to: localhost
+  become: false
+
+- name: Set the vlan_mac variable
+  ansible.builtin.set_fact:
+    vlan_mac: "{{ vlan_mac_command.stdout }}"
+
+- name: get interface for MAC of vlan interface (Linux)
+  ansible.builtin.shell: |
+    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ proxmox_vmid }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
+  register: interface_name_command
+  delegate_to: localhost
+  become: false
+
+- name: Set the interface_name variable
+  ansible.builtin.set_fact:
+    interface_name: "{{ interface_name_command.stdout }}"
+
+- name: Assert we found the interface name
+  ansible.builtin.assert:
+    that: interface_name != ""
+    fail_msg: "Could not find the interface name for VM {{ proxmox_vmid }}"
+    success_msg: "Successfully found the interface name for VM {{ proxmox_vmid }}"
+
+# Static IP - Linux
+- name: Set static IP from the template (Linux-Debian)
+  become: true
+  ansible.builtin.template:
+    src: interfaces-debian.j2
+    dest: /etc/network/interfaces
+  register: interfaces_status_debian
+  when: ansible_os_family == "Debian"
+
+- name: Set static IP from the template (Linux-RedHat/CentOS/Alma/Rocky)
+  become: true
+  ansible.builtin.template:
+    src: interfaces-redhat.j2
+    dest: "/etc/sysconfig/network-scripts/ifcfg-{{ interface_name }}"
+  register: interfaces_status_redhat
+  # These should all resolve to 'RedHat' but on older ansible they will not be in the OS_FAMILY_MAP and default to the distribution
+  # https://github.com/ansible/ansible/blob/d10100968890d85602099c153b71a23c416930b4/lib/ansible/module_utils/facts/system/distribution.py#L543
+  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux']
+
+- name: Check for "new" static IP files on (Linux-RedHat/CentOS/Alma/Rocky) > 8
+  ansible.builtin.stat:
+    path: "/etc/NetworkManager/system-connections/{{ interface_name }}.nmconnection"
+  register: readhat_stat_result
+  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux', 'CentOS']
+
+- name: Remove "new" static IP file (Linux-RedHat/CentOS/Alma/Rocky) > 8
+  become: true
+  ansible.builtin.file:
+    path: "/etc/NetworkManager/system-connections/{{ interface_name }}.nmconnection"
+    state: absent
+  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux', 'CentOS'] and readhat_stat_result.stat.exists
+
+- name: Enable new interface (Linux)
+  become: true
+  ansible.builtin.shell: ifup {{ interface_name }}
+  ignore_errors: true
+  when: ansible_os_family == "Debian" and (interfaces_status_debian is changed or interfaces_status_redhat is changed)
+
+# Hostname - Linux
+- name: Setting hostname (Linux)
+  become: true
+  ansible.builtin.hostname:
+    name: "{{ vm_hostname }}"
+    use: debian
+  register: linux_hostname
+  when: ansible_os_family == "Debian"
+
+- name: Setting hostname (Linux-RedHat/CentOS/Alma/Rocky)
+  become: true
+  ansible.builtin.hostname:
+    name: "{{ vm_hostname }}"
+  register: linux_hostname
+  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux', 'CentOS']
+
+- name: Add IP address to /etc/hosts
+  ansible.builtin.lineinfile:
+    dest: /etc/hosts
+    regexp: '.*{{ inventory_hostname }}$'
+    line: "{{ static_ip }} {{ inventory_hostname }} {{ vm_hostname }}"
+    state: present
+  become: true
+
+- name: Add hostname to /etc/hosts
+  ansible.builtin.lineinfile:
+    dest: /etc/hosts
+    regexp: '^127.0.1.1.*{{ inventory_hostname }}$'
+    line: "127.0.1.1    {{ inventory_hostname }}"
+    state: present
+  become: true
+
+- name: Remove default entry for 127.0.0.1 from /etc/hosts
+  ansible.builtin.lineinfile:
+    dest: /etc/hosts
+    regexp: '^127.*debian.*$'
+    state: absent
+  become: true
+
+- name: Set the timezone (Linux)
+  ansible.builtin.timezone:
+    name: "{{ defaults.timezone }}"
+  when: defaults.timezone is defined
+
+# Can't use the built in reboot because it won't do async https://github.com/ansible/ansible/issues/71517
+- name: Reboot to set ip and hostname (Linux)
+  become: true
+  ansible.builtin.shell: |
+    reboot
+  async: 100
+  poll: 0
+  register: reboot
+  when: ((interfaces_status_debian is changed or interfaces_status_redhat is changed) or linux_hostname is changed)
+
+- name: Change ansible's ip address for the host
+  ansible.builtin.set_fact:
+    ansible_host: "{{ static_ip }}"
+  when: reboot is changed
+
+- name: Wait for the host's control interface (SSH) to come up
+  ansible.builtin.wait_for:
+    host: "{{ static_ip }}"
+    port: 22
+    delay: 3
+    state: started
+  delegate_to: localhost
+  become: false
+  register: wait_result
+  when: reboot is changed
+
+- name: Refresh inventory
+  ansible.builtin.meta: refresh_inventory

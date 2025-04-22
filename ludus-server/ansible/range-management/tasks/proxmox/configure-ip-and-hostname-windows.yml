@@ -1,0 +1,179 @@
+#######################################
+## Check if we need to change the IP ##
+#######################################
+- name: Get network interface configuration (Windows)
+  ansible.windows.win_shell: |
+    $interface = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like "10.*" } | Select-Object -First 1
+    if ($interface -ne $null) {
+        if (Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPAddress -like "10.*"} | select -ExpandProperty DHCPEnabled) {
+            Write-Output "DHCP"
+        } else {
+            Write-Output "Static"
+        }
+    } else {
+        Write-Output "No interface in 10.0.0.0/16 network found"
+    }
+  register: windows_ip_status
+
+- name: Output result
+  ansible.builtin.debug:
+    msg: "{{ windows_ip_status.stdout }}"
+
+- name: Get IP address of network interface (Windows)
+  ansible.windows.win_shell: |
+    $ipAddress = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like "10.*" } | Select-Object -First 1 -ExpandProperty IPAddress
+    if ($ipAddress -ne $null) {
+        Write-Output $ipAddress
+    } else {
+        Write-Output "No IP address found in 10.0.0.0/16 network"
+    }
+  register: windows_ip_address_result
+  when:
+    - windows_ip_status.stdout | trim == "Static"
+
+- name: Show IP address
+  ansible.builtin.debug:
+    msg: "{{ windows_ip_address_result.stdout }}"
+  when:
+    - windows_ip_status.stdout | trim == "Static"
+
+- name: Ending play for this host (Windows)
+  ansible.builtin.debug:
+    msg: "Ending IP/Hostname play for {{ ansible_host }} as it is already configured. IP status: {{ windows_ip_status.stdout | trim }}, IP: {{ windows_ip_address_result.stdout | trim }}"
+  when:
+    - windows_ip_status.stdout | trim == "Static"
+    - windows_ip_address_result.stdout | trim == static_ip
+
+- name: End play if configured (Windows)
+  ansible.builtin.meta: end_host
+  when:
+    - windows_ip_status.stdout | trim == "Static"
+    - windows_ip_address_result.stdout | trim == static_ip
+
+#############
+## Windows ##
+#############
+# Static IP - Windows
+- name: Primary Method - Set up static IP address (Windows)
+  ansible.windows.win_shell: |
+    $eAdapter = Get-NetIpAddress -InterfaceAlias 'Ethernet*'
+    $eAdapter | New-NetIpAddress -IpAddress {{ static_ip }} -PrefixLength {{ cidr_netmask }} -DefaultGateway {{ default_gateway }}
+    Disable-NetAdapter -Name $eAdapter -Confirm: $false
+    Enable-NetAdapter -Name $eAdapter -Confirm: $false
+  async: 100 # Using "fire-and-forget" asynchronous execution for this task, otherwise it will always fail and time out
+  poll: 0
+  ignore_errors: true
+  register: potential_error_old_hardware
+
+- name: Set old_hardware fact (Windows)
+  ansible.builtin.set_fact:
+    old_hardware: "{{ (potential_error_old_hardware | default({})).failed | default(false) }}"
+
+- name: Is fallback needed?
+  ansible.builtin.debug:
+    msg: "{{ potential_error_old_hardware }}"
+
+# -- Fallback Method: Use netsh script if the static IP wasn’t applied --
+- name: "Fallback - Create file with ip changes with netsh.exe"
+  community.windows.win_lineinfile:
+    path: C:\static-ip.ps1
+    create: true
+    line: |
+      sleep 60
+      ipconfig /renew
+      netsh.exe interface ipv4 set address name=Ethernet source=static addr={{ static_ip }}/{{ cidr_netmask }} gateway={{ default_gateway }}
+      ipconfig /renew
+  when: old_hardware
+
+- name: "Fallback - Set registry key for script execution on next reboot"
+  ansible.windows.win_regedit:
+    path: HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce
+    name: RunMyScript
+    data: 'powershell.exe -ExecutionPolicy Unrestricted -File C:\static-ip.ps1'
+    type: string
+  when: old_hardware
+
+- name: "Fallback - Set registry key for script execution on next reboot"
+  ansible.windows.win_regedit:
+    path: HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce
+    name: FallbackIPSet
+    data: 'powershell.exe -ExecutionPolicy Unrestricted -File C:\static-ip.ps1'
+    type: string
+  when: old_hardware
+
+- name: "Fallback - Reboot the machine to apply static IP (Fallback Method)"
+  ansible.windows.win_reboot:
+    msg: "Rebooting to apply fallback static IP configuration"
+  when: old_hardware
+
+- name: "Change ansible's ip address for the host (Windows)"
+  ansible.builtin.set_fact:
+    ansible_host: "{{ static_ip }}"
+
+- name: Wait for the host's network interface to come back up (Windows)
+  ansible.builtin.wait_for:
+    host: "{{ static_ip }}"
+    port: 5986
+    delay: 3
+    state: started
+  delegate_to: localhost
+  become: false
+  register: wait_result
+
+- name: Clean up static IP script after reboot
+  ansible.windows.win_file:
+    path: C:\static-ip.ps1
+    state: absent
+  when: old_hardware
+
+- name: Set DNS (Windows)
+  ansible.windows.win_dns_client:
+    adapter_names: '*'
+    dns_servers:
+      - "{{ dns_server }}"
+  when: dns_server is defined
+
+- name: Set DNS search domain (Windows)
+  ansible.windows.win_powershell:
+    script: |
+      Set-DnsClientGlobalSetting -SuffixSearchList @("home.arpa")
+  when: dns_server is defined
+
+- name: Lookup the timezone string for Windows
+  ansible.builtin.set_fact:
+    windows_tz: "{{ lookup('ansible.builtin.csvfile', defaults.timezone, col='1', file='tz_mappings.csv', delimiter=',', default='NOT FOUND') }}"
+  when: defaults.timezone is defined
+
+- name: Fail this host if we can't find the timezone
+  ansible.builtin.fail:
+    msg: "Could not find the Windows timezone string for {{ defaults.timezone }}"
+  when: defaults.timezone is defined and windows_tz == "NOT FOUND"
+
+- name: Set the timezone (Windows)
+  community.windows.win_timezone:
+    timezone: "{{ windows_tz }}"
+  when: defaults.timezone is defined
+
+# Hostname - Windows
+- name: Hostname change (Windows)
+  ansible.windows.win_hostname:
+    name: "{{ vm_hostname }}"
+  register: res
+
+- name: Reboot
+  ansible.windows.win_reboot:
+  when: res.reboot_required
+
+- name: Wait for the host's control interface (WinRM via HTTPS) to come up
+  ansible.builtin.wait_for:
+    host: "{{ static_ip }}"
+    port: 5986
+    delay: 3
+    state: started
+  delegate_to: localhost
+  become: false
+  register: wait_result
+  when: res.reboot_required
+
+- name: Refresh inventory
+  ansible.builtin.meta: refresh_inventory

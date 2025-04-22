@@ -1,0 +1,43 @@
+###########
+## macOS ##
+###########
+- name: Set up static IP address (macOS)
+  ansible.builtin.shell: |
+    networksetup -setmanual Ethernet {{ static_ip }} 255.255.255.0 {{ default_gateway }}
+  # macOS changes the IP immediately, so the command will never "return"
+  async: 100
+  poll: 0
+
+- name: Change ansible's ip address for the host
+  ansible.builtin.set_fact:
+    ansible_host: "{{ static_ip }}"
+
+- name: Wait for the host's control interface (SSH) to come up
+  ansible.builtin.wait_for:
+    host: "{{ static_ip }}"
+    port: 22
+    delay: 3
+    state: started
+  delegate_to: localhost
+  become: false
+  register: wait_result
+
+- name: Set DNS (macOS)
+  ansible.builtin.shell: |
+    networksetup -setdnsservers Ethernet {{ dns_server }}
+  when: dns_server is defined
+
+- name: Setting hostname (macOS)
+  ansible.builtin.hostname:
+    name: "{{ vm_hostname }}"
+    use: darwin
+  become: true
+
+- name: Set the timezone (macOS)
+  ansible.builtin.shell: |
+    systemsetup -settimezone {{ defaults.timezone }}
+  become: true
+  when: defaults.timezone is defined
+
+- name: Refresh inventory
+  ansible.builtin.meta: refresh_inventory
