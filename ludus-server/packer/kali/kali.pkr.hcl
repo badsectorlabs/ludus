@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "sha256:beca4f8fd7f58eda290812f538e1323d3ba1f1a34df4b203e85de4be42525bb6"
+  default = "sha256:4a87f7ee0ff7544f52a7ce619b1d8d9d508d167aced424a4e8acf5f962cbbed9"
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
@@ -11,7 +11,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://cdimage.kali.org/kali-2024.4/kali-linux-2024.4-installer-amd64.iso"
+  default = "https://cdimage.kali.org/kali-2025.1c/kali-linux-2025.1c-installer-netinst-amd64.iso"
 }
 
 variable "vm_cpu_cores" {
@@ -148,7 +148,7 @@ build {
   provisioner "ansible" {
     user               = "${var.ssh_username}"
     use_proxy          = false
-    extra_arguments    = ["--extra-vars", "{ansible_python_interpreter: /usr/bin/python3, ansible_password: ${var.ssh_password}, ansible_sudo_pass: ${var.ssh_password}}"]
+    extra_arguments    = ["--extra-vars", "{ansible_python_interpreter: /usr/bin/python3, ansible_password: ${var.ssh_password}, ansible_sudo_pass: ${var.ssh_password}}", "--ssh-extra-args", "-o StrictHostKeyChecking=no"]
     playbook_file      = "./kali.yml"
     ansible_env_vars   = ["ANSIBLE_HOME=${var.ansible_home}", "ANSIBLE_LOCAL_TEMP=${var.ansible_home}/tmp", "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR=${var.ansible_home}/pc", "ANSIBLE_SSH_CONTROL_PATH_DIR=${var.ansible_home}/cp"]
     skip_version_check = true
