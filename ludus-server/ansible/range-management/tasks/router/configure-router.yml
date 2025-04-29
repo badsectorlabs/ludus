@@ -42,7 +42,7 @@
   ansible.builtin.shell: |
     curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
   register: adguard_install
-  failed_when: adguard_install.rc != 0 and (adguard_install.rc == 1 and 'the existing AdGuard Home installation is detected' not in adguard_install.stderr)
+  failed_when: adguard_install.rc != 0 and 'the existing AdGuard Home installation is detected' not in adguard_install.stderr
 
 - name: Configure AdGuardHome
   ansible.builtin.template:
