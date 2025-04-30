@@ -1,0 +1,53 @@
+---
+- name: Create GPO to enable anonymous SMB share access
+  ansible.windows.win_shell: |
+    Import-Module GroupPolicy -Verbose:$false
+
+    Start-Transcript -path C:\ludus\gpo-log.txt -append
+
+    $GPOName = "Enable Anonymous SMB Share Access"
+    $GPOExists = Get-GPO -Name $GPOName -ErrorAction SilentlyContinue
+
+    if (! $GPOExists) {
+      Write-Host "Creating GPO..."
+      New-GPO -Name $GPOName | Out-Null
+
+      $Domain = Get-ADDomain
+      $Forest = $Domain.Forest
+      $DN = $Domain.DistinguishedName
+      $TargetOU = $DN
+
+      Write-Host "Configuring SMB Client settings..."
+
+      # Set registry key for AllowInsecureGuestAuth
+      $Params = @{
+          Name = $GPOName;
+          Key = 'HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters';
+      }
+      try {
+          Set-GPRegistryValue @Params -ValueName "AllowInsecureGuestAuth" -Value 1 -Type DWORD | Out-Null
+      } catch {
+          Write-Error "Error while configuring AllowInsecureGuestAuth policy!"
+      }
+
+      # Set registry key for RequireSecuritySignature
+      $Params = @{
+          Name = $GPOName;
+          Key = 'HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters';
+      }
+      try {
+          Set-GPRegistryValue @Params -ValueName "RequireSecuritySignature" -Value 0 -Type DWORD | Out-Null
+      } catch {
+          Write-Error "Error while configuring RequireSecuritySignature policy!"
+      }
+
+      Write-Host "Configuring Security Filter..."
+      Set-GPPermissions -Name $GPOName -PermissionLevel GpoApply -TargetName "Domain Computers" -TargetType Group | Out-Null
+      Set-GPPermissions -Name $GPOName -PermissionLevel GpoApply -TargetName "Domain Users" -TargetType User | Out-Null
+
+      Write-Host "Linking and enabling new GPO..."
+
+      New-GPLink -Name $GPOName -Target $TargetOU -LinkEnabled Yes -Enforced Yes | Out-Null
+    }
+
+    Write-Host "GPO for anonymous SMB share access configured."

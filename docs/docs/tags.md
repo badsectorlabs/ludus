@@ -14,7 +14,7 @@ This is useful after an initial deployment to skip steps that are not needed on 
 | Tag | Meaning |
 | --- | --- |
 | additional-tools | Install firefox, chrome, VSCode, burp suite, 7zip, process hacker, ilspy and other useful utilities on Windows VMs |
-| allow-share-access | Allow anonymous access to SMB shares on all Windows VMs (run as part of `share` tag as well)|
+| allow-share-access | Allow anonymous access to SMB shares on all Windows VMs. Consider using the `anaon_share_access` gpo to allow anonymous access to SMB shares on all Windows VMs instead of this tag. |
 | assign-ip | Configure the static IP and hostname for all VMs |
 | custom-choco | Install user defined chocolatey packages |
 | custom-groups | Sets custom ansible groups for VMs, which are reflected in the inventory returned by `ludus range inventory` |
@@ -27,8 +27,8 @@ This is useful after an initial deployment to skip steps that are not needed on 
 | install-office | Install Microsoft Office on Windows VMs |
 | install-visual-studio | Install Visual Studio on Windows VMs |
 | network | Setup all VLANs and network rules on the router, including any firewall rules, inbound, and outbound WireGuard. Does **not** setup DNS rewrites (use `dns-rewrites` for that) |
-| nexus | Deploy Nexus cache VM |
-| share | Deploy Ludus Share VM |
+| nexus | Deploy [Nexus cache](./nexus-cache.md) VM |
+| share | Deploy Ludus Share VM - exposes `readonlyshare` and `readwriteshare`. Consider using the `anaon_share_access` gpo to allow anonymous access to SMB shares on all Windows VMs |
 | sysprep | Run Sysprep on Windows VMs with a sysprep key set to `true` |
 | user-defined-roles | Apply all user defined roles to VMs |
 | vm-deploy | Deploy all VMs defined in the range config and make sure they are powered on |

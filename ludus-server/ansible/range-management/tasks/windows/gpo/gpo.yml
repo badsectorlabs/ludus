@@ -7,3 +7,7 @@
 - name: Disable Windows Defender
   ansible.builtin.include_tasks: disable_defender.yml
   when: '"disable_defender" in enabled_gpos'
+
+- name: Enable anonymous SMB share access
+  ansible.builtin.include_tasks: enable_anon_share_access.yml
+  when: '"anon_share_access" in enabled_gpos'

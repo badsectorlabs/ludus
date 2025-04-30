@@ -31,7 +31,7 @@ Ludus user routers are assigned a static IP in this network where their range nu
 | IP | Description |
 | --- | --- |
 | 192.0.2.1 | [KMS server](./enterprise/kms.md) |
-| 192.0.2.2 | Nexus cache server |
+| 192.0.2.2 | [Nexus cache server](./nexus-cache.md) |
 | 192.0.2.3 | Ludus share server |
 
 The remaining 49 IPs in the `.1 - .50` range are reserved for future use.

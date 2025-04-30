@@ -253,7 +253,8 @@
                                         "items": {
                                             "type": "string",
                                             "enum": [
-                                                "disable_defender"
+                                                "disable_defender",
+                                                "anon_share_access"
                                             ]
                                         },
                                         "description": "The GPOs to enable for the domain. Only applies to a primary-dc. Default: none"
@@ -513,7 +514,8 @@
                     "items": {
                         "type": "string",
                         "enum": [
-                            "disable_defender"
+                            "disable_defender",
+                            "anon_share_access"
                         ]
                     },
                     "description": "The GPOs to enable for the domain. Only applies to a primary-dc. Default: none"

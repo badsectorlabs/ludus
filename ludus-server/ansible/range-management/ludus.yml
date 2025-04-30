@@ -966,8 +966,8 @@
         samba_workgroup: WORKGROUP
         samba_log: /var/log/samba.log
         samba_log_size: 60000
-        samba_log_level: '3 passdb:5 auth:10 winbind:2 '
-        samba_map_to_guest: Never
+        samba_log_level: '3 passdb:5 auth:10 winbind:2'
+        samba_map_to_guest: Bad User
         samba_shares_root: /srv/samba
         samba_shares:
           - name: readonlyshare
@@ -983,19 +983,19 @@
             guest_ok: true
             public: true
             readable: true
-            writeable: false
+            writeable: true
             browseable: true
             path: /srv/samba/readwriteshare
             user: debian
 
 - name: Configure Windows VMs to allow anonymous access to SMB Shares
-  tags: [never, share, allow-share-access]
+  tags: [never, allow-share-access]
   hosts: windows
   tasks:
     - name: Allow anonymous access to SMB Shares
       ansible.windows.win_shell: |
-        Set-SmbClientConfiguration -RequireSecuritySignature $false
-        Set-SmbClientConfiguration -EnableInsecureGuestLogons $true
+        Set-SmbClientConfiguration -RequireSecuritySignature $false -Confirm:$false
+        Set-SmbClientConfiguration -EnableInsecureGuestLogons $true -Confirm:$false
 
 # ==========================================================
 # Write RDP Files

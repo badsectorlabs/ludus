@@ -28,7 +28,8 @@ ludus:
     windows:            # This key must be set for windows VMs - all subkeys are optional
       sysprep: false    # Set to true to run sysprep before any other tasks on this VM. Default: false
       gpos:
-        - disable_defender # Create and link a GPO this disables Windows Defender for every domain joined Windows machine
+        - disable_defender   # Create and link a GPO this disables Windows Defender for every domain joined Windows machine
+        - anaon_share_access # Create and link a GPO that enables anonymous SMB share access for every domain joined Windows machine (for use with `ludus range deploy -t share`)
     domain:               # Define this key to put this machine in a domain
       fqdn: ludus.network # The FQDN of the domain
       role: primary-dc    # The role of the VM in the domain (primary-dc|alt-dc|member)
