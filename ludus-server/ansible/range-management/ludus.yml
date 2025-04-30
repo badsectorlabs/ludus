@@ -318,6 +318,8 @@
       ansible.builtin.include_tasks: tasks/windows/configure-autologon.yml
     - name: Configure Domain Controller
       ansible.builtin.include_tasks: tasks/windows/configure-dc.yml
+    - name: Configure GPOs
+      ansible.builtin.include_tasks: tasks/windows/gpo/gpo.yml
   vars:
     dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
     dc_ip: "{{ ansible_host }}"
@@ -1084,18 +1086,9 @@
 # ==========================================================
 - name: Debug
   tags: [never, debug]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: alma-test
   tasks:
-    - name: Get current DNS rules
-      ansible.builtin.uri:
-        url: http://127.0.0.1:3000/control/filtering/status
-        method: GET
-        status_code: [200, 202]
-        return_content: true
-        headers:
-          Authorization: Basic YWRtaW46cGFzc3dvcmQ=
-      register: filtering_status
-
     - name: Debug
       ansible.builtin.debug:
-        msg: "{{ filtering_status.json.user_rules }}"
+        var: hostvars[inventory_hostname]
+
