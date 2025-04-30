@@ -48,7 +48,7 @@ independently if it is a new feature, already planned feature or small
 quick win.
 
 If possible, please test all changes locally in your own CI environment.
-Instructions on how to set up CI can be found [here](https://docs.ludus.cloud/docs/cicd).
+Instructions on how to set up CI can be found [here](https://docs.ludus.cloud/docs/developers/cicd).
 
 ## Commit Guidelines ##
 
