@@ -39,6 +39,12 @@ The Ludus Anti-Sandbox plugin uses custom compiled QEMU and OVMF packages that h
   * Restores default Windows wallpaper
   * Removes Ludus-specific background configurations
 
+* Modifies processor information:
+  * Can configure custom processor name
+  * Can configure custom processor vendor identifier
+  * Can configure custom processor speed
+  * Can configure custom processor identifier
+
 ## Comparison
 
 This is a comparison of the Ludus Anti-Sandbox plugin and the standard Windows 11 template.
@@ -89,7 +95,7 @@ To take full advantage of the Anti-Sandbox feature, you must install the custom 
 
 ```shell-session
 #terminal-command-local
-ludus antisandbox install-custom
+ludus --url https://127.0.0.1:8081 antisandbox install-custom
 [INFO]  Anti-Sandbox QEMU and OVMF installed - will take effect on VM's next power cycle
 ```
 
@@ -114,7 +120,7 @@ When you are ready to enable Anti-Sandbox, note the VMID for the VM and run the 
 #terminal-command-local
 ludus snapshot create -n 179 -d "Clean snapshot before enabling anti-sandbox" pre-antisandbox
 #terminal-command-local
-ludus antisandbox enable -n 179
+ludus --url https://127.0.0.1:8081 antisandbox enable -n 179
 [INFO]  Enabling Anti-Sandbox settings for VM(s), this can take some time. Please wait.
 [INFO]  Successfully enabled anti-sandbox for VM(s): 179
 ```
@@ -123,6 +129,22 @@ You can also specify `--drop-files` to populate the autologon user's desktop and
 
 If there are any errors during the enable process, you can check the logs with `ludus range logs` or `ludus range errors`.
 
+:::note
+
+If you experience a Blue Screen of Death (BSOD) after enabling Anti-Sandbox, you can try the following:
+
+```
+echo 1 > /sys/module/kvm/parameters/ignore_msrs
+```
+
+If that allows the VM to boot, make it permanent by adding the following to `/etc/modprobe.d/kvm.conf`:
+
+```
+options kvm ignore_msrs=1
+options kvm report_ignored_msrs=0
+```
+
+:::
 
 ## Example Anti-Sandbox Configuration
 
