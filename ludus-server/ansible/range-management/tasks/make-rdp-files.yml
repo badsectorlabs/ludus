@@ -22,7 +22,12 @@
     - (ludus | selectattr('vm_name', 'match', item))[0].domain is defined
   vars:
     rdp_host: "{{ hostvars[item]['ansible_host'] }}"
-    rdp_domain: "{{ (ludus | selectattr('vm_name', 'match', item))[0].domain.fqdn.split('.')[0] }}"
+    rdp_domain: >-
+      {{
+        (ludus | selectattr('vm_name', 'match', item))[0].domain.fqdn.split('.')[0]
+        if (ludus | selectattr('vm_name', 'match', item))[0].domain is defined
+        else ''
+      }}
     rdp_username: "{{ defaults.ad_domain_user }}"
 
 - name: Create RDP files for each Windows host for autologon_user
@@ -37,8 +42,13 @@
     - (ludus | selectattr('vm_name', 'match', item))[0].windows.autologon_user is defined
   vars:
     rdp_host: "{{ hostvars[item]['ansible_host'] }}"
-    rdp_domain: "{{ (ludus | selectattr('vm_name', 'match', item))[0].domain.fqdn.split('.')[0] }}"
-    rdp_username: "{{ (ludus | selectattr('vm_name', 'match', item))[0].windows.autologon_user }}"
+    rdp_domain: >-
+      {{
+        (ludus | selectattr('vm_name', 'match', item))[0].domain.fqdn.split('.')[0]
+        if (ludus | selectattr('vm_name', 'match', item))[0].domain is defined
+        else ''
+      }}
+    rdp_username: "{{ (ludus | selectattr('vm_name', 'match', item))[0].windows.autologon_user | default('') }}"
 
 - name: Create RDP files for each Windows host for domainadmin
   ansible.builtin.template:
@@ -52,7 +62,12 @@
     - (ludus | selectattr('vm_name', 'match', item))[0].domain is defined
   vars:
     rdp_host: "{{ hostvars[item]['ansible_host'] }}"
-    rdp_domain: "{{ (ludus | selectattr('vm_name', 'match', item))[0].domain.fqdn.split('.')[0] }}"
+    rdp_domain: >-
+      {{
+        (ludus | selectattr('vm_name', 'match', item))[0].domain.fqdn.split('.')[0]
+        if (ludus | selectattr('vm_name', 'match', item))[0].domain is defined
+        else ''
+      }}
     rdp_username: "{{ defaults.ad_domain_admin }}"
 
 - name: Create RDP files for each Windows host for localuser
