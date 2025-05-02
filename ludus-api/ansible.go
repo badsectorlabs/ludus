@@ -161,7 +161,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
         msg: "No user-defined roles to run"`,
 			false)
 		// If we are running as root, chown this file to ludus:ludus to prevent potential issues when deploying as a regular user
-		if os.Geteuid() != 0 {
+		if os.Geteuid() == 0 {
 			changeFileOwner(userDefinedRolePath, "ludus")
 		}
 	}
