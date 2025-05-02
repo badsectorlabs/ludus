@@ -16,6 +16,10 @@ var (
 	RegisteredOrganization string
 	Vendor                 string
 	dropFiles              bool
+	processorName          string
+	processorVendor        string
+	processorSpeed         string
+	processorIdentifier    string
 )
 
 func isUsingAdminPort() bool {
@@ -78,11 +82,15 @@ var antiSandboxEnableCmd = &cobra.Command{
 		}
 
 		type AntiSandboxPayload struct {
-			VMIDs     string `json:"vmIDs"`
-			Owner     string `json:"registeredOwner,omitempty"`
-			Org       string `json:"registeredOrganization,omitempty"`
-			Vendor    string `json:"vendor,omitempty"`
-			DropFiles bool   `json:"dropFiles,omitempty"`
+			VMIDs               string `json:"vmIDs"`
+			Owner               string `json:"registeredOwner,omitempty"`
+			Org                 string `json:"registeredOrganization,omitempty"`
+			Vendor              string `json:"vendor,omitempty"`
+			DropFiles           bool   `json:"dropFiles,omitempty"`
+			ProcessorName       string `json:"processorName,omitempty"`
+			ProcessorVendor     string `json:"processorVendor,omitempty"`
+			ProcessorSpeed      string `json:"processorSpeed,omitempty"`
+			ProcessorIdentifier string `json:"processorIdentifier,omitempty"`
 		}
 		var antiSandboxPayload AntiSandboxPayload
 		antiSandboxPayload.VMIDs = VMIDs
@@ -90,6 +98,10 @@ var antiSandboxEnableCmd = &cobra.Command{
 		antiSandboxPayload.Org = RegisteredOrganization
 		antiSandboxPayload.Vendor = Vendor
 		antiSandboxPayload.DropFiles = dropFiles
+		antiSandboxPayload.ProcessorName = processorName
+		antiSandboxPayload.ProcessorVendor = processorVendor
+		antiSandboxPayload.ProcessorSpeed = processorSpeed
+		antiSandboxPayload.ProcessorIdentifier = processorIdentifier
 		if antiSandboxPayload.Vendor != "" && antiSandboxPayload.Vendor != "Dell" {
 			logger.Logger.Fatal("The only supported vendor at this time is Dell")
 		}
@@ -134,7 +146,10 @@ func setupAntiSandboxEnableCmd(command *cobra.Command) {
 	command.Flags().StringVar(&Vendor, "vendor", "", "The Vendor value to use for the MAC address of the VMs")
 	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
 	command.Flags().BoolVar(&dropFiles, "drop-files", false, "drop random pdf, doc, ppt, and xlsx files on the desktop and downloads folder of the VMs")
-
+	command.Flags().StringVar(&processorName, "processor-name", "", "The ProcessorNameString value to use for the VMs (e.g. Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz)")
+	command.Flags().StringVar(&processorVendor, "processor-vendor", "", "The VendorIdentifier value to use for the VMs (e.g. GenuineIntel or AuthenticAMD)")
+	command.Flags().StringVar(&processorSpeed, "processor-speed", "", "The ~Mhz value to use for the VMs in MHz (e.g. 2600)")
+	command.Flags().StringVar(&processorIdentifier, "processor-identifier", "", "The Identifier value to use for the VMs (e.g. Intel64 Family 6 Model 142 Stepping 10)")
 	_ = command.MarkFlagRequired("vmids")
 }
 
