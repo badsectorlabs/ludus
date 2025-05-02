@@ -20,6 +20,8 @@ var (
 	processorVendor        string
 	processorSpeed         string
 	processorIdentifier    string
+	systemBiosVersion      string
+	persist                bool
 )
 
 func isUsingAdminPort() bool {
@@ -91,6 +93,8 @@ var antiSandboxEnableCmd = &cobra.Command{
 			ProcessorVendor     string `json:"processorVendor,omitempty"`
 			ProcessorSpeed      string `json:"processorSpeed,omitempty"`
 			ProcessorIdentifier string `json:"processorIdentifier,omitempty"`
+			SystemBiosVersion   string `json:"systemBiosVersion,omitempty"`
+			Persist             bool   `json:"persist,omitempty"`
 		}
 		var antiSandboxPayload AntiSandboxPayload
 		antiSandboxPayload.VMIDs = VMIDs
@@ -102,9 +106,8 @@ var antiSandboxEnableCmd = &cobra.Command{
 		antiSandboxPayload.ProcessorVendor = processorVendor
 		antiSandboxPayload.ProcessorSpeed = processorSpeed
 		antiSandboxPayload.ProcessorIdentifier = processorIdentifier
-		if antiSandboxPayload.Vendor != "" && antiSandboxPayload.Vendor != "Dell" {
-			logger.Logger.Fatal("The only supported vendor at this time is Dell")
-		}
+		antiSandboxPayload.SystemBiosVersion = systemBiosVersion
+		antiSandboxPayload.Persist = persist
 
 		if !noPrompt {
 			var choice string
@@ -143,13 +146,15 @@ func setupAntiSandboxEnableCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&VMIDs, "vmids", "n", "", "A VM ID or name (104) or multiple VM IDs or names (104,105) to enable anti-sandbox on")
 	command.Flags().StringVar(&RegisteredOwner, "owner", "", "The RegisteredOwner value to use for the VMs")
 	command.Flags().StringVar(&RegisteredOrganization, "org", "", "The RegisteredOrganization value to use for the VMs")
-	command.Flags().StringVar(&Vendor, "vendor", "", "The Vendor value to use for the MAC address of the VMs")
+	command.Flags().StringVar(&Vendor, "vendor", "", "The Vendor value to use for the SMBIOS information (Dell, HP, Lenovo, or Google)")
 	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
 	command.Flags().BoolVar(&dropFiles, "drop-files", false, "drop random pdf, doc, ppt, and xlsx files on the desktop and downloads folder of the VMs")
 	command.Flags().StringVar(&processorName, "processor-name", "", "The ProcessorNameString value to use for the VMs (e.g. Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz)")
 	command.Flags().StringVar(&processorVendor, "processor-vendor", "", "The VendorIdentifier value to use for the VMs (e.g. GenuineIntel or AuthenticAMD)")
 	command.Flags().StringVar(&processorSpeed, "processor-speed", "", "The ~Mhz value to use for the VMs in MHz (e.g. 2600)")
 	command.Flags().StringVar(&processorIdentifier, "processor-identifier", "", "The Identifier value to use for the VMs (e.g. Intel64 Family 6 Model 142 Stepping 10)")
+	command.Flags().StringVar(&systemBiosVersion, "system-bios-version", "", "The SystemBiosVersion value to use for the VMs (e.g. 1.18.0)")
+	command.Flags().BoolVar(&persist, "persist", false, "persist SystemBiosVersion and CPU the changes to the VMs via a non-obvious scheduled task")
 	_ = command.MarkFlagRequired("vmids")
 }
 
