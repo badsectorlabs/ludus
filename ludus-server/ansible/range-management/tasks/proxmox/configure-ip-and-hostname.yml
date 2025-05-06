@@ -8,7 +8,15 @@
     file: configure-ip-and-hostname-linux.yml
   when: ansible_system == 'Linux'
 
+- name: Debug ansible_system
+  ansible.builtin.debug:
+    msg: "{{ ansible_system }}"
+
+- name: Debug ansible facts
+  ansible.builtin.debug:
+    var: ansible_windows_domain_member
+
 - name: Include tasks for Windows
   ansible.builtin.include_tasks:
     file: configure-ip-and-hostname-windows.yml
-  when: ansible_system == 'Windows'
+  when: ansible_system == 'Win32NT'
