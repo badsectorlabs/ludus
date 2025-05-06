@@ -722,6 +722,9 @@ range check-admin:
     - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
     - ludus range logs
     - ludus range list
+    # Check to make sure the IPs were set correctly
+    - export valid_last_octets=(1 11 21 254)
+    - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
     - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
 
 range snapshot-admin:
@@ -1076,6 +1079,9 @@ range check-user:
     - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
     - ludus range logs
     - ludus range list
+    # Check to make sure the IPs were set correctly
+    - export valid_last_octets=(1 11 21 254)
+    - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
     - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
 
 range snapshot-user:
@@ -1424,6 +1430,9 @@ test-everything:
     - if [[ "$(ludus range list --json | jq -r '.rangeState')" == "ERROR" ]]; then ludus range errors; fi
     - ludus range list
     - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
+    # Check to make sure the IPs were set correctly
+    - export valid_last_octets=(1 2 11 12 21 254)
+    - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
     # Check for docker on the redirector
     - export REDIRECTOR_VMID=$(sudo qm list | grep running | grep redirector | head -1 | awk '{print $1}')
     - sudo qm guest exec $REDIRECTOR_VMID -- docker --version | grep 'Docker version'
