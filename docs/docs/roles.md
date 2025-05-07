@@ -15,6 +15,12 @@ Roles are Ansible roles that are applied to VMs in Ludus after they are deployed
 
 Roles are unique to each user on a Ludus host, which allows users to have different versions of roles, custom roles, etc without overwriting or breaking each other's roles.
 
+:::tip Ansible Galaxy
+
+Any ansible role (35,000+) can be used with Ludus, as long as it is compatible with the OS of the VM and the roles pre-requisites are met. You can search for roles on [Ansible Galaxy](https://galaxy.ansible.com/ui/standalone/roles/).
+
+:::
+
 To add a role to Ludus, use the client as the user that will deploy the role (optionally specify the user/range that will use the role with `--user`)
 
 ```bash
