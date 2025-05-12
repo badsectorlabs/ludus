@@ -35,5 +35,11 @@ Enter ".help" for usage hints.
 sqlite> UPDATE range_objects set testing_enabled = 0 WHERE range_number = <RANGE NUMBER>;
 sqlite> UPDATE range_objects set allowed_domains = '' WHERE range_number = <RANGE NUMBER>;
 sqlite> UPDATE range_objects set allowed_ips = '' WHERE range_number = <RANGE NUMBER>;
-sqlute> .exit
+sqlite> .exit
+```
+
+## Get the total resources for a range config
+
+```
+yq '{"Total VMs": (.ludus.[] as $vm_item ireduce (0; . + 1)),"Total CPUs": (.ludus.[] as $vm_item ireduce (0; . + $vm_item.cpus)),"Total RAM (GB)": (.ludus.[] as $vm_item ireduce (0; . + $vm_item.ram_gb))}' range-config.yml
 ```
