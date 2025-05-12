@@ -140,6 +140,8 @@ ludus:
     cpus: 4
     windows:
       sysprep: true
+      autologon_user: domainadmin
+      autologon_password: password
     domain:
       fqdn: ludus.domain
       role: member
@@ -217,7 +219,7 @@ The main way to access SCCM is on the Site Server (sccm-sitesrv) with the Config
 
 :::tip
 
-Using the configuration above, the `domainadmin` user is the user that has permissions in SCCM. To access the Configuration Manager Console. Log into the sccm-sitesrv VM as `domainadmin` (not the default `domainuser`).
+Using the configuration above, the `domainadmin` user is the user that has permissions in SCCM. To access the Configuration Manager Console. Log into the sccm-sitesrv VM as `domainadmin` (which should be the user that automatically logs in to the Site Server).
 
 :::
 
