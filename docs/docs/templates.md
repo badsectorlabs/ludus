@@ -45,7 +45,7 @@ To add a template to Ludus, use the Ludus CLI to upload the template directory t
 
 ```
 local:~$ git clone https://gitlab.com/badsectorlabs/ludus
-local:~$ cd templates
+local:~$ cd ludus/templates
 local:~$ ls -1
 debian10
 manual-setup-required
