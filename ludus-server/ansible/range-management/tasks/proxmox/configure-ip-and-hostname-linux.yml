@@ -115,6 +115,19 @@
   become: true
   when: ansible_distribution == "Ubuntu" and dns_server is defined
 
+- name: Check for systemd-networkd-wait-online service
+  ansible.builtin.stat:
+    path: /lib/systemd/system/systemd-networkd-wait-online.service
+  register: systemd_networkd_wait_online_service
+  when: ansible_distribution == "Ubuntu"
+
+- name: Disable systemd-networkd-wait-online for faster boot
+  ansible.builtin.service:
+    name: systemd-networkd-wait-online
+    enabled: false
+  become: true
+  when: ansible_distribution == "Ubuntu" and systemd_networkd_wait_online_service.stat.exists
+
 # Get the data needed for all Linux
 # I tried to do this with uri and json_query, but JMESPath is a mess.
 - name: get MAC for vlan interface (Linux)
