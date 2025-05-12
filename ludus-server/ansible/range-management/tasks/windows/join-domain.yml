@@ -41,14 +41,22 @@
 #   Domain Users: {{ domain_sid }}-513
 
 # This is a bit wild but since we don't have Get-ADDomain on clients, we can get the SID of the krbtgt account then just take the first part of the SID
-- name: Get the domain SID for this domain
+- name: Get the domain SID for this domain (modern PowerShell)
   ansible.windows.win_shell: |
     [System.Security.Principal.NTAccount]::new((Get-WmiObject Win32_ComputerSystem).Domain, "krbtgt").Translate([System.Security.Principal.SecurityIdentifier]).Value
   register: domain_sid_command
+  ignore_errors: true
+
+- name: Get the domain SID for this domain (PowerShell <5.0 fallback)
+  ansible.windows.win_shell: |
+    (New-Object System.Security.Principal.NTAccount -ArgumentList (Get-WmiObject Win32_ComputerSystem).Domain, "krbtgt").Translate([System.Security.Principal.SecurityIdentifier]).Value
+  register: domain_sid_command_fallback
+  when: domain_sid_command is failed
 
 - name: Set the domain SID
   ansible.builtin.set_fact:
-    domain_sid: "{{ domain_sid_command.stdout | trim | regex_replace('-502', '') }}"
+    domain_sid: >-
+      {{ (domain_sid_command.stdout | default('') | trim | regex_replace('-502', '')) if (domain_sid_command is not failed) else (domain_sid_command_fallback.stdout | default('') | trim | regex_replace('-502', '')) }}
 
 # Ansible is fun sometimes.
 - name: Set a backslash
