@@ -1,67 +1,199 @@
-- name: Check if the Windows evaluation is expiring/expired
+# - name: Check if the Windows evaluation is expiring/expired
+#   ansible.windows.win_powershell:
+#     script: |
+#       # Purpose: Re-arms the expiration timer on expiring Windows eval images and fixes activation issues
+#       Start-Transcript -path C:\ludus\setup-log.txt -append
+
+#       # Check to see if there are days left on the timer or if it's just expired
+#       $regex = cscript c:\windows\system32\slmgr.vbs /dlv | select-string -Pattern "\((\d+) day\(s\)|grace time expired|0xC004D302|0xC004FC07|0xC004F200"
+#       If ($regex.Matches.Value -eq "grace time expired" -or $regex.Matches.Value -eq "0xC004D302" -or $regex.Matches.Value -eq "0xC004F200") {
+#         # If it shows expired, it's likely it wasn't properly activated
+#         Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) It appears Windows was not properly activated. Attempting to resolve..."
+#         Try {
+#           # The TrustedInstaller service MUST be running for activation to succeed
+#           Set-Service TrustedInstaller -StartupType Automatic
+#           Start-Service TrustedInstaller
+#           Start-Sleep 10
+#           # Attempt to activate
+#           cscript c:\windows\system32\slmgr.vbs /ato
+#         } Catch {
+#           Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Something went wrong trying to reactivate Windows..."
+#         }
+#       }
+#       Elseif ($regex.Matches.Value -eq "0xC004FC07") {
+#         Try {
+#           cscript c:\windows\system32\slmgr.vbs /rearm
+#         } Catch {
+#           Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Something went wrong trying to re-arm the image..."
+#         }
+#       }
+
+#       # If activation was successful, the regex should match 90 or 180 (Win10 or Win2016)
+#       $regex = cscript c:\windows\system32\slmgr.vbs /dlv | select-string -Pattern "\((\d+) day\(s\)"
+
+#       Try {
+#         $days_left = $regex.Matches.Groups[1].Value
+#       } Catch {
+#         Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Unable to successfully parse the output from slmgr, not rearming"
+#         $days_left = 90
+#       }
+
+#       If ($days_left -as [int] -lt 30) {
+#         write-host "$('[{0:HH:mm}]' -f (Get-Date)) $days_left days remaining before expiration"
+#         write-host "$('[{0:HH:mm}]' -f (Get-Date)) Less than 30 days remaining before Windows expiration. Attempting to rearm..."
+#         Try {
+#           # The TrustedInstaller service MUST be running for activation to succeed
+#           Set-Service TrustedInstaller -StartupType Automatic
+#           Start-Service TrustedInstaller
+#           Start-Sleep 10
+#           # Attempt to activate
+#           cscript c:\windows\system32\slmgr.vbs /ato
+#           cscript c:\windows\system32\slmgr.vbs /rearm
+#         } Catch {
+#           Try {
+#             cscript c:\windows\system32\slmgr.vbs /rearm
+#           } Catch {
+#             Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Something went wrong trying to re-arm the image..."
+#           }
+#         }
+#       }
+#       Else {
+#         Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) $days_left days left until expiration, no need to rearm."
+#       }
+#   register: powershell_result
+
+- name: Rearm the Windows trial if needed
   ansible.windows.win_powershell:
     script: |
-      # Purpose: Re-arms the expiration timer on expiring Windows eval images and fixes activation issues
-      Start-Transcript -path C:\ludus\setup-log.txt -append
+      $Computer = $env:COMPUTERNAME
+      $Cim = New-CimSession -ComputerName $Computer
 
-      # Check to see if there are days left on the timer or if it's just expired
-      $regex = cscript c:\windows\system32\slmgr.vbs /dlv | select-string -Pattern "\((\d+) day\(s\)|grace time expired|0xC004D302|0xC004FC07|0xC004F200"
-      If ($regex.Matches.Value -eq "grace time expired" -or $regex.Matches.Value -eq "0xC004D302" -or $regex.Matches.Value -eq "0xC004F200") {
-        # If it shows expired, it's likely it wasn't properly activated
-        Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) It appears Windows was not properly activated. Attempting to resolve..."
-        Try {
-          # The TrustedInstaller service MUST be running for activation to succeed
-          Set-Service TrustedInstaller -StartupType Automatic
-          Start-Service TrustedInstaller
-          Start-Sleep 10
-          # Attempt to activate
-          cscript c:\windows\system32\slmgr.vbs /ato
-        } Catch {
-          Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Something went wrong trying to reactivate Windows..."
+      # Get all licensing products
+      $AllLicensingProducts = Get-CimInstance -ClassName 'SoftwareLicensingProduct' -CimSession $Cim -ErrorAction SilentlyContinue
+      if ($AllLicensingProducts -and $AllLicensingProducts.ReturnValue -eq 0) {
+          Write-Host("Got Licensing Products")
+      } else {
+          Write-Host("Unable to get Licensing Products. Reboot.")
+          exit 1
+      }
+
+      # Filter for the Windows Operating System license product
+      # We're looking for one where the name starts with "Windows" AND LicenseStatus is 1 (Licensed)
+      # This should reliably get the currently active OS license.
+      $SLP_Windows = $AllLicensingProducts | Where-Object { $_.Name -like 'Windows*' -and $_.LicenseStatus -eq 1 } | Select-Object -First 1
+
+      # If you want to be very specific for evaluation versions:
+      # $SLP_Windows = $AllLicensingProducts | Where-Object { $_.Description -like '*TIMEBASED_EVAL*' -and $_.Name -like 'Windows*' } | Select-Object -First 1
+
+      # Check if we found the Windows license product
+      if (-not $SLP_Windows) {
+          Write-Error "Could not find an active Windows license product."
+          # Output all found products for diagnostics
+          Write-Warning "Available licensing products:"
+          $AllLicensingProducts | Format-Table Name, Description, LicenseStatus, GracePeriodRemaining -AutoSize
+          Remove-CimSession -CimSession $Cim
+          exit 1
+      }
+
+      Write-Output "Selected Windows Licensing Product:"
+      Write-Output ($SLP_Windows | Format-List *) # Display the specific product we're working with
+
+      # Now $SLP_Windows should be a single object, so accessing its properties will return single values
+      $GraceLeft = $null
+      if ($SLP_Windows.GracePeriodRemaining -ne $null -and $SLP_Windows.GracePeriodRemaining -ge 0) {
+          $GraceLeft = [DateTime]::Now.Add([TimeSpan]::FromMinutes($SLP_Windows.GracePeriodRemaining))
+      } else {
+          Write-Warning "GracePeriodRemaining for Windows is null or invalid: $($SLP_Windows.GracePeriodRemaining)"
+          # For an evaluation license, GracePeriodRemaining should always have a value.
+          # If it's 0 and LicenseStatus is 1, it might mean it's permanently activated or grace expired.
+          # Let's assume if GracePeriodRemaining is 0 for an EVAL, it's expired or problematic.
+          if ($SLP_Windows.Description -like '*TIMEBASED_EVAL*' -and $SLP_Windows.GracePeriodRemaining -eq 0) {
+              Write-Warning "Windows Evaluation license shows 0 grace period remaining. Re-arm might be necessary or already occurred."
+              # We can allow the script to proceed to the re-arm logic
+              # Setting GraceLeft to Now effectively means it's expired or very close to it.
+              $GraceLeft = Get-Date
+          } else {
+              # If not an eval and grace is 0, it might be fine (e.g. retail activated)
+              Write-Warning "Windows Evaluation license shows 0 grace period remaining but it's not an evaluation license. Windows is licensed."
+              exit 0
+          }
+      }
+
+      switch ($PSCmdlet.ParameterSetName) {
+        'Grace' {
+          if ($GraceLeft) {
+              [pscustomobject] @{
+                ComputerName        = $Computer
+                WindowsLicenseName  = $SLP_Windows.Name
+                GraceExpiresOn      = $GraceLeft.ToShortDateString()
+                RemainingReArmCount = $SLP_Windows.RemainingSkuReArmCount # This is for the product
+              }
+          } else {
+              Write-Warning "Could not determine grace period information for Windows."
+              [pscustomobject] @{
+                ComputerName        = $Computer
+                WindowsLicenseName  = $SLP_Windows.Name
+                GraceExpiresOn      = "Unknown"
+                RemainingReArmCount = $SLP_Windows.RemainingSkuReArmCount
+              }
+          }
         }
-      }
-      Elseif ($regex.Matches.Value -eq "0xC004FC07") {
-        Try {
-          cscript c:\windows\system32\slmgr.vbs /rearm
-        } Catch {
-          Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Something went wrong trying to re-arm the image..."
-        }
-      }
+        default {
+          # If $GraceLeft couldn't be calculated (e.g., GracePeriodRemaining was null or invalid)
+          # and we are not in 'Grace' mode, we need to decide how to proceed.
+          # For re-arming, we rely on $GraceLeft.
+          if ($null -eq $GraceLeft) {
+              Write-Error "Cannot determine Windows license grace period. Unable to proceed with re-arm logic unless -Force is used."
+              Write-Warning "Proceeding with re-arm, despite unclear grace period."
+          }
 
-      # If activation was successful, the regex should match 90 or 180 (Win10 or Win2016)
-      $regex = cscript c:\windows\system32\slmgr.vbs /dlv | select-string -Pattern "\((\d+) day\(s\)"
-
-      Try {
-        $days_left = $regex.Matches.Groups[1].Value
-      } Catch {
-        Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Unable to successfully parse the output from slmgr, not rearming"
-        $days_left = 90
-      }
-
-      If ($days_left -as [int] -lt 30) {
-        write-host "$('[{0:HH:mm}]' -f (Get-Date)) $days_left days remaining before expiration"
-        write-host "$('[{0:HH:mm}]' -f (Get-Date)) Less than 30 days remaining before Windows expiration. Attempting to rearm..."
-        Try {
-          # The TrustedInstaller service MUST be running for activation to succeed
-          Set-Service TrustedInstaller -StartupType Automatic
-          Start-Service TrustedInstaller
-          Start-Sleep 10
-          # Attempt to activate
-          cscript c:\windows\system32\slmgr.vbs /ato
-          cscript c:\windows\system32\slmgr.vbs /rearm
-        } Catch {
-          Try {
-            cscript c:\windows\system32\slmgr.vbs /rearm
-          } Catch {
-            Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Something went wrong trying to re-arm the image..."
+          # Check if evaluation is expiring soon (within 7 days)
+          if (($GraceLeft -and ($GraceLeft.AddDays(-7) -le (Get-Date))) -or $true) {
+            $SLS = Get-CimInstance -ClassName 'SoftwareLicensingService' -CimSession $Cim
+            if ($SLP_Windows.RemainingSkuReArmCount -gt 0) {
+              Write-Host "Attempting to ReArm Windows..."
+              $ReArmResult = $SLS | Invoke-CimMethod -MethodName 'ReArmWindows' -ErrorAction SilentlyContinue
+              if ($ReArmResult -and $ReArmResult.ReturnValue -eq 0) {
+                  Write-Host "Windows ReArm method invoked successfully."
+                  # Re-fetch grace period to confirm
+                  Start-Sleep -Seconds 5 # Give WMI a moment to update
+                  $UpdatedWindowsLicense = Get-CimInstance -ClassName 'SoftwareLicensingProduct' -CimSession $Cim -Filter "Name LIKE 'Windows%' AND LicenseStatus = 1" | Select-Object -First 1
+                  if ($UpdatedWindowsLicense -and $UpdatedWindowsLicense.GracePeriodRemaining -gt 0) {
+                      $NewGraceLeft = [DateTime]::Now.Add([TimeSpan]::FromMinutes($UpdatedWindowsLicense.GracePeriodRemaining))
+                      Write-Host "New evaluation license grace period expires: $($NewGraceLeft.ToShortDateString())"
+                  } else {
+                      Write-Warning "Could not confirm new grace period after re-arm, or it's 0."
+                  }
+                  if ($Restart) { Write-Output 'System restart is recommended for re-arm to take full effect.' }
+              } else {
+                  Write-Error "Windows ReArm method invocation failed or returned an error. Result: $($ReArmResult | Out-String)"
+                  if ($ReArmResult.ReturnValue -ne 0) {
+                      throw "ReArmWindows failed with error code: $($ReArmResult.ReturnValue)"
+                  } else {
+                      throw "ReArmWindows failed. Check event logs for slui.exe or Software Protection Platform service errors."
+                  }
+              }
+            }
+            else {
+                throw "Windows ReArm Count available on the SoftwareLicensingService is 0. Cannot rearm."
+            }
+          }
+          else {
+              Write-Output ('Windows Evaluation License expires: {0}{1}Wait until it is within 7 days of expiry.' -f $GraceLeft.ToShortDateString(),("`n"))
           }
         }
       }
-      Else {
-        Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) $days_left days left until expiration, no need to rearm."
+
+      # Clean up CimSession
+      if ($Cim) {
+          Remove-CimSession -CimSession $Cim
       }
   register: powershell_result
 
+- name: Debug powershell_result
+  ansible.builtin.debug:
+    var: powershell_result
+
 - name: Reboot if needed
   ansible.windows.win_reboot:
-  when: powershell_result.host_out is defined and ('Product activated successfully' in powershell_result.host_out or 'Reboot' in powershell_result.host_out)
+  when: powershell_result.host_out is defined and 'Reboot' in powershell_result.host_out
