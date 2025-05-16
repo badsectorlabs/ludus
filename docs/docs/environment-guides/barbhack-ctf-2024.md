@@ -178,7 +178,7 @@ ludus snapshot create clean-setup -d "Clean BarbHack Lab setup after ansible run
 
 ### 6. Hack!
 
-Access your Kali machine at `https://10.RANGENUMBER.50.99:8444` using the creds `kali:password`.
+Access your Kali machine at `https://10.RANGENUMBER.10.99:8444` using the creds `kali:password` (sudo password is `kali`).
 
 
 If you want a challange and want to do the lab with defender enabled, edit the `ad/BARBHACK/data/inventory` file and change the last part to look like this
