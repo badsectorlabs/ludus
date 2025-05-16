@@ -202,20 +202,10 @@ ansible-playbook -i ../ad/LEHACK/providers/ludus/inventory_disableludus.yml disa
 
 ### 6. Snapshot VMs
 
-Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
+Take snapshots via the proxmox web UI or SSH run the following ludus command:
 
 ```bash
-export RANGEID=JD # <= change to your ID
-vms=("$RANGEID-dc01" "$RANGEID-dc02" "$RANGEID-srv01" "$RANGEID-srv02" "$RANGEID-kali")
-COMMENT="Clean NetExec Lab setup after ansible run"
-# Loop over the array
-for vm in "${vms[@]}"
-do
-  echo "[+] Create snapshot for $vm"
-  id=$(qm list | grep $vm  | awk '{print $1}')
-  echo "[+] VM id is : $id"
-  qm snapshot "$id" 'snapshot-'$(date '+%Y-%m-%d--%H-%M') --vmstate 1 --description "$COMMENT"
-done
+ludus snapshot create clean-setup =d "Clean setup of the netexec lab after ansible run"
 ```
 
 ### 7. Hack!

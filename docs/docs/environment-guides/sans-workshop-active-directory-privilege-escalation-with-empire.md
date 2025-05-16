@@ -160,7 +160,7 @@ You must be connected to your Ludus wireguard VPN for these commands to work
 
 ### 5. Snapshot VMs
 
-Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
+Take snapshots via the proxmox web UI or SSH run the following ludus command:
 
 ```bash
 ludus snapshot create clean-setup -d "Clean SANS Lab setup after ansible run"

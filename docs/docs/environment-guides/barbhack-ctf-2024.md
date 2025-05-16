@@ -4,14 +4,15 @@ title: "BarbHack CTF 2024 (Gotham City - Active Directory Lab)"
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# SANS Workshop: Active Directory Privilege Escalation with Empire!
+# BarbHack CTF 2024 (Gotham City - Active Directory Lab)
 
 :::success Props!
 
-Huge shout out to [@ladhaAleem](https://twitter.com/LadhaAleem) converting the "BarbHack CTF 2024 (Gotham City - Active Directory Lab)" workshop created by [@mpgn_x64]((https://x.com/mpgn_x64) to an ansible playbook and making it work with Ludus as well!
+Huge shout out to [@ladhaAleem](https://twitter.com/LadhaAleem) converting the "BarbHack CTF 2024 (Gotham City - Active Directory Lab)" workshop created by [@mpgn_x64](https://x.com/mpgn_x64) to an ansible playbook and making it work with Ludus as well!
+
 :::
 
-## Description from BarbHack CTF 2024 (Gotham City - Active Directory Lab)
+## Description from BarbHack CTF 2024
 
 Welcome to the NetExec Active Directory Lab! This lab is designed to teach you how to exploit Active Directory (AD) environments using the powerful tool NetExec.
 
@@ -31,36 +32,7 @@ Have fun !
 
 ## Deployment
 
-
-### 1. Add the Windows 2022 template to Ludus
-
-```bash
-#terminal-command-local
-git clone https://gitlab.com/badsectorlabs/ludus
-#terminal-command-local
-cd ludus/templates
-#terminal-command-local
-ludus templates add -d win2022-server-x64
-[INFO]  Successfully added template
-#terminal-command-local
-ludus templates build
-[INFO]  Template building started - this will take a while. Building 1 template(s) at a time.
-# Wait until the templates finish building, you can monitor them with `ludus templates logs -f` or `ludus templates status`
-#terminal-command-local
-ludus templates list
-+----------------------------------------+-------+
-|                TEMPLATE                | BUILT |
-+----------------------------------------+-------+
-| debian-11-x64-server-template          | TRUE  |
-| debian-12-x64-server-template          | TRUE  |
-| kali-x64-desktop-template              | TRUE  |
-| win11-22h2-x64-enterprise-template     | TRUE  |
-| win2022-server-x64-template            | TRUE  |
-| win2019-server-x64-template            | TRUE  |
-+----------------------------------------+-------+
-```
-
-### 2. Deploy VMs
+### 1. Deploy VMs
 
 Set and deploy the configuration for the lab.
 
@@ -76,8 +48,13 @@ ludus range deploy
 # Or check the status with `ludus range status`
 ```
 
+### 2. Install requirements
 
-### 3. Install requirements
+:::warning
+
+If you are running this guide on the Ludus host you can skip this step, it already has all the requirements.
+
+:::
 
 Install ansible and its requirements for the BarbHack lab on your local machine.
 
@@ -99,7 +76,7 @@ The inventory file is already present in the providers folder and replace RANGEN
 
 
 <Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
+  <TabItem value="linux" label="Linux or Ludus host">
 ```bash
 #terminal-command-local
 cd NetExec-Lab/BARBHACK-2024/ansible
@@ -139,7 +116,7 @@ If not running on the Ludus host, you must be connected to your Ludus wireguard 
 :::
 
 <Tabs groupId="operating-systems">
-  <TabItem value="linux" label="Linux">
+  <TabItem value="linux" label="Linux or Ludus host">
 ```bash
 # in the ansible folder perform the following
 #terminal-command-local
@@ -181,7 +158,7 @@ Once install has finished disable localuser user to avoid using it and avoid uni
 
 :::note
 
-You must be connected to your Ludus wireguard VPN for these commands to work
+If not running on the Ludus host, you must be connected to your Ludus wireguard VPN for this command to work
 
 :::
 ```bash
@@ -193,7 +170,7 @@ ansible-playbook -i ../ad/BARBHACK/providers/ludus/inventory_disableludus.yml di
 
 ### 5. Snapshot VMs
 
-Take snapshots via the proxmox web UI or SSH into ludus and as root run the following
+Take snapshots via the proxmox web UI or run the following ludus command
 
 ```bash
 ludus snapshot create clean-setup -d "Clean BarbHack Lab setup after ansible run"
