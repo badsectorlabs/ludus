@@ -14,7 +14,7 @@ import (
 const (
 	// Minimum required versions
 	minPackerVersion              = "1.9.4"  // No v in the version string
-	minPackerProxmoxPluginVersion = "1.1.8"  // No v in the version string
+	minPackerProxmoxPluginVersion = "1.2.3"  // No v in the version string - Note we are using the badsectorlabs/proxmox plugin instead of hashicorp/proxmox
 	minPackerAnsiblePluginVersion = "1.1.1"  // No v in the version string
 	minAnsibleCoreVersion         = "2.16.0" // 2.16.14 is the last version that supports Python 2.7 on the target hosts
 	ansiblePyPiVersionToInstall   = "9.13.0" // 9.13.0 is the last version that supports Python 2.7 on the target hosts
@@ -139,7 +139,7 @@ func checkPackerPluginVersions() error {
 			if pluginName == "packer-plugin-ansible" {
 				Run("PACKER_PLUGIN_PATH="+ludusInstallPath+"/resources/packer/plugins packer plugins install github.com/hashicorp/ansible v"+minVersion, false, true)
 			} else if pluginName == "packer-plugin-proxmox" {
-				Run("PACKER_PLUGIN_PATH="+ludusInstallPath+"/resources/packer/plugins packer plugins install github.com/hashicorp/proxmox v"+minVersion, false, true)
+				Run("PACKER_PLUGIN_PATH="+ludusInstallPath+"/resources/packer/plugins packer plugins install github.com/badsectorlabs/proxmox v"+minVersion, false, true)
 			}
 		} else {
 			log.Printf("Packer plugin %s version %s meets minimum required version %s", pluginName, pluginVer, minVersion)
