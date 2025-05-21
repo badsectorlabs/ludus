@@ -21,8 +21,11 @@ ludus:
     ram_gb: 8
     cpus: 4
     windows:
-      install_additional_tools: true
-      office_version: 2019
+      chocolatey_packages:
+        - vscodium
+        - googlechrome
+      chocolatey_ignore_checksums: true # Chrome updates faster than choco package hash updates
+      office_version: 2021
       office_arch: 64bit
     domain:
       fqdn: ludus.domain

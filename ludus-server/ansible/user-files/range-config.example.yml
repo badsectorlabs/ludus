@@ -25,7 +25,7 @@ ludus:
         - vscodium
         - googlechrome
       chocolatey_ignore_checksums: true # Chrome updates faster than choco package hash updates
-      office_version: 2019
+      office_version: 2021
       office_arch: 64bit
     domain:
       fqdn: ludus.domain
