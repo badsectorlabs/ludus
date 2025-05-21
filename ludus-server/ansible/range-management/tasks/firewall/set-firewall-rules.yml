@@ -125,6 +125,7 @@
     action: insert
     comment: "Default: allow related/established rule"
     numeric: true
+    rule_num: 1
 
 - name: Set the default external rule
   ansible.builtin.iptables:
@@ -210,6 +211,19 @@
   loop: "{{ network.rules }}"
   when: 'network.rules is defined'
 
+- name: Allow the Ludus IP to hit this router from the outside for ansible
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    source: "192.0.2.254"
+    in_interface: "{{ router_external_interface }}"
+    protocol: all
+    jump: ACCEPT
+    state: present
+    action: insert
+    comment: "Default: Ludus access rule"
+    numeric: true
+    rule_num: 2
+
 - name: Deny range traffic to the proxmox IP of "192.0.2.254"
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
@@ -221,6 +235,7 @@
     state: present
     action: insert
     numeric: true
+    rule_num: 3
 
 - name: Deny range traffic to the host local IP
   ansible.builtin.iptables:
@@ -233,6 +248,7 @@
     state: present
     action: insert
     numeric: true
+    rule_num: 4
 
 - name: Deny range traffic to the host public IP
   ansible.builtin.iptables:
@@ -245,6 +261,7 @@
     state: present
     action: insert
     numeric: true
+    rule_num: 5
 
 # Since user wireguard rules are added to the LUDUS_DEFAULTS chain add this rule after the user defined rules so it will be on top
 - name: Deny all range traffic to user defined "always_blocked_networks"
@@ -258,20 +275,9 @@
     action: insert
     comment: "User Default: always_blocked_networks rule"
     numeric: true
+    rule_num: 1 # This is the first rule in the LUDUS_DEFAULTS chain, taking precedence over any other rules
   loop: "{{ network.always_blocked_networks | default([]) }}"
   when: network.always_blocked_networks is defined
-
-- name: Allow the Ludus IP to hit this router from the outside for ansible
-  ansible.builtin.iptables:
-    chain: LUDUS_DEFAULTS
-    source: "192.0.2.254"
-    in_interface: "{{ router_external_interface }}"
-    protocol: all
-    jump: ACCEPT
-    state: present
-    action: insert
-    comment: "Default: Ludus access rule"
-    numeric: true
 
 - name: Reset the conntrack entries to prevent previously allowed traffic to continue
   ansible.builtin.shell: conntrack -F
