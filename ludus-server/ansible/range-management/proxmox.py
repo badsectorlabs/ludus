@@ -390,8 +390,27 @@ def main_list(options, config_path):
         }
     }
 
+    # Get range filtering settings
+    range_id = os.environ.get('LUDUS_RANGE_ID')
+    return_all_ranges = os.environ.get('LUDUS_RETURN_ALL_RANGES', '').lower() in ('true', '1', 'yes')
+
     proxmox_api = ProxmoxAPI(options, config_path)
     proxmox_api.auth()
+
+    # Get valid VMIDs from the matching pool if range_id is set
+    valid_vmids = set()
+    if range_id and not return_all_ranges:
+        try:
+            pool = proxmox_api.pool(range_id)
+            for member in pool['members']:
+                if member['type'] in ('qemu', 'lxc'):
+                    valid_vmids.add(str(member['vmid']))
+        except HTTPError:
+            # If pool doesn't exist, we'll return empty results
+            pass
+
+    # Keep track of all groups for filtering later
+    all_groups = set()
 
     for node in proxmox_api.nodes().get_names():
         try:
@@ -483,8 +502,8 @@ def main_list(options, config_path):
             else:
                 results['_meta']['hostvars'][vm]['ansible_host'] = proxmox_api.openvz_ip_address(node, vmid)
             if 'groups' in metadata:
-                # print metadata
                 for group in metadata['groups']:
+                    all_groups.add(group)
                     if group not in results:
                         results[group] = {
                             'hosts': []
@@ -495,6 +514,7 @@ def main_list(options, config_path):
             # so you can: --limit 'running'
             status = results['_meta']['hostvars'][vm]['proxmox_status']
             if status == 'running':
+                all_groups.add('running')
                 if 'running' not in results:
                     results['running'] = {
                         'hosts': []
@@ -504,6 +524,7 @@ def main_list(options, config_path):
             if 'proxmox_os_id' in results['_meta']['hostvars'][vm]:
                 osid = results['_meta']['hostvars'][vm]['proxmox_os_id']
                 if osid:
+                    all_groups.add(osid)
                     if osid not in results:
                         results[osid] = {
                             'hosts': []
@@ -514,9 +535,40 @@ def main_list(options, config_path):
 
     # pools
     for pool in proxmox_api.pools().get_names():
+        all_groups.add(pool)
         results[pool] = {
             'hosts': proxmox_api.pool(pool).get_members_name(),
         }
+
+    # Filter based on VMIDs if needed
+    if not return_all_ranges and range_id and valid_vmids:
+        # First filter the _meta hostvars
+        filtered_hostvars = {}
+        filtered_all_hosts = []
+        
+        for host, vars in results['_meta']['hostvars'].items():
+            if str(vars.get('proxmox_vmid')) in valid_vmids:
+                filtered_hostvars[host] = vars
+                filtered_all_hosts.append(host)
+        
+        # Update the _meta and all sections
+        results['_meta']['hostvars'] = filtered_hostvars
+        results['all']['hosts'] = filtered_all_hosts
+        
+        # Now filter all groups to only include valid hosts
+        filtered_results = {
+            'all': results['all'],
+            '_meta': results['_meta']
+        }
+        
+        # Filter each group to only include valid hosts
+        for group in results:
+            if group not in ('all', '_meta'):
+                valid_hosts = [host for host in results[group]['hosts'] if host in filtered_all_hosts]
+                if valid_hosts:  # Only keep groups that have valid hosts
+                    filtered_results[group] = {'hosts': valid_hosts}
+        
+        results = filtered_results
 
     return results
 

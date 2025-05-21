@@ -25,6 +25,7 @@ var (
 	limit          string
 	targetUserID   string
 	sourceUserID   string
+	allRanges      bool
 )
 
 var rangeCmd = &cobra.Command{
@@ -419,11 +420,19 @@ var rangeAnsibleInventoryCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/range/ansibleinventory?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/range/ansibleinventory")
+		apiString := "/range/ansibleinventory"
+		if allRanges {
+			apiString += "?allranges=true"
 		}
+		if userID != "" {
+			if allRanges {
+				apiString += "&"
+			} else {
+				apiString += "?"
+			}
+			apiString += fmt.Sprintf("userID=%s", userID)
+		}
+		responseJSON, success = rest.GenericGet(client, apiString)
 		if !success {
 			return
 		}
@@ -442,6 +451,10 @@ var rangeAnsibleInventoryCmd = &cobra.Command{
 		fmt.Print(data.Result)
 
 	},
+}
+
+func setupRangeAnsibleInventoryCmd(command *cobra.Command) {
+	command.Flags().BoolVar(&allRanges, "all", false, "return inventory for all ranges this user has access to (useful for admin users)")
 }
 
 var rangeGetTags = &cobra.Command{
@@ -680,6 +693,7 @@ func init() {
 	setupDeleteCmd(rangeDeleteCmd)
 	rangeCmd.AddCommand(rangeDeleteCmd)
 	rangeCmd.AddCommand(rangeConfigCmd)
+	setupRangeAnsibleInventoryCmd(rangeAnsibleInventoryCmd)
 	rangeCmd.AddCommand(rangeAnsibleInventoryCmd)
 	rangeCmd.AddCommand(rangeGetTags)
 	rangeCmd.AddCommand(rangeAbortCmd)
