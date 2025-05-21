@@ -416,5 +416,5 @@ func PostCredentials(c *gin.Context) {
 	}
 
 	// File saved successfully. Return proper result
-	c.JSON(http.StatusOK, gin.H{"result": "Your proxmox password has been successfully updated."})
+	c.JSON(http.StatusOK, gin.H{"result": "Your proxmox password has been successfully updated in Ludus. THIS DOES NOT UPDATE THE PROXMOX PASSWORD ON THE HOST SYSTEM. YOU MUST UPDATE THE PROXMOX PASSWORD ON THE HOST SYSTEM MANUALLY TO MATCH THE PASSWORD YOU SET IN LUDUS."})
 }
