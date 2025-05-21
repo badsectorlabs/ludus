@@ -1,12 +1,3 @@
-packer {
-  required_plugins {
-    proxmox = {
-      source  = "github.com/hashicorp/proxmox"
-      version = ">= 1.2.2"
-    }
-  }
-}
-
 variable "iso_checksum" {
   type    = string
   default = "sha256:F9013861CB88C168941FE1164DB500157A803E3A7F33A546252BA314A4C76AAD"

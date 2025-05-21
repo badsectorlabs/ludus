@@ -1,12 +1,3 @@
-packer {
-  required_plugins {
-    proxmox = {
-      source  = "github.com/hashicorp/proxmox"
-      version = ">= 1.2.2"
-    }
-  }
-}
-
 variable "iso_checksum" {
   type    = string
   default = "sha256:16442d1c0509bcbb25b715b1b322a15fb3ab724a42da0f384b9406ca1c124ed4"
@@ -112,10 +103,9 @@ source "proxmox-iso" "win2025-server-x64-tpm" {
   ]
   boot_iso {
     iso_checksum             = "${var.iso_checksum}"
-    iso_file                 = "${var.iso_storage_pool}:iso/26100.1.240331-1435.ge_release_SERVER_EVAL_x64FRE_en-us.iso"
-    #iso_url                  = "${var.iso_url}"
-    #iso_storage_pool         = "${var.iso_storage_pool}"
-    #iso_download_pve         = true
+    iso_url                  = "${var.iso_url}"
+    iso_storage_pool         = "${var.iso_storage_pool}"
+    iso_download_pve         = true
     unmount                  = true
     keep_cdrom_device        = true
   }
@@ -135,9 +125,8 @@ source "proxmox-iso" "win2025-server-x64-tpm" {
   additional_iso_files {
     type              = "sata"
     index             = "4"
-    iso_checksum      = "sha256:57B0F6DC8DC92DC2AE8621F8B1BFBD8A873DE9BEDC788C4C4B305EA28ACC77CD"
-    iso_url           = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
-    #iso_url           = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.240-1/virtio-win-0.1.240.iso"
+    iso_checksum      = "sha256:bbe6166ad86a490caefad438fef8aa494926cb0a1b37fa1212925cfd81656429"
+    iso_url           = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.271-1/virtio-win.iso"
     iso_storage_pool  = "${var.iso_storage_pool}"
     #iso_download_pve  = true
     unmount           = true
