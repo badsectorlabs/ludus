@@ -210,6 +210,42 @@
   loop: "{{ network.rules }}"
   when: 'network.rules is defined'
 
+- name: Deny range traffic to the proxmox IP of "192.0.2.254"
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    source: "10.{{ range_second_octet }}.0.0/16"
+    destination: "192.0.2.254"
+    protocol: all
+    comment: "Default: Deny traffic to the host IP of 192.0.2.254"
+    jump: REJECT
+    state: present
+    action: insert
+    numeric: true
+
+- name: Deny range traffic to the host local IP
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    source: "10.{{ range_second_octet }}.0.0/16"
+    destination: "{{ proxmox_local_ip }}"
+    protocol: all
+    comment: "Default: Deny traffic to the host IP of {{ proxmox_local_ip }}"
+    jump: REJECT
+    state: present
+    action: insert
+    numeric: true
+
+- name: Deny range traffic to the host public IP
+  ansible.builtin.iptables:
+    chain: LUDUS_DEFAULTS
+    source: "10.{{ range_second_octet }}.0.0/16"
+    destination: "{{ proxmox_public_ip }}"
+    protocol: all
+    comment: "Default: Deny traffic to the public IP of {{ proxmox_public_ip }}"
+    jump: REJECT
+    state: present
+    action: insert
+    numeric: true
+
 # Since user wireguard rules are added to the LUDUS_DEFAULTS chain add this rule after the user defined rules so it will be on top
 - name: Deny all range traffic to user defined "always_blocked_networks"
   ansible.builtin.iptables:
@@ -239,7 +275,7 @@
 
 - name: Reset the conntrack entries to prevent previously allowed traffic to continue
   ansible.builtin.shell: conntrack -F
-  async: 5 # Becuase this resets the conntrack entries, ansible will hang unless we run it async
+  async: 5 # Because this resets the conntrack entries, ansible will hang unless we run it async
   poll: 1
 
 - name: Save current state of the firewall to a file
