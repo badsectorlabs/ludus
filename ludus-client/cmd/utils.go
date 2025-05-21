@@ -274,11 +274,10 @@ func filterAndPrintTemplateLogs(logs string, verbose bool) {
 				continue
 			}
 		}
-		// This will ignore all lines without the '=>', which is most of the verbose stuff, as well as the python3-apt error
+		// This will ignore all lines without the '=>', which is most of the verbose stuff, except the "beginning download of", but also ignore the python3-apt error
 		if !verbose &&
-			(!strings.Contains(line, "=>") ||
+			((!strings.Contains(line, "=>") && !strings.Contains(line, "beginning download of") && !strings.Contains(line, "finished downloading")) ||
 				strings.Contains(line, "proxmox-iso.kali: fatal: [default]: FAILED! => {\"changed\": false, \"msg\": \"python3-apt must be installed and visible from /usr/bin/python3.\"}")) {
-
 			continue
 		}
 		fmt.Println(line)
