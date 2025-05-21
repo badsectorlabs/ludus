@@ -21,6 +21,6 @@
     - name: Check for valid dynamic inventory
       ansible.builtin.assert:
         that:
-          - "'SHARED' in groups"
+          - range_id in groups
         fail_msg: "Dynamic inventory failed to load correctly. This may be an issue if you changed your proxmox password but did not update it in ludus."
         success_msg: "Dynamic inventory loaded!"
