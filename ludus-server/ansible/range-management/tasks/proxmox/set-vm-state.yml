@@ -22,7 +22,7 @@
     vmids_to_change: "{{ vmids_to_change + vm_ids_response.json | json_query(query_string) }}"
   loop: "{{ vm_names_to_change }}"
   vars:
-    query_string: "data[?name=='{{ item }}'].vmid"
+    query_string: "data[?name=='{{ item }}' && pool=='{{ vm_group_to_change }}'].vmid"
 
 - name: Configure VM state
   community.general.proxmox_kvm:
