@@ -38,9 +38,8 @@ ludus:
     windows:
       chocolatey_packages:
         - vscodium
-      install_additional_tools: true
       # visual_studio_version: 2019 # This takes so long - its 50+GB...
-      office_version: 2019
+      office_version: 2021 # 2019 is broken as of 2025-05-21 on an un-updated Windows 11 22H2 template
       office_arch: 64bit
     domain:
       fqdn: ludus.domain
