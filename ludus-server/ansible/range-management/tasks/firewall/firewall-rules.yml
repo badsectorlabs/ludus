@@ -166,6 +166,7 @@
     action: insert
     comment: "User Rule: {{ item.name }}"
     numeric: true
+    rule_num: "{{ 2 if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else omit }}"
   when: >
       (item.ip_last_octet_src is undefined and item.ip_last_octet_dst is undefined) or
       (item.ip_last_octet_dst is undefined and item.ip_last_octet_src is defined and "-" not in (item.ip_last_octet_src | string)) or
@@ -184,6 +185,7 @@
     action: insert
     comment: "User Rule: {{ item.name }}"
     numeric: true
+    rule_num: "{{ 2 if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else omit }}"
   when:
     - item.ip_last_octet_src is defined
     - '"-" in (item.ip_last_octet_src | string)'
@@ -201,6 +203,7 @@
     action: insert
     comment: "User Rule: {{ item.name }}"
     numeric: true
+    rule_num: "{{ 2 if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else omit }}"
   when:
     - item.ip_last_octet_dst is defined
     - '"-" in (item.ip_last_octet_dst| string)'
@@ -218,6 +221,7 @@
     action: insert
     comment: "User Rule: {{ item.name }}"
     numeric: true
+    rule_num: "{{ 2 if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else omit }}"
   when:
     - item.ip_last_octet_src is defined
     - item.ip_last_octet_dst is defined
