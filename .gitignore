@@ -12,6 +12,7 @@ ludus-enterprise-plugin
 
 ### Ansible ###
 *.retry
+.ansible
 
 ### macOS ###
 # General
