@@ -198,13 +198,15 @@ Ludus uses remote management (WinRM and Powershell for windows, SSH and python3 
 
 Windows:
 
-- WinRM must be enabled
+- Qemu Guest Agent installed
+- WinRM must be enabled and available over HTTPS
 - Powershell must be installed
 - DCHP must be enabled
 - `localuser:password` must be a local admin account
 
 Linux/macOS:
 
+- Qemu Guest Agent installed
 - SSH must be enabled
 - python3 must be installed
 - sudo must be installed
