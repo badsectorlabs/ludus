@@ -73,8 +73,8 @@ extra_vars:
   defaults:
     snapshot_with_RAM: true                  # When entering testing mode, capture the RAM state which allows reverting to a running VM
     stale_hours: 0                           # How many hours until a pre-existing snapshot should be deleted and retaken (if entering and exiting testing mode quickly)
-    ad_domain_functional_level: Win2012R2    # The functional level of each Windows domain created by Ludus - options are: "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", or "WinThreshold"
-    ad_forest_functional_level: Win2012R2    # The functional level of each Windows forest created by Ludus - options are: "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", or "WinThreshold"
+    ad_domain_functional_level: Win2012R2    # The functional level of each Windows domain created by Ludus - options are: "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold", or "Win2025"
+    ad_forest_functional_level: Win2012R2    # The functional level of each Windows forest created by Ludus - options are: "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold", or "Win2025"
     ad_domain_admin: domainadmin             # The domain admin username for every Windows domain
     ad_domain_admin_password: password       # The domain admin password for every Windows domain
     ad_domain_user: domainuser               # The domain user username for every Windows domain

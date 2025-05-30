@@ -45,12 +45,12 @@
                 },
                 "ad_domain_functional_level": {
                     "type": "string",
-                    "enum": [ "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold" ],
+                    "enum": [ "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold", "Win2025"],
                     "description": "The functional level of each Windows domain created by Ludus"
                 },
                 "ad_forest_functional_level": {
                     "type": "string",
-                    "enum": [ "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold" ],
+                    "enum": [ "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold", "Win2025"],
                     "description": "The functional level of each Windows forest created by Ludus"
                 },
                 "ad_domain_admin": {
