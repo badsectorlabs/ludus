@@ -397,6 +397,7 @@ func GetAnsibleInventoryForRange(c *gin.Context) {
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_NUMBER=%s", strconv.Itoa(int(usersRange.RangeNumber))))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_ID=%s", user.UserID))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RETURN_ALL_RANGES=%s", strconv.FormatBool(allRanges)))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_USER_IS_ADMIN=%s", strconv.FormatBool(user.IsAdmin)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to get the ansible inventory: " + string(out)})

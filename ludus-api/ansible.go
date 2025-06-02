@@ -137,6 +137,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 		execute.WithEnvVar("LUDUS_RANGE_CONFIG", fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername)),
 		execute.WithEnvVar("LUDUS_RANGE_NUMBER", strconv.Itoa(int(usersRange.RangeNumber))),
 		execute.WithEnvVar("LUDUS_RANGE_ID", usersRange.UserID),
+		execute.WithEnvVar("LUDUS_USER_IS_ADMIN", strconv.FormatBool(user.IsAdmin)),
 	)
 
 	playbook := &playbook.AnsiblePlaybookCmd{

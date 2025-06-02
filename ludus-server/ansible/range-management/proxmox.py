@@ -393,6 +393,7 @@ def main_list(options, config_path):
     # Get range filtering settings
     range_id = os.environ.get('LUDUS_RANGE_ID')
     return_all_ranges = os.environ.get('LUDUS_RETURN_ALL_RANGES', '').lower() in ('true', '1', 'yes')
+    user_is_admin = os.environ.get('LUDUS_USER_IS_ADMIN', '').lower() in ('true', '1', 'yes')
 
     proxmox_api = ProxmoxAPI(options, config_path)
     proxmox_api.auth()
@@ -403,6 +404,15 @@ def main_list(options, config_path):
         try:
             pool = proxmox_api.pool(range_id)
             for member in pool['members']:
+                if member['type'] in ('qemu', 'lxc'):
+                    valid_vmids.add(str(member['vmid']))
+        except HTTPError:
+            # If pool doesn't exist, we'll return empty results
+            pass
+    if user_is_admin:
+        try:
+            admin_pool = proxmox_api.pool('ADMIN')
+            for member in admin_pool['members']:
                 if member['type'] in ('qemu', 'lxc'):
                     valid_vmids.add(str(member['vmid']))
         except HTTPError:

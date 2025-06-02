@@ -178,7 +178,7 @@
           roles: ["PVESDNUser"]
           groups: ["ludus_users"]
         - path: /pool/ADMIN
-          roles: ["PVEVMAdmin", "PVESDNAdmin"]
+          roles: ["PVEVMAdmin", "PVESDNAdmin", "PVEPoolAdmin"]
           groups: ["ludus_admins"]
         - path: /
           roles: ["ResourceAudit"]
