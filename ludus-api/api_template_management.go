@@ -40,6 +40,10 @@ func getAvailableTemplates(user UserObject) ([]string, error) {
 	if err != nil {
 		return nil, errors.New("unable to get user packer templates")
 	}
+	// Filter out pkrvars.hcl files from userTemplates, re: https://gitlab.com/badsectorlabs/ludus/-/issues/103
+	userTemplates = slices.DeleteFunc(userTemplates, func(template string) bool {
+		return strings.HasSuffix(template, "pkrvars.hcl")
+	})
 	allTemplates := append(globalTemplates, userTemplates...)
 	return allTemplates, nil
 }
