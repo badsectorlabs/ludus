@@ -26,6 +26,10 @@ const config = {
   onBrokenLinks: 'throw',
   onBrokenMarkdownLinks: 'warn',
 
+  markdown: {
+    mermaid: true,
+  },
+
 
   // Even if you don't use internationalization, you can use this field to set
   // useful metadata like html lang. For example, if your site is Chinese, you
@@ -35,7 +39,7 @@ const config = {
     locales: ['en'],
   },
 
-  themes: ["docusaurus-json-schema-plugin"],
+  themes: ["docusaurus-json-schema-plugin", "@docusaurus/theme-mermaid"],
 
   presets: [
     [
@@ -204,6 +208,9 @@ const config = {
             line: 'terminal-command-goad',
           },
         ],
+      },
+      mermaid: {
+        theme: {light: 'neutral', dark: 'dark'},
       },
     }),
 };
