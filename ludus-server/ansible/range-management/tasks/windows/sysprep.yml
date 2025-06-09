@@ -28,6 +28,16 @@
     src: windows/sysprep/oob-disable.xml
     dest: C:\ludus\sysprep\oob-disable.xml
 
+# https://www.deploymentresearch.com/fixing-why-sysprep-fails-in-windows-10-due-to-windows-store-updates/
+# https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/sysprep-fails-remove-or-update-store-apps#cause
+- name: Remove Microsoft.Edge.GameAssist appx package if it exists as it prevents sysprep from working
+  ansible.windows.win_shell: |
+    $packageFullName = (Get-AppxPackage | Where-Object { $_.PackageFamilyName -eq 'Microsoft.Edge.GameAssist_8wekyb3d8bbwe' }).PackageFullName
+    if ($packageFullName) {
+      Remove-AppxPackage -Package $packageFullName
+    }
+  ignore_errors: true
+
 - name: Run Sysprep
   ansible.windows.win_shell: C:\Windows\System32\Sysprep\sysprep.exe /generalize /quiet /reboot /oobe /unattend:C:\ludus\sysprep\oob-disable.xml
 
