@@ -330,7 +330,7 @@
                 },
                 "force_ip": {
                     "type": "boolean",
-                    "description": "If set to rue, the config defined IP address will be used for the VM even if there are other valid IPs available via qemu-guest-agent"
+                    "description": "If set to true, the config defined IP address will be used for the VM when no IP is available via qemu-guest-agent (only use for EDR appliances or anti-sandbox VMs that do not have qemu-guest-agent installed)"
                 },
                 "ram_min_gb": {
                     "type": "integer",
