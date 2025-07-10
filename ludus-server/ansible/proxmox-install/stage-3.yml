@@ -230,7 +230,7 @@
       failed_when: false
 
     - name: Reinstall qemu-server if version is >= 8.3.14
-      ansible.builtin.shell: apt install --reinstall -y qemu-server
+      ansible.builtin.shell: apt install -y qemu-server=8.3.13 && apt install -y qemu-server
       when: qemu_server_version.stdout is version('8.3.14', '>=')
 
     - name: Bounce the TTY to update the install issue_message
