@@ -219,19 +219,21 @@
               Docs:   https://{{ proxmox_public_ip }}:8080/ludus
               Web UI: https://{{ proxmox_public_ip }}:8006
 
-    # This is a hack to fix the shutdown bug in qemu-server 8.3.14
+    # These two service starts are required to fix the shutdown bug in qemu-server 8.3.14
     # https://gitlab.com/badsectorlabs/ludus/-/issues/106
     # https://forum.proxmox.com/threads/qemu-server-8-3-14-prevents-vm-shutdown.168309/
     # https://www.reddit.com/r/Proxmox/comments/1lvz4jl/qemuserver_8314_prevents_vm_shutdown/
-    - name: Check qemu-server version
-      ansible.builtin.command: dpkg-query -W -f='${Version}' qemu-server
-      register: qemu_server_version
-      changed_when: false
-      failed_when: false
+    - name: Ensure qmeventd service is running and enabled
+      ansible.builtin.service:
+        name: qmeventd
+        state: started
+        enabled: true
 
-    - name: Reinstall qemu-server if version is >= 8.3.14
-      ansible.builtin.shell: apt install -y --allow-downgrades qemu-server=8.3.13 && apt install -y qemu-server
-      when: qemu_server_version.stdout is version('8.3.14', '>=')
+    - name: Ensure pve-query-machine-capabilities service is running and enabled
+      ansible.builtin.service:
+        name: pve-query-machine-capabilities
+        state: started
+        enabled: true
 
     - name: Bounce the TTY to update the install issue_message
       ansible.builtin.service:
