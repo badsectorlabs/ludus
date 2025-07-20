@@ -100,3 +100,5 @@ While most existing ansible roles will work with Ludus, this page contains a tab
 | [0xRedpoll.ludus_mythic_teamserver](https://github.com/0xRedpoll/ludus_mythic_teamserver) | Installs and spins up a Mythic Teamserver on a Debian or Ubuntu server | [@0xRedpoll](https://github.com/0xRedpoll) ||
 | [ludus-ad-vulns](https://github.com/Primusinterp/ludus-ad-vulns) | Adds vulnerabilities in an Active Directory. | [@Primusinterp](https://github.com/Primusinterp) | Must install from directory |
 | [ludus_juiceshop](https://github.com/xurger/ludus_juiceshop) | Installs [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) | [xurger](https://github.com/xurger) | Must install from directory |
+| [netpenguins.ludus_sliver](https://github.com/NetPenguins/ludus_sliver) | Installs [SliverC2](https://github.com/BishopFox/sliver) | [NetPenguins](https://github.com/NetPenguins) ||
+| [netpenguins.ludus_redirector](https://github.com/NetPenguins/ludus_redirector) | Sets up an Apache2 redirector for adversarial simulation ranges | [NetPenguins](https://github.com/NetPenguins) ||
