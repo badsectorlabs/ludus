@@ -23,6 +23,9 @@ type AnsibleItem struct {
 type RangeObject struct {
 	UserID         string     `json:"userID"`
 	RangeNumber    int32      `json:"rangeNumber"`
+	Name           string     `json:"name"`
+	Description    string     `json:"description"`
+	Purpose        string     `json:"purpose"`
 	LastDeployment time.Time  `json:"lastDeployment"`
 	NumberOfVMs    int32      `json:"numberOfVMs"`
 	TestingEnabled bool       `json:"testingEnabled"`

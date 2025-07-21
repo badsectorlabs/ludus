@@ -1,34 +1,19 @@
 package ludusapi
 
 import (
-	"database/sql/driver"
-	"strings"
 	"time"
 )
 
-// SQLite does not support array types, so we will make our own
-// Since domains and IPs cannot contain "|" we'll use that as our
-// separator and serialize and deserialize with that
-type SQLiteStringArray []string
-
-func (a *SQLiteStringArray) Scan(value interface{}) error {
-	stringValue := value.(string)
-	stringArray := strings.Split(stringValue, "|")
-	*a = stringArray
-	return nil
-}
-
-func (a SQLiteStringArray) Value() (driver.Value, error) {
-	stringValue := strings.Join(a, "|")
-	return stringValue, nil
-}
-
 type RangeObject struct {
-
 	// Must be a unique 2-4 letter uppercase string.  Initials are commonly used.
-	UserID string `json:"userID" gorm:"unique"`
+	UserID string `json:"userID" gorm:"index"` // Removed unique constraint to allow multiple ranges per user
 
 	RangeNumber int32 `json:"rangeNumber" gorm:"primaryKey"`
+
+	// New fields for range metadata
+	Name        string `json:"name" gorm:"not null"`
+	Description string `json:"description"`
+	Purpose     string `json:"purpose"`
 
 	LastDeployment time.Time `json:"lastDeployment"`
 
@@ -38,11 +23,14 @@ type RangeObject struct {
 
 	VMs []VmObject `json:"VMs" gorm:"foreignKey:RangeNumber;references:RangeNumber"`
 
-	AllowedDomains SQLiteStringArray `json:"allowedDomains" gorm:"type:string"`
+	AllowedDomains []string `json:"allowedDomains" gorm:"type:text[]"` // PostgreSQL array type
 
-	AllowedIPs SQLiteStringArray `json:"allowedIPs" gorm:"type:string"`
+	AllowedIPs []string `json:"allowedIPs" gorm:"type:text[]"` // PostgreSQL array type
 
 	RangeState string `json:"rangeState" gorm:"default:'NEVER DEPLOYED'"`
+
+	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 type UserApiKeyObject struct {
@@ -72,6 +60,9 @@ type UserObject struct {
 	ProxmoxUsername string `json:"proxmoxUsername"`
 
 	PortforwardingEnabled bool `json:"portforwardingEnabled"`
+
+	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 type VmObject struct {
@@ -86,10 +77,43 @@ type VmObject struct {
 	PoweredOn bool `json:"poweredOn"`
 
 	IP string `json:"ip,omitempty"`
+
+	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
-type RangeAccessObject struct {
-	TargetUserID string `json:"targetUserID" gorm:"primaryKey"`
+// New models for group-based access system
+type GroupObject struct {
+	ID          uint      `json:"id" gorm:"primaryKey"`
+	Name        string    `json:"name" gorm:"unique;not null"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt   time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
+}
 
-	SourceUserIDs SQLiteStringArray `json:"sourceUserIDs"`
+// UserRangeAccess represents direct user-to-range assignments
+type UserRangeAccess struct {
+	UserID      string    `json:"userID" gorm:"primaryKey"`
+	RangeNumber int32     `json:"rangeNumber" gorm:"primaryKey"`
+	CreatedAt   time.Time `json:"createdAt" gorm:"autoCreateTime"`
+}
+
+// UserGroupMembership represents user membership in groups
+type UserGroupMembership struct {
+	UserID    string    `json:"userID" gorm:"primaryKey"`
+	GroupID   uint      `json:"groupID" gorm:"primaryKey"`
+	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
+}
+
+// GroupRangeAccess represents group access to ranges
+type GroupRangeAccess struct {
+	GroupID     uint      `json:"groupID" gorm:"primaryKey"`
+	RangeNumber int32     `json:"rangeNumber" gorm:"primaryKey"`
+	CreatedAt   time.Time `json:"createdAt" gorm:"autoCreateTime"`
+}
+
+// Keep RangeAccessObject for backward compatibility during migration
+type RangeAccessObject struct {
+	TargetUserID  string   `json:"targetUserID" gorm:"primaryKey"`
+	SourceUserIDs []string `json:"sourceUserIDs" gorm:"type:text[]"` // Updated to PostgreSQL array
 }

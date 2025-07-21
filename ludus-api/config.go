@@ -29,6 +29,7 @@ type Configuration struct {
 	LicenseKey             string  `mapstructure:"license_key" yaml:"license_key"`
 	ExposeAdminPort        bool    `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
 	ReservedRangeNumbers   []int32 `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
+	DatabaseURL            string  `mapstructure:"database_url" yaml:"database_url"`
 }
 
 var ServerConfiguration Configuration
@@ -54,6 +55,7 @@ func (s *Server) ParseConfig() {
 	viper.SetDefault("proxmox_iso_storage_pool", "local")
 	viper.SetDefault("ludus_nat_interface", "vmbr0") // Backwards compatibility for < v1.0.4
 	viper.SetDefault("prevent_user_ansible_add", false)
+	viper.SetDefault("database_url", "postgresql://postgres.your-tenant-id:your-super-secret-and-long-postgres-password@192.0.2.1:5432/postgres")
 
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)

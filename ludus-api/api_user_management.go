@@ -74,27 +74,26 @@ func AddUser(c *gin.Context) {
 				return
 			}
 
-			// Make a range for the user
-			var usersRange RangeObject
-			usersRange.UserID = user.UserID
-			usersRange.NumberOfVMs = 0
-			usersRange.TestingEnabled = false
-
-			// Find the next available range number for the new user
-			usersRange.RangeNumber = findNextAvailableRangeNumber(db, ServerConfiguration.ReservedRangeNumbers)
-
-			result := db.Create(&usersRange)
-			if result.Error != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating user's range object (range number %d): %v", usersRange.RangeNumber, result.Error)})
+			// Create a default range for the user using the new utility function
+			err = CreateDefaultUserRange(db, user.UserID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating user's default range: %v", err)})
 				return
 			}
-			// Query the DB to get the autoincremented rangeID
-			db.First(&usersRange, "user_id = ?", user.UserID)
+
+			// Get the created range to check range number limits
+			var usersRange RangeObject
+			usersRange, err = GetUserDefaultRange(db, user.UserID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error retrieving created range"})
+				return
+			}
 
 			// Refuse to create more than 150 users
 			if usersRange.RangeNumber > 150 {
-				// Remove the usersRange from the database
-				db.Delete(&usersRange)
+				// Remove the user range access and range from the database
+				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
+				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
 				c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot create more than 150 users per Ludus due to networking constraints"})
 				return
 			}
@@ -271,6 +270,23 @@ func DeleteUser(c *gin.Context) {
 			}
 		}
 	}
+	// Clean up all access records for this user
+	db.Where("user_id = ?", userID).Delete(&UserRangeAccess{})
+	db.Where("user_id = ?", userID).Delete(&UserGroupMembership{})
+
+	// Clean up group range access records for groups this user was a member of
+	var userGroups []UserGroupMembership
+	db.Where("user_id = ?", userID).Find(&userGroups)
+	for _, membership := range userGroups {
+		// Check if this group has any other members
+		var memberCount int64
+		db.Model(&UserGroupMembership{}).Where("group_id = ?", membership.GroupID).Count(&memberCount)
+		if memberCount == 0 {
+			// Group has no members left, clean up group range access
+			db.Where("group_id = ?", membership.GroupID).Delete(&GroupRangeAccess{})
+		}
+	}
+
 	db.Delete(&user, "user_id = ?", userID)
 	db.Delete(&usersRange, "user_id = ?", user.UserID)
 

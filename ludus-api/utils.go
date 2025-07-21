@@ -202,11 +202,35 @@ func GetRangeObject(c *gin.Context) (RangeObject, error) {
 		return usersRange, gorm.ErrRecordNotFound // Status and JSON set in getUserID
 	}
 
-	usersRange.UserID = userID
-	result := db.First(&usersRange, "user_id = ?", userID)
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "UserID " + userID + " has no range"})
-		return usersRange, gorm.ErrRecordNotFound
+	// Check if a specific range number was provided in the query
+	rangeNumberStr, hasRangeNumber := c.GetQuery("rangeNumber")
+	if hasRangeNumber {
+		rangeNumber, parseErr := strconv.ParseInt(rangeNumberStr, 10, 32)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range number"})
+			return usersRange, errors.New("invalid range number")
+		}
+
+		// Verify user has access to this range
+		if !HasRangeAccess(db, userID, int32(rangeNumber)) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "User does not have access to this range"})
+			return usersRange, errors.New("access denied")
+		}
+
+		var rangeErr error
+		usersRange, rangeErr = GetRangeObjectByNumber(db, int32(rangeNumber))
+		if rangeErr != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
+			return usersRange, rangeErr
+		}
+	} else {
+		// Get user's default range (first accessible range)
+		var defaultErr error
+		usersRange, defaultErr = GetUserDefaultRange(db, userID)
+		if defaultErr != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "UserID " + userID + " has no accessible ranges"})
+			return usersRange, defaultErr
+		}
 	}
 
 	// Set the "rangeObject" key in the gin context to avoid repeated look ups
@@ -354,4 +378,140 @@ func chownFileToUsername(filePath string, username string) {
 func userExistsOnHostSystem(username string) bool {
 	cmd := exec.Command("id", username)
 	return cmd.Run() == nil
+}
+
+// New utility functions for group-based access system
+
+// HasRangeAccess checks if a user has access to a range through direct assignment or group membership
+func HasRangeAccess(db *gorm.DB, userID string, rangeNumber int32) bool {
+	// Check direct user-to-range assignment
+	var userRangeAccess UserRangeAccess
+	if err := db.Where("user_id = ? AND range_number = ?", userID, rangeNumber).First(&userRangeAccess).Error; err == nil {
+		return true
+	}
+
+	// Check group-based access
+	var count int64
+	err := db.Table("user_group_memberships").
+		Joins("JOIN group_range_accesses ON user_group_memberships.group_id = group_range_accesses.group_id").
+		Where("user_group_memberships.user_id = ? AND group_range_accesses.range_number = ?", userID, rangeNumber).
+		Count(&count).Error
+
+	return err == nil && count > 0
+}
+
+// GetUserAccessibleRanges returns all range numbers a user can access
+func GetUserAccessibleRanges(db *gorm.DB, userID string) []int32 {
+	var rangeNumbers []int32
+
+	// Get direct range assignments
+	db.Model(&UserRangeAccess{}).
+		Where("user_id = ?", userID).
+		Pluck("range_number", &rangeNumbers)
+
+	// Get group-based range access
+	var groupRangeNumbers []int32
+	db.Table("user_group_memberships").
+		Joins("JOIN group_range_accesses ON user_group_memberships.group_id = group_range_accesses.group_id").
+		Where("user_group_memberships.user_id = ?", userID).
+		Pluck("group_range_accesses.range_number", &groupRangeNumbers)
+
+	// Combine and deduplicate
+	rangeMap := make(map[int32]bool)
+	for _, num := range rangeNumbers {
+		rangeMap[num] = true
+	}
+	for _, num := range groupRangeNumbers {
+		rangeMap[num] = true
+	}
+
+	result := make([]int32, 0, len(rangeMap))
+	for num := range rangeMap {
+		result = append(result, num)
+	}
+
+	return result
+}
+
+// GetRangeAccessibleUsers returns all users who can access a specific range
+func GetRangeAccessibleUsers(db *gorm.DB, rangeNumber int32) []string {
+	var userIDs []string
+
+	// Get direct user assignments
+	db.Model(&UserRangeAccess{}).
+		Where("range_number = ?", rangeNumber).
+		Pluck("user_id", &userIDs)
+
+	// Get group-based user access
+	var groupUserIDs []string
+	db.Table("group_range_accesses").
+		Joins("JOIN user_group_memberships ON group_range_accesses.group_id = user_group_memberships.group_id").
+		Where("group_range_accesses.range_number = ?", rangeNumber).
+		Pluck("user_group_memberships.user_id", &groupUserIDs)
+
+	// Combine and deduplicate
+	userMap := make(map[string]bool)
+	for _, id := range userIDs {
+		userMap[id] = true
+	}
+	for _, id := range groupUserIDs {
+		userMap[id] = true
+	}
+
+	result := make([]string, 0, len(userMap))
+	for id := range userMap {
+		result = append(result, id)
+	}
+
+	return result
+}
+
+// CreateDefaultUserRange creates a default range for a user and assigns direct access
+func CreateDefaultUserRange(db *gorm.DB, userID string) error {
+	// Find next available range number
+	rangeNumber := findNextAvailableRangeNumber(db, ServerConfiguration.ReservedRangeNumbers)
+
+	// Create the range with default name
+	rangeObj := RangeObject{
+		Name:        fmt.Sprintf("Default Range for %s", userID),
+		Description: "Default range created automatically for user",
+		Purpose:     "General testing and development",
+		UserID:      userID,
+		RangeNumber: rangeNumber,
+		NumberOfVMs: 0,
+		RangeState:  "NEVER DEPLOYED",
+	}
+
+	if err := db.Create(&rangeObj).Error; err != nil {
+		return err
+	}
+
+	// Create direct access record
+	userRangeAccess := UserRangeAccess{
+		UserID:      userID,
+		RangeNumber: rangeNumber,
+	}
+
+	return db.Create(&userRangeAccess).Error
+}
+
+// GetRangeObjectByNumber gets a range object by range number (for multi-range support)
+func GetRangeObjectByNumber(db *gorm.DB, rangeNumber int32) (RangeObject, error) {
+	var rangeObj RangeObject
+	err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error
+	return rangeObj, err
+}
+
+// GetUserDefaultRange gets the default range for a user (first range they have access to)
+func GetUserDefaultRange(db *gorm.DB, userID string) (RangeObject, error) {
+	var rangeObj RangeObject
+
+	// Try to get the first range the user has access to
+	accessibleRanges := GetUserAccessibleRanges(db, userID)
+	if len(accessibleRanges) == 0 {
+		return rangeObj, gorm.ErrRecordNotFound
+	}
+
+	err := db.Where("range_number = ?", accessibleRanges[0]).First(&rangeObj).Error
+	return rangeObj, err
 }

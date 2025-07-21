@@ -53,17 +53,29 @@ func formatRangeResponse(data RangeObject, withVMs bool) {
 	// Create table
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetAlignment(tablewriter.ALIGN_CENTER)
-	table.SetHeader([]string{"User ID", "Range Network", "Last Deployment", "Number of VMs", "Deployment Status", "Testing Enabled"})
+	table.SetHeader([]string{"Name", "Range Network", "User ID", "Last Deployment", "Number of VMs", "Deployment Status", "Testing Enabled"})
 	lastDeployment := formatTimeObject(data.LastDeployment, "2006-01-02 15:04")
 
-	table.Append([]string{data.UserID, fmt.Sprintf("10.%d.0.0/16", data.RangeNumber), lastDeployment, fmt.Sprint(data.NumberOfVMs), data.RangeState, strings.ToUpper(strconv.FormatBool(data.TestingEnabled))})
+	table.Append([]string{data.Name, fmt.Sprintf("10.%d.0.0/16", data.RangeNumber), data.UserID, lastDeployment, fmt.Sprint(data.NumberOfVMs), data.RangeState, strings.ToUpper(strconv.FormatBool(data.TestingEnabled))})
 
 	if data.TestingEnabled {
-		table.SetColumnColor(nil, nil, nil, nil, getRangeStateColor(data), tablewriter.Colors{tablewriter.FgBlackColor, tablewriter.Bold, tablewriter.BgGreenColor})
+		table.SetColumnColor(nil, nil, nil, nil, nil, getRangeStateColor(data), tablewriter.Colors{tablewriter.FgBlackColor, tablewriter.Bold, tablewriter.BgGreenColor})
 	} else {
-		table.SetColumnColor(nil, nil, nil, nil, getRangeStateColor(data), tablewriter.Colors{tablewriter.FgHiRedColor, tablewriter.Bold, tablewriter.BgBlackColor})
+		table.SetColumnColor(nil, nil, nil, nil, nil, getRangeStateColor(data), tablewriter.Colors{tablewriter.FgHiRedColor, tablewriter.Bold, tablewriter.BgBlackColor})
 	}
 	table.Render()
+
+	// Display description and purpose if available
+	if data.Description != "" || data.Purpose != "" {
+		fmt.Println()
+		if data.Description != "" {
+			fmt.Printf("Description: %s\n", data.Description)
+		}
+		if data.Purpose != "" {
+			fmt.Printf("Purpose: %s\n", data.Purpose)
+		}
+		fmt.Println()
+	}
 
 	if withVMs {
 		vmTable := tablewriter.NewWriter(os.Stdout)
@@ -132,11 +144,11 @@ var rangeListCmd = &cobra.Command{
 			}
 			table := tablewriter.NewWriter(os.Stdout)
 			table.SetAlignment(tablewriter.ALIGN_CENTER)
-			table.SetHeader([]string{"User ID", "Range Network", "Last Deployment", "VM Count", "Deployment Status", "Testing Enabled"})
+			table.SetHeader([]string{"Name", "Range Network", "User ID", "Last Deployment", "VM Count", "Deployment Status", "Testing Enabled"})
 			for _, rangeObject := range data {
 				lastDeployment := formatTimeObject(rangeObject.LastDeployment, "2006-01-02 15:04")
 
-				rowValues := []string{rangeObject.UserID, fmt.Sprintf("10.%d.0.0/16", rangeObject.RangeNumber), lastDeployment, fmt.Sprint(rangeObject.NumberOfVMs), rangeObject.RangeState, strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled))}
+				rowValues := []string{rangeObject.Name, fmt.Sprintf("10.%d.0.0/16", rangeObject.RangeNumber), rangeObject.UserID, lastDeployment, fmt.Sprint(rangeObject.NumberOfVMs), rangeObject.RangeState, strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled))}
 
 				var testingColor tablewriter.Colors
 				if rangeObject.TestingEnabled {
@@ -157,7 +169,7 @@ var rangeListCmd = &cobra.Command{
 				}
 
 				table.Rich(rowValues,
-					[]tablewriter.Colors{nil, nil, dateColor, nil, getRangeStateColor(rangeObject), testingColor},
+					[]tablewriter.Colors{nil, nil, nil, dateColor, nil, getRangeStateColor(rangeObject), testingColor},
 				)
 			}
 			table.Render()
@@ -680,7 +692,215 @@ var rangeTaskOutputCmd = &cobra.Command{
 	},
 }
 
+// Admin commands for range management
+var rangeCreateCmd = &cobra.Command{
+	Use:   "create [name]",
+	Short: "Create a new range (admin only)",
+	Long:  `Create a new range with a name. Description and purpose are optional. Admin privileges required.`,
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		name := args[0]
+		description, _ := cmd.Flags().GetString("description")
+		purpose, _ := cmd.Flags().GetString("purpose")
+		userID, _ := cmd.Flags().GetString("user")
+		rangeNumber, _ := cmd.Flags().GetInt32("range-number")
+
+		payload := map[string]interface{}{
+			"name": name,
+		}
+		if description != "" {
+			payload["description"] = description
+		}
+		if purpose != "" {
+			payload["purpose"] = purpose
+		}
+		if userID != "" {
+			payload["userID"] = userID
+		}
+		if rangeNumber > 0 {
+			payload["rangeNumber"] = rangeNumber
+		}
+
+		var responseJSON []byte
+		var success bool
+		responseJSON, success = rest.GenericJSONPost(client, "/ranges/create", payload)
+		if !success {
+			return
+		}
+
+		if jsonFormat {
+			fmt.Printf("%s\n", responseJSON)
+		} else {
+			fmt.Printf("Range '%s' created successfully\n", name)
+		}
+	},
+}
+
+var rangeAssignCmd = &cobra.Command{
+	Use:   "assign [userID] [rangeNumber]",
+	Short: "Assign a range to a user (admin only)",
+	Long:  `Assign an existing range to a user, granting them direct access. Admin privileges required.`,
+	Args:  cobra.ExactArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		userID := args[0]
+		rangeNumber := args[1]
+
+		var responseJSON []byte
+		var success bool
+		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/ranges/assign/%s/%s", userID, rangeNumber), nil)
+		if !success {
+			return
+		}
+
+		if jsonFormat {
+			fmt.Printf("%s\n", responseJSON)
+		} else {
+			fmt.Printf("Range %s assigned to user %s successfully\n", rangeNumber, userID)
+		}
+	},
+}
+
+var rangeRevokeCmd = &cobra.Command{
+	Use:   "revoke [userID] [rangeNumber]",
+	Short: "Revoke range access from a user (admin only)",
+	Long:  `Revoke a user's direct access to a range. Admin privileges required.`,
+	Args:  cobra.ExactArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		userID := args[0]
+		rangeNumber := args[1]
+
+		var responseJSON []byte
+		var success bool
+		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/ranges/revoke/%s/%s", userID, rangeNumber))
+		if !success {
+			return
+		}
+
+		if jsonFormat {
+			fmt.Printf("%s\n", responseJSON)
+		} else {
+			fmt.Printf("Range %s access revoked from user %s successfully\n", rangeNumber, userID)
+		}
+	},
+}
+
+var rangeUsersCmd = &cobra.Command{
+	Use:   "users [rangeNumber]",
+	Short: "List users with access to a range (admin only)",
+	Long:  `List all users who have access to a specific range, including direct and group-based access. Admin privileges required.`,
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		rangeNumber := args[0]
+
+		var responseJSON []byte
+		var success bool
+		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ranges/users/%s", rangeNumber))
+		if !success {
+			return
+		}
+
+		type Data struct {
+			Result []struct {
+				UserID string `json:"userID"`
+				Name   string `json:"name"`
+				Type   string `json:"type"`
+			} `json:"result"`
+		}
+
+		var data Data
+		err := json.Unmarshal(responseJSON, &data)
+		if err != nil {
+			logger.Logger.Fatal(err)
+		}
+
+		if jsonFormat {
+			fmt.Printf("%s\n", responseJSON)
+			return
+		}
+
+		// Create table
+		table := tablewriter.NewWriter(os.Stdout)
+		table.SetHeader([]string{"UserID", "Name", "Access Type"})
+
+		// Add data to table
+		for _, user := range data.Result {
+			table.Append([]string{user.UserID, user.Name, user.Type})
+		}
+
+		// Print table
+		table.Render()
+	},
+}
+
+var rangeAccessibleCmd = &cobra.Command{
+	Use:   "accessible",
+	Short: "List all ranges accessible to the current user",
+	Long:  `List all ranges that the current user can access, including direct assignments and group-based access.`,
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		var responseJSON []byte
+		var success bool
+		responseJSON, success = rest.GenericGet(client, "/ranges/accessible")
+		if !success {
+			return
+		}
+
+		type Data struct {
+			Result []struct {
+				RangeNumber int32  `json:"rangeNumber"`
+				UserID      string `json:"userID"`
+				RangeState  string `json:"rangeState"`
+				AccessType  string `json:"accessType"`
+			} `json:"result"`
+		}
+
+		var data Data
+		err := json.Unmarshal(responseJSON, &data)
+		if err != nil {
+			logger.Logger.Fatal(err)
+		}
+
+		if jsonFormat {
+			fmt.Printf("%s\n", responseJSON)
+			return
+		}
+
+		// Create table
+		table := tablewriter.NewWriter(os.Stdout)
+		table.SetHeader([]string{"Range Number", "UserID", "State", "Access Type"})
+
+		// Add data to table
+		for _, rangeObj := range data.Result {
+			table.Append([]string{
+				fmt.Sprintf("%d", rangeObj.RangeNumber),
+				rangeObj.UserID,
+				rangeObj.RangeState,
+				rangeObj.AccessType,
+			})
+		}
+
+		// Print table
+		table.Render()
+	},
+}
+
 func init() {
+	// Add flags to range create command
+	rangeCreateCmd.Flags().String("description", "", "Description of the range")
+	rangeCreateCmd.Flags().String("purpose", "", "Purpose of the range")
+	rangeCreateCmd.Flags().String("user", "", "User ID to assign the range to (optional)")
+	rangeCreateCmd.Flags().Int32("range-number", 0, "Specific range number to assign (optional)")
+
 	rangeConfigCmd.AddCommand(rangeConfigGet)
 	setupRangeConfigSet(rangeConfigSet)
 	rangeConfigCmd.AddCommand(rangeConfigSet)
@@ -707,6 +927,14 @@ func init() {
 	setupGenericRangeActionCmd(accessRevokeCmd)
 	rangeCmd.AddCommand(rangeAccessCmd)
 	rangeCmd.AddCommand(rangeTaskOutputCmd)
+
+	// Add admin range management commands
+	rangeCmd.AddCommand(rangeCreateCmd)
+	rangeCmd.AddCommand(rangeAssignCmd)
+	rangeCmd.AddCommand(rangeRevokeCmd)
+	rangeCmd.AddCommand(rangeUsersCmd)
+	rangeCmd.AddCommand(rangeAccessibleCmd)
+
 	rootCmd.AddCommand(rangeCmd)
 
 }

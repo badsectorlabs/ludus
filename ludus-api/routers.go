@@ -492,4 +492,112 @@ var routes = Routes{
 		"/testing/update",
 		UpdateVMs,
 	},
+
+	// Group management routes
+	{
+		"CreateGroup",
+		http.MethodPost,
+		"/groups",
+		CreateGroup,
+	},
+
+	{
+		"DeleteGroup",
+		http.MethodDelete,
+		"/groups/:groupID",
+		DeleteGroup,
+	},
+
+	{
+		"ListGroups",
+		http.MethodGet,
+		"/groups",
+		ListGroups,
+	},
+
+	{
+		"AddUserToGroup",
+		http.MethodPost,
+		"/groups/:groupID/users/:userID",
+		AddUserToGroup,
+	},
+
+	{
+		"RemoveUserFromGroup",
+		http.MethodDelete,
+		"/groups/:groupID/users/:userID",
+		RemoveUserFromGroup,
+	},
+
+	{
+		"AddRangeToGroup",
+		http.MethodPost,
+		"/groups/:groupID/ranges/:rangeNumber",
+		AddRangeToGroup,
+	},
+
+	{
+		"RemoveRangeFromGroup",
+		http.MethodDelete,
+		"/groups/:groupID/ranges/:rangeNumber",
+		RemoveRangeFromGroup,
+	},
+
+	{
+		"ListGroupMembers",
+		http.MethodGet,
+		"/groups/:groupID/users",
+		ListGroupMembers,
+	},
+
+	{
+		"ListGroupRanges",
+		http.MethodGet,
+		"/groups/:groupID/ranges",
+		ListGroupRanges,
+	},
+
+	// Enhanced range management routes
+	{
+		"CreateRange",
+		http.MethodPost,
+		"/ranges",
+		CreateRange,
+	},
+
+	{
+		"AssignRangeToUser",
+		http.MethodPost,
+		"/ranges/:rangeNumber/users/:userID",
+		AssignRangeToUser,
+	},
+
+	{
+		"RevokeRangeFromUser",
+		http.MethodDelete,
+		"/ranges/:rangeNumber/users/:userID",
+		RevokeRangeFromUser,
+	},
+
+	{
+		"ListRangeUsers",
+		http.MethodGet,
+		"/ranges/:rangeNumber/users",
+		ListRangeUsers,
+	},
+
+	{
+		"ListUserAccessibleRanges",
+		http.MethodGet,
+		"/ranges/accessible",
+		ListUserAccessibleRanges,
+	},
+
+	// Migration routes
+	{
+		"MigrateSQLiteToPostgreSQL",
+		http.MethodPost,
+		"/migrate/sqlite",
+		MigrateSQLiteToPostgreSQL,
+	},
 }

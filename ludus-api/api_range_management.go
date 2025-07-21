@@ -580,3 +580,240 @@ func RangeAccessList(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, rangeAccessObjects)
 }
+
+// New range management endpoints for group-based access system
+
+// CreateRange allows admins to create ranges not tied to a specific user
+func CreateRange(c *gin.Context) {
+	if !isAdmin(c, true) {
+		return
+	}
+
+	type CreateRangePayload struct {
+		Name        string `json:"name" binding:"required"`
+		Description string `json:"description"`
+		Purpose     string `json:"purpose"`
+		UserID      string `json:"userID"`
+		RangeNumber int32  `json:"rangeNumber,omitempty"`
+	}
+
+	var payload CreateRangePayload
+	if err := c.Bind(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// If UserID is provided, verify the user exists
+	if payload.UserID != "" {
+		var user UserObject
+		if err := db.First(&user, "user_id = ?", payload.UserID).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding user: %v", err)})
+			}
+			return
+		}
+	}
+
+	// Determine range number
+	var rangeNumber int32
+	if payload.RangeNumber > 0 {
+		// Check if range number is already in use
+		var existingRange RangeObject
+		if err := db.Where("range_number = ?", payload.RangeNumber).First(&existingRange).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "Range number already in use"})
+			return
+		}
+		rangeNumber = payload.RangeNumber
+	} else {
+		// Find next available range number
+		rangeNumber = findNextAvailableRangeNumber(db, ServerConfiguration.ReservedRangeNumbers)
+	}
+
+	// Create the range
+	rangeObj := RangeObject{
+		Name:        payload.Name,
+		Description: payload.Description,
+		Purpose:     payload.Purpose,
+		UserID:      payload.UserID,
+		RangeNumber: rangeNumber,
+		NumberOfVMs: 0,
+		RangeState:  "NEVER DEPLOYED",
+	}
+
+	if err := db.Create(&rangeObj).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating range: %v", err)})
+		return
+	}
+
+	// If UserID was provided, create direct access record
+	if payload.UserID != "" {
+		userRangeAccess := UserRangeAccess{
+			UserID:      payload.UserID,
+			RangeNumber: rangeNumber,
+		}
+		if err := db.Create(&userRangeAccess).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating user range access: %v", err)})
+			return
+		}
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"result": rangeObj})
+}
+
+// AssignRangeToUser directly assigns a range to a user (admin only)
+func AssignRangeToUser(c *gin.Context) {
+	if !isAdmin(c, true) {
+		return
+	}
+
+	rangeNumberStr := c.Param("rangeNumber")
+	rangeNumber, err := strconv.ParseInt(rangeNumberStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range number"})
+		return
+	}
+
+	userID := c.Param("userID")
+	if userID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
+		return
+	}
+
+	// Check if range exists
+	var rangeObj RangeObject
+	if err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding range: %v", err)})
+		}
+		return
+	}
+
+	// Check if user exists
+	var user UserObject
+	if err := db.First(&user, "user_id = ?", userID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding user: %v", err)})
+		}
+		return
+	}
+
+	// Check if user already has access to this range
+	if HasRangeAccess(db, userID, int32(rangeNumber)) {
+		c.JSON(http.StatusConflict, gin.H{"error": "User already has access to this range"})
+		return
+	}
+
+	// Create direct access record
+	userRangeAccess := UserRangeAccess{
+		UserID:      userID,
+		RangeNumber: int32(rangeNumber),
+	}
+
+	if err := db.Create(&userRangeAccess).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error assigning range to user: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"result": "Range assigned to user successfully"})
+}
+
+// RevokeRangeFromUser revokes direct range access from a user (admin only)
+func RevokeRangeFromUser(c *gin.Context) {
+	if !isAdmin(c, true) {
+		return
+	}
+
+	rangeNumberStr := c.Param("rangeNumber")
+	rangeNumber, err := strconv.ParseInt(rangeNumberStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range number"})
+		return
+	}
+
+	userID := c.Param("userID")
+	if userID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
+		return
+	}
+
+	// Remove direct access record
+	result := db.Where("user_id = ? AND range_number = ?", userID, rangeNumber).Delete(&UserRangeAccess{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error revoking range access: %v", result.Error)})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User does not have direct access to this range"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"result": "Range access revoked from user successfully"})
+}
+
+// ListRangeUsers lists all users with access to a range (admin only)
+func ListRangeUsers(c *gin.Context) {
+	if !isAdmin(c, true) {
+		return
+	}
+
+	rangeNumberStr := c.Param("rangeNumber")
+	rangeNumber, err := strconv.ParseInt(rangeNumberStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range number"})
+		return
+	}
+
+	// Check if range exists
+	var rangeObj RangeObject
+	if err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding range: %v", err)})
+		}
+		return
+	}
+
+	// Get all users with access to this range
+	accessibleUsers := GetRangeAccessibleUsers(db, int32(rangeNumber))
+
+	// Get user details for each accessible user
+	var users []UserObject
+	for _, userID := range accessibleUsers {
+		var user UserObject
+		if err := db.First(&user, "user_id = ?", userID).Error; err == nil {
+			users = append(users, user)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"result": users})
+}
+
+// ListUserAccessibleRanges lists all ranges the current user can access
+func ListUserAccessibleRanges(c *gin.Context) {
+	userID, success := getUserID(c)
+	if !success {
+		return
+	}
+
+	// Get all ranges the user can access
+	accessibleRanges := GetUserAccessibleRanges(db, userID)
+
+	// Get range details for each accessible range
+	var ranges []RangeObject
+	for _, rangeNumber := range accessibleRanges {
+		var rangeObj RangeObject
+		if err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error; err == nil {
+			ranges = append(ranges, rangeObj)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"result": ranges})
+}

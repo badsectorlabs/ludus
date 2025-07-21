@@ -233,19 +233,54 @@ type AccessGrantStruct struct {
 
 // Get the access grants for the provided user ID and return an array of {second_octet, username} objects
 func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
+	var returnArray []AccessGrantStruct
+
+	// Get direct user-to-range assignments
+	var userRangeAccesses []UserRangeAccess
+	db.Where("user_id = ?", targetUserId).Find(&userRangeAccesses)
+
+	for _, access := range userRangeAccesses {
+		var rangeObj RangeObject
+		if err := db.Where("range_number = ?", access.RangeNumber).First(&rangeObj).Error; err == nil {
+			var user UserObject
+			if err := db.First(&user, "user_id = ?", rangeObj.UserID).Error; err == nil {
+				returnArray = append(returnArray, AccessGrantStruct{access.RangeNumber, user.ProxmoxUsername})
+			}
+		}
+	}
+
+	// Get group-based access
+	var userGroupMemberships []UserGroupMembership
+	db.Where("user_id = ?", targetUserId).Find(&userGroupMemberships)
+
+	for _, membership := range userGroupMemberships {
+		var groupRangeAccesses []GroupRangeAccess
+		db.Where("group_id = ?", membership.GroupID).Find(&groupRangeAccesses)
+
+		for _, groupAccess := range groupRangeAccesses {
+			var rangeObj RangeObject
+			if err := db.Where("range_number = ?", groupAccess.RangeNumber).First(&rangeObj).Error; err == nil {
+				var user UserObject
+				if err := db.First(&user, "user_id = ?", rangeObj.UserID).Error; err == nil {
+					returnArray = append(returnArray, AccessGrantStruct{groupAccess.RangeNumber, user.ProxmoxUsername})
+				}
+			}
+		}
+	}
+
+	// Also check legacy RangeAccessObject for backward compatibility
 	var accessGrants RangeAccessObject
 	result := db.First(&accessGrants, "target_user_id = ?", targetUserId)
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil
+	if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		for _, sourceUserID := range accessGrants.SourceUserIDs {
+			var sourceUser UserObject
+			db.First(&sourceUser, "user_id = ?", sourceUserID)
+			var sourceRange RangeObject
+			db.First(&sourceRange, "user_id = ?", sourceUserID)
+			returnArray = append(returnArray, AccessGrantStruct{sourceRange.RangeNumber, sourceUser.ProxmoxUsername})
+		}
 	}
-	var returnArray []AccessGrantStruct
-	for _, sourceUserID := range accessGrants.SourceUserIDs {
-		var sourceUser UserObject
-		db.First(&sourceUser, "user_id = ?", sourceUserID)
-		var sourceRange RangeObject
-		db.First(&sourceRange, "user_id = ?", sourceUserID)
-		returnArray = append(returnArray, AccessGrantStruct{sourceRange.RangeNumber, sourceUser.ProxmoxUsername})
-	}
+
 	return returnArray
 }
 

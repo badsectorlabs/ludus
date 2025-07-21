@@ -20,7 +20,7 @@
           "openapi": "3.0.3",
           "info": {
               "description": "This API controls Ludus user management, range deployment, power state, and testing state.",
-              "version": "1.9.6",
+              "version": "2.0.0",
               "title": "Ludus API",
               "license": {
                   "name": "GNU AGPLv3",
@@ -72,6 +72,14 @@
               {
                   "name": "KMS Management",
                   "description": "Actions to manage the Key Management Service"
+              },
+              {
+                  "name": "Group Management",
+                  "description": "Actions to manage user groups and group membership in Ludus"
+              },
+              {
+                  "name": "Migration",
+                  "description": "Actions to migrate Ludus data between databases"
               }
           ],
           "paths": {
@@ -3105,6 +3113,310 @@
                           "500": {
                               "description": "internal error creating snapshots"
                           }
+                      }
+                  }
+              },
+              "/groups": {
+                  "post": {
+                      "tags": [
+                          "Group Management"
+                      ],
+                      "summary": "Create a new group",
+                      "operationId": "createGroup",
+                      "description": "Creates a new group in Ludus.",
+                      "requestBody": {
+                          "content": {
+                              "application/json": {
+                                  "schema": {
+                                      "type": "object",
+                                      "properties": {
+                                          "name": { "type": "string", "example": "Red Team" },
+                                          "description": { "type": "string", "example": "Red team group" }
+                                      },
+                                      "required": ["name"]
+                                  }
+                              }
+                          }
+                      },
+                      "responses": {
+                          "201": {
+                              "description": "Group created",
+                              "content": {
+                                  "application/json": {
+                                      "schema": {
+                                          "type": "object",
+                                          "properties": {
+                                              "result": { "type": "string", "example": "Group created successfully" }
+                                          }
+                                      }
+                                  }
+                              }
+                          },
+                          "400": { "description": "Invalid input" }
+                      }
+                  },
+                  "get": {
+                      "tags": [
+                          "Group Management"
+                      ],
+                      "summary": "List all groups",
+                      "operationId": "listGroups",
+                      "description": "Returns a list of all groups in Ludus.",
+                      "responses": {
+                          "200": {
+                              "description": "List of groups",
+                              "content": {
+                                  "application/json": {
+                                      "schema": {
+                                          "type": "array",
+                                          "items": { "type": "object", "properties": { "id": { "type": "integer" }, "name": { "type": "string" }, "description": { "type": "string" } } }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              },
+              "/groups/{groupID}": {
+                  "delete": {
+                      "tags": [
+                          "Group Management"
+                      ],
+                      "summary": "Delete a group",
+                      "operationId": "deleteGroup",
+                      "description": "Deletes a group by groupID.",
+                      "parameters": [
+                          { "name": "groupID", "in": "path", "required": true, "schema": { "type": "string" } }
+                      ],
+                      "responses": {
+                          "200": { "description": "Group deleted" },
+                          "404": { "description": "Group not found" }
+                      }
+                  }
+              },
+              "/groups/{groupID}/users/{userID}": {
+                  "post": {
+                      "tags": [ "Group Management" ],
+                      "summary": "Add user to group",
+                      "operationId": "addUserToGroup",
+                      "description": "Adds a user to a group.",
+                      "parameters": [
+                          { "name": "groupID", "in": "path", "required": true, "schema": { "type": "string" } },
+                          { "name": "userID", "in": "path", "required": true, "schema": { "type": "string" } }
+                      ],
+                      "responses": {
+                          "200": { "description": "User added to group" },
+                          "404": { "description": "Group or user not found" }
+                      }
+                  },
+                  "delete": {
+                      "tags": [ "Group Management" ],
+                      "summary": "Remove user from group",
+                      "operationId": "removeUserFromGroup",
+                      "description": "Removes a user from a group.",
+                      "parameters": [
+                          { "name": "groupID", "in": "path", "required": true, "schema": { "type": "string" } },
+                          { "name": "userID", "in": "path", "required": true, "schema": { "type": "string" } }
+                      ],
+                      "responses": {
+                          "200": { "description": "User removed from group" },
+                          "404": { "description": "Group or user not found" }
+                      }
+                  }
+              },
+              "/groups/{groupID}/ranges/{rangeNumber}": {
+                  "post": {
+                      "tags": [ "Group Management" ],
+                      "summary": "Add range to group",
+                      "operationId": "addRangeToGroup",
+                      "description": "Adds a range to a group.",
+                      "parameters": [
+                          { "name": "groupID", "in": "path", "required": true, "schema": { "type": "string" } },
+                          { "name": "rangeNumber", "in": "path", "required": true, "schema": { "type": "integer" } }
+                      ],
+                      "responses": {
+                          "200": { "description": "Range added to group" },
+                          "404": { "description": "Group or range not found" }
+                      }
+                  },
+                  "delete": {
+                      "tags": [ "Group Management" ],
+                      "summary": "Remove range from group",
+                      "operationId": "removeRangeFromGroup",
+                      "description": "Removes a range from a group.",
+                      "parameters": [
+                          { "name": "groupID", "in": "path", "required": true, "schema": { "type": "string" } },
+                          { "name": "rangeNumber", "in": "path", "required": true, "schema": { "type": "integer" } }
+                      ],
+                      "responses": {
+                          "200": { "description": "Range removed from group" },
+                          "404": { "description": "Group or range not found" }
+                      }
+                  }
+              },
+              "/groups/{groupID}/users": {
+                  "get": {
+                      "tags": [ "Group Management" ],
+                      "summary": "List group members",
+                      "operationId": "listGroupMembers",
+                      "description": "Lists all users in a group.",
+                      "parameters": [
+                          { "name": "groupID", "in": "path", "required": true, "schema": { "type": "string" } }
+                      ],
+                      "responses": {
+                          "200": {
+                              "description": "List of group members",
+                              "content": {
+                                  "application/json": {
+                                      "schema": {
+                                          "type": "array",
+                                          "items": { "type": "object", "properties": { "userID": { "type": "string" }, "name": { "type": "string" } } }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              },
+              "/groups/{groupID}/ranges": {
+                  "get": {
+                      "tags": [ "Group Management" ],
+                      "summary": "List group ranges",
+                      "operationId": "listGroupRanges",
+                      "description": "Lists all ranges in a group.",
+                      "parameters": [
+                          { "name": "groupID", "in": "path", "required": true, "schema": { "type": "string" } }
+                      ],
+                      "responses": {
+                          "200": {
+                              "description": "List of group ranges",
+                              "content": {
+                                  "application/json": {
+                                      "schema": {
+                                          "type": "array",
+                                          "items": { "type": "object", "properties": { "rangeNumber": { "type": "integer" }, "userID": { "type": "string" }, "rangeState": { "type": "string" } } }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              },
+              "/ranges/create": {
+                  "post": {
+                      "tags": [ "Range Management" ],
+                      "summary": "Create a new range (admin only)",
+                      "operationId": "createRange",
+                      "description": "Creates a new range. Admin only.",
+                      "requestBody": {
+                          "content": {
+                              "application/json": {
+                                  "schema": {
+                                      "type": "object",
+                                      "properties": {
+                                          "name": { "type": "string", "example": "Red Team Range" },
+                                          "description": { "type": "string", "example": "Range for red team" },
+                                          "purpose": { "type": "string", "example": "Testing" },
+                                          "userID": { "type": "string", "example": "JD" },
+                                          "rangeNumber": { "type": "integer", "example": 3 }
+                                      },
+                                      "required": ["name"]
+                                  }
+                              }
+                          }
+                      },
+                      "responses": {
+                          "201": { "description": "Range created" },
+                          "400": { "description": "Invalid input" }
+                      }
+                  }
+              },
+              "/ranges/assign/{userID}/{rangeNumber}": {
+                  "post": {
+                      "tags": [ "Range Management" ],
+                      "summary": "Assign a range to a user (admin only)",
+                      "operationId": "assignRangeToUser",
+                      "description": "Assigns a range to a user. Admin only.",
+                      "parameters": [
+                          { "name": "userID", "in": "path", "required": true, "schema": { "type": "string" } },
+                          { "name": "rangeNumber", "in": "path", "required": true, "schema": { "type": "integer" } }
+                      ],
+                      "responses": {
+                          "200": { "description": "Range assigned to user" },
+                          "404": { "description": "Range or user not found" }
+                      }
+                  }
+              },
+              "/ranges/revoke/{userID}/{rangeNumber}": {
+                  "delete": {
+                      "tags": [ "Range Management" ],
+                      "summary": "Revoke range access from a user (admin only)",
+                      "operationId": "revokeRangeFromUser",
+                      "description": "Revokes a user's access to a range. Admin only.",
+                      "parameters": [
+                          { "name": "userID", "in": "path", "required": true, "schema": { "type": "string" } },
+                          { "name": "rangeNumber", "in": "path", "required": true, "schema": { "type": "integer" } }
+                      ],
+                      "responses": {
+                          "200": { "description": "Range revoked from user" },
+                          "404": { "description": "Range or user not found" }
+                      }
+                  }
+              },
+              "/ranges/users/{rangeNumber}": {
+                  "get": {
+                      "tags": [ "Range Management" ],
+                      "summary": "List users with access to a range (admin only)",
+                      "operationId": "listRangeUsers",
+                      "description": "Lists all users with access to a range. Admin only.",
+                      "parameters": [
+                          { "name": "rangeNumber", "in": "path", "required": true, "schema": { "type": "integer" } }
+                      ],
+                      "responses": {
+                          "200": {
+                              "description": "List of users assigned to the range",
+                              "content": {
+                                  "application/json": {
+                                      "schema": {
+                                          "type": "array",
+                                          "items": { "type": "object", "properties": { "userID": { "type": "string" }, "name": { "type": "string" }, "type": { "type": "string" } } }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              },
+              "/ranges/accessible": {
+                  "get": {
+                      "tags": [ "Range Management" ],
+                      "summary": "List ranges accessible to the user",
+                      "operationId": "listUserAccessibleRanges",
+                      "description": "Lists all ranges accessible to the current user.",
+                      "responses": {
+                          "200": {
+                              "description": "List of accessible ranges",
+                              "content": {
+                                  "application/json": {
+                                      "schema": {
+                                          "type": "array",
+                                          "items": { "type": "object", "properties": { "rangeNumber": { "type": "integer" }, "userID": { "type": "string" }, "rangeState": { "type": "string" }, "accessType": { "type": "string" } } }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              },
+              "/migrate/sqlite": {
+                  "post": {
+                      "tags": [ "Migration" ],
+                      "summary": "Migrate SQLite to PostgreSQL",
+                      "operationId": "migrateSQLiteToPostgreSQL",
+                      "description": "Migrates Ludus data from SQLite to PostgreSQL.",
+                      "responses": {
+                          "200": { "description": "Migration started" },
+                          "500": { "description": "Migration failed" }
                       }
                   }
               }
