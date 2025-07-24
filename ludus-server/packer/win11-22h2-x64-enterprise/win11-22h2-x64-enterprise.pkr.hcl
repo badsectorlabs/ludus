@@ -124,13 +124,13 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
     unmount          = true
   }
   boot_iso {
-    type             = "scsi"
-    iso_checksum     = "${var.iso_checksum}"
-    iso_url          = "${var.iso_url}"
-    iso_storage_pool = "${var.iso_storage_pool}"
-    iso_download_pve = true
-    unmount          = true
-    keep_cdrom_drive = true
+    type              = "scsi"
+    iso_checksum      = "${var.iso_checksum}"
+    iso_url           = "${var.iso_url}"
+    iso_storage_pool  = "${var.iso_storage_pool}"
+    iso_download_pve  = true
+    unmount           = true
+    keep_cdrom_device = true
   }
   # Required for Win11
   bios = "ovmf"
