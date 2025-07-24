@@ -135,12 +135,14 @@ router:
     ...
   outbound_wireguard_vlans: # Enterprise only; Define the VLANs that the router VM will route traffic for. This key is required if outbound_wireguard_config is defined.
     - 10
-  inbound_wireguard: # Enterprise only; Must be used with users that have portforwarding enabled at creation time
-    enabled: true # Enable or disable the WireGuard server on the router (default: false)
+  inbound_wireguard:             # Enterprise only; Must be used with users that have portforwarding enabled at creation time
+    enabled: true                # Enable or disable the WireGuard server on the router (default: false)
     server_cidr: 10.254.254.0/24 # The CIDR of the WireGuard server (default: 10.254.254.0/24)
-    port: 51820 # The port the WireGuard server is listening on (UDP) (default: 51820). Note: This must be 51820 to work with port forwarding.
-    allowed_vlans: # The VLANs that WireGuard clients are allowed to connect to (default: all)
+    port: 51820                  # The port the WireGuard server is listening on (UDP) (default: 51820). Note: This must be 51820 to work with port forwarding.
+    allowed_vlans:               # The VLANs that WireGuard clients are allowed to connect to (default: all)
       - 10
+  iptables_commands: # These commands are run after the firewall is configured. Make sure you understand what these commands do as they could allow traffic that should otherwise be blocked by Ludus features!
+    - iptables -I LUDUS_DEFAULTS -i ens18 -s 192.0.2.103 -j ACCEPT # A full iptables command to run at the end of router setup
 
 # This key defines network rules in your range. It is optional, and by default all traffic is allowed
 network: 

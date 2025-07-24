@@ -1467,6 +1467,7 @@ test-everything:
       sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:443 /\* User Rule: Only allow windows to kali on 443 \*/'
       sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     all  --  \*      \*       10.[1-9].0.0/16          10.[1-9].0.0/16          /\* User Default: Inter-VLAN Rule \*/ reject-with icmp-port-unreachable'
       sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.[1-9].0.0/16          /\* User Default: External Rule \*/'
+      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | grep "This is a custom iptables command"
 
 ##########
 # MANUAL #

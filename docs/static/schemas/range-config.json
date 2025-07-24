@@ -679,6 +679,14 @@
                 },
                 "inbound_wireguard": {
                     "$ref": "#/definitions/InboundWireguard"
+                },
+                "iptables_commands": {
+                    "description": "These commands are run after the firewall is configured. Make sure you understand what these commands do as they could allow traffic that should otherwise be blocked by Ludus features!",
+                    "type": "array",
+                    "item": {
+                        "type": "string",
+                        "description": "A full iptables command to run at the end of router setup; example: iptables -I LUDUS_DEFAULTS -i ens18 -s 192.0.2.103 -j ACCEPT" 
+                    }
                 }
             },
             "dependentRequired": {
