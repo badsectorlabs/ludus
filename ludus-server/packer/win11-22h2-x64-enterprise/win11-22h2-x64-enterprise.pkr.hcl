@@ -103,7 +103,8 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
     "<return><wait><return><wait><return><wait><return><wait><return><wait><return><wait><return><wait><return><wait><return><wait><return><wait>"
   ]
   additional_iso_files {
-    device           = "sata3"
+    type             = "sata"
+    index            = "3"
     iso_storage_pool = "${var.iso_storage_pool}"
     unmount          = true
     cd_label         = "PROVISION"
@@ -115,11 +116,21 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
     ]
   }
   additional_iso_files {
-    device           = "sata4"
+    type             = "sata"
+    index            = "4"
     iso_checksum     = "sha256:ebd48258668f7f78e026ed276c28a9d19d83e020ffa080ad69910dc86bbcbcc6"
     iso_url          = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.240-1/virtio-win-0.1.240.iso"
     iso_storage_pool = "${var.iso_storage_pool}"
     unmount          = true
+  }
+  boot_iso {
+    type             = "scsi"
+    iso_checksum     = "${var.iso_checksum}"
+    iso_url          = "${var.iso_url}"
+    iso_storage_pool = "${var.iso_storage_pool}"
+    iso_download_pve = true
+    unmount          = true
+    keep_cdrom_drive = true
   }
   # Required for Win11
   bios = "ovmf"
@@ -164,7 +175,6 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
   winrm_use_ssl        = true
   winrm_username       = "${var.winrm_username}"
   winrm_timeout        = "60m"
-  unmount_iso          = true
   task_timeout         = "20m" // On slow disks the imgcopy operation takes > 1m
 }
 
