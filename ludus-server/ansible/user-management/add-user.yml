@@ -148,9 +148,11 @@
     # them for every user that gets added. Speeds up user creation and allows for offline usage!
     - name: Copy the ansible directory from ROOT to the user
       ansible.builtin.copy:
-        src: "{{ ludus_install_path }}/users/root/.ansible"
-        dest: /home/{{ username }}/.ansible
-        mode: '0770'
+        src: "{{ ludus_users_dir }}/root/.ansible"
+        remote_src: true
+        dest: "{{ ludus_users_dir }}/{{ username }}"
+        mode: '0660'
+        directory_mode: '0770'
         owner: "{{ username }}"
         group: ludus
 
