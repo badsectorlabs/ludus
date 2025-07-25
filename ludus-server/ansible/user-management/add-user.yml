@@ -136,14 +136,6 @@
         dest: "{{ ludus_users_dir }}/{{ username }}/"
         mode: "0600"
 
-    - name: Chown the user's directory
-      ansible.builtin.file:
-        path: "{{ ludus_users_dir }}/{{ username }}"
-        owner: "{{ username }}"
-        group: ludus
-        mode: u=rwX,g=rwX,o-rwx
-        recurse: true
-
     # Get the user up to speed with collections and roles without having to download
     # them for every user that gets added. Speeds up user creation and allows for offline usage!
     - name: Copy the ansible directory from ROOT to the user
@@ -155,6 +147,14 @@
         directory_mode: '0770'
         owner: "{{ username }}"
         group: ludus
+
+    - name: Chown the user's directory
+      ansible.builtin.file:
+        path: "{{ ludus_users_dir }}/{{ username }}"
+        owner: "{{ username }}"
+        group: ludus
+        mode: u=rwX,g=rwX,o-rwx
+        recurse: true
 
     - name: Sync the wireguard config (no downtime)
       ansible.builtin.shell: |
