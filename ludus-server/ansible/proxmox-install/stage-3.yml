@@ -235,6 +235,13 @@
         state: started
         enabled: true
 
+    # https://gitlab.com/badsectorlabs/ludus/-/issues/109
+    # https://forum.proxmox.com/threads/blank-webgui.130366/
+    - name: Fix the black screen bug in the Proxmox web UI
+      ansible.builtin.shell:
+        cmd: |
+          apt install -y --reinstall proxmox-widget-toolkit
+
     - name: Bounce the TTY to update the install issue_message
       ansible.builtin.service:
         name: getty@tty1
