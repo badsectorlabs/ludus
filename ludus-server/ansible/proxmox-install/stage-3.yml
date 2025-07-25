@@ -59,7 +59,7 @@
         - path: /
           roles: ["ResourceAudit"]
           groups: ["ludus_users"]
-        - path: /nodes/{{ inventory_hostname }} # Required as the AccessNetwork role is more specific than the ResourceAudit role against '/' so we need this as well
+        - path: /nodes/{{ ansible_hostname }} # Required as the AccessNetwork role is more specific than the ResourceAudit role against '/' so we need this as well
           roles: ["ResourceAudit"]
           groups: ["ludus_users"]          
         - path: "/storage/{{ proxmox_vm_storage_pool }}"
