@@ -202,7 +202,7 @@
           roles: ["DatastoreUser"]
           groups:
             - ludus_users
-        - path: "/nodes/{{ inventory_hostname }}"
+        - path: "/nodes/{{ ansible_hostname }}"
           roles: ["AccessNetwork"]
           groups:
             - ludus_users
