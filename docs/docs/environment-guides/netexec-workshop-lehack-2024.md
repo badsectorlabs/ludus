@@ -205,7 +205,7 @@ ansible-playbook -i ../ad/LEHACK/providers/ludus/inventory_disableludus.yml disa
 Take snapshots via the proxmox web UI or SSH run the following ludus command:
 
 ```bash
-ludus snapshot create clean-setup =d "Clean setup of the netexec lab after ansible run"
+ludus snapshot create clean-setup -d "Clean setup of the netexec lab after ansible run"
 ```
 
 ### 7. Hack!
