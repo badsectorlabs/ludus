@@ -5,7 +5,7 @@
       - "{{ dc_ip }}"
 
 - name: Join the domain
-  ansible.windows.win_domain_membership:
+  microsoft.ad.membership:
     dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
     domain_admin_user: "{{ netbios_name }}.{{ fqdn_tail }}\\{{ domain_admin }}"
     domain_admin_password: "{{ domain_admin_password }}"

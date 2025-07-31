@@ -188,6 +188,8 @@ router:
   ram_gb: 2
   ram_min_gb: 1
   cpus: 2
+  iptables_commands:
+    - iptables -I LUDUS_DEFAULTS -i ens18 -s 192.0.2.103 -m comment --comment "This is a custom iptables command" -j ACCEPT
 
 defaults:
   snapshot_with_RAM: true

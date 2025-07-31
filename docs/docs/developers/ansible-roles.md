@@ -19,12 +19,6 @@ If you've build a cool role you'd like to share with us, let us know [via email]
 
 ## Testing roles
 
-:::note
-
-Requires Ludus server 1.3.0 or later
-
-:::
-
 To quickly test roles, use the `-t user-defined-roles`, `--limit` and `--only-roles` flags to execute only the role you are testing on the machine you are testing it on.
 
 For example, given the following range config that begins:
@@ -56,11 +50,9 @@ If you wish to only run the `testing_role` role on `JD-ad-dc-win2022-server-x64-
 
 ```shell-session
 #terminal-command-local
-ludus range deploy -t user-defined-roles --limit localhost,JD-ad-dc-win2022-server-x64-1 \
+ludus range deploy -t user-defined-roles --limit JD-ad-dc-win2022-server-x64-1 \
  --only-roles testing_role
 ```
-
-Note that you must include `localhost` in your limit argument due to the way Ludus uses localhost to parse the range config.
 
 This command construct enables the rapid testing of ansible roles in a loop such as:
 
@@ -71,12 +63,6 @@ This command construct enables the rapid testing of ansible roles in a loop such
 5. Goto: 1
 
 ## Ludus specific variables
-
-:::note
-
-Requires Ludus server 1.1.3 or later
-
-:::
 
 When developing a role for Ludus, you may want to access information about a host for use in your role.
 The following variables are available for your use and reflect the values for the specific host that is executing your role:

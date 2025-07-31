@@ -109,3 +109,11 @@ Resolve this conflict and restart `dnsmasq`.
 Once `dnsmasq` is running, VMs should be able to get an IP address via DHCP and access the internet.
 
 For more information about how this all works, learn more about [Ludus' networking](../networking.md).
+
+## Unable to access a range after granting access
+
+If you have granted a user access to a range but they are unable to access the range try the following:
+
+1. Make sure the user has an up to date WireGuard configuration file that includes the destination range subnet. You can always pull an up to date configuration with `ludus --user <userID> user wireguard`
+
+2. Re-deploy the networking rules for the target range with `ludus --user <target range ID> range deploy -t network`. This will force a recreation of the firewall rules and should include a rule to allow the user access.

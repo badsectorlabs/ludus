@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -241,9 +242,7 @@ func FileGet(client *resty.Client, apiPath string, outputPath string) {
 	s.Suffix = " Waiting for server..."
 	s.Start()
 
-	resp, err := client.R().
-		SetOutput(outputPath).
-		Get(apiPath)
+	resp, err := client.R().Get(apiPath)
 
 	s.Stop()
 
@@ -252,8 +251,13 @@ func FileGet(client *resty.Client, apiPath string, outputPath string) {
 	}
 
 	if resp.StatusCode() == 200 {
+		err := os.WriteFile(outputPath, resp.Body(), 0644)
+		if err != nil {
+			logger.Logger.Fatalf("Failed to write file: %v", err)
+		}
 		logger.Logger.Infof("File downloaded and saved as %s", outputPath)
 	} else {
 		fmt.Printf("Received non-200 status code: %d\n", resp.StatusCode())
+		fmt.Printf("Error: %s\n", string(resp.Body()))
 	}
 }

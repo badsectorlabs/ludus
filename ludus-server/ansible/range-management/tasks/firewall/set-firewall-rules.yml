@@ -279,6 +279,13 @@
   loop: "{{ network.always_blocked_networks | default([]) }}"
   when: network.always_blocked_networks is defined
 
+# The very last step of firewall setup - run any user defined iptables commands
+# Trust that the user knows what they are doing and that they have set up their rules correctly!
+- name: Run any user defined iptables commands
+  ansible.builtin.shell: |
+    {{ item }}
+  loop: "{{ router.iptables_commands | default([], true) }}"
+
 - name: Reset the conntrack entries to prevent previously allowed traffic to continue
   ansible.builtin.shell: conntrack -F
   async: 5 # Because this resets the conntrack entries, ansible will hang unless we run it async

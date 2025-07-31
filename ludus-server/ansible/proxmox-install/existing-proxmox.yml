@@ -183,7 +183,7 @@
         - path: /
           roles: ["ResourceAudit"]
           groups: ["ludus_users"]
-        - path: /nodes/{{ inventory_hostname }} # Required as the AccessNetwork role is more specific than the ResourceAudit role against '/' so we need this as well
+        - path: /nodes/{{ ansible_hostname }} # Required as the AccessNetwork role is more specific than the ResourceAudit role against '/' so we need this as well
           roles: ["ResourceAudit"]
           groups: ["ludus_users"]           
         - path: "/storage/{{ proxmox_vm_storage_pool }}"
@@ -202,7 +202,7 @@
           roles: ["DatastoreUser"]
           groups:
             - ludus_users
-        - path: "/nodes/{{ inventory_hostname }}"
+        - path: "/nodes/{{ ansible_hostname }}"
           roles: ["AccessNetwork"]
           groups:
             - ludus_users
@@ -212,7 +212,7 @@
   tasks:
     - name: Install proxmox and ansible packer plugin
       ansible.builtin.shell:
-        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/proxmox v1.1.8;
+        PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/badsectorlabs/proxmox v1.2.3;
         PACKER_PLUGIN_PATH={{ ludus_install_path }}/resources/packer/plugins packer plugins install github.com/hashicorp/ansible v1.1.1
       register: packer_plugin_install
 

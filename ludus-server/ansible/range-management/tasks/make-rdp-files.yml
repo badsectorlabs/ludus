@@ -84,9 +84,16 @@
     rdp_domain: "{{ item }}"
     rdp_username: localuser
 
+- name: Find RDP files to zip
+  ansible.builtin.find:
+    paths: "{{ ludus_users_dir }}/{{ username }}/rdp"
+    patterns: "*.rdp"
+  register: rdp_files_found
+
 - name: Zip up the RDP files
   community.general.archive:
     format: zip
     path:
       - "{{ ludus_users_dir }}/{{ username }}/rdp/*"
     dest: "{{ ludus_users_dir }}/{{ username }}/rdp.zip"
+    when: rdp_files_found.files | length > 0

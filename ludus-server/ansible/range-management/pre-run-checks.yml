@@ -21,6 +21,8 @@
     - name: Check for valid dynamic inventory
       ansible.builtin.assert:
         that:
-          - range_id in groups
+          # If the user is an admin, and deploys an ADMIN VM (i.e. nexus cache) and then deletes their range, they will not have their range_id in groups.
+          # https://gitlab.com/badsectorlabs/ludus/-/issues/107
+          - range_id in groups or 'ADMIN' in groups
         fail_msg: "Dynamic inventory failed to load correctly. This may be an issue if you changed your proxmox password but did not update it in ludus."
         success_msg: "Dynamic inventory loaded!"

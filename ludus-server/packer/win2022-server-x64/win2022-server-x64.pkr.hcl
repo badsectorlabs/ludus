@@ -86,7 +86,8 @@ locals {
 
 source "proxmox-iso" "win2022-server-x64" {
   additional_iso_files {
-    device           = "sata3"
+    type             = "sata"
+    index            = "3"
     iso_storage_pool = "${var.iso_storage_pool}"
     unmount          = true
     cd_label         = "PROVISION"
@@ -98,11 +99,21 @@ source "proxmox-iso" "win2022-server-x64" {
     ]
   }
   additional_iso_files {
-    device           = "sata4"
+    type             = "sata"
+    index            = "4"
     iso_checksum     = "sha256:c88a0dde34605eaee6cf889f3e2a0c2af3caeb91b5df45a125ca4f701acbbbe0"
     iso_url          = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.229-1/virtio-win-0.1.229.iso"
     iso_storage_pool = "${var.iso_storage_pool}"
     unmount          = true
+  }
+  boot_iso {
+    type              = "ide"
+    iso_checksum      = "${var.iso_checksum}"
+    iso_url           = "${var.iso_url}"
+    iso_storage_pool  = "${var.iso_storage_pool}"
+    iso_download_pve  = true
+    unmount           = true
+    keep_cdrom_device = true
   }
   communicator    = "winrm"
   cores           = "${var.vm_cpu_cores}"
@@ -118,9 +129,6 @@ source "proxmox-iso" "win2022-server-x64" {
   }
   pool                     = "${var.proxmox_pool}"
   insecure_skip_tls_verify = "${var.proxmox_skip_tls_verify}"
-  iso_checksum             = "${var.iso_checksum}"
-  iso_url                  = "${var.iso_url}"
-  iso_storage_pool         = "${var.iso_storage_pool}"
   memory                   = "${var.vm_memory}"
   network_adapters {
     bridge = "${var.ludus_nat_interface}"
@@ -137,7 +145,6 @@ source "proxmox-iso" "win2022-server-x64" {
   winrm_password       = "${var.winrm_password}"
   winrm_use_ssl        = true
   winrm_username       = "${var.winrm_username}"
-  unmount_iso          = true
   winrm_timeout        = "6h" // Sometimes the boot and/or updates can be really really slow
   task_timeout         = "20m" // On slow disks the imgcopy operation takes > 1m
 }
