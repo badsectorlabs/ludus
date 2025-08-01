@@ -23,9 +23,9 @@ type RangeObject struct {
 
 	VMs []VmObject `json:"VMs" gorm:"foreignKey:RangeNumber;references:RangeNumber"`
 
-	AllowedDomains []string `json:"allowedDomains" gorm:"type:text[]"` // PostgreSQL array type
+	AllowedDomains []string `json:"allowedDomains" gorm:"serializer:json"`
 
-	AllowedIPs []string `json:"allowedIPs" gorm:"type:text[]"` // PostgreSQL array type
+	AllowedIPs []string `json:"allowedIPs" gorm:"serializer:json"`
 
 	RangeState string `json:"rangeState" gorm:"default:'NEVER DEPLOYED'"`
 
@@ -78,6 +78,8 @@ type VmObject struct {
 
 	IP string `json:"ip,omitempty"`
 
+	IsRouter bool `json:"isRouter" gorm:"default:false"`
+
 	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
 	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
 }
@@ -115,5 +117,5 @@ type GroupRangeAccess struct {
 // Keep RangeAccessObject for backward compatibility during migration
 type RangeAccessObject struct {
 	TargetUserID  string   `json:"targetUserID" gorm:"primaryKey"`
-	SourceUserIDs []string `json:"sourceUserIDs" gorm:"type:text[]"` // Updated to PostgreSQL array
+	SourceUserIDs []string `json:"sourceUserIDs" gorm:"serializer:json"` // JSON serialized array
 }

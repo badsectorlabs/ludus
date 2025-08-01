@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -267,6 +268,14 @@ func updateUsersRangeVMData(c *gin.Context) error {
 
 	var rangeVMCount = 0
 
+	// Get the router VM name for this range
+	routerVMName, err := GetRouterVMName(c)
+	fmt.Println("routerVMName", routerVMName)
+	if err != nil {
+		// If we can't get the router name, continue without router identification
+		routerVMName = ""
+	}
+
 	// Loop over the VMs and add them to the DB
 	// Save the network for this user to compare IPs against
 	_, network, _ := net.ParseCIDR(fmt.Sprintf("10.%d.0.0/16", usersRange.RangeNumber))
@@ -312,6 +321,9 @@ func updateUsersRangeVMData(c *gin.Context) error {
 		} else {
 			thisVM.PoweredOn = false
 		}
+
+		// Check if this VM is the router
+		thisVM.IsRouter = (vm["name"].(string) == routerVMName)
 
 		db.Create(&thisVM)
 		rangeVMCount += 1
@@ -430,6 +442,9 @@ func GetUserAccessibleRanges(db *gorm.DB, userID string) []int32 {
 		result = append(result, num)
 	}
 
+	// Sort the result to ensure consistent ordering
+	slices.Sort(result)
+
 	return result
 }
 
@@ -462,6 +477,9 @@ func GetRangeAccessibleUsers(db *gorm.DB, rangeNumber int32) []string {
 	for id := range userMap {
 		result = append(result, id)
 	}
+
+	// Sort the result to ensure consistent ordering
+	slices.Sort(result)
 
 	return result
 }
@@ -502,16 +520,22 @@ func GetRangeObjectByNumber(db *gorm.DB, rangeNumber int32) (RangeObject, error)
 	return rangeObj, err
 }
 
-// GetUserDefaultRange gets the default range for a user (first range they have access to)
+// GetUserDefaultRange gets the default range for a user (range where user_id matches the user's ID)
 func GetUserDefaultRange(db *gorm.DB, userID string) (RangeObject, error) {
 	var rangeObj RangeObject
 
-	// Try to get the first range the user has access to
+	// First try to get a range where the user_id field matches the current user's ID
+	err := db.Where("user_id = ?", userID).First(&rangeObj).Error
+	if err == nil {
+		return rangeObj, nil
+	}
+
+	// If no range with matching user_id is found, fall back to the first accessible range
 	accessibleRanges := GetUserAccessibleRanges(db, userID)
 	if len(accessibleRanges) == 0 {
 		return rangeObj, gorm.ErrRecordNotFound
 	}
 
-	err := db.Where("range_number = ?", accessibleRanges[0]).First(&rangeObj).Error
+	err = db.Where("range_number = ?", accessibleRanges[0]).First(&rangeObj).Error
 	return rangeObj, err
 }
