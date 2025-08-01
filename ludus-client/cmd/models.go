@@ -11,6 +11,7 @@ type VmObject struct {
 	Name        string `json:"name"`
 	PoweredOn   bool   `json:"poweredOn"`
 	Ip          string `json:"ip,omitempty"`
+	IsRouter    bool   `json:"isRouter"`
 }
 
 type AnsibleItem struct {
