@@ -83,17 +83,17 @@ See: https://pve.proxmox.com/wiki/Upgrade_from_7_to_8
 	return false
 }
 
-// check /etc/os-release for Debian 12, throw a fatal error /etc/os-release does not exist or does not contain the Debian 12 string
-func checkDebian12() {
+// check /etc/os-release for Debian 12 or 13, throw a fatal error /etc/os-release does not exist or does not contain the Debian 12 string
+func checkDebian12or13() {
 	if fileExists("/etc/os-release") {
 		osReleaseContents, err := os.ReadFile("/etc/os-release")
 		if err != nil {
 			log.Fatal(err.Error())
 		}
-		if !strings.Contains(string(osReleaseContents), "Debian GNU/Linux 12 (bookworm)") {
-			log.Fatal("/etc/os-release did not indicate this is Debian 12. Ludus only supports Debian 12.")
+		if !strings.Contains(string(osReleaseContents), "Debian GNU/Linux 12 (bookworm)") && !strings.Contains(string(osReleaseContents), "Debian GNU/Linux 13 (trixie)") {
+			log.Fatal("/etc/os-release did not indicate this is Debian 12 or 13. Ludus only supports Debian 12 or 13.")
 		}
 	} else {
-		log.Fatal("Could not read /etc/os-release to check for Debian 12. Ludus only supports Debian 12.")
+		log.Fatal("Could not read /etc/os-release to check for Debian 12 or 13. Ludus only supports Debian 12 or 13.")
 	}
 }

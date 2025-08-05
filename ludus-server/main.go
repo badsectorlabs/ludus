@@ -122,7 +122,7 @@ func main() {
 
 	// Sanity checks
 	checkArgs()
-	checkDebian12()
+	checkDebian12or13()
 	checkForVirtualizationSupport()
 	generateConfigIfAutomatedInstall()
 
