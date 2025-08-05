@@ -138,7 +138,7 @@ func main() {
 	checkRoot()
 
 	// If this is a proxmox 8 machine, print some warnings and set the bool
-	existingProxmox = checkForProxmox8()
+	existingProxmox = checkForProxmox8or9()
 
 	getInstallStep(existingProxmox)
 	// Use pip to install ansible because Debian's ansible apt package is 4 versions out of date (2.10, current is 2.14)

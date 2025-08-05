@@ -726,11 +726,11 @@ main() {
   fi
   
   if [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && [[ ! -d /opt/ludus ]]; then 
-    # Check if this is a Debian 12 host by reading /etc/debian_version
+    # Check if this is a Debian 12 or 13 host by reading /etc/debian_version
     if [[ -f /etc/os-release ]]; then
       # shellcheck source=/dev/null
       source /etc/os-release
-      if [[ "${ID}" == "debian" ]] && [[ "${VERSION_ID}" == "12" ]]; then
+      if [[ "${ID}" == "debian" ]] && { [[ "${VERSION_ID}" == "12" ]] || [[ "${VERSION_ID}" == "13" ]]; }; then
         print_message "[?] Would you like to install the Ludus server on this host?" "warn"
         if [[ "$SHELL" == "/bin/zsh" ]]; then
           print_message "[?] (y/n): " "warn"
