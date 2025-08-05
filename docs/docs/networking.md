@@ -174,7 +174,7 @@ network:
       action: REJECT
 ```
 
-See more details about the range config schema (which includes the network object) [here](./configuration).
+See more details about the range config schema (which includes the network object) [here](./configuration.mdx).
 
 ## Testing Mode
 
