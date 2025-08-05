@@ -63,7 +63,7 @@ EOF
 
 #---  FUNCTION  ----------------------------------------------------------------
 #          NAME:  command_exists
-#   DESCRIPTION:  Checks if a command is avilable
+#   DESCRIPTION:  Checks if a command is available
 #    PARAMETERS:  $1 = Command to check
 #       RETURNS:  0 = command is available
 #                 1 = command is not available
@@ -246,7 +246,7 @@ download_file() {
 #    PARAMETERS:  $1 = path to checksum file
 #                 $2 = location of file to check
 #                 $3 = working directory
-#       RETURNS:  0 = checkusm verified
+#       RETURNS:  0 = checksum verified
 #                 1 = checksum verification failed
 #                 20 = failed to determine tool to use to check checksum
 #                 30 = failed to change into tmp dir
@@ -697,7 +697,7 @@ main() {
   # Completions
   if { [[ "$SHELL" == "/bin/zsh" ]] && [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/zsh/completions/_ludus" ]]; } || \
     { [[ "$SHELL" == "/bin/bash" ]] && \
-      { [[ "${EUID}" == "0" ]] && command_exists pkg-config && [[ ! -f "$(pkg-config --variable=completionsdir bash-completion)/ludus" ]]; } || \
+      { [[ "${EUID}" == "0" ]] && { { command_exists pkg-config && [[ ! -f "$(pkg-config --variable=completionsdir bash-completion)/ludus" ]]; } || { ! command_exists pkg-config && [[ ! -f "/usr/share/bash-completion/completions/ludus" ]]; }; } } || \
       { [[ "${EUID}" != "0" ]] && [[ ! -f "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/ludus" ]]; }; }; then
 
     print_message "[?] Would you like to install shell completions so tab works with the 'ludus' command?" "warn"
