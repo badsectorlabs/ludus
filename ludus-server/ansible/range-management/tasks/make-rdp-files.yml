@@ -96,4 +96,4 @@
     path:
       - "{{ ludus_users_dir }}/{{ username }}/rdp/*"
     dest: "{{ ludus_users_dir }}/{{ username }}/rdp.zip"
-    when: rdp_files_found.files | length > 0
+  when: rdp_files_found.files | length > 0
