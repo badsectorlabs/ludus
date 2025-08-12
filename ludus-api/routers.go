@@ -561,21 +561,21 @@ var routes = Routes{
 	{
 		"CreateRange",
 		http.MethodPost,
-		"/ranges",
+		"/ranges/create",
 		CreateRange,
 	},
 
 	{
 		"AssignRangeToUser",
 		http.MethodPost,
-		"/ranges/:rangeNumber/users/:userID",
+		"/ranges/assign/:userID/:rangeNumber",
 		AssignRangeToUser,
 	},
 
 	{
 		"RevokeRangeFromUser",
 		http.MethodDelete,
-		"/ranges/:rangeNumber/users/:userID",
+		"/ranges/revoke/:userID/:rangeNumber",
 		RevokeRangeFromUser,
 	},
 

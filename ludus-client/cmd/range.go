@@ -802,7 +802,7 @@ var rangeUsersCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ranges/users/%s", rangeNumber))
+		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ranges/%s/users", rangeNumber))
 		if !success {
 			return
 		}
@@ -850,7 +850,11 @@ var rangeAccessibleCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, "/ranges/accessible")
+		if userID != "" {
+			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ranges/accessible?userID=%s", userID))
+		} else {
+			responseJSON, success = rest.GenericGet(client, "/ranges/accessible")
+		}
 		if !success {
 			return
 		}
