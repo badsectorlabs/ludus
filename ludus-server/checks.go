@@ -64,34 +64,36 @@ func checkRoot() {
 	}
 }
 
-func checkForProxmox8() bool {
+func checkForProxmox8or9() bool {
 	if fileExists("/usr/bin/pveversion") && !fileExists(fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath)) {
 		pveVersion := Run("pveversion", false, false)
 		if strings.Contains(pveVersion, "pve-manager/8") {
 			return true
+		} else if strings.Contains(pveVersion, "pve-manager/9") {
+			return true
 		} else if strings.Contains(pveVersion, "pve-manager/7") {
-			log.Fatal(`This is a Proxmox host but not proxmox 8.
-Upgrade to Proxmox 8 before using Ludus.
+			log.Fatal(`This is a Proxmox host but not proxmox 8 or 9.
+Upgrade to Proxmox 8 or 9 before using Ludus.
 See: https://pve.proxmox.com/wiki/Upgrade_from_7_to_8
 `)
 		} else {
-			log.Fatal("This is a Proxmox host and is not a supported version. Only Proxmox 8 is supported by Ludus.")
+			log.Fatal("This is a Proxmox host and is not a supported version. Only Proxmox 8 or 9 are supported by Ludus.")
 		}
 	}
 	return false
 }
 
-// check /etc/os-release for Debian 12, throw a fatal error /etc/os-release does not exist or does not contain the Debian 12 string
-func checkDebian12() {
+// check /etc/os-release for Debian 12 or 13, throw a fatal error /etc/os-release does not exist or does not contain the Debian 12 string
+func checkDebian12or13() {
 	if fileExists("/etc/os-release") {
 		osReleaseContents, err := os.ReadFile("/etc/os-release")
 		if err != nil {
 			log.Fatal(err.Error())
 		}
-		if !strings.Contains(string(osReleaseContents), "Debian GNU/Linux 12 (bookworm)") {
-			log.Fatal("/etc/os-release did not indicate this is Debian 12. Ludus only supports Debian 12.")
+		if !strings.Contains(string(osReleaseContents), "Debian GNU/Linux 12 (bookworm)") && !strings.Contains(string(osReleaseContents), "Debian GNU/Linux 13 (trixie)") {
+			log.Fatal("/etc/os-release did not indicate this is Debian 12 or 13. Ludus only supports Debian 12 or 13.")
 		}
 	} else {
-		log.Fatal("Could not read /etc/os-release to check for Debian 12. Ludus only supports Debian 12.")
+		log.Fatal("Could not read /etc/os-release to check for Debian 12 or 13. Ludus only supports Debian 12 or 13.")
 	}
 }

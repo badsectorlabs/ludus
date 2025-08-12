@@ -129,10 +129,16 @@
         - ufw_installed.rc == 0
 
     # Jeff Geerling approved: https://github.com/geerlingguy/ansible-role-pip/pull/58
-    - name: Remove python externally-managed file to allow pip to run via ansible
-      ansible.builtin.file:
-        path: /usr/lib/python3.11/EXTERNALLY-MANAGED
-        state: absent
+    - name: Remove python EXTERNALLY-MANAGED files using shell find (faster/simpler than ansible.builtin.find)
+      ansible.builtin.shell:
+        cmd: find /usr/lib/python*/EXTERNALLY-MANAGED -type f -delete
+        executable: /bin/bash
+      register: find_delete_result
+      changed_when: find_delete_result.rc == 0
+      failed_when: >
+        find_delete_result.rc != 0 and
+        not ('No such file or directory' in find_delete_result.stderr and
+            'EXTERNALLY-MANAGED' in find_delete_result.stderr)
 
     - name: Install required python packages (for ansible/proxmox interoperability)
       ansible.builtin.pip:
