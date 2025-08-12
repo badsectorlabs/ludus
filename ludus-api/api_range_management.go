@@ -278,6 +278,12 @@ func ListAllRanges(c *gin.Context) {
 
 	var ranges []RangeObject
 	result = db.Find(&ranges)
+
+	// Sort the ranges by range number
+	slices.SortFunc(ranges, func(a, b RangeObject) int {
+		return int(a.RangeNumber - b.RangeNumber)
+	})
+
 	if result.Error != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, result.Error)
 	}
@@ -719,6 +725,15 @@ func AssignRangeToUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error assigning range to user: %v", err)})
 		return
 	}
+
+	// Update the user's WireGuard config to reflect the new range access
+	go func(c *gin.Context) {
+		_, err = RunPlaybookWithTag(c, "range-access.yml", "grant", false)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}(c)
 
 	c.JSON(http.StatusCreated, gin.H{"result": "Range assigned to user successfully"})
 }
