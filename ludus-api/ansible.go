@@ -21,7 +21,6 @@ import (
 	"github.com/apenella/go-ansible/pkg/playbook"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/exp/maps"
-	"gorm.io/gorm"
 )
 
 // Runs an ansible playbook with an arbitrary amount of extraVars
@@ -235,17 +234,20 @@ type AccessGrantStruct struct {
 func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 	var returnArray []AccessGrantStruct
 
+	// Get the range number for the user
+	userRange, err := GetUserDefaultRange(db, targetUserId)
+	if err != nil {
+		fmt.Println("Error during access grant lookup: user_id not found when getting user for range", userRange.RangeNumber, "for 'userID'", targetUserId, err)
+	}
+
 	// Get direct user-to-range assignments
 	var userRangeAccesses []UserRangeAccess
-	db.Where("user_id = ?", targetUserId).Find(&userRangeAccesses)
+	db.Where("range_number = ?", userRange.RangeNumber).Find(&userRangeAccesses)
 
 	for _, access := range userRangeAccesses {
 		var rangeObj RangeObject
-		if err := db.Where("range_number = ?", access.RangeNumber).First(&rangeObj).Error; err == nil {
-			var user UserObject
-			if err := db.First(&user, "user_id = ?", rangeObj.UserID).Error; err == nil {
-				returnArray = append(returnArray, AccessGrantStruct{access.RangeNumber, user.ProxmoxUsername})
-			}
+		if err := db.Where("user_id = ?", access.UserID).First(&rangeObj).Error; err == nil {
+			returnArray = append(returnArray, AccessGrantStruct{rangeObj.RangeNumber, rangeObj.UserID})
 		}
 	}
 
@@ -265,19 +267,6 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 					returnArray = append(returnArray, AccessGrantStruct{groupAccess.RangeNumber, user.ProxmoxUsername})
 				}
 			}
-		}
-	}
-
-	// Also check legacy RangeAccessObject for backward compatibility
-	var accessGrants RangeAccessObject
-	result := db.First(&accessGrants, "target_user_id = ?", targetUserId)
-	if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		for _, sourceUserID := range accessGrants.SourceUserIDs {
-			var sourceUser UserObject
-			db.First(&sourceUser, "user_id = ?", sourceUserID)
-			var sourceRange RangeObject
-			db.First(&sourceRange, "user_id = ?", sourceUserID)
-			returnArray = append(returnArray, AccessGrantStruct{sourceRange.RangeNumber, sourceUser.ProxmoxUsername})
 		}
 	}
 
