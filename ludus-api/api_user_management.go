@@ -17,6 +17,12 @@ import (
 
 var UserIDRegex = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
 
+type UserWithEmailAndPassword struct {
+	UserObject
+	Password string `json:"password"`
+	Email    string `json:"email"`
+}
+
 // AddUser - adds a user to the system
 func AddUser(c *gin.Context) {
 
@@ -34,7 +40,7 @@ func AddUser(c *gin.Context) {
 		return // JSON set in GetUserObject
 	}
 
-	var user UserObject
+	var user UserWithEmailAndPassword
 	c.Bind(&user)
 
 	if user.Name != "" && user.UserID != "" {
@@ -50,6 +56,18 @@ func AddUser(c *gin.Context) {
 			// Do not allow users to be created with the reserved user IDs
 			if slices.Contains(reservedUserIDs, user.UserID) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s is a reserved user ID", user.UserID)})
+				return
+			}
+
+			// Validate there is an email and password
+			if user.Email == "" || user.Password == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Email and password are required"})
+				return
+			}
+
+			// Check that the password is at least 8 characters long
+			if len(user.Password) < 8 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 8 characters long"})
 				return
 			}
 
@@ -74,7 +92,7 @@ func AddUser(c *gin.Context) {
 				return
 			}
 
-			// Create a default range for the user using the new utility function
+			// Create a default range for the user using the new utility function, also creates a UserRangeAccess record
 			err = CreateDefaultUserRange(db, user.UserID)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating user's default range: %v", err)})
@@ -106,12 +124,17 @@ func AddUser(c *gin.Context) {
 				"proxmox_public_ip":   ServerConfiguration.ProxmoxPublicIP,
 				"user_is_admin":       user.IsAdmin,
 				"portforward_enabled": user.PortforwardingEnabled,
+				"proxmox_password":    user.Password,
 			}
 			output, err := server.RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 				// Remove the range record since creation failed
 				db.Where("user_id = ?", user.UserID).Delete(&usersRange)
+				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
+				// Remove the user from the host system - we validated the user did not exist on the host system before running the playbook, so this is safe to do
+				removeUserFromHostSystem(user.ProxmoxUsername)
+				// TODO: Remove the user from proxmox
 				return
 			}
 			// If this endpoint is called by a user that is not ROOT and this is their first ansible action, their log file will be owned by root
@@ -120,13 +143,49 @@ func AddUser(c *gin.Context) {
 
 			user.DateCreated = time.Now()
 			user.DateLastActive = time.Now()
-			apiKey := GenerateAPIKey(&user)
+			apiKey := GenerateAPIKey(&user.UserObject)
 			user.HashedAPIKey, _ = HashString(apiKey)
-			db.Create(&user)
+
+			// Create a new user in Supabase
+			supabaseUser, err := createUserInSupabase(user, user.Password)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				// Rollback the user creation
+				db.Delete(&user)
+				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
+				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
+				removeUserFromHostSystem(user.ProxmoxUsername)
+				// TODO: Remove the user from proxmox
+				return
+			}
+			user.UUID = supabaseUser.ID
+
+			// Create a Proxmox API Token for the user
+			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.UserObject)
+			if err != nil {
+				// Rollback the user creation
+				db.Delete(&user)
+				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
+				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
+				removeUserFromHostSystem(user.ProxmoxUsername)
+				// TODO: Remove the user from Supabase
+				// TODO: Remove the user from proxmox
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			user.ProxmoxTokenID = tokenID
+			user.ProxmoxTokenSecret = tokenSecret
+
+			// Create the user in the database
+			err = db.Create(&user.UserObject).Error
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 
 			// Add the plaintext API Key to this response only
 			var userDataWithAPIKey map[string]interface{}
-			userMap, _ := json.Marshal(user)
+			userMap, _ := json.Marshal(user.UserObject)
 			json.Unmarshal(userMap, &userDataWithAPIKey)
 			userDataWithAPIKey["apiKey"] = apiKey
 			delete(userDataWithAPIKey, "HashedAPIKey")

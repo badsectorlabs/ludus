@@ -3,20 +3,23 @@
   tags: [always]
   gather_facts: false
   tasks:
-    - name: Acquire session ticket
-      ansible.builtin.uri:
-        url: "https://127.0.0.1:8006/api2/json/access/ticket"
-        method: POST
-        body:
-          username: "{{ username }}@pam"
-          password: "{{ hostvars['localhost'].api_password }}"
-        body_format: form-urlencoded
-        validate_certs: false
-      register: proxmox_ticket_response
+    - name: Check for Proxmox token
+      ansible.builtin.assert:
+        that:
+          - hostvars['localhost'].proxmox_full_token_id is defined
+          - hostvars['localhost'].proxmox_token_secret is defined
+        fail_msg: "Proxmox token is not defined"
+        success_msg: "Proxmox token is defined"
 
-    - name: Extract ticket from response
+    - name: Split the token id
       ansible.builtin.set_fact:
-        proxmox_ticket: "{{ proxmox_ticket_response.json.data.ticket }}"
+        proxmox_token_username: "{{ hostvars['localhost']['proxmox_full_token_id'] | split('!') | first }}"
+        proxmox_token_id: "{{ hostvars['localhost']['proxmox_full_token_id'] | split('!') | last }}"
+
+    - name: Check for valid token id
+      ansible.builtin.assert:
+        that:
+          - proxmox_token_username == hostvars['localhost']['api_user']
 
     - name: Check for valid dynamic inventory
       ansible.builtin.assert:
@@ -24,5 +27,5 @@
           # If the user is an admin, and deploys an ADMIN VM (i.e. nexus cache) and then deletes their range, they will not have their range_id in groups.
           # https://gitlab.com/badsectorlabs/ludus/-/issues/107
           - range_id in groups or 'ADMIN' in groups
-        fail_msg: "Dynamic inventory failed to load correctly. This may be an issue if you changed your proxmox password but did not update it in ludus."
+        fail_msg: "Dynamic inventory failed to load correctly. This may be an issue if the ludus-token was modified in Proxmox."
         success_msg: "Dynamic inventory loaded!"

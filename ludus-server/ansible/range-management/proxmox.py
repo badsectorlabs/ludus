@@ -25,13 +25,14 @@
 #
 # { "groups": ["utility", "databases"], "a": false, "b": true }
 
-# Updated 2024 by the Ludus authors
+# Updated by the Ludus authors
 #
 # Added error handling
 # Added Windows os name normalization
 # Added macOS "support"
 # Fixed version detection logic for Proxmox VE >= 8.0.0
 # Added Ludus config integration to select IP address based on VM name
+# Added support for API tokens and secrets
 
 from six.moves.urllib import request, parse, error
 
@@ -139,40 +140,54 @@ class ProxmoxAPI(object):
                             options.password = config_data["password"]
                         except KeyError:
                             options.password = None
-
+                    if not options.token:
+                        try:
+                            options.token = config_data["token"]
+                        except KeyError:
+                            options.token = None
+                    if not options.secret:
+                        try:
+                            options.secret = config_data["secret"]
+                        except KeyError:
+                            options.secret = None
         if not options.url:
             raise Exception('Missing mandatory parameter --url (or PROXMOX_URL or "url" key in config file).')
         elif not options.username:
             raise Exception(
                 'Missing mandatory parameter --username (or PROXMOX_USERNAME or "username" key in config file).')
-        elif not options.password:
+        elif not options.password and (not options.token or not options.secret):
             raise Exception(
-                'Missing mandatory parameter --password (or PROXMOX_PASSWORD or "password" key in config file).')
-        
+                'Missing mandatory parameter --password (or PROXMOX_PASSWORD or "password" key in config file) or alternatively --token and --secret (or PROXMOX_TOKEN and PROXMOX_SECRET or "token" and "secret" key in config file).')        
         # URL should end with a trailing slash
         if not options.url.endswith("/"):
             options.url = options.url + "/"
 
     def auth(self):
-        request_path = '{0}api2/json/access/ticket'.format(self.options.url)
+        if not self.options.token or not self.options.secret:
+            request_path = '{0}api2/json/access/ticket'.format(self.options.url)
 
-        request_params = parse.urlencode({
-            'username': self.options.username,
-            'password': self.options.password,
-        })
+            request_params = parse.urlencode({
+                'username': self.options.username,
+                'password': self.options.password,
+            })
 
-        data = json.load(open_url(request_path, data=request_params,
-                                  validate_certs=self.options.validate))
+            data = json.load(open_url(request_path, data=request_params,
+                                    validate_certs=self.options.validate))
 
-        self.credentials = {
-            'ticket': data['data']['ticket'],
-            'CSRFPreventionToken': data['data']['CSRFPreventionToken'],
-        }
+            self.credentials = {
+                'ticket': data['data']['ticket'],
+                'CSRFPreventionToken': data['data']['CSRFPreventionToken'],
+            }
 
     def get(self, url, data=None):
         request_path = '{0}{1}'.format(self.options.url, url)
 
-        headers = {'Cookie': 'PVEAuthCookie={0}'.format(self.credentials['ticket'])}
+        headers = {}
+        if not self.options.token or not self.options.secret:
+            headers['Cookie'] = 'PVEAuthCookie={0}'.format(self.credentials['ticket'])
+        else:
+            headers['Authorization'] = 'PVEAPIToken={0}={1}'.format(self.options.token, self.options.secret)
+
         request = open_url(request_path, data=data, headers=headers,
                            validate_certs=self.options.validate)
 
@@ -619,6 +634,8 @@ def main():
     parser.add_option('--url', default=os.environ.get('PROXMOX_URL'), dest='url')
     parser.add_option('--username', default=os.environ.get('PROXMOX_USERNAME'), dest='username')
     parser.add_option('--password', default=os.environ.get('PROXMOX_PASSWORD'), dest='password')
+    parser.add_option('--token', default=os.environ.get('PROXMOX_TOKEN'), dest='token')
+    parser.add_option('--secret', default=os.environ.get('PROXMOX_SECRET'), dest='secret')    
     parser.add_option('--pretty', action="store_true", default=False, dest='pretty')
     parser.add_option('--trust-invalid-certs', action="store_false", default=bool_validate_cert, dest='validate')
     (options, args) = parser.parse_args()

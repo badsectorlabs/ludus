@@ -51,7 +51,7 @@
 
     - name: Get the VM id of the router via Proxmox API
       ansible.builtin.shell: |
-        curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ router_vm_name_to_action }}").vmid'
+        curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ router_vm_name_to_action }}").vmid'
       register: router_id_command
 
     - name: Set the router_vm_id from API lookup
@@ -60,7 +60,7 @@
 
     - name: Get the interface with a 192.0.2.x ip (WAN)
       ansible.builtin.shell: |
-        curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
+        curl -s -k -b PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
       register: wan_interface_command
       failed_when: wan_interface_command.rc != 0 and "grant" not in ansible_run_tags
 

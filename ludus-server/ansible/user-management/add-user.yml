@@ -53,10 +53,11 @@
         dest: "{{ ludus_users_dir }}/{{ username }}/range-config.yml"
         mode: "0600"
 
-    # TODO: Store this in the keyring
-    - name: 'Generating proxmox password for user'
-      ansible.builtin.set_fact:
-        user_proxmox_password: "{{ lookup('password', ludus_users_dir + '/' + username + '/proxmox_password length=20 chars=ascii_letters,digits') }}"
+    - name: Store proxmox password for user
+      ansible.builtin.copy:
+        content: "{{ proxmox_password }}"
+        dest: "{{ ludus_users_dir }}/{{ username }}/proxmox_password"
+        mode: "0660"
 
     - name: Add the user to the host
       ansible.builtin.user:
@@ -184,7 +185,7 @@
 
     - name: Add the user to proxmox
       ansible.builtin.shell:
-        cmd: pveum user add {{ username }}@pam --password {{ user_proxmox_password }} -group ludus_users
+        cmd: pveum user add {{ username }}@pam --password {{ proxmox_password }} -group ludus_users
 
     - name: Set the acls for the user on their own pool
       ansible.builtin.shell:

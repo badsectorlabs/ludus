@@ -3,7 +3,8 @@
     - name: Update the VM description by name (take 1)
       community.general.proxmox_kvm:
         api_user: "{{ api_user }}"
-        api_password: "{{ api_password }}"
+        api_token_id: "{{ proxmox_token_id }}"
+        api_token_secret: "{{ proxmox_token_secret }}"
         api_host: "{{ api_host }}"
         node: "{{ node_name }}"
         name: "{{ vm_name }}"
@@ -16,7 +17,8 @@
     - name: Update the VM description by name (take 2)
       community.general.proxmox_kvm:
         api_user: "{{ api_user }}"
-        api_password: "{{ api_password }}"
+        api_token_id: "{{ proxmox_token_id }}"
+        api_token_secret: "{{ proxmox_token_secret }}"
         api_host: "{{ api_host }}"
         node: "{{ node_name }}"
         name: "{{ vm_name }}"

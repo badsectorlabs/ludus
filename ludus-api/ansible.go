@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
@@ -114,6 +115,12 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	// defer is last in, first out, so this will close the file and then chown it
 	defer ansibleLogFile.Close()
 
+	proxmoxTokenSecret, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Could not decrypt proxmox token secret: %s", err)})
+		return "", errors.New("could not decrypt proxmox token secret")
+	}
+
 	execute := execute.NewDefaultExecute(
 		// Use a multiwrtier that saves the output to a buffer and a file
 		execute.WithWrite(io.MultiWriter(buff, ansibleLogFile)),
@@ -132,7 +139,8 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 		execute.WithEnvVar("PROXMOX_HOSTNAME", ServerConfiguration.ProxmoxHostname),
 		// Inject creds for the proxmox.py dynamic inventory script
 		execute.WithEnvVar("PROXMOX_USERNAME", user.ProxmoxUsername+"@pam"),
-		execute.WithEnvVar("PROXMOX_PASSWORD", proxmoxPassword),
+		execute.WithEnvVar("PROXMOX_TOKEN", user.ProxmoxTokenID),
+		execute.WithEnvVar("PROXMOX_SECRET", proxmoxTokenSecret),
 		execute.WithEnvVar("LUDUS_RANGE_CONFIG", fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername)),
 		execute.WithEnvVar("LUDUS_RANGE_NUMBER", strconv.Itoa(int(usersRange.RangeNumber))),
 		execute.WithEnvVar("LUDUS_RANGE_ID", usersRange.UserID),
@@ -188,6 +196,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	if err != nil {
 		return buff.String(), err
 	}
+
 	return buff.String(), nil
 
 }

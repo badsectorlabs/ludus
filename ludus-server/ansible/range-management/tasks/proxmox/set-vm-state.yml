@@ -14,7 +14,7 @@
     method: GET
     validate_certs: false
     headers:
-      Cookie: "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}"
+      Authorization: "PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}"
   register: vm_ids_response
 
 - name: Parse vmids from JSON and append to list
@@ -27,7 +27,8 @@
 - name: Configure VM state
   community.general.proxmox_kvm:
     api_user: "{{ api_user }}"
-    api_password: "{{ api_password }}"
+    api_token_id: "{{ proxmox_token_id }}"
+    api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     node: "{{ node_name }}"
     state: "{{ new_vm_state }}"

@@ -1,7 +1,7 @@
 - name: Get time of last snapshot
   ansible.builtin.shell:
     cmd: |
-      curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ item }}/snapshot/{{ snapshot_name }}/config" | jq '.[] | .snaptime'
+      curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ item }}/snapshot/{{ snapshot_name }}/config" | jq '.[] | .snaptime'
   loop: "{{ hostvars[router.vm_name | default(range_id + '-router-debian11-x64')]['vmids_to_snapshot'] }}"
   register: snapshot_times
   ignore_errors: true
@@ -10,7 +10,8 @@
 - name: Remove previous clean snapshot
   community.general.proxmox_snap:
     api_user: "{{ api_user }}"
-    api_password: "{{ api_password }}"
+    api_token_id: "{{ proxmox_token_id }}"
+    api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     vmid: "{{ item }}"
     state: absent
@@ -33,7 +34,8 @@
 - name: Create new clean snapshot
   community.general.proxmox_snap:
     api_user: "{{ api_user }}"
-    api_password: "{{ api_password }}"
+    api_token_id: "{{ proxmox_token_id }}"
+    api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     vmid: "{{ item }}"
     state: present
@@ -66,7 +68,8 @@
 - name: Revert VM to snapshot
   community.general.proxmox_snap:
     api_user: "{{ api_user }}"
-    api_password: "{{ api_password }}"
+    api_token_id: "{{ proxmox_token_id }}"
+    api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     vmid: "{{ item }}"
     state: rollback
@@ -81,7 +84,8 @@
 - name: Start the VMs
   community.general.proxmox_kvm:
     api_user: "{{ api_user }}"
-    api_password: "{{ api_password }}"
+    api_token_id: "{{ proxmox_token_id }}"
+    api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     node: "{{ node_name }}"
     vmid: "{{ item }}"

@@ -1,6 +1,6 @@
 - name: Get the VM id of the router via Proxmox API
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ router.vm_name | default(range_id + '-router-debian11-x64') }}").vmid'
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ router.vm_name | default(range_id + '-router-debian11-x64') }}").vmid'
   register: router_id_command
   when: router_vm_id is not defined
 
@@ -11,7 +11,7 @@
 
 - name: Get MAC for vlan interface
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ item }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ item }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
   register: vlan_mac_command
 
 - name: Show vlan_mac_command
@@ -30,7 +30,7 @@
 
 - name: Get interface for MAC of vlan interface
   ansible.builtin.shell: |
-   curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
+   curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
   register: interface_name_command
   when: vlan_mac_command.stdout | length != 0
 
@@ -41,7 +41,7 @@
 
 - name: Get the number for the next network interface (starts at 0)
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/config" | jq '.[] | . | keys[] | select(startswith("net"))' | wc -l
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/config" | jq '.[] | . | keys[] | select(startswith("net"))' | wc -l
   register: next_interface_command
   when: interface_name is undefined or vlan_mac_command.stdout | length == 0
 
@@ -53,7 +53,8 @@
 - name: Add network interface to router
   community.general.proxmox_nic:
     api_user: "{{ api_user }}"
-    api_password: "{{ api_password }}"
+    api_token_id: "{{ proxmox_token_id }}"
+    api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     vmid: "{{ router_vm_id }}"
     interface: "net{{ router_net_interface }}"
@@ -65,7 +66,7 @@
 # Now that the interface has been added, get the interface name on the router
 - name: Get MAC for vlan interface
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ item }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ item }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
   register: vlan_mac_command
   when: network_add is changed
 
@@ -76,7 +77,7 @@
 
 - name: Get interface for MAC of vlan interface
   ansible.builtin.shell: |
-   curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
+   curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
   register: interface_name_command
   when: network_add is changed
 
@@ -88,7 +89,7 @@
 # 192.0.2.x is set by the proxmox build
 - name: Get the interface with a 192.0.2.x ip (WAN)
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ proxmox_ticket }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
   register: wan_interface_command
   when: network_add is changed
 

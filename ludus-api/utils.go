@@ -150,22 +150,6 @@ func containsSubstring(slice []string, target string) bool {
 	return false
 }
 
-// Get the proxmox password for a user
-// Sets the context JSON error and returns an empty string on error
-func getProxmoxPasswordForUser(user UserObject, c *gin.Context) string {
-	if user.ProxmoxUsername == "root" {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "The ROOT API key should only be used to create other admin users. Use the command: ludus users add --admin --name 'first last' --userid FL"})
-		return ""
-	}
-	proxmoxPassword, err := GetFileContents(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, user.ProxmoxUsername))
-
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return ""
-	}
-	return strings.TrimSuffix(proxmoxPassword, "\n")
-}
-
 // Gets a user object from the query string (if the user is an admin) or from
 // API key context. Sets the return status and message when returning an error
 func GetUserObject(c *gin.Context) (UserObject, error) {
@@ -386,10 +370,19 @@ func chownFileToUsername(filePath string, username string) {
 	}
 }
 
-// userExists checks if a user exists on the host system
+// userExistsOnHostSystem checks if a user exists on the host system
 func userExistsOnHostSystem(username string) bool {
 	cmd := exec.Command("id", username)
 	return cmd.Run() == nil
+}
+
+// removeUserFromHostSystem removes a user from the host system
+func removeUserFromHostSystem(username string) {
+	cmd := exec.Command("userdel", "-r", username)
+	err := cmd.Run()
+	if err != nil {
+		fmt.Printf("Failed to remove user %s from host system: %s\n", username, err)
+	}
 }
 
 // New utility functions for group-based access system

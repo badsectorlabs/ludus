@@ -132,7 +132,7 @@
 # I tried to do this with uri and json_query, but JMESPath is a mess.
 - name: get MAC for vlan interface (Linux)
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ proxmox_vmid }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ vlan }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ proxmox_vmid }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ vlan }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
   register: vlan_mac_command
   delegate_to: localhost
   become: false
@@ -143,7 +143,7 @@
 
 - name: get interface for MAC of vlan interface (Linux)
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ proxmox_vmid }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ proxmox_vmid }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
   register: interface_name_command
   delegate_to: localhost
   become: false

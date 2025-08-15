@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/supabase-community/auth-go/types"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -41,7 +43,6 @@ func InitDb() *gorm.DB {
 			db.Migrator().CreateTable(&UserObject{})
 			db.Migrator().CreateTable(&RangeObject{})
 			db.Migrator().CreateTable(&VmObject{})
-			db.Migrator().CreateTable(&RangeAccessObject{})
 			db.Migrator().CreateTable(&GroupObject{})
 			db.Migrator().CreateTable(&UserRangeAccess{})
 			db.Migrator().CreateTable(&UserGroupMembership{})
@@ -92,7 +93,7 @@ func InitDb() *gorm.DB {
 		// has been written
 		if os.Geteuid() == 0 {
 			// Migrate any updates from the models to an existing DB
-			db.AutoMigrate(&UserObject{}, &RangeObject{}, &VmObject{}, &RangeAccessObject{},
+			db.AutoMigrate(&UserObject{}, &RangeObject{}, &VmObject{},
 				&GroupObject{}, &UserRangeAccess{}, &UserGroupMembership{}, &GroupRangeAccess{})
 
 			// Attempt to migrate from SQLite if conditions are met
@@ -144,12 +145,6 @@ func findNextAvailableRangeNumber(db *gorm.DB, reservedRangeNumbers []int32) int
 			}
 		}
 	}
-}
-
-// checkDBOwnership is not relevant for remote PostgreSQL databases
-// This function is kept for backward compatibility but does nothing
-func checkDBOwnership() {
-	// No-op for PostgreSQL - file ownership is not relevant for remote databases
 }
 
 // MigrateFromSQLite migrates data from SQLite to PostgreSQL if conditions are met
@@ -444,15 +439,97 @@ func MigrateFromSQLite() error {
 		return fmt.Errorf("error committing migration: %v", err)
 	}
 
+	// Migrate existing users to Supabase
+	migrateExistingUsersToSupabase()
+
 	log.Println("Migration from SQLite to PostgreSQL completed successfully")
 
 	// Optionally, backup the SQLite database
-	backupPath := fmt.Sprintf("%s/ludus.db.backup.%s", ludusInstallPath, time.Now().Format("20060102-150405"))
-	if err := os.Rename(sqlitePath, backupPath); err != nil {
-		log.Printf("Warning: Could not backup SQLite database: %v", err)
-	} else {
-		log.Printf("SQLite database backed up to: %s", backupPath)
-	}
+	// backupPath := fmt.Sprintf("%s/ludus.db.backup.%s", ludusInstallPath, time.Now().Format("20060102-150405"))
+	// if err := os.Rename(sqlitePath, backupPath); err != nil {
+	// 	log.Printf("Warning: Could not backup SQLite database: %v", err)
+	// } else {
+	// 	log.Printf("SQLite database backed up to: %s", backupPath)
+	// }
 
 	return nil
+}
+
+func migrateExistingUsersToSupabase() {
+	// Read the users from /etc/pve/user.cfg
+	userCfg, err := os.ReadFile("/etc/pve/user.cfg")
+	if err != nil {
+		log.Printf("Error reading /etc/pve/user.cfg: %v", err)
+		return
+	}
+
+	// Parse the user.cfg file
+	userCfgLines := strings.Split(string(userCfg), "\n")
+	// Find lines that start with "user: "
+	for _, line := range userCfgLines {
+		if strings.HasPrefix(line, "user:") {
+			// Extract the username from the line
+			usernamePlusExtra := strings.TrimPrefix(line, "user:")
+			username := strings.Split(usernamePlusExtra, ":")[0]
+
+			// Only migrate local PAM users (Ludus 1.x only supported local PAM users)
+			if strings.Contains(username, "@pam") {
+
+				username = strings.Split(username, "@pam")[0]
+
+				// Ignore the root user
+				if username == "root" {
+					continue
+				}
+
+				// Read the password from the user's proxmox_password file
+				password, err := os.ReadFile(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, username))
+				if err != nil {
+					log.Printf("Error reading proxmox password for user %s: %v", username, err)
+					continue
+				}
+				// Lookup the user in the database
+				var user UserObject
+				if err := db.Where("proxmox_username = ?", username).First(&user).Error; err != nil {
+					log.Printf("Error looking up user %s in database: %v", username, err)
+					continue
+				}
+
+				userWithEmailAndPassword := UserWithEmailAndPassword{
+					UserObject: user,
+					Password:   string(password),
+					Email:      user.ProxmoxUsername + "@ludus.localhost",
+				}
+
+				var supabaseUser types.User
+				if user.UUID == uuid.Nil {
+					supabaseUser, err = createUserInSupabase(userWithEmailAndPassword, string(password))
+					if err != nil {
+						log.Printf("Error creating user %s in Supabase: %v", username, err)
+						continue
+					}
+					user.UUID = supabaseUser.ID
+					db.Save(&user)
+				}
+
+				if user.ProxmoxTokenID == "" {
+					tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user)
+					if err != nil {
+						// This is a fatal error, as every user needs a Proxmox API token to be able to deploy VMs
+						log.Fatalf("Error creating proxmox API token for user %s: %v", username, err)
+					}
+					user.ProxmoxTokenID = tokenID
+					encryptedSecret, err := EncryptStringForDatabase(tokenSecret)
+					if err != nil {
+						log.Fatalf("Error encrypting proxmox API token for user %s: %v", username, err)
+					}
+					user.ProxmoxTokenSecret = encryptedSecret
+					db.Save(&user)
+				}
+
+				log.Printf("Migrated user %s to Supabase", username)
+			}
+		}
+	}
+
 }

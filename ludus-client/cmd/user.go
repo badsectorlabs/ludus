@@ -16,9 +16,11 @@ import (
 var (
 	userName             string
 	newUserID            string
+	email                string
 	userIsAdmin          bool
 	proxmoxPassword      string
 	enablePortforwarding bool
+	password             string
 )
 
 // usersCmd represents the users command
@@ -266,14 +268,21 @@ var usersAddCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
+		// Check that the password is at least 8 characters long
+		if len(password) < 8 {
+			logger.Logger.Fatal("Password must be at least 8 characters long")
+		}
+
 		logger.Logger.Info("Adding user to Ludus, this can take up to a minute. Please wait.")
 
 		requestBody := fmt.Sprintf(`{
 			"name": "%s",
+			"password": "%s",
+			"email": "%s",
 			"userID": "%s",
 			"isAdmin": %s,
 			"portforwardingEnabled": %s
-		  }`, userName, newUserID, strconv.FormatBool(userIsAdmin), strconv.FormatBool(enablePortforwarding))
+		  }`, userName, password, email, newUserID, strconv.FormatBool(userIsAdmin), strconv.FormatBool(enablePortforwarding))
 		responseJSON, success = rest.GenericJSONPost(client, "/user", requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
@@ -317,8 +326,9 @@ func setupUsersAddCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the new user (2-20 chars, typically capitalized initials)")
 	command.Flags().StringVarP(&userName, "name", "n", "", "the name of the user (typically 'first last')")
 	command.Flags().BoolVarP(&userIsAdmin, "admin", "a", false, "set this flag to make the user an admin of Ludus")
-	command.Flags().BoolVarP(&enablePortforwarding, "portforward", "p", false, "set this flag to portfoward UDP port 51000+range_number to the range's router for inbound WireGuard support (Enterprise)")
-
+	command.Flags().BoolVarP(&enablePortforwarding, "portforward", "w", false, "set this flag to portfoward UDP port 51000+range_number to the range's router for inbound WireGuard support (Enterprise)")
+	command.Flags().StringVarP(&password, "password", "p", "", "the password for the user (must be at least 8 characters long)")
+	command.Flags().StringVarP(&email, "email", "e", "", "the email for the user")
 	_ = command.MarkFlagRequired("userid")
 	_ = command.MarkFlagRequired("name")
 }

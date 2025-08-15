@@ -2,6 +2,8 @@ package ludusapi
 
 import (
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type RangeObject struct {
@@ -30,6 +32,7 @@ type RangeObject struct {
 	RangeState string `json:"rangeState" gorm:"default:'NEVER DEPLOYED'"`
 
 	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
+
 	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
@@ -49,6 +52,8 @@ type UserObject struct {
 	// Must be a unique 2-20 letter uppercase string. Initials are commonly used.
 	UserID string `json:"userID" gorm:"primaryKey"`
 
+	UUID uuid.UUID `json:"uuid"`
+
 	DateCreated time.Time `gorm:"autoCreateTime" json:"dateCreated"`
 
 	DateLastActive time.Time `json:"dateLastActive"`
@@ -58,6 +63,10 @@ type UserObject struct {
 	HashedAPIKey string `json:"-"` // - means do not marshal as JSON, prevents the hash from being sent with every user object
 
 	ProxmoxUsername string `json:"proxmoxUsername"`
+
+	ProxmoxTokenID string `json:"-"`
+
+	ProxmoxTokenSecret string `json:"-"`
 
 	PortforwardingEnabled bool `json:"portforwardingEnabled"`
 

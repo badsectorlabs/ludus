@@ -531,7 +531,35 @@
                           "content": {
                               "application/json": {
                                   "schema": {
-                                      "$ref": "#/components/schemas/UserObject"
+                                    "type": "object",
+                                    "required": [
+                                        "name",
+                                        "userID",
+                                        "isAdmin",
+                                        "password",
+                                        "email"
+                                    ],
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "example": "John Doe"
+                                        },
+                                        "userID": {
+                                            "$ref": "#/components/schemas/userID"
+                                        },
+                                        "isAdmin": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "password": {
+                                            "type": "string",
+                                            "example": "super-secret-password"
+                                        },
+                                        "email": {
+                                            "type": "string",
+                                            "example": "john.doe@example.com"
+                                        }
+                                    }
                                   }
                               }
                           },

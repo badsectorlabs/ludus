@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -93,41 +94,75 @@ func updateLastActiveTimeAndLog(c *gin.Context) {
 }
 
 // Validates the API key header and sets the userID, thisUser, and isAdmin value in the gin context
-func validateAPIKey(c *gin.Context) {
+// If no API key is provided, it will check for a JWT token in the Authorization header
+func authenticationMiddleware(c *gin.Context) {
 	APIKey := c.Request.Header.Get("X-API-Key")
 
 	if len(APIKey) == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "No API Key provided"})
-		c.Abort()
-		return
-	}
-
-	// Check that we can pull the userID and apikey from what the user provided
-	apiKeySplit := strings.Split(APIKey, ".")
-	if len(apiKeySplit) != 2 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Malformed API Key provided"})
-		c.Abort()
-		return
-	}
-	userID := apiKeySplit[0]
-
-	var user UserObject
-	db.First(&user, "user_id = ?", userID)
-
-	// Note, we stored the hash of the whole key, with userID, so check against that
-	if CheckHash(APIKey, user.HashedAPIKey) {
-		if user.IsAdmin {
-			c.Set("isAdmin", true)
+		// Check for JWT token
+		tokenString := c.GetHeader("Authorization")
+		if tokenString == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "No API Key or JWT token provided"})
+			return
 		} else {
-			c.Set("isAdmin", false)
+			// Validate token
+			// convert string to a byte array
+			userEmail, userUUID, err := parseJWTToken(tokenString, []byte(ServerConfiguration.JWTSecret))
+
+			if err != nil {
+				log.Printf("Error parsing token: %s", err)
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("Error parsing token: %s", err)})
+				return
+			}
+
+			// Get the user object from the database using the UUID from the validated JWT token
+			var user UserObject
+			userLookupError := db.First(&user, "uuid = ?", userUUID).Error
+			if userLookupError != nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("Error looking up user %s in database: %v", userUUID, userLookupError)})
+				return
+			}
+			c.Set("email", userEmail)
+			c.Set("thisUser", user)
+			c.Set("userID", user.UserID)
+			if user.IsAdmin {
+				c.Set("isAdmin", true)
+			} else {
+				c.Set("isAdmin", false)
+			}
+
+			return
+
 		}
-		c.Set("userID", userID)
-		c.Set("thisUser", user)
-		return
-	} else {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication failed"})
-		c.Abort()
-		return
+
+	} else { // API Key provided
+		// Check that we can pull the userID and apikey from what the user provided
+		apiKeySplit := strings.Split(APIKey, ".")
+		if len(apiKeySplit) != 2 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Malformed API Key provided"})
+			c.Abort()
+			return
+		}
+		userID := apiKeySplit[0]
+
+		var user UserObject
+		db.First(&user, "user_id = ?", userID)
+
+		// Note, we stored the hash of the whole key, with userID, so check against that
+		if CheckHash(APIKey, user.HashedAPIKey) {
+			if user.IsAdmin {
+				c.Set("isAdmin", true)
+			} else {
+				c.Set("isAdmin", false)
+			}
+			c.Set("userID", userID)
+			c.Set("thisUser", user)
+			return
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication failed"})
+			c.Abort()
+			return
+		}
 	}
 }
 
@@ -143,15 +178,15 @@ func RegisterRoutes(router *gin.Engine, routes Routes) {
 	for _, route := range routes {
 		switch route.Method {
 		case http.MethodGet:
-			router.GET(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+			router.GET(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		case http.MethodPost:
-			router.POST(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+			router.POST(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		case http.MethodPut:
-			router.PUT(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+			router.PUT(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		case http.MethodPatch:
-			router.PATCH(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+			router.PATCH(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		case http.MethodDelete:
-			router.DELETE(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+			router.DELETE(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		}
 	}
 }
