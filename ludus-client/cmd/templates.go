@@ -19,6 +19,7 @@ var (
 	follow              bool
 	tail                int
 	templateName        string
+	templateNames       []string
 	templateParallel    int
 	templateDirectory   string
 	verboseTemplateLogs bool
@@ -84,10 +85,23 @@ var templatesBuildCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
+		// Validate that at least one template name is provided
+		if len(templateNames) == 0 {
+			fmt.Println("Error: at least one template name must be specified (use 'all' to build all templates)")
+			return
+		}
+
+		// Convert template names array to JSON array string
+		templateNamesJSON, err := json.Marshal(templateNames)
+		if err != nil {
+			fmt.Printf("Error marshaling template names: %v\n", err)
+			return
+		}
+
 		requestBody := fmt.Sprintf(`{
-			"template": "%s",
+			"templates": %s,
 			"parallel": %d
-		  }`, templateName, templateParallel)
+		  }`, string(templateNamesJSON), templateParallel)
 
 		if userID != "" {
 			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/templates?userID=%s", userID), requestBody)
@@ -105,7 +119,7 @@ var templatesBuildCmd = &cobra.Command{
 }
 
 func setupTemplatesBuildCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&templateName, "name", "n", "all", "the name of the template to build")
+	command.Flags().StringSliceVarP(&templateNames, "names", "n", []string{}, "template names to build separated by commas (use 'all' to build all templates)")
 	command.Flags().IntVarP(&templateParallel, "parallel", "p", 1, "build templates in parallel (speeds things up). Specify what number of templates to build at a time")
 }
 

@@ -222,7 +222,7 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 
 }
 
-func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject, proxmoxPassword string, templateName string, parallel int, verbose bool) error {
+func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject, proxmoxPassword string, templateNames []string, parallel int, verbose bool) error {
 	// Create a WaitGroup to wait for all goroutines to finish.
 	var wg sync.WaitGroup
 
@@ -240,10 +240,37 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 		// Determine whether a VM should be built from the template.
 		// Check that:
 		// 1. The template is not already built (proxmox returns this)
-		// 2. The user asked to build this specific template (by passing 'all' or by name)
+		// 2. The user asked to build this specific template (by including it in the templateNames array or by specifying "all")
 		// 3. This template is not already in progress - the user could call this method twice with a parallel value > number of templates,
 		//    and longer running templates would then be built a second time as the have not finished building to return .Built by proxmox
-		if !templateStatus.Built && (templateName == "all" || templateStatus.Name == templateName) {
+		shouldBuildTemplate := !templateStatus.Built
+		if len(templateNames) > 0 {
+			// Check if "all" is specified, which means build all templates
+			buildAll := false
+			for _, name := range templateNames {
+				if name == "all" {
+					buildAll = true
+					break
+				}
+			}
+
+			if buildAll {
+				// If "all" is specified, build all templates that aren't already built
+				// shouldBuildTemplate is already set to !templateStatus.Built above
+			} else {
+				// Otherwise, only build templates that are explicitly in the list
+				found := false
+				for _, name := range templateNames {
+					if templateStatus.Name == name {
+						found = true
+						break
+					}
+				}
+				shouldBuildTemplate = shouldBuildTemplate && found
+			}
+		}
+
+		if shouldBuildTemplate {
 			_, ok := templateProgressStore.Load(templateStatus.Name)
 			if ok {
 				// This template is already building or in the queue to be built by a user
@@ -400,7 +427,7 @@ func getTemplateNameArray(c *gin.Context, onlyBuilt bool) ([]string, error) {
 	return templateSlice, nil
 }
 
-func templateActions(c *gin.Context, buildTemplates bool, templateName string, parallel int, verbose bool) {
+func templateActions(c *gin.Context, buildTemplates bool, templateNames []string, parallel int, verbose bool) {
 
 	if parallel == 0 {
 		parallel = 1
@@ -427,7 +454,7 @@ func templateActions(c *gin.Context, buildTemplates bool, templateName string, p
 		return // JSON set in getProxmoxPasswordForUser
 	}
 
-	go buildVMsFromTemplates(templateStatusArray, user, proxmoxPassword, templateName, parallel, verbose)
+	go buildVMsFromTemplates(templateStatusArray, user, proxmoxPassword, templateNames, parallel, verbose)
 
 	c.JSON(http.StatusOK, gin.H{
 		"result": fmt.Sprintf("Template building started - this will take a while. Building %d template(s) at a time.", parallel),
@@ -437,22 +464,17 @@ func templateActions(c *gin.Context, buildTemplates bool, templateName string, p
 
 // GetTemplates - returns a list of VM templates available for use in Ludus
 func GetTemplates(c *gin.Context) {
-	templateActions(c, false, "", 1, false)
+	templateActions(c, false, []string{}, 1, false)
 }
 
 // Build all templates
 func BuildTemplates(c *gin.Context) {
 	type TemplateBody struct {
-		Template string `json:"template"`
-		Parallel int    `json:"parallel"`
+		Templates []string `json:"templates"`
+		Parallel  int      `json:"parallel"`
 	}
 	var templateBody TemplateBody
 	c.Bind(&templateBody)
-
-	// Set the default value to all if nothing is presented
-	if templateBody.Template == "" {
-		templateBody.Template = "all"
-	}
 
 	// Set the default value to 1 if nothing is presented
 	if templateBody.Parallel == 0 {
@@ -464,15 +486,22 @@ func BuildTemplates(c *gin.Context) {
 		verbose = false
 	}
 
-	if templateBody.Template != "all" {
-		templateArray, _ := getTemplateNameArray(c, false)
-		if !slices.Contains(templateArray, templateBody.Template) {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Template '%s' not found", templateBody.Template)})
+	// Validate that templates array is not empty
+	if len(templateBody.Templates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "templates array cannot be empty"})
+		return
+	}
+
+	// Validate all templates in the array exist (skip validation for "all")
+	templateArray, _ := getTemplateNameArray(c, false)
+	for _, templateName := range templateBody.Templates {
+		if templateName != "all" && !slices.Contains(templateArray, templateName) {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Template '%s' not found", templateName)})
 			return
 		}
 	}
 
-	templateActions(c, true, templateBody.Template, templateBody.Parallel, verbose)
+	templateActions(c, true, templateBody.Templates, templateBody.Parallel, verbose)
 }
 
 // GetPackerLogs - retrieves the latest packer logs
