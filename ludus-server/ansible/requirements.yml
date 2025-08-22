@@ -18,8 +18,10 @@ collections:
     version: 3.4.0
 
 roles:
+  # Use the commit hash until there is a released version that supports proxmox 9/Debian 13
   - name: lae.proxmox
-    version: v1.8.0
+    source: https://github.com/lae/ansible-role-proxmox.git
+    version: 01ebefc3481e43d6bc4b7f5ac2e4014277e4c115
   - name: geerlingguy.packer
     version: 1.0.2
   - name: ansible-thoteam.nexus3-oss
