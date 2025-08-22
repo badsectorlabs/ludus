@@ -276,13 +276,14 @@ pages:
   retry:
     max: 2
   script:
-  - cd docs
-  # Change the base URL as we are hosting the site straight off the root of the domain
-  - "sed -i \"s|baseUrl: '/ludus/'|baseUrl: '/'|\" docusaurus.config.js"
-  - yarn install
-  - yarn build
-  - rm -f ./build/video/*
-  - mv ./build ../public
+    - cd docs
+    # Change the base URL as we are hosting the site straight off the root of the domain
+    - "sed -i \"s|baseUrl: '/ludus/'|baseUrl: '/'|\" docusaurus.config.js"
+    - "sed -i \"s|/ludus/|/|\" static/api/index.html"
+    - yarn install
+    - yarn build
+    - rm -f ./build/video/*
+    - mv ./build ../public
   artifacts:
     paths:
     - public
