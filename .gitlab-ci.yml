@@ -505,6 +505,8 @@ templates build:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
   timeout: 5m
+  retry:
+    max: 2
   script:
     - *ci-setup-admin
     # Build in parallel to speed up CI

@@ -69,6 +69,11 @@
         router_external_interface: "{{ wan_interface_command.stdout }}"
       when: wan_interface_command.rc == 0
 
+    - name: Validate router host pattern will match a host
+      ansible.builtin.fail:
+        msg: "Router host pattern '{{ router_vm_name_to_action }}' will not match any hosts. This usually means the router VM name is incorrect."
+      when: router_vm_name_to_action not in groups['all'] and router_vm_name_to_action not in groups['ungrouped']
+
 # ==========================================================
 # Grant
 # ==========================================================
