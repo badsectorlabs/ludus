@@ -11,7 +11,7 @@ import TabItem from '@theme/TabItem';
 
 :::note
 
-Sharing ranges requires Ludus >= 1.3.0 (See [Updating](./updating.md))
+NetPenguins has created [ludus-impersonator.sh](https://gist.github.com/NetPenguins/277babc21a74fcccc083e00174569fb6) which could help you if you often impersonate users.
 
 :::
 
