@@ -2650,9 +2650,9 @@ paths:
     post:
       tags:
         - Range Management
-      summary: Create a new range (admin only)
+      summary: Create a new range
       operationId: createRange
-      description: Creates a new range. Admin only.
+      description: Creates a new range.
       requestBody:
         content:
           application/json:

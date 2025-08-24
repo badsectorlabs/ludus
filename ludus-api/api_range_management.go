@@ -589,11 +589,8 @@ func RangeAccessList(c *gin.Context) {
 
 // New range management endpoints for group-based access system
 
-// CreateRange allows admins to create ranges not tied to a specific user
+// CreateRange allows users to create ranges not tied to a specific user
 func CreateRange(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
-	}
 
 	type CreateRangePayload struct {
 		Name        string `json:"name" binding:"required"`
