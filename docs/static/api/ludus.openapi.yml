@@ -630,14 +630,26 @@ paths:
       operationId: listRange
       description: |
         Lists a range's VMs along with their power state and the testing state
-        of the range. Admins can use the query parameter userID to inspect
-        other users' ranges.
+        of the range.
+
+        Use rangeID to specify which range to query. If rangeID is not provided,
+        the user's default range will be used. Use userID to query a different
+        user's range (admins only).
       parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to query. If not provided, uses the user's default range.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            example: 123
         - in: query
           name: userID
           description: |
-            pass an optional userID to query. 
-            Defaults to the user's range (admins can query other ranges)
+            The userID to query ranges for.
+            Defaults to the current user (admins can query other users' ranges)
           required: false
           schema:
             properties:
@@ -657,12 +669,28 @@ paths:
         - Range Management
       summary: Stop and delete all range VMs
       operationId: deleteRange
-      description: Stops and deletes all the range VMs. Used to start fresh.
+      description: |
+        Stops and deletes all the range VMs. Used to start fresh.
+
+        Use rangeID to specify which range to delete. If rangeID is not provided,
+        the user's default range will be used. Use userID to delete a different
+        user's range (admins only).
       parameters:
-        - name: userID
-          in: query
+        - in: query
+          name: rangeID
+          description: |
+            The range number to delete. If not provided, uses the user's default range.
           required: false
-          description: "The id of the range to tear down (default: the calling user)"
+          schema:
+            type: integer
+            format: int32
+            example: 123
+        - in: query
+          name: userID
+          description: |
+            The userID whose range to delete.
+            Defaults to the current user (admins can delete other users' ranges)
+          required: false
           schema:
             properties:
               userID:
@@ -686,19 +714,31 @@ paths:
       operationId: abortRange
       description: |
         Stops the range deployment by finding the pid of the ansible
-        process for the user and killing it. Admins may call this and 
-        specify another user ID.
+        process for the user and killing it.
+
+        Use rangeID to specify which range to abort. If rangeID is not provided,
+        the user's default range will be used. Use userID to abort a different
+        user's range deployment (admins only).
       parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to abort deployment for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            example: 123
         - in: query
           name: userID
           description: |
-            pass an optional userID to query. 
-            Defaults to the user's range (admins can query other ranges)
+            The userID whose range deployment to abort.
+            Defaults to the current user (admins can abort other users' range deployments)
+          required: false
           schema:
             properties:
               userID:
                 $ref: "#/components/schemas/userID"
-          required: false
       responses:
         "201":
           description: range deploy aborted
@@ -755,13 +795,26 @@ paths:
       summary: Retrieve range configuration
       operationId: getConfig
       description: |
-        Returns the current configuration for the range
+        Returns the current configuration for the range.
+
+        Use rangeID to specify which range to get config for. If rangeID is not provided,
+        the user's default range will be used. Use userID to get config for a different
+        user's range (admins only).
       parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to get config for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            example: 123
         - in: query
           name: userID
           description: |
-            pass an optional userID to get the config for. 
-            Defaults to the user's range (admins can query other ranges)
+            The userID to get config for.
+            Defaults to the current user (admins can get config for other users' ranges)
           required: false
           schema:
             properties:
@@ -830,18 +883,31 @@ paths:
       summary: Update the range configuration
       operationId: putConfig
       description: |
-        Updates the range configuration with the provided yaml file
+        Updates the range configuration with the provided yaml file.
+
+        Use rangeID to specify which range to update config for. If rangeID is not provided,
+        the user's default range will be used. Use userID to update config for a different
+        user's range (admins only).
       parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to update config for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            example: 123
         - in: query
           name: userID
           description: |
-            pass an optional userID to query. 
-            Defaults to the user's range (admins can query other ranges)
+            The userID to update config for.
+            Defaults to the current user (admins can update config for other users' ranges)
+          required: false
           schema:
             properties:
               userID:
                 $ref: "#/components/schemas/userID"
-          required: false
       requestBody:
         content:
           multipart/form-data:
@@ -921,12 +987,26 @@ paths:
         without issue without changing the range configuration without causing
         issues. The tags value is optional, by default "all" is run. The force
         value is optional, by default it is false.
+
+        Use rangeID to specify which range to deploy. If rangeID is not provided,
+        the user's default range will be used. Use userID to deploy a different
+        user's range (admins only).
       parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to deploy. If not provided, uses the user's default range.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            example: 123
         - in: query
           name: userID
           description: |
-            pass an optional userID to query. 
-            Defaults to the user's range (admins can query other ranges)
+            The userID to deploy range for.
+            Defaults to the current user (admins can deploy other users' ranges)
+          required: false
           schema:
             properties:
               userID:
@@ -972,13 +1052,26 @@ paths:
       summary: Retrieve the latest range logs
       operationId: getLogs
       description: |
-        Returns the latest logs for the range
+        Returns the latest logs for the range.
+
+        Use rangeID to specify which range to get logs for. If rangeID is not provided,
+        the user's default range will be used. Use userID to get logs for a different
+        user's range (admins only).
       parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to get logs for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            example: 123
         - in: query
           name: userID
           description: |
-            pass an optional userID to get the logs for. 
-            Defaults to the user's range (admins can query other ranges)
+            The userID to get logs for.
+            Defaults to the current user (admins can get logs for other users' ranges)
           required: false
           schema:
             properties:
@@ -1055,7 +1148,31 @@ paths:
       summary: Retrieve /etc/hosts file for the range
       operationId: getEtcHosts
       description: |
-        Returns an /etc/hosts file with appropriate values for the user's range
+        Returns an /etc/hosts file with appropriate values for the range.
+
+        Use rangeID to specify which range to get hosts file for. If rangeID is not provided,
+        the user's default range will be used. Use userID to get hosts file for a different
+        user's range (admins only).
+      parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to get hosts file for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            example: 123
+        - in: query
+          name: userID
+          description: |
+            The userID to get hosts file for.
+            Defaults to the current user (admins can get hosts file for other users' ranges)
+          required: false
+          schema:
+            properties:
+              userID:
+                $ref: "#/components/schemas/userID"
       responses:
         "200":
           description: a range /etc/hosts file
@@ -1141,7 +1258,31 @@ paths:
       operationId: getRDP
       description: |
         Returns a zip file with RDP configuration files for the Windows
-        VMs in a user's range
+        VMs in the range.
+
+        Use rangeID to specify which range to get RDP configs for. If rangeID is not provided,
+        the user's default range will be used. Use userID to get RDP configs for a different
+        user's range (admins only).
+      parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to get RDP configs for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            example: 123
+        - in: query
+          name: userID
+          description: |
+            The userID to get RDP configs for.
+            Defaults to the current user (admins can get RDP configs for other users' ranges)
+          required: false
+          schema:
+            properties:
+              userID:
+                $ref: "#/components/schemas/userID"
       responses:
         "200":
           description: a zip file
@@ -1155,8 +1296,31 @@ paths:
       summary: Retrieve an ansible inventory
       operationId: getAnsibleInventory
       description: >
-        Returns an ansible inventory file with appropriate values for the user's
-        range
+        Returns an ansible inventory file with appropriate values for the range.
+
+        Use rangeID to specify which range to get inventory for. If rangeID is not provided,
+        the user's default range will be used. Use userID to get inventory for a different
+        user's range (admins only).
+      parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to get inventory for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            example: 123
+        - in: query
+          name: userID
+          description: |
+            The userID to get inventory for.
+            Defaults to the current user (admins can get inventory for other users' ranges)
+          required: false
+          schema:
+            properties:
+              userID:
+                $ref: "#/components/schemas/userID"
       responses:
         "200":
           description: an ansible inventory file

@@ -48,9 +48,9 @@ func DeployRange(c *gin.Context) {
 		tags = deployBody.Tags
 	}
 
-	usersRange, err := GetRangeObject(c)
+	usersRange, targetUser, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in getRangeObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
 	// Make sure we aren't already in a "DEPLOYING" state
@@ -74,7 +74,7 @@ func DeployRange(c *gin.Context) {
 					return
 				}
 				if !exists {
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The role '%s' does not exist on the Ludus server for user %s", role, usersRange.UserID)})
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The role '%s' does not exist on the Ludus server for user %s", role, targetUser.UserID)})
 					return
 				}
 			}
@@ -95,9 +95,9 @@ func DeployRange(c *gin.Context) {
 
 // DeleteRange - stops and deletes all range VMs
 func DeleteRange(c *gin.Context) {
-	usersRange, err := GetRangeObject(c)
+	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in getRangeObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
 	// Set range state to "DESTROYING"
@@ -132,11 +132,11 @@ func DeleteRange(c *gin.Context) {
 
 // GetConfig - retrieves the current configuration of the range
 func GetConfig(c *gin.Context) {
-	user, err := GetUserObject(c)
+	_, targetUser, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in GetUserObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
-	rangeConfig, err := GetFileContents(fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername))
+	rangeConfig, err := GetFileContents(fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, targetUser.ProxmoxUsername))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -156,11 +156,11 @@ func GetConfigExample(c *gin.Context) {
 
 // GetEtcHosts - retrieves an /etc/hosts file for the range
 func GetEtcHosts(c *gin.Context) {
-	user, err := GetUserObject(c)
+	_, targetUser, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in GetUserObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
-	etcHosts, err := GetFileContents(fmt.Sprintf("%s/users/%s/etc-hosts", ludusInstallPath, user.ProxmoxUsername))
+	etcHosts, err := GetFileContents(fmt.Sprintf("%s/users/%s/etc-hosts", ludusInstallPath, targetUser.ProxmoxUsername))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -170,14 +170,14 @@ func GetEtcHosts(c *gin.Context) {
 
 // GetRDP - retrieves RDP files as a zip for the range
 func GetRDP(c *gin.Context) {
-	user, err := GetUserObject(c)
+	_, targetUser, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in GetUserObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
 	playbook := []string{ludusInstallPath + "/ansible/range-management/ludus.yml"}
 	extraVars := map[string]interface{}{
-		"username": user.ProxmoxUsername,
+		"username": targetUser.ProxmoxUsername,
 	}
 	output, err := server.RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "generate-rdp", false, "")
 	if err != nil {
@@ -185,7 +185,7 @@ func GetRDP(c *gin.Context) {
 		return
 	}
 
-	filePath := fmt.Sprintf("%s/users/%s/rdp.zip", ludusInstallPath, user.ProxmoxUsername)
+	filePath := fmt.Sprintf("%s/users/%s/rdp.zip", ludusInstallPath, targetUser.ProxmoxUsername)
 	c.Header("Content-Disposition", "attachment; filename=rdp.zip")
 	c.Header("Content-Type", "application/zip")
 	// Serve the file
@@ -194,12 +194,12 @@ func GetRDP(c *gin.Context) {
 
 // GetLogs - retrieves the latest range logs
 func GetLogs(c *gin.Context) {
-	user, err := GetUserObject(c)
+	_, targetUser, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in GetUserObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
-	ansibleLogPath := fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername)
+	ansibleLogPath := fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, targetUser.ProxmoxUsername)
 	GetLogsFromFile(c, ansibleLogPath)
 }
 
@@ -210,15 +210,16 @@ func GetSSHConfig(c *gin.Context) {
 
 // ListRange - lists range VMs, their power state, and their testing state
 func ListRange(c *gin.Context) {
-	err := updateUsersRangeVMData(c)
+	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
+	if err != nil {
+		return // JSON set in CheckRangeAccessAndGetObjects
+	}
+
+	err = updateUsersRangeVMData(c)
 	if err != nil {
 		return // JSON error set in updateUsersRangeVMData
 	}
 	// Get the updated range
-	usersRange, err := GetRangeObject(c)
-	if err != nil {
-		return // JSON error is set in getRangeObject
-	}
 	var allVMs []VmObject
 	db.Where("range_number = ?", usersRange.RangeNumber).Find(&allVMs)
 	// the range we got back from getRangeObject is a cached object from the first lookup
@@ -292,14 +293,9 @@ func ListAllRanges(c *gin.Context) {
 
 // PutConfig - updates the range config
 func PutConfig(c *gin.Context) {
-	user, err := GetUserObject(c)
+	usersRange, targetUser, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in GetUserObject
-	}
-
-	usersRange, err := GetRangeObject(c)
-	if err != nil {
-		return // JSON set in getRangeObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
 	// Retrieve the 'force' field and convert it to boolean
@@ -325,7 +321,7 @@ func PutConfig(c *gin.Context) {
 	}
 
 	// The file is received, so let's save it
-	filePath := fmt.Sprintf("%s/users/%s/.tmp-range-config.yml", ludusInstallPath, user.ProxmoxUsername)
+	filePath := fmt.Sprintf("%s/users/%s/.tmp-range-config.yml", ludusInstallPath, targetUser.ProxmoxUsername)
 	err = c.SaveUploadedFile(file, filePath)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to save the range config"})
@@ -342,9 +338,9 @@ func PutConfig(c *gin.Context) {
 	// Check the roles and dependencies
 	userHasRoles, exists := c.Get("userHasRoles")
 	if exists && userHasRoles.(bool) {
-		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "Resolving dependencies for user-defined roles..\n", false)
+		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, targetUser.ProxmoxUsername), "Resolving dependencies for user-defined roles..\n", false)
 		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(c, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
-		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), rolesOutput, true)
+		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, targetUser.ProxmoxUsername), rolesOutput, true)
 		if err != nil {
 			db.Model(&usersRange).Update("range_state", "ERROR")
 			// Find the 'ERROR' line in the output and return it to the user
@@ -362,7 +358,7 @@ func PutConfig(c *gin.Context) {
 	}
 
 	// The file is valid, so let's move it to the range-config
-	err = os.Rename(filePath, fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername))
+	err = os.Rename(filePath, fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, targetUser.ProxmoxUsername))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to save the range config"})
 		return
@@ -373,18 +369,13 @@ func PutConfig(c *gin.Context) {
 }
 
 func GetAnsibleInventoryForRange(c *gin.Context) {
-	user, err := GetUserObject(c)
+	usersRange, targetUser, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in GetUserObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
-	proxmoxPassword := getProxmoxPasswordForUser(user, c)
+	proxmoxPassword := getProxmoxPasswordForUser(targetUser, c)
 	if proxmoxPassword == "" {
 		return // JSON set in getProxmoxPasswordForUser
-	}
-
-	usersRange, err := GetRangeObject(c)
-	if err != nil {
-		return // JSON set in getRangeObject
 	}
 
 	// Check for allranges parameter
@@ -392,18 +383,18 @@ func GetAnsibleInventoryForRange(c *gin.Context) {
 
 	cmd := exec.Command("ansible-inventory", "-i", ludusInstallPath+"/ansible/range-management/proxmox.py", "--list", "-y")
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, targetUser.ProxmoxUsername))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_NODE=%s", ServerConfiguration.ProxmoxNode))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_INVALID_CERT=%s", strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert)))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_URL=%s", ServerConfiguration.ProxmoxURL))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_HOSTNAME=%s", ServerConfiguration.ProxmoxHostname))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_USERNAME=%s", user.ProxmoxUsername+"@pam"))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_USERNAME=%s", targetUser.ProxmoxUsername+"@pam"))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_PASSWORD=%s", proxmoxPassword))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_CONFIG=%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_CONFIG=%s/users/%s/range-config.yml", ludusInstallPath, targetUser.ProxmoxUsername))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_NUMBER=%s", strconv.Itoa(int(usersRange.RangeNumber))))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_ID=%s", user.UserID))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_ID=%s", targetUser.UserID))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RETURN_ALL_RANGES=%s", strconv.FormatBool(allRanges)))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_USER_IS_ADMIN=%s", strconv.FormatBool(user.IsAdmin)))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_USER_IS_ADMIN=%s", strconv.FormatBool(targetUser.IsAdmin)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to get the ansible inventory: " + string(out)})
@@ -424,21 +415,16 @@ func GetAnsibleTagsForDeployment(c *gin.Context) {
 
 // Find the ansible process for this user and kill it
 func AbortAnsible(c *gin.Context) {
-	user, err := GetUserObject(c)
+	usersRange, targetUser, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in GetUserObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
-	ansiblePid, err := findAnsiblePidForUser(user.ProxmoxUsername)
+	ansiblePid, err := findAnsiblePidForUser(targetUser.ProxmoxUsername)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	killProcessAndChildren(ansiblePid)
-
-	usersRange, err := GetRangeObject(c)
-	if err != nil {
-		return // JSON set in getRangeObject
-	}
 
 	// Set range state to "ABORTED"
 	db.Model(&usersRange).Update("range_state", "ABORTED")

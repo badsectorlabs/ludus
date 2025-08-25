@@ -532,3 +532,64 @@ func GetUserDefaultRange(db *gorm.DB, userID string) (RangeObject, error) {
 	err = db.Where("range_number = ?", accessibleRanges[0]).First(&rangeObj).Error
 	return rangeObj, err
 }
+
+// CheckRangeAccessAndGetObjects validates access permissions and returns the appropriate range and user objects
+// This function handles the following scenarios:
+// 1. rangeID provided, no userID: Check if current user has access to the specified range
+// 2. rangeID and userID provided: Check if current user is admin, then check if specified user has access to range
+// 3. Neither provided: Get current user's default range
+func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, error) {
+	var usersRange RangeObject
+	var targetUser UserObject
+
+	// Get current user from query string or API key/JWT context
+	targetUser, err := GetUserObject(c)
+	if err != nil {
+		return usersRange, targetUser, err
+	}
+	targetUserID := targetUser.UserID
+
+	// Check if rangeID parameter was provided
+	rangeIDStr, hasRangeID := c.GetQuery("rangeID")
+
+	var rangeNumber int32 = -1
+
+	// Parse rangeID if provided
+	if hasRangeID {
+		rangeID, parseErr := strconv.ParseInt(rangeIDStr, 10, 32)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rangeID"})
+			return usersRange, targetUser, errors.New("invalid rangeID")
+		}
+		rangeNumber = int32(rangeID)
+	}
+
+	// Get the range object
+	if hasRangeID {
+		// RangeID was specified, get that specific range
+		usersRange, err = GetRangeObjectByNumber(db, rangeNumber)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error retrieving range"})
+			}
+			return usersRange, targetUser, err
+		}
+
+		// Check if the target user has access to this range
+		if !HasRangeAccess(db, targetUserID, rangeNumber) {
+			c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("User %s does not have access to range %d", targetUserID, rangeNumber)})
+			return usersRange, targetUser, errors.New("access denied")
+		}
+	} else {
+		// No rangeID specified, get the target user's default range
+		usersRange, err = GetUserDefaultRange(db, targetUserID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "No accessible ranges found for user"})
+			return usersRange, targetUser, err
+		}
+	}
+
+	return usersRange, targetUser, nil
+}

@@ -68,7 +68,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "HTTP(S) Proxy URL")
 	rootCmd.PersistentFlags().BoolVar(&verify, "verify", false, "verify the HTTPS certificate of the Ludus server")
 	rootCmd.PersistentFlags().BoolVar(&jsonFormat, "json", false, "format output as json")
-	rootCmd.PersistentFlags().StringVar(&userID, "user", "", "A user ID to impersonate (only available to admins)")
+	rootCmd.PersistentFlags().StringVarP(&userID, "user", "u", "", "A user ID to impersonate (only available to admins)")
+	rootCmd.PersistentFlags().StringVarP(&rangeID, "range", "r", "", "A range ID to operate on (uses default range if not specified)")
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
 
 	// bind the configuration to file/environment values

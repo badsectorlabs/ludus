@@ -26,12 +26,36 @@ var (
 	targetUserID   string
 	sourceUserID   string
 	allRanges      bool
+	rangeID        string
 )
 
 var rangeCmd = &cobra.Command{
 	Use:   "range",
 	Short: "Perform actions on your range",
 	Long:  ``,
+}
+
+// buildRangeURL creates a URL with rangeID and userID query parameters
+// based on the global flags. It handles all combinations:
+// - neither specified: returns baseURL as-is
+// - only rangeID: adds ?rangeID=<rangeID>
+// - only userID: adds ?userID=<userID>
+// - both: adds ?rangeID=<rangeID>&userID=<userID>
+func buildRangeURL(baseURL string) string {
+	if rangeID == "" && userID == "" {
+		return baseURL
+	}
+
+	var params []string
+	if rangeID != "" {
+		params = append(params, fmt.Sprintf("rangeID=%s", rangeID))
+	}
+	if userID != "" {
+		params = append(params, fmt.Sprintf("userID=%s", userID))
+	}
+
+	queryString := strings.Join(params, "&")
+	return fmt.Sprintf("%s?%s", baseURL, queryString)
 }
 
 func getRangeStateColor(data RangeObject) tablewriter.Colors {
@@ -112,10 +136,8 @@ var rangeListCmd = &cobra.Command{
 			all = true
 		} else if len(args) == 1 {
 			logger.Logger.Fatal("Unknown argument:", args[0])
-		} else if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/range?userID=%s", userID))
 		} else {
-			responseJSON, success = rest.GenericGet(client, "/range")
+			responseJSON, success = rest.GenericGet(client, buildRangeURL("/range"))
 		}
 		if !success {
 			return
@@ -199,10 +221,8 @@ var rangeConfigGet = &cobra.Command{
 			logger.Logger.Fatal("Unknown argument:", args[0])
 		} else if len(args) == 1 && args[0] == "example" {
 			responseJSON, success = rest.GenericGet(client, "/range/config/example")
-		} else if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/range/config?userID=%s", userID))
 		} else {
-			responseJSON, success = rest.GenericGet(client, "/range/config")
+			responseJSON, success = rest.GenericGet(client, buildRangeURL("/range/config"))
 		}
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -238,11 +258,7 @@ var rangeConfigSet = &cobra.Command{
 		if err != nil {
 			logger.Logger.Fatalf("Could not read: %s, error: %s\n", configFilePath, err.Error())
 		}
-		if userID != "" {
-			responseJSON, success = rest.PostFileAndForce(client, fmt.Sprintf("/range/config?userID=%s", userID), configFileContent, "file", force)
-		} else {
-			responseJSON, success = rest.PostFileAndForce(client, "/range/config", configFileContent, "file", force)
-		}
+		responseJSON, success = rest.PostFileAndForce(client, buildRangeURL("/range/config"), configFileContent, "file", force)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -285,11 +301,7 @@ var rangeDeployCmd = &cobra.Command{
 			Limit:     limit,
 		}
 
-		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/range/deploy?userID=%s", userID), deployBody)
-		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/range/deploy", deployBody)
-		}
+		responseJSON, success = rest.GenericJSONPost(client, buildRangeURL("/range/deploy"), deployBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -318,10 +330,12 @@ var rangeLogsCmd = &cobra.Command{
 			var newLogs string
 			var cursor int = 0
 			for {
-				if userID != "" {
-					apiStringWithCursor = fmt.Sprintf("/range/logs?userID=%s&cursor=%d", userID, cursor)
+				// Build base URL with range/user parameters
+				baseURL := buildRangeURL("/range/logs")
+				if strings.Contains(baseURL, "?") {
+					apiStringWithCursor = fmt.Sprintf("%s&cursor=%d", baseURL, cursor)
 				} else {
-					apiStringWithCursor = fmt.Sprintf("/range/logs?cursor=%d", cursor)
+					apiStringWithCursor = fmt.Sprintf("%s?cursor=%d", baseURL, cursor)
 				}
 				responseJSON, success := rest.GenericGet(client, apiStringWithCursor)
 				if didFailOrWantJSON(success, responseJSON) {
@@ -334,14 +348,16 @@ var rangeLogsCmd = &cobra.Command{
 				time.Sleep(2 * time.Second)
 			}
 		} else {
-			if userID != "" && tail > 0 {
-				apiString = fmt.Sprintf("/range/logs?userID=%s&tail=%d", userID, tail)
-			} else if tail > 0 {
-				apiString = fmt.Sprintf("/range/logs?tail=%d", tail)
-			} else if userID != "" {
-				apiString = fmt.Sprintf("/range/logs?userID=%s", userID)
+			// Build base URL with range/user parameters
+			baseURL := buildRangeURL("/range/logs")
+			if tail > 0 {
+				if strings.Contains(baseURL, "?") {
+					apiString = fmt.Sprintf("%s&tail=%d", baseURL, tail)
+				} else {
+					apiString = fmt.Sprintf("%s?tail=%d", baseURL, tail)
+				}
 			} else {
-				apiString = "/range/logs"
+				apiString = baseURL
 			}
 			responseJSON, success := rest.GenericGet(client, apiString)
 			if didFailOrWantJSON(success, responseJSON) {
@@ -366,13 +382,7 @@ var rangeErrorsCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		var apiString string
-
-		if userID != "" {
-			apiString = fmt.Sprintf("/range/logs?userID=%s", userID)
-		} else {
-			apiString = "/range/logs"
-		}
+		apiString := buildRangeURL("/range/logs")
 		responseJSON, success := rest.GenericGet(client, apiString)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -394,9 +404,6 @@ var rangeDeleteCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID == "" {
-			userID = strings.Split(apiKey, ".")[0]
-		}
 
 		if !noPrompt {
 			var choice string
@@ -410,7 +417,7 @@ Do you want to continue? (y/N): `, userID)
 			}
 		}
 
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/range?userID=%s", userID))
+		responseJSON, success = rest.GenericDelete(client, buildRangeURL("/range"))
 		if !success {
 			return
 		}
@@ -432,19 +439,18 @@ var rangeAnsibleInventoryCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		apiString := "/range/ansibleinventory"
+		baseURL := buildRangeURL("/range/ansibleinventory")
+
+		// Add allranges parameter
 		if allRanges {
-			apiString += "?allranges=true"
-		}
-		if userID != "" {
-			if allRanges {
-				apiString += "&"
+			if strings.Contains(baseURL, "?") {
+				baseURL += "&allranges=true"
 			} else {
-				apiString += "?"
+				baseURL += "?allranges=true"
 			}
-			apiString += fmt.Sprintf("userID=%s", userID)
 		}
-		responseJSON, success = rest.GenericGet(client, apiString)
+
+		responseJSON, success = rest.GenericGet(client, baseURL)
 		if !success {
 			return
 		}
@@ -510,11 +516,7 @@ var rangeAbortCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/range/abort?userID=%s", userID), "")
-		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/range/abort", "")
-		}
+		responseJSON, success = rest.GenericJSONPost(client, buildRangeURL("/range/abort"), "")
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -532,11 +534,7 @@ one for the domainadmin user, and another for the domainuser user`,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		if userID != "" {
-			rest.FileGet(client, fmt.Sprintf("/range/rdpconfigs?userID=%s", userID), outputPath)
-		} else {
-			rest.FileGet(client, "/range/rdpconfigs", outputPath)
-		}
+		rest.FileGet(client, buildRangeURL("/range/rdpconfigs"), outputPath)
 	},
 }
 
@@ -554,11 +552,7 @@ var rangeEtcHostsGET = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/range/etchosts?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/range/etchosts")
-		}
+		responseJSON, success = rest.GenericGet(client, buildRangeURL("/range/etchosts"))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -675,13 +669,7 @@ var rangeTaskOutputCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		var apiString string
-
-		if userID != "" {
-			apiString = fmt.Sprintf("/range/logs?userID=%s", userID)
-		} else {
-			apiString = "/range/logs"
-		}
+		apiString := buildRangeURL("/range/logs")
 		responseJSON, success := rest.GenericGet(client, apiString)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -850,11 +838,7 @@ var rangeAccessibleCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ranges/accessible?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/ranges/accessible")
-		}
+		responseJSON, success = rest.GenericGet(client, buildRangeURL("/ranges/accessible"))
 		if !success {
 			return
 		}
