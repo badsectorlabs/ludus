@@ -231,19 +231,34 @@ func ListRange(c *gin.Context) {
 }
 
 func ListAllRanges(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+	var ranges []RangeObject
+	var isUserAdmin = isAdmin(c, false)
+
+	if !isUserAdmin {
+		// Get ranges the user has access to
+		userID, success := getUserID(c)
+		if !success {
+			return
+		}
+		accessibleRanges := GetUserAccessibleRanges(db, userID)
+
+		// Get range details for each accessible range
+		for _, rangeNumber := range accessibleRanges {
+			var rangeObj RangeObject
+			if err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error; err == nil {
+				ranges = append(ranges, rangeObj)
+			}
+		}
+	} else {
+		// Admin gets all ranges
+		result := db.Find(&ranges)
+		if result.Error != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, result.Error)
+			return
+		}
 	}
 
-	// Make sure the range table is up to date by looping over all ranges and updating them
-	var usersRanges []RangeObject
-	result := db.Find(&usersRanges)
-	if result.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, result.Error)
-		return
-	}
-
-	// The calling user is an admin can can see all VMs
+	// Get Proxmox client and VM data for updating counts
 	proxmoxClient, err := GetProxmoxClientForUser(c)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Unable to get proxmox client for user: %s", err.Error())})
@@ -256,9 +271,8 @@ func ListAllRanges(c *gin.Context) {
 		return
 	}
 
-	// Loop over all users and update their range data
-	for _, rangeObject := range usersRanges {
-		// Update the VM data for this range
+	// Update VM data for all ranges
+	for i, rangeObj := range ranges {
 		var rangeVMCount = 0
 		vms := rawVMs["data"].([]interface{})
 		for vmCounter := range vms {
@@ -267,27 +281,28 @@ func ListAllRanges(c *gin.Context) {
 			if vm["pool"] == nil || vm["name"] == nil || vm["template"] == nil {
 				continue // A vm with these values as nil will cause the conversions to panic
 			}
-			if vm["pool"].(string) != rangeObject.UserID ||
+			if vm["pool"].(string) != rangeObj.UserID ||
 				strings.HasSuffix(vm["name"].(string), "-template") ||
 				int(vm["template"].(float64)) == 1 {
 				continue
 			}
 			rangeVMCount += 1
 		}
-		db.Model(&rangeObject).Update("number_of_vms", rangeVMCount)
-	}
 
-	var ranges []RangeObject
-	result = db.Find(&ranges)
+		// Update the range object
+		ranges[i].NumberOfVMs = int32(rangeVMCount)
+
+		// Admins also save the count to the database
+		if isUserAdmin {
+			db.Model(&rangeObj).Update("number_of_vms", rangeVMCount)
+		}
+	}
 
 	// Sort the ranges by range number
 	slices.SortFunc(ranges, func(a, b RangeObject) int {
 		return int(a.RangeNumber - b.RangeNumber)
 	})
 
-	if result.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, result.Error)
-	}
 	c.JSON(http.StatusOK, ranges)
 }
 

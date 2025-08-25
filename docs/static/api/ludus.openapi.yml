@@ -119,7 +119,7 @@ paths:
         - in: query
           name: userID
           description: >
-            pass an optional userID to install for. 
+            pass an optional userID to install for.
 
             Defaults to the user's range (admins can interact with other users'
             ranges)
@@ -191,7 +191,7 @@ paths:
         - in: query
           name: userID
           description: >
-            pass an optional userID to install for. 
+            pass an optional userID to install for.
 
             Defaults to the user's range (admins can interact with other users'
             ranges)
@@ -271,7 +271,7 @@ paths:
         - in: query
           name: userID
           description: >
-            pass an optional userID to install for. 
+            pass an optional userID to install for.
 
             Defaults to the user's range (admins can interact with other users'
             ranges)
@@ -363,9 +363,9 @@ paths:
       summary: Add a user to the system
       operationId: addUser
       description: >
-        Adds a user to the system. This action is only available to admins. 
+        Adds a user to the system. This action is only available to admins.
 
-        Note: this response will contain the plaintext API key for the user. 
+        Note: this response will contain the plaintext API key for the user.
 
         It will not be available again except by resetting it using the
         /user/apikey endpoint.
@@ -775,8 +775,9 @@ paths:
       summary: List summary information for all ranges
       operationId: listAllRange
       description: |
-        Lists all range's VMs along with their power state and the testing state
-        of the range. This endpoint is only available to admins.
+        Lists range VMs along with their power state and the testing state
+        of the range. For non-admin users, returns only ranges they have access to.
+        For admin users, returns all ranges with updated VM count information saved to the database.
       responses:
         "200":
           description: search results matching criteria
@@ -843,7 +844,7 @@ paths:
                           hostname: "JE-WIN10-21H1-1"
                           template: win10-21h1-x64-enterprise-template
                           ip_last_octet: 21
-                          ram_gb: 2 
+                          ram_gb: 2
                           cpus: 2
                           full_clone: false
                           windows:
@@ -854,24 +855,24 @@ paths:
                           hostname: "JD-WIN10-21H1-2"
                           template: win10-21h1-x64-enterprise-template
                           ip_last_octet: 22
-                          ram_gb: 2 
+                          ram_gb: 2
                           cpus: 2
-                          full_clone: false 
+                          full_clone: false
                           windows:
-                            install_additional_tools: true 
+                            install_additional_tools: true
                             office_version: "2019"
                             office_arch: 64bit
                         - vm_name: "JD-ad-win10-21h1-enterprise-x64-3"
                           hostname: "JD-WIN10-21H1-3"
                           template: win10-21h1-x64-enterprise-template
                           ip_last_octet: 23
-                          ram_gb: 2 
+                          ram_gb: 2
                           ram_max_gb: 4
                           ram_balloon: true
                           cpus: 2
                           full_clone: false
                           windows:
-                            install_additional_tools: true 
+                            install_additional_tools: true
                             office_version: "2019"
                             office_arch: 64bit
                             visual_studio_version: "2019"
@@ -1244,7 +1245,7 @@ paths:
                         User debian
                         Port 22
                         IdentityFile ~/.ssh/ludus.key
-                        
+
                       Host teamserver2
                         HostName 10.3.30.12
                         User debian
@@ -1463,7 +1464,7 @@ paths:
         - in: query
           name: userID
           description: >
-            pass an optional userID to query. 
+            pass an optional userID to query.
 
             Defaults to the user's range (admins can interact with other users'
             ranges)
@@ -1512,7 +1513,7 @@ paths:
         - in: query
           name: userID
           description: >
-            pass an optional userID to query. 
+            pass an optional userID to query.
 
             Defaults to the user's range (admins can interact with other users'
             ranges)
@@ -1558,7 +1559,7 @@ paths:
         - in: query
           name: userID
           description: >
-            pass an optional userID to get the start testing for. 
+            pass an optional userID to get the start testing for.
 
             Defaults to the user's range (admins can start testing on other
             ranges)
@@ -1591,7 +1592,7 @@ paths:
         - in: query
           name: userID
           description: >
-            pass an optional userID to get the stop testing for. 
+            pass an optional userID to get the stop testing for.
 
             Defaults to the user's range (admins can stop testing on other
             ranges)
@@ -2156,7 +2157,7 @@ paths:
         - in: query
           name: userID
           description: >
-            Pass an optional userID to kill packer processes for. 
+            Pass an optional userID to kill packer processes for.
 
             Defaults to the user's range (admins can interact with other users'
             ranges)
@@ -2197,7 +2198,7 @@ paths:
         - in: query
           name: userID
           description: |
-            pass an optional userID to get the logs for. 
+            pass an optional userID to get the logs for.
             Defaults to the user's range (admins can query other ranges)
           required: false
           schema:
@@ -2247,7 +2248,7 @@ paths:
 
                       2023/01/29 14:57:40 Starting build run: proxmox.debian10
 
-                      2023/01/29 14:57:40 Running builder: 
+                      2023/01/29 14:57:40 Running builder:
 
                       2023/01/29 14:57:40 [INFO] (telemetry) Starting builder
                       proxmox.debian10
@@ -2297,7 +2298,7 @@ paths:
         - in: query
           name: userID
           description: |
-            pass an optional userID to get the logs for. 
+            pass an optional userID to get the logs for.
             Defaults to the user's range (admins can query other ranges)
           required: false
           schema:
