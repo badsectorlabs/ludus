@@ -199,7 +199,20 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 	fmt.Printf("Attempting to create API token '%s' for user '%s'\n", token.TokenID, user.UserID)
 	apiToken, err := goProxmoxUserObject.NewAPIToken(context.Background(), token)
 	if err != nil {
-		return "", "", errors.New("failed to create API token")
+		if strings.Contains(err.Error(), "already exists") {
+			// Remove the token and try again
+			log.Printf("API token already exists for user '%s', removing it and recreating", user.UserID)
+			_, err = RunWithOutput(fmt.Sprintf("pveum user token del %s@pam ludus-token", user.ProxmoxUsername))
+			if err != nil {
+				return "", "", errors.New("unable to remove existing API token: " + err.Error())
+			}
+			apiToken, err = goProxmoxUserObject.NewAPIToken(context.Background(), token)
+			if err != nil {
+				return "", "", errors.New("failed to create API token: " + err.Error())
+			}
+		} else {
+			return "", "", errors.New("failed to create API token: " + err.Error())
+		}
 	}
 	fmt.Printf("Created API token '%s' for user '%s'\n", apiToken.FullTokenID, user.UserID)
 	return apiToken.FullTokenID, apiToken.Value, nil
@@ -208,7 +221,20 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 func createRootAPITokenWithShell() (string, string, error) {
 	out, err := RunWithOutput("pveum user token add root@pam ludus-token -privsep 0 -comment 'Ludus Token - Do not modify or delete' --output-format json")
 	if err != nil {
-		return "", "", errors.New("unable to create root API token: " + err.Error())
+		if strings.Contains(err.Error(), "already exists") {
+			// Remove the token and try again
+			log.Printf("API token already exists for root@pam, removing it and recreating")
+			_, err = RunWithOutput("pveum user token del root@pam ludus-token")
+			if err != nil {
+				return "", "", errors.New("unable to remove existing root API token: " + err.Error())
+			}
+			out, err = RunWithOutput("pveum user token add root@pam ludus-token -privsep 0 -comment 'Ludus Token - Do not modify or delete' --output-format json")
+			if err != nil {
+				return "", "", errors.New("unable to create root API token: " + err.Error())
+			}
+		} else {
+			return "", "", errors.New("unable to create root API token: " + err.Error())
+		}
 	}
 	type TokenResponse struct {
 		TokenID string `json:"full-tokenid"`

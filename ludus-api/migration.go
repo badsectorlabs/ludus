@@ -382,7 +382,7 @@ func migrateExistingUsersToSupabase() {
 				// Lookup the user in the database
 				var user UserObject
 				if err := db.Where("proxmox_username = ?", username).First(&user).Error; err != nil {
-					log.Printf("Error looking up user %s in database: %v", username, err)
+					log.Printf("Error looking up user %s in database, user folder exists on disk but not in database: %v", username, err)
 					continue
 				}
 
