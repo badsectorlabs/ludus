@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -96,8 +97,39 @@ func GetGoProxmoxClientForUserUsingToken(c *gin.Context) (*goproxmox.Client, err
 	}
 
 	tokenID := user.ProxmoxTokenID
-	tokenSecret := user.ProxmoxTokenSecret
+	tokenSecret, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret)
+	if err != nil {
+		return nil, errors.New("unable to decrypt proxmox token secret")
+	}
 
+	insecureHTTPClient := http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: ServerConfiguration.ProxmoxInvalidCert,
+			},
+		},
+	}
+
+	// Create a logger with debug level
+	logger := &goproxmox.LeveledLogger{Level: goproxmox.LevelDebug}
+
+	client := goproxmox.NewClient(ServerConfiguration.ProxmoxURL+"/api2/json",
+		goproxmox.WithHTTPClient(&insecureHTTPClient),
+		goproxmox.WithAPIToken(tokenID, tokenSecret),
+		goproxmox.WithLogger(logger),
+	)
+	return client, nil
+}
+
+func getRootGoProxmoxClient() (*goproxmox.Client, error) {
+	var rootUserObject UserObject
+	db.First(&rootUserObject, "user_id = ?", "ROOT")
+
+	tokenID := rootUserObject.ProxmoxTokenID
+	tokenSecret, err := DecryptStringFromDatabase(rootUserObject.ProxmoxTokenSecret)
+	if err != nil {
+		return nil, errors.New("unable to decrypt proxmox token secret for root user: " + err.Error())
+	}
 	insecureHTTPClient := http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -171,4 +203,77 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 	}
 	fmt.Printf("Created API token '%s' for user '%s'\n", apiToken.FullTokenID, user.UserID)
 	return apiToken.FullTokenID, apiToken.Value, nil
+}
+
+func createRootAPITokenWithShell() (string, string, error) {
+	out, err := RunWithOutput("pveum user token add root@pam ludus-token -privsep 0 -comment 'Ludus Token - Do not modify or delete' --output-format json")
+	if err != nil {
+		return "", "", errors.New("unable to create root API token: " + err.Error())
+	}
+	type TokenResponse struct {
+		TokenID string `json:"full-tokenid"`
+		Value   string `json:"value"`
+	}
+	var tokenResponse TokenResponse
+	err = json.Unmarshal([]byte(out), &tokenResponse)
+	if err != nil {
+		return "", "", errors.New("unable to unmarshal token response: " + err.Error())
+	}
+	return tokenResponse.TokenID, tokenResponse.Value, nil
+}
+
+func createPool(c *gin.Context, poolName string) error {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client")
+	}
+	err = proxmoxClient.NewPool(context.Background(), poolName, "Created by Ludus")
+	if err != nil {
+		return errors.New("unable to create pool: " + err.Error())
+	}
+	return nil
+}
+
+func removePool(c *gin.Context, poolName string) error {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client")
+	}
+	pool, err := proxmoxClient.Pool(context.Background(), poolName)
+	if err != nil {
+		return errors.New("unable to get pool object: " + err.Error())
+	}
+	err = pool.Delete(context.Background())
+	if err != nil {
+		return errors.New("unable to delete pool: " + err.Error())
+	}
+	return nil
+}
+
+func giveUserAccessToPool(username string, realm string, poolName string) error {
+	return poolACLAction(username, realm, poolName, false)
+}
+
+func removeUserAccessFromPool(username string, realm string, poolName string) error {
+	return poolACLAction(username, realm, poolName, true)
+}
+
+func poolACLAction(username string, realm string, poolName string, revoke bool) error {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client: " + err.Error())
+	}
+	PVEVMAdminACL := goproxmox.ACLOptions{
+		Path:      fmt.Sprintf("/pool/%s", poolName),
+		Roles:     "PVEVMAdmin,PVESDNAdmin",
+		Users:     username + "@" + realm,
+		Propagate: goproxmox.IntOrBool(true),
+		Delete:    goproxmox.IntOrBool(revoke),
+	}
+	err = proxmoxClient.UpdateACL(context.Background(), PVEVMAdminACL)
+	if err != nil {
+		return errors.New("unable to set permissions for user: " + err.Error())
+	}
+
+	return nil
 }

@@ -10,19 +10,12 @@ import (
 )
 
 func GetIPForVMFromConfig(c *gin.Context, vmName string) string {
-	// Get the user object to get their range number
-	usersRange, err := GetRangeObject(c)
+	targetRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
 		return "null"
 	}
 
-	// Read the user's range config file
-	user, err := GetUserObject(c)
-	if err != nil {
-		return "null"
-	}
-
-	configBytes, err := os.ReadFile(ludusInstallPath + "/users/" + user.ProxmoxUsername + "/range-config.yml")
+	configBytes, err := os.ReadFile(ludusInstallPath + "/ranges/" + targetRange.RangeID + "/range-config.yml")
 	if err != nil {
 		return "null"
 	}
@@ -39,9 +32,9 @@ func GetIPForVMFromConfig(c *gin.Context, vmName string) string {
 
 	// Loop through VMs looking for a match
 	for _, vm := range config.Ludus {
-		vmNameToCompare := rangeIDTemplateRegex.ReplaceAllString(vm.VMName, usersRange.UserID)
+		vmNameToCompare := rangeIDTemplateRegex.ReplaceAllString(vm.VMName, targetRange.RangeID)
 		if vmNameToCompare == vmName && vm.ForceIP {
-			return fmt.Sprintf("10.%d.%d.%d", usersRange.RangeNumber, vm.VLAN, vm.IPLastOctet)
+			return fmt.Sprintf("10.%d.%d.%d", targetRange.RangeNumber, vm.VLAN, vm.IPLastOctet)
 		}
 	}
 
@@ -50,22 +43,15 @@ func GetIPForVMFromConfig(c *gin.Context, vmName string) string {
 
 // GetRouterVMName returns the router VM name for the given range
 func GetRouterVMName(c *gin.Context) (string, error) {
-	// Get the user object to get their range number
-	usersRange, err := GetRangeObject(c)
+	targetRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
 		return "", err
 	}
 
-	// Read the user's range config file
-	user, err := GetUserObject(c)
-	if err != nil {
-		return "", err
-	}
-
-	configBytes, err := os.ReadFile(ludusInstallPath + "/users/" + user.ProxmoxUsername + "/range-config.yml")
+	configBytes, err := os.ReadFile(ludusInstallPath + "/ranges/" + targetRange.RangeID + "/range-config.yml")
 	if err != nil {
 		// If no config file exists, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", usersRange.UserID), nil
+		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeID), nil
 	}
 
 	// Parse the YAML to get router configuration
@@ -73,38 +59,38 @@ func GetRouterVMName(c *gin.Context) (string, error) {
 	err = yaml.Unmarshal(configBytes, &config)
 	if err != nil {
 		// If parsing fails, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", usersRange.UserID), nil
+		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeID), nil
 	}
 
 	// Check if router section exists
 	routerSection, exists := config["router"]
 	if !exists {
 		// If no router section, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", usersRange.UserID), nil
+		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeID), nil
 	}
 
 	router, ok := routerSection.(map[string]interface{})
 	if !ok {
 		// If router section is not a map, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", usersRange.UserID), nil
+		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeID), nil
 	}
 
 	// Get router VM name
 	vmName, exists := router["vm_name"]
 	if !exists {
 		// If no vm_name specified, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", usersRange.UserID), nil
+		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeID), nil
 	}
 
 	vmNameStr, ok := vmName.(string)
 	if !ok {
 		// If vm_name is not a string, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", usersRange.UserID), nil
+		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeID), nil
 	}
 
 	// Replace range_id template with actual range ID
 	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
-	routerVMName := rangeIDTemplateRegex.ReplaceAllString(vmNameStr, usersRange.UserID)
+	routerVMName := rangeIDTemplateRegex.ReplaceAllString(vmNameStr, targetRange.RangeID)
 
 	return routerVMName, nil
 }

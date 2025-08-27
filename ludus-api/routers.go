@@ -256,6 +256,13 @@ var routes = Routes{
 	},
 
 	{
+		"DeleteRangeVMs",
+		http.MethodDelete,
+		"/range/:rangeID/vms",
+		DeleteRangeVMs,
+	},
+
+	{
 		"DeleteTemplate",
 		http.MethodDelete,
 		"/template/:templateName",

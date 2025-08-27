@@ -111,7 +111,7 @@ func AddUser(c *gin.Context) {
 			if usersRange.RangeNumber > 150 {
 				// Remove the user range access and range from the database
 				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
-				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
+				db.Where("range_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
 				c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot create more than 150 users per Ludus due to networking constraints"})
 				return
 			}
@@ -130,7 +130,7 @@ func AddUser(c *gin.Context) {
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": output})
 				// Remove the range record since creation failed
-				db.Where("user_id = ?", user.UserID).Delete(&usersRange)
+				db.Where("range_id = ?", user.UserID).Delete(&usersRange)
 				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
 				// Remove the user from the host system - we validated the user did not exist on the host system before running the playbook, so this is safe to do
 				removeUserFromHostSystem(user.ProxmoxUsername)
@@ -152,7 +152,7 @@ func AddUser(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				// Rollback the user creation
 				db.Delete(&user)
-				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
+				db.Where("range_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
 				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
 				removeUserFromHostSystem(user.ProxmoxUsername)
 				// TODO: Remove the user from proxmox
@@ -165,7 +165,7 @@ func AddUser(c *gin.Context) {
 			if err != nil {
 				// Rollback the user creation
 				db.Delete(&user)
-				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
+				db.Where("range_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
 				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
 				removeUserFromHostSystem(user.ProxmoxUsername)
 				// TODO: Remove the user from Supabase
@@ -347,7 +347,7 @@ func DeleteUser(c *gin.Context) {
 	}
 
 	db.Delete(&user, "user_id = ?", userID)
-	db.Delete(&usersRange, "user_id = ?", user.UserID)
+	db.Delete(&usersRange, "range_id = ?", user.UserID)
 
 	if len(errorUserIDs) > 0 {
 		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("User deleted but access was not revoked from ranges: %v\nIf these users do not have a range deployed, this is ok.\nOtherwise, the next user created with range number %d could have access to their range if they modify their WireGuard config manually.", errorUserIDs, usersRange.RangeNumber)})

@@ -38,11 +38,8 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	ansiblePlaybookConnectionOptions := &options.AnsibleConnectionOptions{
 		Connection: "local",
 	}
-	user, err := GetUserObject(c)
-	if err != nil {
-		return "Could not get user", err // JSON set in GetUserObject
-	}
-	usersRange, err := GetRangeObject(c)
+
+	usersRange, user, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
 		return "Could not get range", errors.New("could not get range") // JSON set in getRangeObject
 	}
@@ -64,8 +61,8 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	maps.Copy(userVars, extraVars)
 
 	// Always include the ludus, server, and user configs
-	userDir := fmt.Sprintf("@%s/users/%s/", ludusInstallPath, user.ProxmoxUsername)
-	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), userDir + "range-config.yml"}
+	rangeDir := fmt.Sprintf("@%s/ranges/%s/", ludusInstallPath, usersRange.RangeID)
+	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeDir + "range-config.yml"}
 	// root has no range config and cannot use the dynamic inventory
 	var inventory string
 	if user.UserID == "ROOT" {
@@ -92,14 +89,6 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 		Verbose:       verbose,
 	}
 
-	// For add-user and del-user the first user will be created as root, so no need to bail if no prox password found
-	proxmoxPassword := ""
-	if user.UserID != "ROOT" {
-		proxmoxPassword = getProxmoxPasswordForUser(user, c)
-		if proxmoxPassword == "" {
-			return "Could not get proxmox password for user", errors.New("could not get proxmox password for user") // JSON set in getProxmoxPasswordForUser
-		}
-	}
 	// Open a file for saving the ansible log, TRUNC will overwrite
 	// TODO, figure out a way to keep the last 10(?) logs?
 	ansibleLogFile, err := os.OpenFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0660)
@@ -147,9 +136,9 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 		execute.WithEnvVar("PROXMOX_USERNAME", user.ProxmoxUsername+"@pam"),
 		execute.WithEnvVar("PROXMOX_TOKEN", user.ProxmoxTokenID),
 		execute.WithEnvVar("PROXMOX_SECRET", proxmoxTokenSecret),
-		execute.WithEnvVar("LUDUS_RANGE_CONFIG", fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername)),
+		execute.WithEnvVar("LUDUS_RANGE_CONFIG", fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeID)),
 		execute.WithEnvVar("LUDUS_RANGE_NUMBER", strconv.Itoa(int(usersRange.RangeNumber))),
-		execute.WithEnvVar("LUDUS_RANGE_ID", usersRange.UserID),
+		execute.WithEnvVar("LUDUS_RANGE_ID", usersRange.RangeID),
 		execute.WithEnvVar("LUDUS_USER_IS_ADMIN", strconv.FormatBool(user.IsAdmin)),
 		execute.WithEnvVar("LUDUS_RETURN_ALL_RANGES", strconv.FormatBool(returnAllRanges)),
 	)
@@ -188,9 +177,9 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 		err = playbook.Run(context.TODO())
 		duration := time.Since(startTime)
 		// Notify the user of the result of the playbook
-		payload := NewPayload(err == nil, usersRange.UserID, buff.String(), false, duration)
+		payload := NewPayload(err == nil, usersRange.RangeID, buff.String(), false, duration)
 		notifier := Notify{
-			ConfigFilePath: fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername),
+			ConfigFilePath: fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeID),
 			Payload:        payload,
 		}
 		notifier.Send()
@@ -263,7 +252,7 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 	for _, access := range userRangeAccesses {
 		var rangeObj RangeObject
 		if err := db.Where("user_id = ?", access.UserID).First(&rangeObj).Error; err == nil {
-			returnArray = append(returnArray, AccessGrantStruct{rangeObj.RangeNumber, rangeObj.UserID})
+			returnArray = append(returnArray, AccessGrantStruct{rangeObj.RangeNumber, rangeObj.RangeID})
 		}
 	}
 
@@ -279,7 +268,7 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 			var rangeObj RangeObject
 			if err := db.Where("range_number = ?", groupAccess.RangeNumber).First(&rangeObj).Error; err == nil {
 				var user UserObject
-				if err := db.First(&user, "user_id = ?", rangeObj.UserID).Error; err == nil {
+				if err := db.First(&user, "user_id = ?", rangeObj.RangeID).Error; err == nil {
 					returnArray = append(returnArray, AccessGrantStruct{groupAccess.RangeNumber, user.ProxmoxUsername})
 				}
 			}
@@ -425,8 +414,8 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(c *gin.Context, playbookPathArray [
 	}
 
 	// Always include the ludus, server, and user configs
-	userDir := fmt.Sprintf("@%s/users/%s/", ludusInstallPath, user.ProxmoxUsername)
-	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), userDir + ".tmp-range-config.yml"}
+	rangeDir := fmt.Sprintf("@%s/ranges/%s/", ludusInstallPath, usersRange.RangeID)
+	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeDir + "range-config.yml"}
 	inventory := "127.0.0.1"
 
 	execute := execute.NewDefaultExecute(

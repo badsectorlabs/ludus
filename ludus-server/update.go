@@ -55,7 +55,7 @@ Move the updated binary to a different location and run it with --update to comp
 	Run("systemctl start ludus-admin", false, true)
 
 	if !noAnsibleUpdate {
-		err := checkAndCreateNetworkAccessRole() // Required for direct PVE downloads via packer
+		err := migratePermissions() // Required for direct PVE downloads via packer
 		if err != nil {
 			log.Fatal(err)
 		}

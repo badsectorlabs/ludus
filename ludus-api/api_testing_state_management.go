@@ -42,7 +42,7 @@ func Allow(c *gin.Context) {
 	}
 
 	if !usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "testing not enabled for range " + usersRange.UserID})
+		c.JSON(http.StatusConflict, gin.H{"error": "testing not enabled for range " + usersRange.RangeID})
 		return
 	}
 
@@ -141,7 +141,7 @@ func Deny(c *gin.Context) {
 	}
 
 	if !usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "Testing not enabled for range " + usersRange.UserID})
+		c.JSON(http.StatusConflict, gin.H{"error": "Testing not enabled for range " + usersRange.RangeID})
 		return
 	}
 
