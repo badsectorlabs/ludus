@@ -3112,6 +3112,15 @@ components:
           format: int32
           example: 3
           readOnly: true
+        name:
+          type: string
+          example: Red Team Range
+        description:
+          type: string
+          example: Range for red team
+        purpose:
+          type: string
+          example: Testing
         lastDeployment:
           type: string
           format: date-time
