@@ -195,7 +195,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 			// "Windows doesn't permit computer names that exceed 15 characters"
 			// https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/naming-conventions-for-computer-domain-site-ou
 			// First we have to replace any range_id template strings
-			hostname := rangeIDTemplateRegex.ReplaceAllString(vm.Hostname, usersRange.UserID)
+			hostname := rangeIDTemplateRegex.ReplaceAllString(vm.Hostname, usersRange.RangeID)
 			// If the hostname is more than 15 chars, chop it down
 			if len(hostname) >= 15 {
 				NETBIOSnameKey = hostname[:15]
@@ -228,7 +228,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 							return fmt.Errorf("error checking if role exists on the server: %s", err)
 						}
 						if !exists {
-							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.UserID)
+							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.RangeID)
 						} else {
 							c.Set("userHasRoles", true)
 						}
@@ -240,7 +240,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 								return fmt.Errorf("error checking if role exists on the server: %s", err)
 							}
 							if !exists {
-								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, usersRange.UserID)
+								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, usersRange.RangeID)
 							} else {
 								c.Set("userHasRoles", true)
 							}
@@ -253,7 +253,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 												return fmt.Errorf("error checking if role exists on the server: %s", err)
 											}
 											if !exists {
-												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.UserID)
+												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.RangeID)
 											}
 										}
 									}

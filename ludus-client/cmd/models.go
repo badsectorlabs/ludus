@@ -22,7 +22,7 @@ type AnsibleItem struct {
 }
 
 type RangeObject struct {
-	UserID         string     `json:"userID"`
+	RangeID        string     `json:"rangeID"`
 	RangeNumber    int32      `json:"rangeNumber"`
 	Name           string     `json:"name"`
 	Description    string     `json:"description"`

@@ -7,10 +7,9 @@ import (
 )
 
 type RangeObject struct {
-	// Must be a unique 2-4 letter uppercase string.  Initials are commonly used.
-	UserID string `json:"userID" gorm:"index"` // Removed unique constraint to allow multiple ranges per user
+	RangeNumber int32 `json:"rangeNumber" gorm:"primaryKey;unique"`
 
-	RangeNumber int32 `json:"rangeNumber" gorm:"primaryKey"`
+	RangeID string `json:"rangeID" gorm:"index;primaryKey;unique"`
 
 	// New fields for range metadata
 	Name        string `json:"name" gorm:"not null"`

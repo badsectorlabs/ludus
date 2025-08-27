@@ -27,6 +27,10 @@ var (
 	sourceUserID   string
 	allRanges      bool
 	rangeID        string
+	description    string
+	purpose        string
+	userIDForRange string
+	rangeNumber    int32
 )
 
 var rangeCmd = &cobra.Command{
@@ -77,10 +81,10 @@ func formatRangeResponse(data RangeObject, withVMs bool) {
 	// Create table
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetAlignment(tablewriter.ALIGN_CENTER)
-	table.SetHeader([]string{"Name", "Range Network", "User ID", "Last Deployment", "Number of VMs", "Deployment Status", "Testing Enabled"})
+	table.SetHeader([]string{"Range ID", "Name", "Range Network", "Last Deployment", "Number of VMs", "Deployment Status", "Testing Enabled"})
 	lastDeployment := formatTimeObject(data.LastDeployment, "2006-01-02 15:04")
 
-	table.Append([]string{data.Name, fmt.Sprintf("10.%d.0.0/16", data.RangeNumber), data.UserID, lastDeployment, fmt.Sprint(data.NumberOfVMs), data.RangeState, strings.ToUpper(strconv.FormatBool(data.TestingEnabled))})
+	table.Append([]string{data.RangeID, data.Name, fmt.Sprintf("10.%d.0.0/16", data.RangeNumber), lastDeployment, fmt.Sprint(data.NumberOfVMs), data.RangeState, strings.ToUpper(strconv.FormatBool(data.TestingEnabled))})
 
 	if data.TestingEnabled {
 		table.SetColumnColor(nil, nil, nil, nil, nil, getRangeStateColor(data), tablewriter.Colors{tablewriter.FgBlackColor, tablewriter.Bold, tablewriter.BgGreenColor})
@@ -166,11 +170,11 @@ var rangeListCmd = &cobra.Command{
 			}
 			table := tablewriter.NewWriter(os.Stdout)
 			table.SetAlignment(tablewriter.ALIGN_CENTER)
-			table.SetHeader([]string{"Name", "Range Network", "User ID", "Last Deployment", "VM Count", "Deployment Status", "Testing Enabled"})
+			table.SetHeader([]string{"Range ID", "Name", "Range Network", "Last Deployment", "VM Count", "Deployment Status", "Testing Enabled"})
 			for _, rangeObject := range data {
 				lastDeployment := formatTimeObject(rangeObject.LastDeployment, "2006-01-02 15:04")
 
-				rowValues := []string{rangeObject.Name, fmt.Sprintf("10.%d.0.0/16", rangeObject.RangeNumber), rangeObject.UserID, lastDeployment, fmt.Sprint(rangeObject.NumberOfVMs), rangeObject.RangeState, strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled))}
+				rowValues := []string{rangeObject.RangeID, rangeObject.Name, fmt.Sprintf("10.%d.0.0/16", rangeObject.RangeNumber), lastDeployment, fmt.Sprint(rangeObject.NumberOfVMs), rangeObject.RangeState, strings.ToUpper(strconv.FormatBool(rangeObject.TestingEnabled))}
 
 				var testingColor tablewriter.Colors
 				if rangeObject.TestingEnabled {
@@ -395,8 +399,8 @@ var rangeErrorsCmd = &cobra.Command{
 
 var rangeDeleteCmd = &cobra.Command{
 	Use:     "rm",
-	Short:   "Delete your range (all VMs will be destroyed)",
-	Long:    ``,
+	Short:   "Delete your range object from database and optionally destroy all VMs",
+	Long:    `Delete your range object from the database and destroy all VMs. Use --force to delete all VMs.`,
 	Aliases: []string{"destroy"},
 	Args:    cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -405,19 +409,37 @@ var rangeDeleteCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
+		var rangeIDString string
+		if rangeID == "" {
+			if userID == "" {
+				rangeIDString = strings.Split(apiKey, ".")[0]
+			} else {
+				rangeIDString = userID
+			}
+		} else {
+			rangeIDString = rangeID
+		}
+
 		if !noPrompt {
 			var choice string
 			logger.Logger.Warnf(`
-!!! This will destroy all VMs for the range of user ID: %s !!!
- 
-Do you want to continue? (y/N): `, userID)
+!!! This will delete the range: %s !!!
+This action cannot be undone.
+
+Do you want to continue? (y/N): `, rangeIDString)
 			fmt.Scanln(&choice)
 			if choice != "Y" && choice != "y" {
 				logger.Logger.Fatal("Bailing!")
 			}
 		}
 
-		responseJSON, success = rest.GenericDelete(client, buildRangeURL("/range"))
+		// Build URL with force parameter if specified
+		deleteURL := buildRangeURL("/range")
+		if force {
+			deleteURL += "?force=true"
+		}
+
+		responseJSON, success = rest.GenericDelete(client, deleteURL)
 		if !success {
 			return
 		}
@@ -426,6 +448,58 @@ Do you want to continue? (y/N): `, userID)
 }
 
 func setupDeleteCmd(command *cobra.Command) {
+	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
+	command.Flags().BoolVar(&force, "force", false, "force deletion of range even if it has VMs")
+}
+
+var rangeDestroyVmsCmd = &cobra.Command{
+	Use:     "destroy-vms",
+	Short:   "Destroy all VMs in your range (keeps range)",
+	Long:    `Destroy all VMs in your range but keep the range object in the database. Use this to start fresh with your range configuration.`,
+	Aliases: []string{"rm-vms"},
+	Args:    cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		var responseJSON []byte
+		var success bool
+
+		var rangeIDString string
+		if rangeID == "" {
+			if userID == "" {
+				rangeIDString = strings.Split(apiKey, ".")[0]
+			} else {
+				rangeIDString = userID
+			}
+		} else {
+			rangeIDString = rangeID
+		}
+
+		if !noPrompt {
+			var choice string
+			logger.Logger.Warnf(`
+!!! This will destroy all VMs for the range: %s !!!
+The range object will be kept in the database.
+
+Do you want to continue? (y/N): `, rangeIDString)
+			fmt.Scanln(&choice)
+			if choice != "Y" && choice != "y" {
+				logger.Logger.Fatal("Bailing!")
+			}
+		}
+
+		// Build URL for VM destruction endpoint
+		destroyVmsURL := buildRangeURL(fmt.Sprintf("/range/%s/vms", rangeID))
+
+		responseJSON, success = rest.GenericDelete(client, destroyVmsURL)
+		if !success {
+			return
+		}
+		handleGenericResult(responseJSON)
+	},
+}
+
+func setupDestroyVmsCmd(command *cobra.Command) {
 	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
 }
 
@@ -680,35 +754,37 @@ var rangeTaskOutputCmd = &cobra.Command{
 	},
 }
 
-// Admin commands for range management
+type RangeCreatePayload struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Purpose     string `json:"purpose"`
+	UserID      string `json:"userID"`
+	RangeNumber int32  `json:"rangeNumber"`
+	RangeID     string `json:"rangeID"`
+}
+
+// Commands for range management
 var rangeCreateCmd = &cobra.Command{
 	Use:   "create [name]",
-	Short: "Create a new range (admin only)",
-	Long:  `Create a new range with a name. Description and purpose are optional. Admin privileges required.`,
+	Short: "Create a new range",
+	Long:  `Create a new range with a name and pool name. Description, purpose, and userID are optional.`,
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		name := args[0]
-		description, _ := cmd.Flags().GetString("description")
-		purpose, _ := cmd.Flags().GetString("purpose")
-		userID, _ := cmd.Flags().GetString("user")
-		rangeNumber, _ := cmd.Flags().GetInt32("range-number")
 
-		payload := map[string]interface{}{
-			"name": name,
+		if rangeID == "" {
+			logger.Logger.Fatal("Range ID is required. Use --range-id or -r to specify the range ID.")
 		}
-		if description != "" {
-			payload["description"] = description
-		}
-		if purpose != "" {
-			payload["purpose"] = purpose
-		}
-		if userID != "" {
-			payload["userID"] = userID
-		}
-		if rangeNumber > 0 {
-			payload["rangeNumber"] = rangeNumber
+
+		payload := RangeCreatePayload{
+			Name:        name,
+			RangeID:     rangeID,
+			Description: description,
+			Purpose:     purpose,
+			UserID:      userIDForRange,
+			RangeNumber: rangeNumber,
 		}
 
 		var responseJSON []byte
@@ -721,9 +797,16 @@ var rangeCreateCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("Range '%s' created successfully\n", name)
+			fmt.Printf("Range '%s' created successfully\n", rangeID)
 		}
 	},
+}
+
+func setupRangeCreateCmd(command *cobra.Command) {
+	command.Flags().StringVarP(&description, "description", "d", "", "Description of the range")
+	command.Flags().StringVarP(&purpose, "purpose", "o", "", "Purpose of the range")
+	command.Flags().StringVar(&userIDForRange, "user", "", "User ID to assign the range to (optional)")
+	command.Flags().Int32VarP(&rangeNumber, "range-number", "n", 0, "Specific range number to assign (optional)")
 }
 
 var rangeAssignCmd = &cobra.Command{
@@ -883,12 +966,6 @@ var rangeAccessibleCmd = &cobra.Command{
 }
 
 func init() {
-	// Add flags to range create command
-	rangeCreateCmd.Flags().String("description", "", "Description of the range")
-	rangeCreateCmd.Flags().String("purpose", "", "Purpose of the range")
-	rangeCreateCmd.Flags().String("user", "", "User ID to assign the range to (optional)")
-	rangeCreateCmd.Flags().Int32("range-number", 0, "Specific range number to assign (optional)")
-
 	rangeConfigCmd.AddCommand(rangeConfigGet)
 	setupRangeConfigSet(rangeConfigSet)
 	rangeConfigCmd.AddCommand(rangeConfigSet)
@@ -900,6 +977,8 @@ func init() {
 	rangeCmd.AddCommand(rangeListCmd)
 	setupDeleteCmd(rangeDeleteCmd)
 	rangeCmd.AddCommand(rangeDeleteCmd)
+	setupDestroyVmsCmd(rangeDestroyVmsCmd)
+	rangeCmd.AddCommand(rangeDestroyVmsCmd)
 	rangeCmd.AddCommand(rangeConfigCmd)
 	setupRangeAnsibleInventoryCmd(rangeAnsibleInventoryCmd)
 	rangeCmd.AddCommand(rangeAnsibleInventoryCmd)
@@ -917,6 +996,7 @@ func init() {
 	rangeCmd.AddCommand(rangeTaskOutputCmd)
 
 	// Add admin range management commands
+	setupRangeCreateCmd(rangeCreateCmd)
 	rangeCmd.AddCommand(rangeCreateCmd)
 	rangeCmd.AddCommand(rangeAssignCmd)
 	rangeCmd.AddCommand(rangeRevokeCmd)

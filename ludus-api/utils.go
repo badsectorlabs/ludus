@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -342,23 +343,32 @@ func getDomainIPString(rangeSlice []string, domain string) string {
 	return ""
 }
 
-// Chown a file to a user and their group
-func chownFileToUsername(filePath string, username string) {
+func getUIDandGIDFromUsername(username string) (int, int, error) {
 	runnerUser, err := user.Lookup(username)
 	if err != nil {
-		fmt.Printf("Failed to lookup user %s for chown of %s\n", err, filePath)
-		return
+		return 0, 0, fmt.Errorf("failed to lookup user %s", err)
 	}
 
 	uid, err := strconv.Atoi(runnerUser.Uid)
 	if err != nil {
 		fmt.Printf("Failed to convert UID to integer: %s\n", err)
-		return
+		return 0, 0, fmt.Errorf("failed to convert UID to integer: %s", err)
 	}
 
 	gid, err := strconv.Atoi(runnerUser.Gid)
 	if err != nil {
 		fmt.Printf("Failed to convert GID to integer: %s\n", err)
+		return 0, 0, fmt.Errorf("failed to convert GID to integer: %s", err)
+	}
+
+	return uid, gid, nil
+}
+
+// Chown a file to a user and their group
+func chownFileToUsername(filePath string, username string) {
+	uid, gid, err := getUIDandGIDFromUsername(username)
+	if err != nil {
+		fmt.Printf("Failed to get UID and GID for user %s: %s\n", username, err)
 		return
 	}
 
@@ -366,6 +376,28 @@ func chownFileToUsername(filePath string, username string) {
 	err = os.Chown(filePath, uid, gid)
 	if err != nil {
 		fmt.Printf("Failed to change ownership of the file: %s\n", err)
+		return
+	}
+}
+
+func chownDirToUsernameRecursive(filePath string, username string) {
+	uid, gid, err := getUIDandGIDFromUsername(username)
+	if err != nil {
+		fmt.Printf("Failed to get UID and GID for user %s: %s\n", username, err)
+		return
+	}
+	err = filepath.Walk(filePath, func(path string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// os.Chown requires numeric UID and GID
+		if err := os.Chown(path, uid, gid); err != nil {
+			return fmt.Errorf("failed to chown %s: %w", path, err)
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("Failed to chown directory %s: %s\n", filePath, err)
 		return
 	}
 }
@@ -487,7 +519,7 @@ func CreateDefaultUserRange(db *gorm.DB, userID string) error {
 		Name:        fmt.Sprintf("Default Range for %s", userID),
 		Description: "Default range created automatically for user",
 		Purpose:     "General testing and development",
-		UserID:      userID,
+		RangeID:     userID,
 		RangeNumber: rangeNumber,
 		NumberOfVMs: 0,
 		RangeState:  "NEVER DEPLOYED",
@@ -517,8 +549,8 @@ func GetRangeObjectByNumber(db *gorm.DB, rangeNumber int32) (RangeObject, error)
 func GetUserDefaultRange(db *gorm.DB, userID string) (RangeObject, error) {
 	var rangeObj RangeObject
 
-	// First try to get a range where the user_id field matches the current user's ID
-	err := db.Where("user_id = ?", userID).First(&rangeObj).Error
+	// First try to get a range where the range_id field matches the current user's ID
+	err := db.Where("range_id = ?", userID).First(&rangeObj).Error
 	if err == nil {
 		return rangeObj, nil
 	}
@@ -535,8 +567,8 @@ func GetUserDefaultRange(db *gorm.DB, userID string) (RangeObject, error) {
 
 // CheckRangeAccessAndGetObjects validates access permissions and returns the appropriate range and user objects
 // This function handles the following scenarios:
-// 1. rangeID provided, no userID: Check if current user has access to the specified range
-// 2. rangeID and userID provided: Check if current user is admin, then check if specified user has access to range
+// 1. rangeID/rangeNumber provided, no userID: Check if current user has access to the specified range
+// 2. rangeID/rangeNumber and userID provided: Check if current user is admin, then check if specified user has access to range
 // 3. Neither provided: Get current user's default range
 func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, error) {
 	var usersRange RangeObject
@@ -551,22 +583,38 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 
 	// Check if rangeID parameter was provided
 	rangeIDStr, hasRangeID := c.GetQuery("rangeID")
+	rangeNumberStr, hasRangeNumber := c.GetQuery("rangeNumber")
+
+	if hasRangeNumber && hasRangeID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot provide both a rangeID and rangeNumber"})
+		return usersRange, targetUser, errors.New("cannot provide both a rangeID and rangeNumber")
+	}
 
 	var rangeNumber int32 = -1
 
-	// Parse rangeID if provided
 	if hasRangeID {
-		rangeID, parseErr := strconv.ParseInt(rangeIDStr, 10, 32)
-		if parseErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rangeID"})
-			return usersRange, targetUser, errors.New("invalid rangeID")
+		// Look up the range number for the rangeID
+		var rangeObj RangeObject
+		db.First(&rangeObj, "range_id = ?", rangeIDStr)
+		if rangeObj.RangeNumber == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeIDStr)})
+			return usersRange, targetUser, fmt.Errorf("range %s not found", rangeIDStr)
 		}
-		rangeNumber = int32(rangeID)
+		rangeNumber = rangeObj.RangeNumber
+	}
+
+	if hasRangeNumber {
+		rangeNumberInt64, parseErr := strconv.ParseInt(rangeNumberStr, 10, 32)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rangeNumber"})
+			return usersRange, targetUser, errors.New("invalid rangeNumber")
+		}
+		rangeNumber = int32(rangeNumberInt64)
 	}
 
 	// Get the range object
-	if hasRangeID {
-		// RangeID was specified, get that specific range
+	if hasRangeID || hasRangeNumber {
+		// Range was specified, get that specific range
 		usersRange, err = GetRangeObjectByNumber(db, rangeNumber)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -578,7 +626,7 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 		}
 
 		// Check if the target user has access to this range
-		if !HasRangeAccess(db, targetUserID, rangeNumber) {
+		if !HasRangeAccess(db, targetUserID, rangeNumber) && !isAdmin(c, false) {
 			c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("User %s does not have access to range %d", targetUserID, rangeNumber)})
 			return usersRange, targetUser, errors.New("access denied")
 		}

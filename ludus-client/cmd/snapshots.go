@@ -269,7 +269,7 @@ var snapshotsCreateCmd = &cobra.Command{
 func setupSnapshotsCreateCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&snapshotVMIDs, "vmids", "n", "", "A VM ID (104) or multiple VM IDs (104,105) to create snapshots for (default: all VMs in the range)")
 	command.Flags().StringVarP(&snapshotDescription, "description", "d", "", "Description of the snapshot")
-	command.Flags().BoolVarP(&noRAM, "noRAM", "r", false, "Don't include RAM in the snapshot")
+	command.Flags().BoolVar(&noRAM, "noRAM", false, "Don't include RAM in the snapshot")
 }
 
 var snapshotsRollbackCmd = &cobra.Command{
