@@ -1,9 +1,11 @@
 package ludusapi
 
 import (
+	"archive/tar"
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -541,6 +543,64 @@ func PutTemplateTar(c *gin.Context) {
 		return
 	}
 
+	// Read the uploaded tar into memory for inspection
+	fileHandle, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to open uploaded file"})
+		return
+	}
+	defer fileHandle.Close()
+	fileBytes, err := io.ReadAll(fileHandle)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to read uploaded file"})
+		return
+	}
+
+	// Inspect tar contents to ensure a single root directory and capture its name
+	rootNames := make(map[string]struct{})
+	hasNestedEntries := false
+	sawExplicitRootDir := false
+	tarReader := tar.NewReader(bytes.NewReader(fileBytes))
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid tar archive: %v", err)})
+			return
+		}
+		name := header.Name
+		name = strings.TrimPrefix(name, "./")
+		name = strings.TrimLeft(name, "/")
+		if name == "" {
+			continue
+		}
+		parts := strings.SplitN(name, "/", 2)
+		root := parts[0]
+		if root == "" {
+			continue
+		}
+		rootNames[root] = struct{}{} // Minor memory saving hack. struct{} is a zero-byte value, a bool would map memory we don't care about
+		if len(parts) > 1 {
+			hasNestedEntries = true
+		}
+		if header.Typeflag == tar.TypeDir && (name == root || name == root+"/") {
+			sawExplicitRootDir = true
+		}
+	}
+
+	if len(rootNames) != 1 || (!sawExplicitRootDir && !hasNestedEntries) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Tar must contain a single root directory"})
+		return
+	}
+
+	// We have to range over the map since rootNames isn't a slice and we can't use the index of 0 to get the value
+	var rootDirName string
+	for k := range rootNames {
+		rootDirName = k
+	}
+
 	user, err := GetUserObject(c)
 	if err != nil {
 		return // JSON set in GetUserObject
@@ -561,8 +621,8 @@ func PutTemplateTar(c *gin.Context) {
 
 	// Save the file to the server
 	os.MkdirAll(fmt.Sprintf("%s/users/%s/packer/tmp", ludusInstallPath, user.ProxmoxUsername), 0755)
-	templateTarPath := fmt.Sprintf("%s/users/%s/packer/tmp/%s", ludusInstallPath, user.ProxmoxUsername, file.Filename)
-	templateDirPath := fmt.Sprintf("%s/users/%s/packer/%s", ludusInstallPath, user.ProxmoxUsername, file.Filename)
+	templateTarPath := fmt.Sprintf("%s/users/%s/packer/tmp/%s", ludusInstallPath, user.ProxmoxUsername, rootDirName)
+	templateDirPath := fmt.Sprintf("%s/users/%s/packer/%s", ludusInstallPath, user.ProxmoxUsername, rootDirName)
 	if _, err := os.Stat(templateDirPath); errors.Is(err, os.ErrNotExist) {
 		// templateDirPath does not exist
 	} else {
@@ -571,7 +631,8 @@ func PutTemplateTar(c *gin.Context) {
 			return
 		}
 	}
-	err = c.SaveUploadedFile(file, templateTarPath)
+	// Save uploaded tar bytes to temporary path
+	err = os.WriteFile(templateTarPath, fileBytes, 0644)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Saving file failed"})
 		return

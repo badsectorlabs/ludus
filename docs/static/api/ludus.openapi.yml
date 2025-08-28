@@ -2085,7 +2085,7 @@ paths:
       summary: Install an Ansible role from local directory
       operationId: addTemplateFromTar
       description: |
-        Add a template to ludus
+        Add a template to ludus. The file must be a tar file with a single directory (the template name) inside. The filename is ignored, and the root directory name is used.
       requestBody:
         content:
           multipart/form-data:
