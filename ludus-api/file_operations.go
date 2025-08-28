@@ -91,6 +91,13 @@ func Untar(tarFile, destDir string) error {
 	// Create a new tar reader
 	tarReader := tar.NewReader(file)
 
+	// Resolve the absolute, cleaned destination directory for safety checks
+	absDestDir, err := filepath.Abs(destDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve destination directory: %w", err)
+	}
+	absDestDir = filepath.Clean(absDestDir)
+
 	// Iterate through the files in the tar archive
 	for {
 		header, err := tarReader.Next()
@@ -101,8 +108,19 @@ func Untar(tarFile, destDir string) error {
 			return fmt.Errorf("failed to read tar file: %w", err)
 		}
 
-		// Construct the full path for the file/directory
-		path := filepath.Join(destDir, header.Name)
+		// Construct the full path for the file/directory and prevent path traversal
+		joinedPath := filepath.Join(absDestDir, header.Name)
+		cleanPath := filepath.Clean(joinedPath)
+		absPath, err := filepath.Abs(cleanPath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve path: %w", err)
+		}
+		// Ensure the final path is within the destination directory
+		if absPath != absDestDir && !strings.HasPrefix(absPath+string(os.PathSeparator), absDestDir+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path in tar: %s", header.Name)
+		}
+
+		path := absPath
 
 		// Check the file type
 		switch header.Typeflag {
