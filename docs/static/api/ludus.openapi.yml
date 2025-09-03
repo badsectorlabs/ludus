@@ -1523,6 +1523,16 @@ paths:
         Admins can pass a userID parameter to control other user's ranges.
       parameters:
         - in: query
+          name: rangeID
+          description: |
+            The range number to power on. If not provided, uses the user's default range.
+            Not required if specifying one or multiple machines, only used if "all" is specified.
+          required: false
+          schema:
+            properties:
+              rangeID:
+                $ref: "#/components/schemas/rangeID"
+        - in: query
           name: userID
           description: >
             pass an optional userID to query.
@@ -1571,6 +1581,16 @@ paths:
 
         Admins can pass a userID parameter to control other user's ranges.
       parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to power off. If not provided, uses the user's default range.
+            Not required if specifying one or multiple machines, only used if "all" is specified.
+          required: false
+          schema:
+            properties:
+              rangeID:
+                $ref: "#/components/schemas/rangeID"
         - in: query
           name: userID
           description: >

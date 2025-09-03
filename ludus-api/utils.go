@@ -188,13 +188,13 @@ func GetRangeObject(c *gin.Context) (RangeObject, error) {
 		return usersRange, gorm.ErrRecordNotFound // Status and JSON set in getUserID
 	}
 
-	// Check if a specific range number was provided in the query
-	rangeNumberStr, hasRangeNumber := c.GetQuery("rangeNumber")
-	if hasRangeNumber {
-		rangeNumber, parseErr := strconv.ParseInt(rangeNumberStr, 10, 32)
-		if parseErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range number"})
-			return usersRange, errors.New("invalid range number")
+	// Check if a specific range ID was provided in the query
+	rangeIDStr, hasRangeID := c.GetQuery("rangeID")
+	if hasRangeID {
+		rangeNumber, err := GetRangeNumberFromRangeID(db, rangeIDStr)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
+			return usersRange, err
 		}
 
 		// Verify user has access to this range
@@ -543,6 +543,12 @@ func GetRangeObjectByNumber(db *gorm.DB, rangeNumber int32) (RangeObject, error)
 	var rangeObj RangeObject
 	err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error
 	return rangeObj, err
+}
+
+func GetRangeNumberFromRangeID(db *gorm.DB, rangeID string) (int32, error) {
+	var rangeObj RangeObject
+	err := db.Where("range_id = ?", rangeID).First(&rangeObj).Error
+	return rangeObj.RangeNumber, err
 }
 
 // GetUserDefaultRange gets the default range for a user (range where user_id matches the user's ID)

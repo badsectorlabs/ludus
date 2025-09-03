@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// TODO: Update this to use the go-proxmox library
 func PowerAction(c *gin.Context, action string) {
 	type PowerBody struct {
 		Machines []string `json:"machines"`
