@@ -338,3 +338,26 @@ func printTaskOutputFromString(logs string, taskName string) {
 		}
 	}
 }
+
+// buildURLWithRangeAndUserID creates a URL with rangeID and userID query parameters
+// based on the global flags. It handles all combinations:
+// - neither specified: returns baseURL as-is
+// - only rangeID: adds ?rangeID=<rangeID>
+// - only userID: adds ?userID=<userID>
+// - both: adds ?rangeID=<rangeID>&userID=<userID>
+func buildURLWithRangeAndUserID(baseURL string) string {
+	if rangeID == "" && userID == "" {
+		return baseURL
+	}
+
+	var params []string
+	if rangeID != "" {
+		params = append(params, fmt.Sprintf("rangeID=%s", rangeID))
+	}
+	if userID != "" {
+		params = append(params, fmt.Sprintf("userID=%s", userID))
+	}
+
+	queryString := strings.Join(params, "&")
+	return fmt.Sprintf("%s?%s", baseURL, queryString)
+}
