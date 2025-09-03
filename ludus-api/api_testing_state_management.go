@@ -36,9 +36,9 @@ func Allow(c *gin.Context) {
 
 	var errorArray []errorStruct
 
-	usersRange, err := GetRangeObject(c)
+	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in getRangeObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
 	if !usersRange.TestingEnabled {
@@ -135,9 +135,9 @@ func Deny(c *gin.Context) {
 
 	var errorArray []errorStruct
 
-	usersRange, err := GetRangeObject(c)
+	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in getRangeObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
 	if !usersRange.TestingEnabled {
@@ -199,9 +199,9 @@ func Deny(c *gin.Context) {
 
 // StartTesting - snapshot and enter testing state
 func StartTesting(c *gin.Context) {
-	usersRange, err := GetRangeObject(c)
+	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in getRangeObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
 	if usersRange.TestingEnabled {
@@ -222,9 +222,9 @@ func StartTesting(c *gin.Context) {
 
 // StopTesting - revert and exit testing state
 func StopTesting(c *gin.Context) {
-	usersRange, err := GetRangeObject(c)
+	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in getRangeObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
 	if !usersRange.TestingEnabled {
@@ -255,9 +255,9 @@ func StopTesting(c *gin.Context) {
 
 // UpdateVMs - update a VM/group of VMs based on a name provided in the POST body
 func UpdateVMs(c *gin.Context) {
-	usersRange, err := GetRangeObject(c)
+	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
-		return // JSON set in getRangeObject
+		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
 	if usersRange.TestingEnabled {

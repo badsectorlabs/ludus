@@ -40,7 +40,7 @@ var testingStatusCmd = &cobra.Command{
 			userID = strings.Split(apiKey, ".")[0]
 		}
 
-		responseJSON, success := rest.GenericGet(client, fmt.Sprintf("/range?userID=%s", userID))
+		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/range"))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -114,7 +114,7 @@ var testingStartCmd = &cobra.Command{
 			userID = strings.Split(apiKey, ".")[0]
 		}
 
-		responseJSON, success := rest.GenericJSONPut(client, fmt.Sprintf("/testing/start?userID=%s", userID), "")
+		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID("/testing/start"), "")
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -150,7 +150,7 @@ Do you want to continue? (y/N): `)
 			}
 		}
 
-		responseJSON, success := rest.GenericJSONPut(client, fmt.Sprintf("/testing/stop?userID=%s", userID), putBody)
+		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID("/testing/stop"), putBody)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -288,11 +288,7 @@ func testingAllowDenyCmd(use, short, long string) *cobra.Command {
 
 			var responseJSON []byte
 			var success bool
-			if userID != "" {
-				responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/testing/%s?userID=%s", use, userID), string(payload))
-			} else {
-				responseJSON, success = rest.GenericJSONPost(client, "/testing/"+use, string(payload))
-			}
+			responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/testing/"+use), string(payload))
 
 			if didFailOrWantJSON(success, responseJSON) {
 				return
@@ -337,11 +333,8 @@ var testingUpdateCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/testing/update?userID=%s", userID), string(payload))
-		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/testing/update", string(payload))
-		}
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/testing/update"), string(payload))
+
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}

@@ -1618,6 +1618,15 @@ paths:
         Admins can pass a userID parameter to control other user's ranges.
       parameters:
         - in: query
+          name: rangeID
+          description: |
+            The range number to start testing for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            properties:
+              rangeID:
+                $ref: "#/components/schemas/rangeID"
+        - in: query
           name: userID
           description: >
             pass an optional userID to get the start testing for.
@@ -1650,6 +1659,15 @@ paths:
         Setting force to true may leak telemetry or other data about your
         payloads.
       parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to stop testing for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            properties:
+              rangeID:
+                $ref: "#/components/schemas/rangeID"
         - in: query
           name: userID
           description: >
@@ -1688,6 +1706,15 @@ paths:
         Looks up the domain and its HTTPS certificate CRL domains adding all the
         IPs to iptables allow as well as to a DNS allow list.
       parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to apply allow rules for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            properties:
+              rangeID:
+                $ref: "#/components/schemas/rangeID"
         - in: query
           name: userID
           description: >
@@ -1744,6 +1771,15 @@ paths:
         domains as they may be shared my multiple domains.
       parameters:
         - in: query
+          name: rangeID
+          description: |
+            The range number to apply deny rules for. If not provided, uses the user's default range.
+          required: false
+          schema:
+            properties:
+              rangeID:
+                $ref: "#/components/schemas/rangeID"
+        - in: query
           name: userID
           description: >
             pass an optional userID to act on behalf of. Only admins can provide
@@ -1797,6 +1833,15 @@ paths:
         Runs the ansible update routine on a VM or group of VMs specified
         by the user in the request body. (Windows only)
       parameters:
+        - in: query
+          name: rangeID
+          description: |
+            The range number to update. If not provided, uses the user's default range.
+          required: false
+          schema:
+            properties:
+              rangeID:
+                $ref: "#/components/schemas/rangeID"
         - in: query
           name: userID
           description: >
