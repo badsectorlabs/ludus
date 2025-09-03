@@ -28,7 +28,7 @@ Ludus can **only** be installed on a host that meets the following requirements:
 
 Machines with lower specs than listed above may work, but are not tested/supported.
 
-If you are installing Debian 12, the [netinst ISO](https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/) (scroll down to `debian-12.x.x-amd64-netinst.iso`) is recommended. 
+If you are installing Debian 12, use the [Debian 12 netinst ISO](https://cdimage.debian.org/cdimage/archive/12.11.0/amd64/iso-cd/debian-12.11.0-amd64-netinst.iso) for Debian 13, use the [Debian 13 netinst ISO](https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/) (scroll down to `debian-13.x.x-amd64-netinst.iso`). 
 At the screen below during install, uncheck `Debain desktop environment` and check `SSH server`.
 
 ![A screenshot of the Debain 12 install page with SSH Server and standard system utilities checked](/img/intro/debain-12-install.png)
@@ -50,7 +50,7 @@ ssh user@debian12
 su -
 # Enter root password to elevate to root
 # terminal-command-root-at-debian
-apt update && apt install curl sudo
+apt update && apt install curl sudo git ca-certificates
 
 # All-in-one command
 # terminal-command-root-at-debian
