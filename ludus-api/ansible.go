@@ -47,7 +47,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	accessGrantsArray := getAccessGrantsForUser(user.UserID)
 	userVars := map[string]interface{}{
 		"username":           user.ProxmoxUsername,
-		"range_id":           user.UserID,
+		"range_id":           usersRange.RangeID,
 		"range_second_octet": usersRange.RangeNumber,
 		// We have to send this in the event this deploy is a fresh deploy AFTER a user has been granted access to this
 		// range, which means there is a fresh router deployed with no knowledge of the access grants

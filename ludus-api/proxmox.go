@@ -96,6 +96,10 @@ func GetGoProxmoxClientForUserUsingToken(c *gin.Context) (*goproxmox.Client, err
 		return nil, errors.New("unable to get user object") // JSON error is set in GetUserObject
 	}
 
+	if user.Name == "ROOT" {
+		return nil, errors.New("ROOT user should not be used for this action")
+	}
+
 	tokenID := user.ProxmoxTokenID
 	tokenSecret, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret)
 	if err != nil {
