@@ -10,13 +10,13 @@
         - name: End the play
           meta: end_play
 
-    - name: Create CI VM from a Debian 12 template
+    - name: Create CI VM from a Debian 13 template
       community.general.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
         node: "{{ node_name }}"
-        clone: debian-12-x64-server-ludus-ci-template
+        clone: debian-13-x64-server-ludus-ci-template
         name: "{{ runner_vm_name }}"
         pool: CICD
         full: true # TODO determine why the auto-built template doesn't support linked clones
