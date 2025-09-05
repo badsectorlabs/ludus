@@ -50,7 +50,7 @@ ssh user@debian12
 su -
 # Enter root password to elevate to root
 # terminal-command-root-at-debian
-apt update && apt install curl sudo git ca-certificates
+apt update && apt install curl sudo git ca-certificates python3-debian
 
 # All-in-one command
 # terminal-command-root-at-debian
