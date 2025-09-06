@@ -163,7 +163,7 @@ class ProxmoxAPI(object):
 
         data = json.load(open_url(request_path, data=request_params,
                                   validate_certs=self.options.validate,
-                                  timeout=30))
+                                  timeout=90))
 
         self.credentials = {
             'ticket': data['data']['ticket'],
@@ -176,7 +176,7 @@ class ProxmoxAPI(object):
         headers = {'Cookie': 'PVEAuthCookie={0}'.format(self.credentials['ticket'])}
         request = open_url(request_path, data=data, headers=headers,
                            validate_certs=self.options.validate,
-                           timeout=30)
+                           timeout=90)
 
         response = json.load(request)
         return response['data']
@@ -229,7 +229,7 @@ class ProxmoxAPI(object):
             return False
         
         try:
-            ip_address = re.search('ip=(\d*\.\d*\.\d*\.\d*)', config['net0']).group(1)
+            ip_address = re.search(r'ip=(\d*\.\d*\.\d*\.\d*)', config['net0']).group(1)
             return ip_address
         except:
             return False
@@ -430,6 +430,7 @@ def main_list(options, config_path):
         except HTTPError as error:
             # the API raises code 595 when target node is unavailable, skip it
             if error.code == 595 or error.code == 596:
+                print(f"Node {node} is unavailable (error code {error.code}), skipping", file=sys.stderr)
                 continue
             # if it was some other error, reraise it
             raise error
