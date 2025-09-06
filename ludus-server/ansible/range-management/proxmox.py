@@ -162,7 +162,8 @@ class ProxmoxAPI(object):
         })
 
         data = json.load(open_url(request_path, data=request_params,
-                                  validate_certs=self.options.validate))
+                                  validate_certs=self.options.validate,
+                                  timeout=30))
 
         self.credentials = {
             'ticket': data['data']['ticket'],
@@ -174,7 +175,8 @@ class ProxmoxAPI(object):
 
         headers = {'Cookie': 'PVEAuthCookie={0}'.format(self.credentials['ticket'])}
         request = open_url(request_path, data=data, headers=headers,
-                           validate_certs=self.options.validate)
+                           validate_certs=self.options.validate,
+                           timeout=30)
 
         response = json.load(request)
         return response['data']
