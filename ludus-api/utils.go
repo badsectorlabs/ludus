@@ -240,11 +240,6 @@ func updateUsersRangeVMData(c *gin.Context) error {
 		return errors.New("unable to get users range") // JSON error is set in getRangeObject
 	}
 
-	userID, success := getUserID(c)
-	if !success {
-		return errors.New("unable to get user ID") // JSON set in getUserID
-	}
-
 	proxmoxClient, err := GetProxmoxClientForUser(c)
 	if err != nil {
 		return errors.New("unable to get proxmox client")
@@ -280,7 +275,7 @@ func updateUsersRangeVMData(c *gin.Context) error {
 		if vm["pool"] == nil || vm["name"] == nil || vm["template"] == nil {
 			continue // A vm with these values as nil will cause the conversions to panic
 		}
-		if vm["pool"].(string) != userID ||
+		if vm["pool"].(string) != targetRange.RangeID ||
 			strings.HasSuffix(vm["name"].(string), "-template") ||
 			int(vm["template"].(float64)) == 1 {
 			continue
