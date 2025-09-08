@@ -1,7 +1,6 @@
 package ludusapi
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/spf13/viper"
@@ -85,5 +84,5 @@ func (s *Server) ParseConfig() {
 		s.LicenseKey = ServerConfiguration.LicenseKey
 		s.checkLicense()
 	}
-	fmt.Println("Using configuration file: ", viper.ConfigFileUsed())
+	log.Println("Using configuration file: ", viper.ConfigFileUsed())
 }

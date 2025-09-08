@@ -35,9 +35,9 @@ func createUserInSupabase(user UserWithEmailAndPassword, password string) (types
 	}
 
 	// 3. User created successfully
-	fmt.Println("User creation successful!")
-	fmt.Printf("User ID: %s\n", supabaseAdminCreateUserResponse.User.ID)
-	fmt.Printf("Email: %s\n", supabaseAdminCreateUserResponse.User.Email)
+	logger.Debug("User creation successful!")
+	logger.Debug(fmt.Sprintf("User ID: %s\n", supabaseAdminCreateUserResponse.User.ID))
+	logger.Debug(fmt.Sprintf("Email: %s\n", supabaseAdminCreateUserResponse.User.Email))
 
 	return supabaseAdminCreateUserResponse.User, nil
 }

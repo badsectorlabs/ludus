@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"plugin"
@@ -30,6 +31,7 @@ type Server struct {
 	LicenseMessage   string
 	LicenseValid     bool
 	LicenseKey       string
+	Logger           *slog.Logger
 }
 
 func (s *Server) LoadPlugin(path string) error {

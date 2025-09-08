@@ -42,6 +42,14 @@ if [ "$HOSTNAME" == "m1" ]; then
     scp ludus-server lkdev2: && ssh lkdev2 "./ludus-server --update"
 fi
 
+if [ "$1" == "-d" ]; then
+    echo "[+] Setting LUDUS_DEBUG=1"
+    systemctl set-environment LUDUS_DEBUG=1
+else
+    echo "[-] Unsetting LUDUS_DEBUG"
+    systemctl unset-environment LUDUS_DEBUG
+fi
+
 ./ludus-server --update --no-dep-update
 
 echo

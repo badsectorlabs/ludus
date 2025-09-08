@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 )
 
@@ -15,6 +16,7 @@ var (
 	nodeName           string
 	autoGenerateConfig bool
 	noAnsibleUpdate    bool
+	debugFlag          bool
 )
 
 func init() {
@@ -25,6 +27,7 @@ func init() {
 	flag.BoolVar(&helpFlag, "h", false, "display help information")
 	flag.BoolVar(&helpFlag, "help", false, "display help information")
 	flag.BoolVar(&noAnsibleUpdate, "no-dep-update", false, "skip the dependency update check")
+	flag.BoolVar(&debugFlag, "debug", false, "enable debug mode (can also be set with the LUDUS_DEBUG environment variable)")
 	flag.Usage = printHelp
 }
 
@@ -46,6 +49,24 @@ func checkArgs() {
 		updateLudus()
 		os.Exit(0)
 	}
+
+	if os.Getenv("LUDUS_DEBUG") == "1" || os.Getenv("LUDUS_DEBUG") == "true" {
+		debugFlag = true
+	}
+
+	logLevel := slog.LevelInfo
+
+	if debugFlag {
+		logLevel = slog.LevelDebug
+	}
+	handler := NewPrettyHandler(os.Stderr, PrettyHandlerOptions{
+		SlogOpts: slog.HandlerOptions{
+			Level: logLevel,
+		},
+	})
+	logger = slog.New(handler)
+	slog.SetDefault(logger)
+	slog.Debug("Debug mode enabled via flag or environment variable")
 
 	interactiveInstall = !noPromptFlag
 	autoGenerateConfig = noPromptFlag

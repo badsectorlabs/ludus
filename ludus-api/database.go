@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 var (
@@ -27,8 +28,19 @@ func InitDb() *gorm.DB {
 			databaseURL = "postgres://postgres.your-tenant-id:your-super-secret-and-long-postgres-password@192.0.2.1:5432/postgres"
 		}
 
+		newLogger := gormlogger.New(
+			log.New(os.Stdout, "[DATABASE] ", log.LstdFlags),
+			gormlogger.Config{
+				SlowThreshold:             time.Second,
+				LogLevel:                  gormlogger.Warn,
+				IgnoreRecordNotFoundError: true,
+				Colorful:                  true,
+			},
+		)
+
 		db, err = gorm.Open(postgres.Open(databaseURL), &gorm.Config{
 			SkipDefaultTransaction: true,
+			Logger:                 newLogger,
 		})
 		if err != nil {
 			log.Fatalf("error opening db: %v", err)

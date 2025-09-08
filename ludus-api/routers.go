@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -31,6 +32,7 @@ type Routes []Route
 
 var server *Server
 var Router *gin.Engine
+var logger *slog.Logger
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
@@ -54,6 +56,18 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 	}
 	server = ludusServer
 	Router = router
+
+	// Transition from using log.Printf to using slog.Info, slog.Error, etc.
+	// Adopts the debug level from the main server logger
+	if server.Logger != nil {
+		logger = server.Logger
+		slog.SetDefault(server.Logger)
+	} else {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+		slog.SetDefault(logger)
+	}
 
 	return router
 }

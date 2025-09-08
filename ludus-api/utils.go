@@ -20,6 +20,7 @@ import (
 
 	"github.com/Telmate/proxmox-api-go/proxmox"
 	"github.com/gin-gonic/gin"
+	"github.com/goforj/godump"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -191,25 +192,32 @@ func GetRangeObject(c *gin.Context) (RangeObject, error) {
 	// Check if a specific range ID was provided in the query
 	rangeIDStr, hasRangeID := c.GetQuery("rangeID")
 	if hasRangeID {
+		logger.Debug(fmt.Sprintf("Getting range for: %s", rangeIDStr))
 		rangeNumber, err := GetRangeNumberFromRangeID(db, rangeIDStr)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
 			return usersRange, err
 		}
-
+		logger.Debug(fmt.Sprintf("Getting range access for range %s for user %s", rangeIDStr, userID))
 		// Verify user has access to this range, admins have access to all ranges
 		if !HasRangeAccess(db, userID, int32(rangeNumber)) && !isAdmin(c, false) {
+			logger.Debug(fmt.Sprintf("User %s does not have access to range %s and is not an admin", userID, rangeIDStr))
 			c.JSON(http.StatusForbidden, gin.H{"error": "User does not have access to this range"})
 			return usersRange, errors.New("access denied")
 		}
 
 		var rangeErr error
+		logger.Debug("Getting range object by number: " + strconv.Itoa(int(rangeNumber)))
 		usersRange, rangeErr = GetRangeObjectByNumber(db, int32(rangeNumber))
 		if rangeErr != nil {
+			logger.Debug(fmt.Sprintf("Range not found: %s", rangeErr.Error()))
 			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
 			return usersRange, rangeErr
 		}
+		logger.Debug(fmt.Sprintf("Range found: %d", rangeNumber))
+		logger.Debug(fmt.Sprintf("Range object: %+v", godump.DumpStr(usersRange)))
 	} else {
+		logger.Debug(fmt.Sprintf("Getting default range for user %s", userID))
 		// Get user's default range (first accessible range)
 		var defaultErr error
 		usersRange, defaultErr = GetUserDefaultRange(db, userID)
@@ -227,7 +235,7 @@ func GetRangeObject(c *gin.Context) (RangeObject, error) {
 
 // updates the VM and range data for a user extracted from the context
 func updateUsersRangeVMData(c *gin.Context) error {
-	usersRange, err := GetRangeObject(c)
+	targetRange, err := GetRangeObject(c)
 	if err != nil {
 		return errors.New("unable to get users range") // JSON error is set in getRangeObject
 	}
@@ -249,13 +257,14 @@ func updateUsersRangeVMData(c *gin.Context) error {
 	}
 
 	// Clear the DB of any previous VMs for this range
-	db.Where("range_number = ?", usersRange.RangeNumber).Delete(&VmObject{})
+	logger.Debug(fmt.Sprintf("Clearing VMs for range %s with range number %d", targetRange.RangeID, targetRange.RangeNumber))
+	db.Where("range_number = ?", targetRange.RangeNumber).Delete(&VmObject{})
 
 	var rangeVMCount = 0
 
 	// Get the router VM name for this range
 	routerVMName, err := GetRouterVMName(c)
-	fmt.Println("routerVMName", routerVMName)
+	logger.Debug("routerVMName is: " + routerVMName)
 	if err != nil {
 		// If we can't get the router name, continue without router identification
 		routerVMName = ""
@@ -263,7 +272,7 @@ func updateUsersRangeVMData(c *gin.Context) error {
 
 	// Loop over the VMs and add them to the DB
 	// Save the network for this user to compare IPs against
-	_, network, _ := net.ParseCIDR(fmt.Sprintf("10.%d.0.0/16", usersRange.RangeNumber))
+	_, network, _ := net.ParseCIDR(fmt.Sprintf("10.%d.0.0/16", targetRange.RangeNumber))
 	vms := rawVMs["data"].([]interface{})
 	for vmCounter := range vms {
 		vm := vms[vmCounter].(map[string]interface{})
@@ -299,8 +308,9 @@ func updateUsersRangeVMData(c *gin.Context) error {
 			thisVM.IP = GetIPForVMFromConfig(c, vm["name"].(string))
 		}
 
-		thisVM.RangeNumber = usersRange.RangeNumber
+		thisVM.RangeNumber = targetRange.RangeNumber
 		thisVM.Name = vm["name"].(string)
+		logger.Debug(fmt.Sprintf("Adding VM %s to range %s with range number %d", thisVM.Name, targetRange.RangeID, targetRange.RangeNumber))
 		if vm["status"].(string) == "running" {
 			thisVM.PoweredOn = true
 		} else {
@@ -314,7 +324,7 @@ func updateUsersRangeVMData(c *gin.Context) error {
 		rangeVMCount += 1
 	}
 
-	db.Model(&usersRange).Update("number_of_vms", rangeVMCount)
+	db.Model(&targetRange).Update("number_of_vms", rangeVMCount)
 
 	return nil
 }
@@ -351,13 +361,13 @@ func getUIDandGIDFromUsername(username string) (int, int, error) {
 
 	uid, err := strconv.Atoi(runnerUser.Uid)
 	if err != nil {
-		fmt.Printf("Failed to convert UID to integer: %s\n", err)
+		logger.Error("Failed to convert UID to integer: " + err.Error())
 		return 0, 0, fmt.Errorf("failed to convert UID to integer: %s", err)
 	}
 
 	gid, err := strconv.Atoi(runnerUser.Gid)
 	if err != nil {
-		fmt.Printf("Failed to convert GID to integer: %s\n", err)
+		logger.Error("Failed to convert GID to integer: " + err.Error())
 		return 0, 0, fmt.Errorf("failed to convert GID to integer: %s", err)
 	}
 
@@ -368,14 +378,14 @@ func getUIDandGIDFromUsername(username string) (int, int, error) {
 func chownFileToUsername(filePath string, username string) {
 	uid, gid, err := getUIDandGIDFromUsername(username)
 	if err != nil {
-		fmt.Printf("Failed to get UID and GID for user %s: %s\n", username, err)
+		logger.Error("Failed to get UID and GID for user " + username + ": " + err.Error())
 		return
 	}
 
 	// Change ownership of the file
 	err = os.Chown(filePath, uid, gid)
 	if err != nil {
-		fmt.Printf("Failed to change ownership of the file: %s\n", err)
+		logger.Error("Failed to change ownership of the file: " + err.Error())
 		return
 	}
 }
@@ -580,6 +590,14 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 	var usersRange RangeObject
 	var targetUser UserObject
 
+	// If we have already stored the range object and user object for this context, just return it
+	usersRangeFromContext, usersRangeExists := c.Get("rangeObject")
+	userObjectFromContext, userObjectFromContextExists := c.Get("userObject")
+	if usersRangeExists && userObjectFromContextExists {
+		logger.Debug("Returning cached range object and user object for context")
+		return usersRangeFromContext.(RangeObject), userObjectFromContext.(UserObject), nil // Type assert the "any" returned from c.Get to RangeObject/UserObject
+	}
+
 	// Get current user from query string or API key/JWT context
 	targetUser, err := GetUserObject(c)
 	if err != nil {
@@ -599,6 +617,7 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 	var rangeNumber int32 = -1
 
 	if hasRangeID {
+		logger.Debug(fmt.Sprintf("RangeID provided, looking up range for rangeID: %s", rangeIDStr))
 		// Look up the range number for the rangeID
 		var rangeObj RangeObject
 		db.First(&rangeObj, "range_id = ?", rangeIDStr)
@@ -606,6 +625,7 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeIDStr)})
 			return usersRange, targetUser, fmt.Errorf("range %s not found", rangeIDStr)
 		}
+		logger.Debug(fmt.Sprintf("Range found for rangeID: %s, range number: %d", rangeIDStr, rangeObj.RangeNumber))
 		rangeNumber = rangeObj.RangeNumber
 	}
 
@@ -644,6 +664,10 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 			return usersRange, targetUser, err
 		}
 	}
+
+	// Save the range object and user object to the context
+	c.Set("rangeObject", usersRange)
+	c.Set("userObject", targetUser)
 
 	return usersRange, targetUser, nil
 }
