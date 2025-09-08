@@ -197,8 +197,8 @@ func GetRangeObject(c *gin.Context) (RangeObject, error) {
 			return usersRange, err
 		}
 
-		// Verify user has access to this range
-		if !HasRangeAccess(db, userID, int32(rangeNumber)) {
+		// Verify user has access to this range, admins have access to all ranges
+		if !HasRangeAccess(db, userID, int32(rangeNumber)) && !isAdmin(c, false) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "User does not have access to this range"})
 			return usersRange, errors.New("access denied")
 		}
