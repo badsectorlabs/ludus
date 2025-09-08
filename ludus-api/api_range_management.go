@@ -283,7 +283,9 @@ func ListRange(c *gin.Context) {
 	}
 	// Get the updated range
 	var allVMs []VmObject
+	logger.Debug(fmt.Sprintf("ListRange: Listing range %s with range number %d", usersRange.RangeID, usersRange.RangeNumber))
 	db.Where("range_number = ?", usersRange.RangeNumber).Find(&allVMs)
+	// logger.Debug(fmt.Sprintf("allVMs: %+v", godump.DumpStr(allVMs)))
 	// the range we got back from getRangeObject is a cached object from the first lookup
 	// so update the values we care about for this ListRange call and return the updated
 	// object to the user

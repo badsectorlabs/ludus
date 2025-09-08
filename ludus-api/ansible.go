@@ -242,7 +242,7 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 	// Get the range number for the user
 	userRange, err := GetUserDefaultRange(db, targetUserId)
 	if err != nil {
-		fmt.Println("Error during access grant lookup: user_id not found when getting user for range", userRange.RangeNumber, "for 'userID'", targetUserId, err)
+		logger.Error("Error during access grant lookup: user_id not found when getting user for range", userRange.RangeNumber, "for 'userID'", targetUserId, err)
 	}
 
 	// Get direct user-to-range assignments
@@ -370,7 +370,7 @@ func checkRoleExists(c *gin.Context, roleName string) (bool, error) {
 		// Split the line into role name and version
 		parts := strings.SplitN(line[2:], ", ", 2)
 		if len(parts) != 2 {
-			fmt.Println("Invalid line format:", line)
+			logger.Error("Invalid line format:", line)
 			continue
 		}
 

@@ -8,6 +8,7 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -22,6 +23,7 @@ var GitCommitHash string
 var VersionString string
 var LudusVersion string = VersionString + "+" + GitCommitHash
 var existingProxmox bool
+var logger *slog.Logger
 
 // Embed the ansible directory into the binary for simple distribution
 //
@@ -40,13 +42,14 @@ func serve() {
 		Version:          LudusVersion,
 		VersionString:    VersionString,
 		LudusInstallPath: ludusInstallPath,
+		Logger:           logger,
 	}
 
 	// Setup Gin router
 	router := ludusapi.NewRouter(LudusVersion, server)
 
 	if server.LicenseType == "community" {
-		fmt.Println("LICENSE: Community Edition")
+		logger.Info("LICENSE: Community Edition")
 	}
 
 	// Load plugins
@@ -61,7 +64,7 @@ func serve() {
 	if info, err := os.Stat(pluginsDir); err == nil && info.IsDir() {
 		entries, err := os.ReadDir(pluginsDir)
 		if err != nil {
-			log.Printf("Error reading plugins directory: %v", err)
+			logger.Error("Error reading plugins directory: %v", err)
 		}
 
 		for _, entry := range entries {

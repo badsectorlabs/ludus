@@ -66,7 +66,7 @@ func GetRolesAndCollections(c *gin.Context) {
 		// Split the line into role name and version
 		parts := strings.SplitN(line[2:], ", ", 2)
 		if len(parts) != 2 {
-			fmt.Println("Invalid line format:", line)
+			logger.Error("Invalid line format:", line)
 			continue
 		}
 
@@ -84,7 +84,7 @@ func GetRolesAndCollections(c *gin.Context) {
 
 	// Check for errors during scanning
 	if err := scanner.Err(); err != nil {
-		fmt.Println("Error reading input:", err)
+		logger.Error("Error reading input:", err)
 	}
 
 	// Collections

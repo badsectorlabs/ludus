@@ -4,16 +4,17 @@
 # It assumes you are on a macOS or Linux host and have root SSH access to the target machine
 
 # Parse command line arguments
-while getopts "hlat:n:c" opt; do
+while getopts "hlat:n:cd" opt; do
   case $opt in
     h)
       echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c]"
       echo "  -h  Show this help message"
-      echo "  -l  Show Ludus service logs (default 100 lines)" 
+      echo "  -l  Show Ludus service logs (default 100 lines)"
       echo "  -a  Show Ludus admin service logs (requires -l)"
       echo "  -t  Target development hostname (default: lkdev2)"
       echo "  -n  Number of log lines to show (default 100)"
-      echo "  -c  Build and install client locally"      
+      echo "  -c  Build and install client locally"
+      echo "  -d  Build and install debug mode"
       exit 0
       ;;
     l)
@@ -30,6 +31,9 @@ while getopts "hlat:n:c" opt; do
       ;;
     c)
       BUILD_CLIENT=true
+      ;;
+    d)
+      DEBUG_MODE=true
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -74,8 +78,14 @@ if [ -d "./ludus-antisandbox-plugin" ]; then
     ssh "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-antisandbox-plugin && ./dev.sh"
 fi
 
-# SSH into the target machine and build the ludus server binary
-ssh "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh"
+# SSH into the target machine and build the ludus server binary\
+if [ "$DEBUG_MODE" = true ]; then
+    echo "[+] Building ludus server with LUDUS_DEBUG=1"
+    ssh "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh -d"
+else
+    echo "[-] Building ludus server with LUDUS_DEBUG=0"
+    ssh "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh"
+fi
 
 # Build the client locally if requested
 if [ "$BUILD_CLIENT" = true ]; then

@@ -19,7 +19,7 @@ func findAnsiblePidForUser(username string) (string, error) {
 			// egrep failed, no ansible running
 			return "", errors.New("no ansible processes are running")
 		}
-		fmt.Println("Error executing command: ", err)
+		logger.Error("Error executing command: ", err)
 		return "", err
 	}
 
@@ -34,14 +34,14 @@ func findAnsiblePidForUser(username string) (string, error) {
 				// Get the environment variables for the process
 				envOut, err := exec.Command("bash", "-c", fmt.Sprintf("cat /proc/%s/environ", pid)).Output()
 				if err != nil {
-					fmt.Printf("Error executing command: cat /proc/%s/environ: %v\n", pid, err)
+					logger.Error("Error executing command: cat /proc/%s/environ: %v\n", pid, err)
 					continue
 				}
 
 				envVars := strings.Split(string(envOut), "\\0")
 				for _, envVar := range envVars {
 					if strings.Contains(envVar, fmt.Sprintf("%s@pam", username)) {
-						fmt.Printf("Process %s has '%s@pam' in its environment variables\n", pid, username)
+						logger.Error("Process %s has '%s@pam' in its environment variables\n", pid, username)
 						return pid, nil
 					}
 				}
