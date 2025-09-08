@@ -16,7 +16,7 @@ Going more than 1 layer deep of nested virtualization is not supported.
 To set up a CI/CD runner for Ludus development you must meet the following requirements:
 
 1. A functional, fast, Ludus server with at least 32GB of free RAM, 250GB of free disk space, and 8 cores available (can over-provision cores if necessary)
-2. The `debian-12-x64-server-template` must be built
+2. The `debian-13-x64-server-template` must be built
 3. Root access to the Ludus server
 4. A Gitlab account with the ability to create a runner token (gitlab.com or self-hosted)
 5. Network access from the Ludus server to the Gitlab instance/gitlab.com
@@ -78,3 +78,76 @@ The available tags are listed below:
 
 Any time a version tag is created in Gitlab, two additional CI jobs are added to the pipeline: `upload` and `release`.
 These jobs are manually triggered (you must click the play button in the pipeline) and upload the compiled binaries to the package registry as well as create the actual release. If you use [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/) (perhaps created with [koji](https://github.com/its-danny/koji)), then [git-cliff](https://github.com/orhun/git-cliff) will automatically generate a change log for the release.
+
+## Manual CI VM Setup
+
+Run these commands on a Debian 13 VM, then power it off and save it as a template
+
+```
+hostname ludus-ci-debian-13
+
+# Resize the disk by hand if needed (should be ~250GB)
+fdisk /dev/vda1
+p
+d
+n
+1
+2048
+[End]
+N
+w
+
+resize2fs /dev/vda1
+
+# Install Go
+apt install curl wget ca-certificates
+wget https://go.dev/dl/go1.25.1.linux-amd64.tar.gz
+rm -rf /usr/local/go && tar -C /usr/local -xzf go1.25.1.linux-amd64.tar.gz
+# This is required since gitlab-runner ignores .bashrc
+echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
+
+
+# Add the gitlab-runner user and allow them to sudo
+useradd -m -s /bin/bash -c "Gitlab Runner" gitlab-runner 
+# This breaks gitlab-runner, remove it
+rm /home/gitlab-runner/.bash_logout
+echo 'gitlab-runner ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+
+# Install needed components
+curl -L 'https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh' | bash
+curl -s 'https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh' | bash
+apt install gitlab-runner git git-lfs build-essential vim tmux htop jq python3-debian
+
+# Install node/yarn for documentation building
+curl -fsSL https://deb.nodesource.com/setup_21.x | bash - && apt-get install -y nodejs
+npm install --global yarn
+
+# Helpful to auto-load the key on login for troubleshooting
+echo 'if [ -f /opt/ludus/ci/.apikey-admin ]; then export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin); fi' >> /home/gitlab-runner/.bashrc
+echo 'if [ -f /opt/ludus/ci/.apikey-user ]; then export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user); fi' >> /home/gitlab-runner/.bashrc
+
+# Warm the caches
+su gitlab-runner -
+cd /tmp
+git clone https://gitlab.com/badsectorlabs/ludus
+
+cd ludus/ludus-server
+GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w"
+
+cd ../ludus-client
+git clone https://github.com/zimeg/spinner
+cd spinner && git checkout unhide-interrupts && cd .. && go mod edit -replace github.com/briandowns/spinner=./spinner
+GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w"
+GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w"
+GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w"
+GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w"
+# The forked spinner library doesn't compile for windows, so switch back to the original
+go mod edit -dropreplace=github.com/briandowns/spinner
+GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w"
+GOOS=windows GOARCH=386 go build -trimpath -ldflags "-s -w"
+GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w"
+
+cd ../docs
+yarn install
+yarn build
+```

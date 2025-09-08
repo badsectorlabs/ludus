@@ -106,7 +106,6 @@
 
     - name: Enable new ludus NAT interface
       ansible.builtin.shell: ADDRFAM=inet ifup {{ ludus_nat_interface }}
-      when: interfaces_status is changed
 
 - name: Configure Proxmox Stage 2
   hosts: localhost

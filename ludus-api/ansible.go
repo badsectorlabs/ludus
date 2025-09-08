@@ -115,6 +115,12 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	// defer is last in, first out, so this will close the file and then chown it
 	defer ansibleLogFile.Close()
 
+	// If this is an access grant or revoke, we need to set the LUDUS_RETURN_ALL_RANGES environment variable to true so ansible can modify the target router
+	returnAllRanges := false
+	if slices.Contains(playbookPathArray, fmt.Sprintf("%s/ansible/range-management/range-access.yml", ludusInstallPath)) {
+		returnAllRanges = true
+	}
+
 	execute := execute.NewDefaultExecute(
 		// Use a multiwrtier that saves the output to a buffer and a file
 		execute.WithWrite(io.MultiWriter(buff, ansibleLogFile)),
@@ -138,6 +144,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 		execute.WithEnvVar("LUDUS_RANGE_NUMBER", strconv.Itoa(int(usersRange.RangeNumber))),
 		execute.WithEnvVar("LUDUS_RANGE_ID", usersRange.UserID),
 		execute.WithEnvVar("LUDUS_USER_IS_ADMIN", strconv.FormatBool(user.IsAdmin)),
+		execute.WithEnvVar("LUDUS_RETURN_ALL_RANGES", strconv.FormatBool(returnAllRanges)),
 	)
 
 	playbook := &playbook.AnsiblePlaybookCmd{
