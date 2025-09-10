@@ -102,9 +102,13 @@ func (s *Server) checkLicense() {
 	if license.Expiry != nil {
 		log.Printf("LICENSE: active, expires: %s, licensed to %s\n", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
 		s.LicenseMessage = fmt.Sprintf("License active, expires: %s, licensed to %s", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
+		s.LicenseName = license.Name
+		s.LicenseExpiry = license.Expiry
 	} else {
 		log.Println("LICENSE: active, does not expire, licensed to", license.Name)
 		s.LicenseMessage = fmt.Sprintf("License active, does not expire, licensed to %s", license.Name)
+		s.LicenseName = license.Name
+		s.LicenseExpiry = nil
 	}
 	s.LicenseValid = true
 
