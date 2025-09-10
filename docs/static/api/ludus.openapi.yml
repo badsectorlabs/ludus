@@ -3348,6 +3348,35 @@ components:
           example: true
           description: Include RAM in the snapshot. If false, the VM will be powered off
             when restored to this snapshot.
+    LicenseData:
+      type: object
+      properties:
+        edition:
+          type: string
+          example: enterprise
+          description: The type of license the Ludus server is using
+          enum:
+            - enterprise
+            - professional
+            - community
+        licensed_to:
+          type: string
+          example: John Doe
+          description: The name of the person or organization the license is licensed to
+        expires_at:
+          type: string
+          format: date-time
+          example: 2022-08-29T09:12:33.001Z
+          description: The date and time the license expires
+        active:
+          type: boolean
+          example: true
+          description: Whether the license is active
+        message:
+          type: string
+          example: "License active, expires: 2022-08-29 14:12:33, licensed to John Doe"
+          description: The message associated with the license
+
 servers:
   - description: Public DNS that resolves to 198.51.100.1
     url: https://my.ludus.cloud:8080

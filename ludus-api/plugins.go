@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"plugin"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,6 +32,8 @@ type Server struct {
 	LicenseMessage   string
 	LicenseValid     bool
 	LicenseKey       string
+	LicenseName      string
+	LicenseExpiry    *time.Time
 	Logger           *slog.Logger
 }
 

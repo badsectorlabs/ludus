@@ -214,6 +214,13 @@ var routes = Routes{
 	},
 
 	{
+		"GetLicense",
+		http.MethodGet,
+		"/license",
+		GetLicense,
+	},
+
+	{
 		"AbortAnsible",
 		http.MethodPost,
 		"/range/abort",
