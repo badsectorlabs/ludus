@@ -7,6 +7,8 @@ User=root
 ExecStart={{ ludus_install_path }}/ludus-server
 Restart=always
 RestartSec=10
+RestartMaxDelaySec=1m
+RestartSteps=10
 
 [Install]
 WantedBy=multi-user.target
