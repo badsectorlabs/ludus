@@ -64,6 +64,24 @@ paths:
                   result:
                     type: string
                     example: Ludus Server v1.0.0+abc123a
+
+  /license:
+    get:
+      tags:
+        - Host Management
+      summary: Retrieve the ludus license
+      operationId: getLicense
+      description: |
+        Returns the ludus license
+      responses:
+        "200":
+          description: License Object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LicenseDataObject"
+
+
   /ansible:
     get:
       tags:
@@ -3348,7 +3366,7 @@ components:
           example: true
           description: Include RAM in the snapshot. If false, the VM will be powered off
             when restored to this snapshot.
-    LicenseData:
+    LicenseDataObject:
       type: object
       properties:
         edition:
