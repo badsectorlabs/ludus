@@ -1,10 +1,9 @@
 # Required vars:
-# target_username - username to be modified, required to get router VM details
 # target_range_id - range ID to be modified, required to get router VM details
 # target_range_second_octet - range to grant/revoke access to
-# source_range_second_octet - user getting or losing access
+# user_number - user getting or losing access
 # source_username - user getting or losing access
-# source_range_id - needed to create WG file path
+# source_user_id - needed to create WG file path
 
 # Tags:
 # grant - grant user access to a range
@@ -24,7 +23,7 @@
     - name: Set facts
       ansible.builtin.set_fact:
         action_ip_range: "10.{{ target_range_second_octet }}.0.0/16"
-        wg_conf_file: "{{ ludus_users_dir }}/{{ source_username }}/{{ source_range_id }}_client.conf"
+        wg_conf_file: "{{ ludus_users_dir }}/{{ source_username }}/{{ source_user_id }}_client.conf"
 
     - name: Read wg.conf file
       ansible.builtin.slurp:
@@ -37,7 +36,7 @@
 
     - name: Get range config for range being actioned
       ansible.builtin.slurp:
-        src: "{{ ludus_users_dir }}/{{ target_username }}/range-config.yml"
+        src: "{{ ludus_ranges_dir }}/{{ target_range_id }}/range-config.yml"
       register: range_config_contents
 
     - name: Get the VM name of the router from the target range config
@@ -60,7 +59,7 @@
 
     - name: Get the interface with a 192.0.2.x ip (WAN)
       ansible.builtin.shell: |
-        curl -s -k -b PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
+        curl -s -k -b -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
       register: wan_interface_command
       failed_when: wan_interface_command.rc != 0 and "grant" not in ansible_run_tags
 
@@ -71,7 +70,7 @@
 
     - name: Validate router host pattern will match a host
       ansible.builtin.fail:
-        msg: "Router host pattern '{{ router_vm_name_to_action }}' will not match any hosts. This usually means the router VM name is incorrect."
+        msg: "Target router is not up. Router host pattern '{{ router_vm_name_to_action }}' will not match any hosts. This usually means the router VM name is incorrect."
       when: router_vm_name_to_action not in groups['all'] and router_vm_name_to_action not in groups['ungrouped']
 
 # ==========================================================
@@ -98,7 +97,7 @@
     - name: Fail if the target router is not up
       ansible.builtin.fail:
         msg: "Target router is not up - Warn the user"
-      when: router_external_interface is not defined
+      when: router_external_interface is not defined or router_external_interface == ""
 
 - name: Router grant task
   tags: [grant]
@@ -117,7 +116,7 @@
     - name: Modify router firewall to allow new user's WireGuard IP
       ansible.builtin.iptables:
         chain: LUDUS_DEFAULTS
-        source: "198.51.100.{{ source_range_second_octet }}"
+        source: "198.51.100.{{ user_number }}"
         in_interface: "{{ hostvars['localhost']['router_external_interface'] }}"
         protocol: all
         jump: ACCEPT
@@ -135,7 +134,7 @@
 # ==========================================================
 # Revoke
 # ==========================================================
-- name: Ludus host grant tasks
+- name: Ludus host revoke tasks
   tags: [revoke]
   hosts: localhost
   gather_facts: false
@@ -160,6 +159,15 @@
         msg: "{{ action_ip_range }} is not present in {{ wg_conf_file }}"
       when: not action_ip_range_present
 
+    - name: Fail if the target router is not up
+      ansible.builtin.fail:
+        msg: "Target router is not up - Warn the user"
+      when: router_external_interface is not defined or router_external_interface == ""
+
+    - name: Debug the router_external_interface variable
+      ansible.builtin.debug:
+        msg: "{{ router_external_interface }}"
+
 - name: Router revoke task
   tags: [revoke]
   hosts: "{{ hostvars['localhost']['router_vm_name_to_action'] }}"
@@ -167,7 +175,7 @@
     - name: Modify router firewall to allow new user's WireGuard IP
       ansible.builtin.iptables:
         chain: LUDUS_DEFAULTS
-        source: "198.51.100.{{ source_range_second_octet }}"
+        source: "198.51.100.{{ user_number }}"
         in_interface: "{{ hostvars['localhost']['router_external_interface'] }}"
         protocol: all
         jump: ACCEPT

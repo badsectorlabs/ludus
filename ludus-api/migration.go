@@ -29,10 +29,10 @@ func MigrateFromSQLite() error {
 		return fmt.Errorf("error checking user count: %v", err)
 	}
 
-	// if userCount > 1 {
-	// 	log.Println("PostgreSQL database has more than ROOT user, skipping migration")
-	// 	return nil
-	// }
+	if userCount > 1 {
+		log.Println("PostgreSQL database has more than ROOT user, skipping migration")
+		return nil
+	}
 
 	log.Println("Starting migration from SQLite to PostgreSQL...")
 
@@ -79,9 +79,23 @@ func MigrateFromSQLite() error {
 			continue // Skip ROOT user as it already exists in PostgreSQL
 		}
 
+		// Look up the range that has the user_id of the user
+		var rangeObj RangeObject
+		if err := sqliteDB.Table("range_objects").Where("user_id = ?", sqliteUser.UserID).First(&rangeObj).Error; err != nil {
+			log.Printf("Error looking up range for user %s: %v", sqliteUser.UserID, err)
+			continue
+		}
+
 		// Check if user already exists in PostgreSQL
 		var existingUser UserObject
 		if err := tx.Where("user_id = ?", sqliteUser.UserID).First(&existingUser).Error; err == nil {
+
+			// if the user doesn't have a user number, set it to the range number
+			if existingUser.UserNumber == 0 {
+				existingUser.UserNumber = rangeObj.RangeNumber
+				tx.Save(&existingUser)
+			}
+
 			log.Printf("User %s already exists in PostgreSQL, skipping", sqliteUser.UserID)
 			continue
 		}
@@ -90,6 +104,7 @@ func MigrateFromSQLite() error {
 		user := UserObject{
 			Name:                  sqliteUser.Name,
 			UserID:                sqliteUser.UserID,
+			UserNumber:            rangeObj.RangeNumber, // The user only has one range, so their "range number" becomes their user number
 			DateCreated:           sqliteUser.DateCreated,
 			DateLastActive:        sqliteUser.DateLastActive,
 			IsAdmin:               sqliteUser.IsAdmin,

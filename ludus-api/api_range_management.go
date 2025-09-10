@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/goforj/godump"
 	"gorm.io/gorm"
 )
 
@@ -307,9 +308,9 @@ func ListAllRanges(c *gin.Context) {
 		accessibleRanges := GetUserAccessibleRanges(db, userID)
 
 		// Get range details for each accessible range
-		for _, rangeNumber := range accessibleRanges {
+		for _, accessibleRange := range accessibleRanges {
 			var rangeObj RangeObject
-			if err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error; err == nil {
+			if err := db.Where("range_number = ?", accessibleRange.RangeNumber).First(&rangeObj).Error; err == nil {
 				ranges = append(ranges, rangeObj)
 			}
 		}
@@ -775,108 +776,146 @@ func CreateRange(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"result": rangeObj})
 }
 
-// AssignRangeToUser directly assigns a range to a user (admin only)
-func AssignRangeToUser(c *gin.Context) {
+func AssignOrRevokeRangeAccess(c *gin.Context, actionVerb string, force bool) {
 	if !isAdmin(c, true) {
 		return
 	}
 
-	rangeNumberStr := c.Param("rangeNumber")
-	rangeNumber, err := strconv.ParseInt(rangeNumberStr, 10, 32)
+	rangeID := c.Param("rangeID")
+	rangeNumber, err := GetRangeNumberFromRangeID(db, rangeID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range number"})
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeID)})
 		return
 	}
 
 	userID := c.Param("userID")
 	if userID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
-		return
-	}
-
-	// Check if range exists
-	var rangeObj RangeObject
-	if err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding range: %v", err)})
-		}
-		return
-	}
-
-	// Check if user exists
-	var user UserObject
-	if err := db.First(&user, "user_id = ?", userID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding user: %v", err)})
-		}
 		return
 	}
 
 	// Check if user already has access to this range
-	if HasRangeAccess(db, userID, int32(rangeNumber)) {
-		c.JSON(http.StatusConflict, gin.H{"error": "User already has access to this range"})
+	if actionVerb == "grant" && HasRangeAccess(db, userID, rangeNumber) {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("User %s already has access to range %s", userID, rangeID)})
 		return
 	}
 
-	// Create direct access record
-	userRangeAccess := UserRangeAccess{
-		UserID:      userID,
-		RangeNumber: int32(rangeNumber),
-	}
-
-	if err := db.Create(&userRangeAccess).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error assigning range to user: %v", err)})
+	if actionVerb == "revoke" && !HasRangeAccess(db, userID, rangeNumber) {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("User %s does not have access to range %s", userID, rangeID)})
 		return
 	}
 
-	// Update the user's WireGuard config to reflect the new range access
-	go func(c *gin.Context) {
-		_, err = RunPlaybookWithTag(c, "range-access.yml", "grant", false)
+	// Get the target range object
+	targetRange, err := GetRangeObjectByNumber(db, rangeNumber)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting range object: %v", err)})
+		return
+	}
+
+	// Get the source user object by looking up the user ID in the database
+	var sourceUserObject UserObject
+	if err := db.First(&sourceUserObject, "user_id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting user object: %v", err)})
+		return
+	}
+
+	extraVars := map[string]interface{}{
+		"target_range_id":           targetRange.RangeID,
+		"target_range_second_octet": targetRange.RangeNumber,
+		"source_username":           sourceUserObject.ProxmoxUsername,
+		"source_user_id":            sourceUserObject.UserID,
+		"user_number":               sourceUserObject.UserNumber,
+	}
+	logger.Debug(godump.DumpStr(extraVars))
+	output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, actionVerb, false, "")
+	if err != nil {
+		if strings.Contains(output, "Target router is not up") && actionVerb == "grant" {
+			c.JSON(http.StatusOK, gin.H{"result": `WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!
+The target range router VM is inaccessible!
+If the target range router is deployed, no firewall changes have taken place.
+If the VM is not deployed yet, the rule will be added when it is deployed and you can ignore this.
+WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`})
+		} else if strings.Contains(output, "Target router is not up") && actionVerb == "revoke" && !force {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "The target range router is inaccessible. To revoke access, the target range router must be up and accessible. Use --force to override this protection."})
+			return
+		} else if strings.Contains(output, "Target router is not up") && actionVerb == "revoke" && force {
+			// pass
+		} else { // Some other error we want to fail on
+			c.JSON(http.StatusInternalServerError, gin.H{"error": output})
+			return
+		}
+	}
+
+	if actionVerb == "grant" {
+
+		userRangeAccess := UserRangeAccess{
+			UserID:      sourceUserObject.UserID,
+			RangeNumber: targetRange.RangeNumber,
+		}
+
+		if err := db.Create(&userRangeAccess).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error assigning range to user: %v", err)})
+			return
+		}
+
+		// Give the user access to the proxmox pool for the range
+		err = giveUserAccessToPool(sourceUserObject.ProxmoxUsername, "pam", targetRange.RangeID)
+		if err != nil {
+			db.Delete(&userRangeAccess)
+			server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, "revoke", false, "")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusCreated, gin.H{"result": "Range assigned to user successfully"})
+
+	} else if actionVerb == "revoke" {
+
+		// Check if the user has direct access to the range
+		var userRangeAccess UserRangeAccess
+		if err := db.Where("user_id = ? AND range_number = ?", sourceUserObject.UserID, targetRange.RangeNumber).First(&userRangeAccess).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s does not have DIRECT access to range %s, the access may be via a group", sourceUserObject.UserID, targetRange.RangeID)})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting user range access: %v", err)})
+			return
+		}
+
+		err := removeUserAccessFromPool(sourceUserObject.ProxmoxUsername, "pam", targetRange.RangeID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-	}(c)
 
-	c.JSON(http.StatusCreated, gin.H{"result": "Range assigned to user successfully"})
+		// Delete the direct access record
+		db.Delete(&userRangeAccess)
+
+		c.JSON(http.StatusOK, gin.H{"result": "Range access revoked from user successfully"})
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid action verb"})
+		return
+	}
+}
+
+// AssignRangeToUser directly assigns a range to a user (admin only)
+func AssignRangeToUser(c *gin.Context) {
+	AssignOrRevokeRangeAccess(c, "grant", false)
 }
 
 // RevokeRangeFromUser revokes direct range access from a user (admin only)
 func RevokeRangeFromUser(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+	forceStr := c.Query("force")
+	force := false
+	var err error
+	if forceStr != "" {
+		force, err = strconv.ParseBool(forceStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid force parameter"})
+			return
+		}
 	}
-
-	rangeNumberStr := c.Param("rangeNumber")
-	rangeNumber, err := strconv.ParseInt(rangeNumberStr, 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range number"})
-		return
-	}
-
-	userID := c.Param("userID")
-	if userID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
-		return
-	}
-
-	// Remove direct access record
-	result := db.Where("user_id = ? AND range_number = ?", userID, rangeNumber).Delete(&UserRangeAccess{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error revoking range access: %v", result.Error)})
-		return
-	}
-
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User does not have direct access to this range"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"result": "Range access revoked from user successfully"})
+	AssignOrRevokeRangeAccess(c, "revoke", force)
 }
 
 // ListRangeUsers lists all users with access to a range (admin only)
@@ -885,26 +924,26 @@ func ListRangeUsers(c *gin.Context) {
 		return
 	}
 
-	rangeNumberStr := c.Param("rangeNumber")
-	rangeNumber, err := strconv.ParseInt(rangeNumberStr, 10, 32)
+	rangeID := c.Param("rangeID")
+	rangeNumber, err := GetRangeNumberFromRangeID(db, rangeID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range number"})
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeID)})
 		return
 	}
 
 	// Check if range exists
 	var rangeObj RangeObject
-	if err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error; err != nil {
+	if err := db.Where("range_id = ?", rangeID).First(&rangeObj).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeID)})
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding range: %v", err)})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding range %s: %v", rangeID, err)})
 		}
 		return
 	}
 
 	// Get all users with access to this range
-	accessibleUsers := GetRangeAccessibleUsers(db, int32(rangeNumber))
+	accessibleUsers := GetRangeAccessibleUsers(db, rangeNumber)
 
 	// Get user details for each accessible user
 	var users []UserObject
@@ -928,14 +967,5 @@ func ListUserAccessibleRanges(c *gin.Context) {
 	// Get all ranges the user can access
 	accessibleRanges := GetUserAccessibleRanges(db, userID)
 
-	// Get range details for each accessible range
-	var ranges []RangeObject
-	for _, rangeNumber := range accessibleRanges {
-		var rangeObj RangeObject
-		if err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error; err == nil {
-			ranges = append(ranges, rangeObj)
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"result": ranges})
+	c.JSON(http.StatusOK, gin.H{"result": accessibleRanges})
 }

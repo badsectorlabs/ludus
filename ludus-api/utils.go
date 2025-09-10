@@ -442,14 +442,30 @@ func HasRangeAccess(db *gorm.DB, userID string, rangeNumber int32) bool {
 	return err == nil && count > 0
 }
 
+type RangesAccessibleByUser struct {
+	RangeNumber int32  `json:"rangeNumber"`
+	RangeID     string `json:"rangeID"`
+	AccessType  string `json:"accessType"`
+}
+
 // GetUserAccessibleRanges returns all range numbers a user can access
-func GetUserAccessibleRanges(db *gorm.DB, userID string) []int32 {
+func GetUserAccessibleRanges(db *gorm.DB, userID string) []RangesAccessibleByUser {
 	var rangeNumbers []int32
 
 	// Get direct range assignments
 	db.Model(&UserRangeAccess{}).
 		Where("user_id = ?", userID).
 		Pluck("range_number", &rangeNumbers)
+
+	var result []RangesAccessibleByUser
+	for _, num := range rangeNumbers {
+		var rangeObj RangeObject
+		if err := db.Where("range_number = ?", num).First(&rangeObj).Error; err == nil {
+			result = append(result, RangesAccessibleByUser{RangeNumber: num, RangeID: rangeObj.RangeID, AccessType: "direct"})
+		} else {
+			result = append(result, RangesAccessibleByUser{RangeNumber: num, RangeID: "ERROR", AccessType: "direct"})
+		}
+	}
 
 	// Get group-based range access
 	var groupRangeNumbers []int32
@@ -458,22 +474,19 @@ func GetUserAccessibleRanges(db *gorm.DB, userID string) []int32 {
 		Where("user_group_memberships.user_id = ?", userID).
 		Pluck("group_range_accesses.range_number", &groupRangeNumbers)
 
-	// Combine and deduplicate
-	rangeMap := make(map[int32]bool)
-	for _, num := range rangeNumbers {
-		rangeMap[num] = true
-	}
 	for _, num := range groupRangeNumbers {
-		rangeMap[num] = true
-	}
-
-	result := make([]int32, 0, len(rangeMap))
-	for num := range rangeMap {
-		result = append(result, num)
+		var rangeObj RangeObject
+		if err := db.Where("range_number = ?", num).First(&rangeObj).Error; err == nil {
+			result = append(result, RangesAccessibleByUser{RangeNumber: num, RangeID: rangeObj.RangeID, AccessType: "group"})
+		} else {
+			result = append(result, RangesAccessibleByUser{RangeNumber: num, RangeID: "ERROR", AccessType: "group"})
+		}
 	}
 
 	// Sort the result to ensure consistent ordering
-	slices.Sort(result)
+	slices.SortFunc(result, func(a, b RangesAccessibleByUser) int {
+		return int(a.RangeNumber - b.RangeNumber)
+	})
 
 	return result
 }
@@ -572,7 +585,7 @@ func GetUserDefaultRange(db *gorm.DB, userID string) (RangeObject, error) {
 		return rangeObj, gorm.ErrRecordNotFound
 	}
 
-	err = db.Where("range_number = ?", accessibleRanges[0]).First(&rangeObj).Error
+	err = db.Where("range_number = ?", accessibleRanges[0].RangeNumber).First(&rangeObj).Error
 	return rangeObj, err
 }
 

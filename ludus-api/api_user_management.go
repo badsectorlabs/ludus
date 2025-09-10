@@ -99,7 +99,7 @@ func AddUser(c *gin.Context) {
 				return
 			}
 
-			// Get the created range to check range number limits
+			// Get the created range
 			var usersRange RangeObject
 			usersRange, err = GetUserDefaultRange(db, user.UserID)
 			if err != nil {
@@ -107,8 +107,11 @@ func AddUser(c *gin.Context) {
 				return
 			}
 
+			// Get the next available user number
+			user.UserNumber = findNextAvailableUserNumber(db)
+
 			// Refuse to create more than 150 users
-			if usersRange.RangeNumber > 150 {
+			if user.UserNumber > 150 {
 				// Remove the user range access and range from the database
 				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
 				db.Where("range_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
@@ -120,7 +123,7 @@ func AddUser(c *gin.Context) {
 			extraVars := map[string]interface{}{
 				"username":            user.ProxmoxUsername,
 				"user_range_id":       user.UserID,
-				"second_octet":        usersRange.RangeNumber,
+				"user_number":         user.UserNumber,
 				"proxmox_public_ip":   ServerConfiguration.ProxmoxPublicIP,
 				"user_is_admin":       user.IsAdmin,
 				"portforward_enabled": user.PortforwardingEnabled,

@@ -51,6 +51,8 @@ type UserObject struct {
 	// Must be a unique 2-20 letter uppercase string. Initials are commonly used.
 	UserID string `json:"userID" gorm:"primaryKey"`
 
+	UserNumber int32 `json:"userNumber" gorm:"unique"`
+
 	UUID uuid.UUID `json:"uuid"`
 
 	DateCreated time.Time `gorm:"autoCreateTime" json:"dateCreated"`

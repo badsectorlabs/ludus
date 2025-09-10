@@ -157,3 +157,33 @@ func findNextAvailableRangeNumber(db *gorm.DB, reservedRangeNumbers []int32) int
 		}
 	}
 }
+
+// findNextAvailableUserNumber finds the smallest positive integer that is not
+// present in the UserNumber column of the UserObject table. This function
+// assumes that the UserNumber values are positive integers and that there can
+// be gaps or non-sequential values in the column.
+//
+// The function takes a *gorm.DB as an argument, which should be a valid GORM
+// database connection.
+//
+// Returns:
+//
+//	int32 - The smallest positive integer that is not present in the
+//	        UserNumber column of the UserObject table.
+func findNextAvailableUserNumber(db *gorm.DB) int32 {
+	var userNumbers []int32
+	db.Model(&UserObject{}).Select("user_number").Order("user_number").Scan(&userNumbers)
+
+	for i := int32(1); ; i++ {
+		found := false
+		for _, num := range userNumbers {
+			if num == i {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return i
+		}
+	}
+}
