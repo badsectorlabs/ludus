@@ -22,24 +22,11 @@
         state: directory
         mode: '0770'
 
-    - name: Create ansible directory for this user
-      ansible.builtin.file:
-        path: "{{ ludus_users_dir }}/{{ username }}/ansible"
-        state: directory
-        mode: '0770'
-
     - name: Create .ansible directory for this user
       ansible.builtin.file:
         path: "{{ ludus_users_dir }}/{{ username }}/.ansible"
         state: directory
         mode: '0770'
-
-    - name: Create ansible log for this user
-      ansible.builtin.copy:
-        dest: "{{ ludus_users_dir }}/{{ username }}/ansible.log"
-        mode: '0660'
-        content: |
-          This user has never deployed a range.
 
     - name: Create a pool for this user (range_id)
       ansible.builtin.shell: |

@@ -92,14 +92,14 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 
 	// Open a file for saving the ansible log, TRUNC will overwrite
 	// TODO, figure out a way to keep the last 10(?) logs?
-	ansibleLogFile, err := os.OpenFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0660)
+	ansibleLogFile, err := os.OpenFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0660)
 	if err != nil {
 		return "Failed to open ansible log file", errors.New("failed to open ansible log file")
 	}
 	// If we are running as root, chown this log file to ludus:ludus to prevent potential issues when running future commands as a regular user
 	defer func() {
 		if os.Geteuid() != 0 {
-			changeFileOwner(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "ludus")
+			changeFileOwner(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID), "ludus")
 		}
 	}()
 	// defer is last in, first out, so this will close the file and then chown it
@@ -153,7 +153,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	}
 
 	// Check for a user-defined-roles playbook (included in ludus) and create a placeholder if it doesn't exist
-	userDefinedRolePath := fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername)
+	userDefinedRolePath := fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, usersRange.RangeID)
 	if !FileExists(userDefinedRolePath) {
 		logToFile(userDefinedRolePath,
 			`- name: Run debug task on localhost
@@ -240,20 +240,20 @@ type AccessGrantStruct struct {
 func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 	var returnArray []AccessGrantStruct
 
-	// Get the range number for the user
-	userRange, err := GetUserDefaultRange(db, targetUserId)
-	if err != nil {
-		logger.Error("Error during access grant lookup: user_id not found when getting user for range " + strconv.Itoa(int(userRange.RangeNumber)) + " for 'userID' " + targetUserId + ": " + err.Error())
+	// Get direct user-to-range assignments for the target user
+	var userRangeAccesses []UserRangeAccess
+	db.Where("user_id = ?", targetUserId).Find(&userRangeAccesses)
+
+	var userObject UserObject
+	if err := db.Where("user_id = ?", targetUserId).First(&userObject).Error; err != nil {
+		logger.Error("Error getting user object for user ID " + targetUserId + ": " + err.Error())
+		return returnArray
 	}
 
-	// Get direct user-to-range assignments
-	var userRangeAccesses []UserRangeAccess
-	db.Where("range_number = ?", userRange.RangeNumber).Find(&userRangeAccesses)
-
 	for _, access := range userRangeAccesses {
-		var userObject UserObject
-		if err := db.Where("user_id = ?", access.UserID).First(&userObject).Error; err == nil {
-			returnArray = append(returnArray, AccessGrantStruct{userObject.UserNumber, userObject.ProxmoxUsername})
+		var rangeObject RangeObject
+		if err := db.Where("range_number = ?", access.RangeNumber).First(&rangeObject).Error; err == nil {
+			returnArray = append(returnArray, AccessGrantStruct{rangeObject.RangeNumber, userObject.ProxmoxUsername})
 		}
 	}
 
@@ -261,17 +261,21 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 	var userGroupMemberships []UserGroupMembership
 	db.Where("user_id = ?", targetUserId).Find(&userGroupMemberships)
 
+	// For every group the user is a member of, get the ranges that group has access to
 	for _, membership := range userGroupMemberships {
 		var groupRangeAccesses []GroupRangeAccess
 		db.Where("group_id = ?", membership.GroupID).Find(&groupRangeAccesses)
 
 		for _, groupAccess := range groupRangeAccesses {
+			// Only add the access grant if it is not already in the returnArray
+			if slices.ContainsFunc(returnArray, func(entry AccessGrantStruct) bool {
+				return entry.SecondOctet == groupAccess.RangeNumber
+			}) {
+				continue
+			}
 			var rangeObj RangeObject
 			if err := db.Where("range_number = ?", groupAccess.RangeNumber).First(&rangeObj).Error; err == nil {
-				var user UserObject
-				if err := db.First(&user, "user_id = ?", rangeObj.RangeID).Error; err == nil {
-					returnArray = append(returnArray, AccessGrantStruct{groupAccess.RangeNumber, user.ProxmoxUsername})
-				}
+				returnArray = append(returnArray, AccessGrantStruct{groupAccess.RangeNumber, userObject.ProxmoxUsername})
 			}
 		}
 	}
@@ -456,8 +460,8 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(c *gin.Context, playbookPathArray [
 
 }
 
-func GetErrorsFromAnsiblePlaybook(user UserObject) []string {
-	ansibleLogPath := fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername)
+func GetErrorsFromAnsiblePlaybook(rangeID string) []string {
+	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, rangeID)
 	ansibleLogContents, err := os.ReadFile(ansibleLogPath)
 	if err != nil {
 		return []string{"Could not read ansible log: " + err.Error()}
