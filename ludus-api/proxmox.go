@@ -359,6 +359,7 @@ func addUserToGroupInProxmox(username string, realm string, groupName string) er
 	}
 
 	user.Groups = append(user.Groups, groupName)
+	logger.Debug(godump.DumpStr(user))
 
 	err = user.Update(context.Background())
 	if err != nil {

@@ -156,7 +156,7 @@ func AddUserToGroup(c *gin.Context) {
 	}
 
 	// Add user to group in proxmox
-	err = addUserToGroupInProxmox(userID, "pam", group.Name)
+	err = addUserToGroupInProxmox(user.ProxmoxUsername, "pam", group.Name)
 	if err != nil {
 		db.Delete(&membership)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error adding user %s to group %s in proxmox: %v", userID, group.Name, err)})
@@ -183,8 +183,19 @@ func RemoveUserFromGroup(c *gin.Context) {
 		return
 	}
 
+	// Check if user exists
+	var user UserObject
+	if err := db.First(&user, "user_id = ?", userID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s not found", userID)})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding user %s: %v", userID, err)})
+		}
+		return
+	}
+
 	// Remove user from group in proxmox
-	err = removeUserFromGroupInProxmox(userID, "pam", group.Name)
+	err = removeUserFromGroupInProxmox(user.ProxmoxUsername, "pam", group.Name)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error removing user %s from group %s in proxmox: %v", userID, group.Name, err)})
 		return

@@ -21,7 +21,6 @@ import (
 	"github.com/apenella/go-ansible/pkg/options"
 	"github.com/apenella/go-ansible/pkg/playbook"
 	"github.com/gin-gonic/gin"
-	"github.com/goforj/godump"
 	"golang.org/x/exp/maps"
 )
 
@@ -280,7 +279,7 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 		}
 	}
 
-	logger.Debug("Access grants for user " + targetUserId + ": " + godump.DumpStr(returnArray))
+	// logger.Debug("Access grants for user " + targetUserId + ": " + godump.DumpStr(returnArray))
 
 	return returnArray
 }

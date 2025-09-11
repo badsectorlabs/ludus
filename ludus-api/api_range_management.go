@@ -158,17 +158,28 @@ func DeleteRange(c *gin.Context) {
 
 // DeleteRangeVMs - stops and deletes all range VMs (keeps range object in database)
 func DeleteRangeVMs(c *gin.Context) {
-	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
-	if err != nil {
-		return // JSON set in CheckRangeAccessAndGetObjects
+	// Get the range ID from the URL
+	rangeID := c.Param("rangeID")
+
+	if rangeID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "rangeID not provided"})
+		return
 	}
+
+	var usersRange RangeObject
+	if err := db.Where("range_id = ?", rangeID).First(&usersRange).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeID)})
+		return
+	}
+
+	logger.Debug("DeleteRangeVMs for range ID: " + usersRange.RangeID)
 
 	// Set range state to "DESTROYING"
 	db.Model(&usersRange).Update("range_state", "DESTROYING")
 
 	// This can take a long time, so run as a go routine and have the user check the status via another endpoint
 	go func(c *gin.Context) {
-		_, err = RunPlaybookWithTag(c, "power.yml", "destroy-range", false)
+		_, err := RunPlaybookWithTag(c, "power.yml", "destroy-range", false)
 		if err != nil {
 			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
 			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "Error with destroy-range\n")
