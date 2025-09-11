@@ -189,8 +189,18 @@ func GetRangeObject(c *gin.Context) (RangeObject, error) {
 		return usersRange, gorm.ErrRecordNotFound // Status and JSON set in getUserID
 	}
 
-	// Check if a specific range ID was provided in the query
-	rangeIDStr, hasRangeID := c.GetQuery("rangeID")
+	var rangeIDStr string
+	var hasRangeID bool
+	// Check the URL for a range ID, it takes priority
+	rangeID := c.Param("rangeID")
+	if rangeID != "" {
+		rangeIDStr = rangeID
+		hasRangeID = true
+	} else {
+		// Check if a specific range ID was provided in the query
+		rangeIDStr, hasRangeID = c.GetQuery("rangeID")
+	}
+
 	if hasRangeID {
 		logger.Debug(fmt.Sprintf("Getting range for: %s", rangeIDStr))
 		rangeNumber, err := GetRangeNumberFromRangeID(db, rangeIDStr)
@@ -614,7 +624,17 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 	targetUserID := targetUser.UserID
 
 	// Check if rangeID parameter was provided
-	rangeIDStr, hasRangeID := c.GetQuery("rangeID")
+	var rangeIDStr string
+	var hasRangeID bool
+	// Check the URL for a range ID, it takes priority
+	rangeID := c.Param("rangeID")
+	if rangeID != "" {
+		rangeIDStr = rangeID
+		hasRangeID = true
+	} else {
+		// Check if a specific range ID was provided in the query
+		rangeIDStr, hasRangeID = c.GetQuery("rangeID")
+	}
 	rangeNumberStr, hasRangeNumber := c.GetQuery("rangeNumber")
 
 	if hasRangeNumber && hasRangeID {
