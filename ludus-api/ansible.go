@@ -21,6 +21,7 @@ import (
 	"github.com/apenella/go-ansible/pkg/options"
 	"github.com/apenella/go-ansible/pkg/playbook"
 	"github.com/gin-gonic/gin"
+	"github.com/goforj/godump"
 	"golang.org/x/exp/maps"
 )
 
@@ -242,7 +243,7 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 	// Get the range number for the user
 	userRange, err := GetUserDefaultRange(db, targetUserId)
 	if err != nil {
-		logger.Error("Error during access grant lookup: user_id not found when getting user for range", userRange.RangeNumber, "for 'userID'", targetUserId, err)
+		logger.Error("Error during access grant lookup: user_id not found when getting user for range " + strconv.Itoa(int(userRange.RangeNumber)) + " for 'userID' " + targetUserId + ": " + err.Error())
 	}
 
 	// Get direct user-to-range assignments
@@ -250,9 +251,9 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 	db.Where("range_number = ?", userRange.RangeNumber).Find(&userRangeAccesses)
 
 	for _, access := range userRangeAccesses {
-		var rangeObj RangeObject
-		if err := db.Where("user_id = ?", access.UserID).First(&rangeObj).Error; err == nil {
-			returnArray = append(returnArray, AccessGrantStruct{rangeObj.RangeNumber, rangeObj.RangeID})
+		var userObject UserObject
+		if err := db.Where("user_id = ?", access.UserID).First(&userObject).Error; err == nil {
+			returnArray = append(returnArray, AccessGrantStruct{userObject.UserNumber, userObject.ProxmoxUsername})
 		}
 	}
 
@@ -274,6 +275,8 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 			}
 		}
 	}
+
+	logger.Debug("Access grants for user " + targetUserId + ": " + godump.DumpStr(returnArray))
 
 	return returnArray
 }

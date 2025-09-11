@@ -120,7 +120,7 @@
         block: |
           [Peer]
           PublicKey = {{ client_public_key }}
-          AllowedIPs = 198.51.100.{{ second_octet }}/32
+          AllowedIPs = 198.51.100.{{ user_number }}/32
         marker: "# {mark} ANSIBLE MANAGED BLOCK FOR {{ user_range_id }}"
         insertafter: EOF
 
@@ -170,18 +170,18 @@
       loop:
         - 1
 
-    - name: Add a portforward for this user (Enterprise)
-      ansible.builtin.include_tasks: portforward-management.yml
-      vars:
-        port_to_forward_on_ludus_host: "{{ 51000 + second_octet }}"
-        host_to_forward_to: "192.0.2.{{ 100 + second_octet }}"
-        port_to_forward_to: 51820 # hardcoded to the WireGuard server port
-        state_var: present
-      when:
-        - ludus_enterprise_license is defined and ludus_enterprise_license
-        - lookup('ansible.builtin.fileglob', playbook_dir + '/portforward-management.yml') != []
-        - portforward_enabled is defined
-        - portforward_enabled
+    # - name: Add a portforward for this user (Enterprise)
+    #   ansible.builtin.include_tasks: portforward-management.yml
+    #   vars:
+    #     port_to_forward_on_ludus_host: "{{ 51000 + second_octet }}"
+    #     host_to_forward_to: "192.0.2.{{ 100 + second_octet }}"
+    #     port_to_forward_to: 51820 # hardcoded to the WireGuard server port
+    #     state_var: present
+    #   when:
+    #     - ludus_enterprise_license is defined and ludus_enterprise_license
+    #     - lookup('ansible.builtin.fileglob', playbook_dir + '/portforward-management.yml') != []
+    #     - portforward_enabled is defined
+    #     - portforward_enabled
 
     - name: Add the user to proxmox
       ansible.builtin.shell:

@@ -787,7 +787,7 @@ func setupRangeCreateCmd(command *cobra.Command) {
 }
 
 var rangeAssignCmd = &cobra.Command{
-	Use:   "assign [userID] [rangeNumber]",
+	Use:   "assign [userID] [rangeID]",
 	Short: "Assign a range to a user (admin only)",
 	Long:  `Assign an existing range to a user, granting them direct access. Admin privileges required.`,
 	Args:  cobra.ExactArgs(2),
@@ -795,11 +795,11 @@ var rangeAssignCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		userID := args[0]
-		rangeNumber := args[1]
+		rangeID := args[1]
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/ranges/assign/%s/%s", userID, rangeNumber), nil)
+		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/ranges/assign/%s/%s", userID, rangeID), nil)
 		if !success {
 			return
 		}
@@ -807,13 +807,13 @@ var rangeAssignCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("Range %s assigned to user %s successfully\n", rangeNumber, userID)
+			fmt.Printf("Range %s assigned to user %s successfully\n", rangeID, userID)
 		}
 	},
 }
 
 var rangeRevokeCmd = &cobra.Command{
-	Use:   "revoke [userID] [rangeNumber]",
+	Use:   "revoke [userID] [rangeID]",
 	Short: "Revoke range access from a user (admin only)",
 	Long:  `Revoke a user's direct access to a range. Admin privileges required.`,
 	Args:  cobra.ExactArgs(2),
@@ -821,11 +821,11 @@ var rangeRevokeCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		userID := args[0]
-		rangeNumber := args[1]
+		rangeID := args[1]
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/ranges/revoke/%s/%s", userID, rangeNumber))
+		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/ranges/revoke/%s/%s?force=%t", userID, rangeID, force))
 		if !success {
 			return
 		}
@@ -833,24 +833,28 @@ var rangeRevokeCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("Range %s access revoked from user %s successfully\n", rangeNumber, userID)
+			fmt.Printf("Range %s access revoked from user %s successfully\n", rangeID, userID)
 		}
 	},
 }
 
+func setupRangeRevokeCmd(command *cobra.Command) {
+	command.Flags().BoolVar(&force, "force", false, "force the access action even if the target router is inaccessible")
+}
+
 var rangeUsersCmd = &cobra.Command{
-	Use:   "users [rangeNumber]",
+	Use:   "users [rangeID]",
 	Short: "List users with access to a range (admin only)",
 	Long:  `List all users who have access to a specific range, including direct and group-based access. Admin privileges required.`,
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		rangeNumber := args[0]
+		rangeID := args[0]
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ranges/%s/users", rangeNumber))
+		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ranges/%s/users", rangeID))
 		if !success {
 			return
 		}
@@ -906,8 +910,7 @@ var rangeAccessibleCmd = &cobra.Command{
 		type Data struct {
 			Result []struct {
 				RangeNumber int32  `json:"rangeNumber"`
-				UserID      string `json:"userID"`
-				RangeState  string `json:"rangeState"`
+				RangeID     string `json:"rangeID"`
 				AccessType  string `json:"accessType"`
 			} `json:"result"`
 		}
@@ -925,14 +928,13 @@ var rangeAccessibleCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Range Number", "UserID", "State", "Access Type"})
+		table.SetHeader([]string{"Range Network", "Range ID", "Access Type"})
 
 		// Add data to table
 		for _, rangeObj := range data.Result {
 			table.Append([]string{
-				fmt.Sprintf("%d", rangeObj.RangeNumber),
-				rangeObj.UserID,
-				rangeObj.RangeState,
+				fmt.Sprintf("10.%d.0.0/16", rangeObj.RangeNumber),
+				rangeObj.RangeID,
 				rangeObj.AccessType,
 			})
 		}
@@ -976,6 +978,7 @@ func init() {
 	setupRangeCreateCmd(rangeCreateCmd)
 	rangeCmd.AddCommand(rangeCreateCmd)
 	rangeCmd.AddCommand(rangeAssignCmd)
+	setupRangeRevokeCmd(rangeRevokeCmd)
 	rangeCmd.AddCommand(rangeRevokeCmd)
 	rangeCmd.AddCommand(rangeUsersCmd)
 	rangeCmd.AddCommand(rangeAccessibleCmd)

@@ -567,7 +567,7 @@ var routes = Routes{
 	{
 		"DeleteGroup",
 		http.MethodDelete,
-		"/groups/:groupID",
+		"/groups/:groupName",
 		DeleteGroup,
 	},
 
@@ -581,42 +581,42 @@ var routes = Routes{
 	{
 		"AddUserToGroup",
 		http.MethodPost,
-		"/groups/:groupID/users/:userID",
+		"/groups/:groupName/users/:userID",
 		AddUserToGroup,
 	},
 
 	{
 		"RemoveUserFromGroup",
 		http.MethodDelete,
-		"/groups/:groupID/users/:userID",
+		"/groups/:groupName/users/:userID",
 		RemoveUserFromGroup,
 	},
 
 	{
 		"AddRangeToGroup",
 		http.MethodPost,
-		"/groups/:groupID/ranges/:rangeNumber",
+		"/groups/:groupName/ranges/:rangeID",
 		AddRangeToGroup,
 	},
 
 	{
 		"RemoveRangeFromGroup",
 		http.MethodDelete,
-		"/groups/:groupID/ranges/:rangeNumber",
+		"/groups/:groupName/ranges/:rangeID",
 		RemoveRangeFromGroup,
 	},
 
 	{
 		"ListGroupMembers",
 		http.MethodGet,
-		"/groups/:groupID/users",
+		"/groups/:groupName/users",
 		ListGroupMembers,
 	},
 
 	{
 		"ListGroupRanges",
 		http.MethodGet,
-		"/groups/:groupID/ranges",
+		"/groups/:groupName/ranges",
 		ListGroupRanges,
 	},
 
@@ -631,21 +631,21 @@ var routes = Routes{
 	{
 		"AssignRangeToUser",
 		http.MethodPost,
-		"/ranges/assign/:userID/:rangeNumber",
+		"/ranges/assign/:userID/:rangeID",
 		AssignRangeToUser,
 	},
 
 	{
 		"RevokeRangeFromUser",
 		http.MethodDelete,
-		"/ranges/revoke/:userID/:rangeNumber",
+		"/ranges/revoke/:userID/:rangeID",
 		RevokeRangeFromUser,
 	},
 
 	{
 		"ListRangeUsers",
 		http.MethodGet,
-		"/ranges/:rangeNumber/users",
+		"/ranges/:rangeID/users",
 		ListRangeUsers,
 	},
 

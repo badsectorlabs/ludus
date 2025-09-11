@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
+	"slices"
 	"strings"
 
+	"github.com/goforj/godump"
 	goproxmox "github.com/luthermonson/go-proxmox"
 
 	"github.com/Telmate/proxmox-api-go/proxmox"
@@ -303,6 +306,114 @@ func poolACLAction(username string, realm string, poolName string, revoke bool) 
 	err = proxmoxClient.UpdateACL(context.Background(), PVEVMAdminACL)
 	if err != nil {
 		return errors.New("unable to set permissions for user: " + err.Error())
+	}
+
+	return nil
+}
+
+var proxmoxGroupNameRegex = regexp.MustCompile(`^[A-Za-z0-9_\-]+$`)
+
+func createGroupInProxmox(groupName string) error {
+
+	// Alphanumeric and hyphen only
+	if !proxmoxGroupNameRegex.MatchString(groupName) {
+		return errors.New("group name must be alphanumeric, hyphens, and underscores only")
+	}
+
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client: " + err.Error())
+	}
+	err = proxmoxClient.NewGroup(context.Background(), groupName, "Created by Ludus")
+	if err != nil {
+		return errors.New("unable to create group: " + err.Error())
+	}
+	return nil
+}
+
+func removeGroupFromProxmox(groupName string) error {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client: " + err.Error())
+	}
+	group, err := proxmoxClient.Group(context.Background(), groupName)
+	if err != nil {
+		return errors.New("unable to get group object: " + err.Error())
+	}
+	err = group.Delete(context.Background())
+	if err != nil {
+		return errors.New("unable to delete group: " + err.Error())
+	}
+	return nil
+}
+
+func addUserToGroupInProxmox(username string, realm string, groupName string) error {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client: " + err.Error())
+	}
+	// Get the user object from go-proxmox, then add them to the group by updating their user configuration
+	user, err := proxmoxClient.User(context.Background(), username+"@"+realm)
+	if err != nil {
+		return errors.New("unable to get user object: " + err.Error())
+	}
+
+	user.Groups = append(user.Groups, groupName)
+
+	err = user.Update(context.Background())
+	if err != nil {
+		return errors.New("unable to add user to group: " + err.Error())
+	}
+	return nil
+}
+
+func removeUserFromGroupInProxmox(username string, realm string, groupName string) error {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client: " + err.Error())
+	}
+	// Get the user object from go-proxmox, then remove them from the group by updating their user configuration
+	user, err := proxmoxClient.User(context.Background(), username+"@"+realm)
+	if err != nil {
+		return errors.New("unable to get user object: " + err.Error())
+	}
+	user.Groups = slices.DeleteFunc(user.Groups, func(group string) bool {
+		return group == groupName
+	})
+
+	err = user.Update(context.Background())
+	if err != nil {
+		return errors.New("unable to remove user from group: " + err.Error())
+	}
+	return nil
+}
+
+func grantGroupAccessToRangeInProxmox(groupID string, poolName string) error {
+	return groupACLAction(groupID, poolName, false)
+}
+
+func revokeGroupAccessToRangeInProxmox(groupID string, poolName string) error {
+	return groupACLAction(groupID, poolName, true)
+}
+
+func groupACLAction(groupID string, poolName string, revoke bool) error {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client: " + err.Error())
+	}
+
+	PVEVMAdminACL := goproxmox.ACLOptions{
+		Path:      fmt.Sprintf("/pool/%s", poolName),
+		Groups:    groupID,
+		Roles:     "PVEVMAdmin,PVESDNAdmin",
+		Propagate: goproxmox.IntOrBool(true),
+		Delete:    goproxmox.IntOrBool(revoke),
+	}
+	logger.Debug(fmt.Sprintf("Attempting to set permissions for group '%s' to pool '%s'\n", groupID, poolName))
+	logger.Debug(godump.DumpStr(PVEVMAdminACL))
+	err = proxmoxClient.UpdateACL(context.Background(), PVEVMAdminACL)
+	if err != nil {
+		return errors.New("unable to set permissions for group: " + err.Error())
 	}
 
 	return nil

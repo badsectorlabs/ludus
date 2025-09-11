@@ -22,6 +22,7 @@ defaults:
 
 ludus_install_path: /opt/ludus
 ludus_users_dir: "{{ ludus_install_path }}/users"
+ludus_ranges_dir: "{{ ludus_install_path }}/ranges"
 
 # Wireguard config
 wg_port: "51820"

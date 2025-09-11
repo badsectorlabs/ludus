@@ -3,11 +3,25 @@ package ludusapi
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+func getGroupObjectFromRequest(c *gin.Context) (GroupObject, error) {
+	groupName := c.Param("groupName")
+
+	var group GroupObject
+	if err := db.First(&group, "name = ?", groupName).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Group not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding group: %v", err)})
+		}
+		return group, err
+	}
+	return group, nil
+}
 
 // CreateGroup creates a new group (admin only)
 func CreateGroup(c *gin.Context) {
@@ -38,6 +52,14 @@ func CreateGroup(c *gin.Context) {
 		return
 	}
 
+	// Create the group in proxmox
+	err := createGroupInProxmox(group.Name)
+	if err != nil {
+		db.Delete(&group)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating group in proxmox: %v", err)})
+		return
+	}
+
 	c.JSON(http.StatusCreated, gin.H{"result": group})
 }
 
@@ -47,26 +69,21 @@ func DeleteGroup(c *gin.Context) {
 		return
 	}
 
-	groupIDStr := c.Param("groupID")
-	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
+	group, err := getGroupObjectFromRequest(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid group ID"})
 		return
 	}
 
-	var group GroupObject
-	if err := db.First(&group, groupID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Group not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding group: %v", err)})
-		}
+	// Delete the group from proxmox
+	err = removeGroupFromProxmox(group.Name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error deleting group from proxmox: %v", err)})
 		return
 	}
 
 	// Clean up all memberships and range access for this group
-	db.Where("group_id = ?", groupID).Delete(&UserGroupMembership{})
-	db.Where("group_id = ?", groupID).Delete(&GroupRangeAccess{})
+	db.Where("group_id = ?", group.ID).Delete(&UserGroupMembership{})
+	db.Where("group_id = ?", group.ID).Delete(&GroupRangeAccess{})
 
 	// Delete the group
 	if err := db.Delete(&group).Error; err != nil {
@@ -98,10 +115,8 @@ func AddUserToGroup(c *gin.Context) {
 		return
 	}
 
-	groupIDStr := c.Param("groupID")
-	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
+	group, err := getGroupObjectFromRequest(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid group ID"})
 		return
 	}
 
@@ -111,43 +126,40 @@ func AddUserToGroup(c *gin.Context) {
 		return
 	}
 
-	// Check if group exists
-	var group GroupObject
-	if err := db.First(&group, groupID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Group not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding group: %v", err)})
-		}
-		return
-	}
-
 	// Check if user exists
 	var user UserObject
 	if err := db.First(&user, "user_id = ?", userID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s not found", userID)})
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding user: %v", err)})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding user %s: %v", userID, err)})
 		}
 		return
 	}
 
 	// Check if user is already a member
 	var existingMembership UserGroupMembership
-	if err := db.Where("user_id = ? AND group_id = ?", userID, groupID).First(&existingMembership).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "User is already a member of this group"})
+	if err := db.Where("user_id = ? AND group_id = ?", userID, group.ID).First(&existingMembership).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("User %s is already a member of group %s", userID, group.Name)})
 		return
 	}
 
 	// Add user to group
 	membership := UserGroupMembership{
 		UserID:  userID,
-		GroupID: uint(groupID),
+		GroupID: uint(group.ID),
 	}
 
 	if err := db.Create(&membership).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error adding user to group: %v", err)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error adding user %s to group %s: %v", userID, group.Name, err)})
+		return
+	}
+
+	// Add user to group in proxmox
+	err = addUserToGroupInProxmox(userID, "pam", group.Name)
+	if err != nil {
+		db.Delete(&membership)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error adding user %s to group %s in proxmox: %v", userID, group.Name, err)})
 		return
 	}
 
@@ -160,10 +172,8 @@ func RemoveUserFromGroup(c *gin.Context) {
 		return
 	}
 
-	groupIDStr := c.Param("groupID")
-	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
+	group, err := getGroupObjectFromRequest(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid group ID"})
 		return
 	}
 
@@ -173,15 +183,22 @@ func RemoveUserFromGroup(c *gin.Context) {
 		return
 	}
 
+	// Remove user from group in proxmox
+	err = removeUserFromGroupInProxmox(userID, "pam", group.Name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error removing user %s from group %s in proxmox: %v", userID, group.Name, err)})
+		return
+	}
+
 	// Remove user from group
-	result := db.Where("user_id = ? AND group_id = ?", userID, groupID).Delete(&UserGroupMembership{})
+	result := db.Where("user_id = ? AND group_id = ?", userID, group.ID).Delete(&UserGroupMembership{})
 	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error removing user from group: %v", result.Error)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error removing user %s from group %s: %v", userID, group.Name, result.Error)})
 		return
 	}
 
 	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User is not a member of this group"})
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s is not a member of group %s", userID, group.Name)})
 		return
 	}
 
@@ -194,61 +211,50 @@ func AddRangeToGroup(c *gin.Context) {
 		return
 	}
 
-	groupIDStr := c.Param("groupID")
-	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
+	group, err := getGroupObjectFromRequest(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid group ID"})
 		return
 	}
 
-	rangeNumberStr := c.Param("rangeNumber")
-	rangeNumber, err := strconv.ParseInt(rangeNumberStr, 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range number"})
-		return
-	}
-
-	// Check if group exists
-	var group GroupObject
-	if err := db.First(&group, groupID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Group not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding group: %v", err)})
-		}
-		return
-	}
+	rangeID := c.Param("rangeID")
 
 	// Check if range exists
 	var rangeObj RangeObject
-	if err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error; err != nil {
+	if err := db.Where("range_id = ?", rangeID).First(&rangeObj).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeID)})
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding range: %v", err)})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding range %s: %v", rangeID, err)})
 		}
 		return
 	}
 
 	// Check if group already has access to this range
 	var existingAccess GroupRangeAccess
-	if err := db.Where("group_id = ? AND range_number = ?", groupID, rangeNumber).First(&existingAccess).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Group already has access to this range"})
+	if err := db.Where("group_id = ? AND range_number = ?", group.ID, rangeObj.RangeNumber).First(&existingAccess).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("Group %s already has access to range %s", group.Name, rangeObj.RangeID)})
 		return
 	}
 
 	// Grant group access to range
 	groupRangeAccess := GroupRangeAccess{
-		GroupID:     uint(groupID),
-		RangeNumber: int32(rangeNumber),
+		GroupID:     uint(group.ID),
+		RangeNumber: int32(rangeObj.RangeNumber),
 	}
 
-	if err := db.Create(&groupRangeAccess).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error granting group access to range: %v", err)})
+	// Grant group access to range in proxmox
+	err = grantGroupAccessToRangeInProxmox(group.Name, rangeObj.RangeID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error granting group %s access to range %s in proxmox: %v", group.Name, rangeObj.RangeID, err)})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"result": "Group access to range granted successfully"})
+	if err := db.Create(&groupRangeAccess).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error granting group %s access to range %s: %v", group.Name, rangeObj.RangeID, err)})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"result": fmt.Sprintf("Group %s access to range %s granted successfully", group.Name, rangeObj.RangeID)})
 }
 
 // RemoveRangeFromGroup revokes group access from a range (admin only)
@@ -257,29 +263,39 @@ func RemoveRangeFromGroup(c *gin.Context) {
 		return
 	}
 
-	groupIDStr := c.Param("groupID")
-	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
+	group, err := getGroupObjectFromRequest(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid group ID"})
 		return
 	}
 
-	rangeNumberStr := c.Param("rangeNumber")
-	rangeNumber, err := strconv.ParseInt(rangeNumberStr, 10, 32)
+	rangeID := c.Param("rangeID")
+
+	var rangeObj RangeObject
+	if err := db.Where("range_id = ?", rangeID).First(&rangeObj).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeID)})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding range %s: %v", rangeID, err)})
+		}
+		return
+	}
+
+	// Remove group access to range in proxmox
+	err = revokeGroupAccessToRangeInProxmox(group.Name, rangeObj.RangeID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range number"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error revoking group %s access to range %s in proxmox: %v", group.Name, rangeObj.RangeID, err)})
 		return
 	}
 
 	// Remove group access to range
-	result := db.Where("group_id = ? AND range_number = ?", groupID, rangeNumber).Delete(&GroupRangeAccess{})
+	result := db.Where("group_id = ? AND range_number = ?", group.ID, rangeObj.RangeNumber).Delete(&GroupRangeAccess{})
 	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error revoking group access to range: %v", result.Error)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error revoking group %s access to range %s: %v", group.Name, rangeObj.RangeID, result.Error)})
 		return
 	}
 
 	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Group does not have access to this range"})
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Group %s does not have access to range %s", group.Name, rangeObj.RangeID)})
 		return
 	}
 
@@ -292,27 +308,14 @@ func ListGroupMembers(c *gin.Context) {
 		return
 	}
 
-	groupIDStr := c.Param("groupID")
-	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
+	group, err := getGroupObjectFromRequest(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid group ID"})
-		return
-	}
-
-	// Check if group exists
-	var group GroupObject
-	if err := db.First(&group, groupID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Group not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding group: %v", err)})
-		}
 		return
 	}
 
 	// Get group members
 	var memberships []UserGroupMembership
-	if err := db.Where("group_id = ?", groupID).Find(&memberships).Error; err != nil {
+	if err := db.Where("group_id = ?", group.ID).Find(&memberships).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting group members: %v", err)})
 		return
 	}
@@ -335,27 +338,14 @@ func ListGroupRanges(c *gin.Context) {
 		return
 	}
 
-	groupIDStr := c.Param("groupID")
-	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
+	group, err := getGroupObjectFromRequest(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid group ID"})
-		return
-	}
-
-	// Check if group exists
-	var group GroupObject
-	if err := db.First(&group, groupID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Group not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding group: %v", err)})
-		}
 		return
 	}
 
 	// Get group range access
 	var groupRangeAccesses []GroupRangeAccess
-	if err := db.Where("group_id = ?", groupID).Find(&groupRangeAccesses).Error; err != nil {
+	if err := db.Where("group_id = ?", group.ID).Find(&groupRangeAccesses).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting group ranges: %v", err)})
 		return
 	}

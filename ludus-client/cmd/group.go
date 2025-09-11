@@ -102,18 +102,18 @@ var groupsCreateCmd = &cobra.Command{
 }
 
 var groupsDeleteCmd = &cobra.Command{
-	Use:   "delete [groupID]",
+	Use:   "delete [groupName]",
 	Short: "Delete a group",
 	Long:  `Delete a group and clean up all memberships and range access.`,
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		groupID := args[0]
+		groupName := args[0]
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/groups/%s", groupID))
+		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/groups/%s", groupName))
 		if !success {
 			return
 		}
@@ -121,25 +121,32 @@ var groupsDeleteCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("Group %s deleted successfully\n", groupID)
+			fmt.Printf("Group %s deleted successfully\n", groupName)
 		}
 	},
 }
 
+// Parent add command
+var groupsAddCmd = &cobra.Command{
+	Use:   "add",
+	Short: "Add users or ranges to groups",
+	Long:  `Add users to groups or grant group access to ranges.`,
+}
+
 var groupsAddUserCmd = &cobra.Command{
-	Use:   "add user [groupID] [userID]",
+	Use:   "user [userID] [groupName]",
 	Short: "Add a user to a group",
 	Long:  `Add a user to a group to grant them access to ranges assigned to that group.`,
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		groupID := args[0]
-		userID := args[1]
+		userID := args[0]
+		groupName := args[1]
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/groups/%s/users/%s", groupID, userID), nil)
+		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/groups/%s/users/%s", groupName, userID), nil)
 		if !success {
 			return
 		}
@@ -147,51 +154,25 @@ var groupsAddUserCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("User %s added to group %s successfully\n", userID, groupID)
-		}
-	},
-}
-
-var groupsRemoveUserCmd = &cobra.Command{
-	Use:   "remove user [groupID] [userID]",
-	Short: "Remove a user from a group",
-	Long:  `Remove a user from a group to revoke their access to ranges assigned to that group.`,
-	Args:  cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
-		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-
-		groupID := args[0]
-		userID := args[1]
-
-		var responseJSON []byte
-		var success bool
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/groups/%s/users/%s", groupID, userID))
-		if !success {
-			return
-		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-		} else {
-			fmt.Printf("User %s removed from group %s successfully\n", userID, groupID)
+			fmt.Printf("User %s added to group %s successfully\n", userID, groupName)
 		}
 	},
 }
 
 var groupsAddRangeCmd = &cobra.Command{
-	Use:   "add range [groupID] [rangeNumber]",
+	Use:   "range [rangeID] [groupName]",
 	Short: "Grant group access to a range",
 	Long:  `Grant a group access to a specific range, allowing all group members to access that range.`,
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		groupID := args[0]
-		rangeNumber := args[1]
+		rangeID := args[0]
+		groupName := args[1]
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/groups/%s/ranges/%s", groupID, rangeNumber), nil)
+		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/groups/%s/ranges/%s", groupName, rangeID), nil)
 		if !success {
 			return
 		}
@@ -199,25 +180,62 @@ var groupsAddRangeCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("Group %s granted access to range %s successfully\n", groupID, rangeNumber)
+			fmt.Printf("Group %s granted access to range %s successfully\n", groupName, rangeID)
+		}
+	},
+}
+
+// Parent remove command
+var groupsRemoveCmd = &cobra.Command{
+	Use:   "remove",
+	Short: "Remove users or ranges from groups",
+	Long:  `Remove users from groups or revoke group access to ranges.`,
+}
+
+var groupsRemoveUserCmd = &cobra.Command{
+	Use:   "user [userID] [groupName]",
+	Short: "Remove a user from a group",
+	Long:  `Remove a user from a group to revoke their access to ranges assigned to that group.`,
+	Args:  cobra.ExactArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		userID := args[0]
+		groupName := args[1]
+
+		var responseJSON []byte
+		var success bool
+		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/groups/%s/users/%s", groupName, userID))
+		if !success {
+			return
+		}
+
+		if jsonFormat {
+			fmt.Printf("%s\n", responseJSON)
+		} else {
+			fmt.Printf("User %s removed from group %s successfully\n", userID, groupName)
 		}
 	},
 }
 
 var groupsRemoveRangeCmd = &cobra.Command{
-	Use:   "remove range [groupID] [rangeNumber]",
+	Use:   "range [rangeID] [groupName]",
 	Short: "Revoke group access from a range",
 	Long:  `Revoke a group's access to a specific range, removing access for all group members.`,
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		groupID := args[0]
-		rangeNumber := args[1]
+		rangeID := args[0]
+		groupName := args[1]
+
+		if rangeID == "" || groupName == "" {
+			logger.Logger.Fatal("rangeID and groupName are required")
+		}
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/groups/%s/ranges/%s", groupID, rangeNumber))
+		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/groups/%s/ranges/%s", groupName, rangeID))
 		if !success {
 			return
 		}
@@ -225,24 +243,24 @@ var groupsRemoveRangeCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("Group %s access to range %s revoked successfully\n", groupID, rangeNumber)
+			fmt.Printf("Group %s access to range %s revoked successfully\n", groupName, rangeID)
 		}
 	},
 }
 
 var groupsMembersCmd = &cobra.Command{
-	Use:   "members [groupID]",
+	Use:   "members [groupName]",
 	Short: "List group members",
 	Long:  `List all users who are members of the specified group.`,
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		groupID := args[0]
+		groupName := args[0]
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/groups/%s/users", groupID))
+		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/groups/%s/users", groupName))
 		if !success {
 			return
 		}
@@ -280,18 +298,18 @@ var groupsMembersCmd = &cobra.Command{
 }
 
 var groupsRangesCmd = &cobra.Command{
-	Use:   "ranges [groupID]",
+	Use:   "ranges [groupName]",
 	Short: "List group accessible ranges",
 	Long:  `List all ranges that the specified group has access to.`,
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		groupID := args[0]
+		groupName := args[0]
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/groups/%s/ranges", groupID))
+		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/groups/%s/ranges", groupName))
 		if !success {
 			return
 		}
@@ -299,7 +317,7 @@ var groupsRangesCmd = &cobra.Command{
 		type Data struct {
 			Result []struct {
 				RangeNumber int32  `json:"rangeNumber"`
-				UserID      string `json:"userID"`
+				RangeID     string `json:"rangeID"`
 				RangeState  string `json:"rangeState"`
 			} `json:"result"`
 		}
@@ -317,14 +335,13 @@ var groupsRangesCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Range Number", "UserID", "State"})
+		table.SetHeader([]string{"Range Number", "Range ID"})
 
 		// Add data to table
 		for _, rangeObj := range data.Result {
 			table.Append([]string{
 				fmt.Sprintf("%d", rangeObj.RangeNumber),
-				rangeObj.UserID,
-				rangeObj.RangeState,
+				rangeObj.RangeID,
 			})
 		}
 
@@ -337,14 +354,20 @@ func init() {
 	// Add flags to group create command
 	groupsCreateCmd.Flags().String("description", "", "Description of the group")
 
+	// Add subcommands to parent add command
+	groupsAddCmd.AddCommand(groupsAddUserCmd)
+	groupsAddCmd.AddCommand(groupsAddRangeCmd)
+
+	// Add subcommands to parent remove command
+	groupsRemoveCmd.AddCommand(groupsRemoveUserCmd)
+	groupsRemoveCmd.AddCommand(groupsRemoveRangeCmd)
+
 	// Add subcommands to groups command
 	groupsCmd.AddCommand(groupsListCmd)
 	groupsCmd.AddCommand(groupsCreateCmd)
 	groupsCmd.AddCommand(groupsDeleteCmd)
-	groupsCmd.AddCommand(groupsAddUserCmd)
-	groupsCmd.AddCommand(groupsRemoveUserCmd)
-	groupsCmd.AddCommand(groupsAddRangeCmd)
-	groupsCmd.AddCommand(groupsRemoveRangeCmd)
+	groupsCmd.AddCommand(groupsAddCmd)
+	groupsCmd.AddCommand(groupsRemoveCmd)
 	groupsCmd.AddCommand(groupsMembersCmd)
 	groupsCmd.AddCommand(groupsRangesCmd)
 
