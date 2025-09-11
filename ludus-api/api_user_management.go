@@ -35,11 +35,6 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	callingUser, err := GetUserObject(c)
-	if err != nil {
-		return // JSON set in GetUserObject
-	}
-
 	var user UserWithEmailAndPassword
 	c.Bind(&user)
 
@@ -93,7 +88,7 @@ func AddUser(c *gin.Context) {
 			}
 
 			// Create a default range for the user using the new utility function, also creates a UserRangeAccess record
-			err = CreateDefaultUserRange(db, user.UserID)
+			err := CreateDefaultUserRange(db, user.UserID)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating user's default range: %v", err)})
 				return
@@ -142,7 +137,7 @@ func AddUser(c *gin.Context) {
 			}
 			// If this endpoint is called by a user that is not ROOT and this is their first ansible action, their log file will be owned by root
 			// Chown the ansible log file to ludus to prevent errors when they use the normal ludus endpoint (which runs as ludus)
-			chownFileToUsername(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, callingUser.ProxmoxUsername), "ludus")
+			chownFileToUsername(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID), "ludus")
 
 			user.DateCreated = time.Now()
 			user.DateLastActive = time.Now()

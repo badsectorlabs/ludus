@@ -162,7 +162,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 		return err
 	}
 
-	usersRange, err := GetRangeObject(c)
+	targetRange, err := GetRangeObject(c)
 	if err != nil {
 		return err
 	}
@@ -195,7 +195,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 			// "Windows doesn't permit computer names that exceed 15 characters"
 			// https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/naming-conventions-for-computer-domain-site-ou
 			// First we have to replace any range_id template strings
-			hostname := rangeIDTemplateRegex.ReplaceAllString(vm.Hostname, usersRange.RangeID)
+			hostname := rangeIDTemplateRegex.ReplaceAllString(vm.Hostname, targetRange.RangeID)
 			// If the hostname is more than 15 chars, chop it down
 			if len(hostname) >= 15 {
 				NETBIOSnameKey = hostname[:15]
@@ -228,7 +228,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 							return fmt.Errorf("error checking if role exists on the server: %s", err)
 						}
 						if !exists {
-							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.RangeID)
+							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, targetRange.RangeID)
 						} else {
 							c.Set("userHasRoles", true)
 						}
@@ -240,7 +240,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 								return fmt.Errorf("error checking if role exists on the server: %s", err)
 							}
 							if !exists {
-								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, usersRange.RangeID)
+								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, targetRange.RangeID)
 							} else {
 								c.Set("userHasRoles", true)
 							}
@@ -253,7 +253,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 												return fmt.Errorf("error checking if role exists on the server: %s", err)
 											}
 											if !exists {
-												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.RangeID)
+												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, targetRange.RangeID)
 											}
 										}
 									}
@@ -264,15 +264,10 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 				}
 			}
 		} else {
-			// Remove the user-defined-roles.yml file in the event the user previously had a config with roles defined
-			user, err := GetUserObject(c)
-			if err != nil {
-				return fmt.Errorf("failed to get user object: %v", err)
-			}
-
-			_, err = os.Stat(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername))
+			// Remove the user-defined-roles.yml file in the event the range previously had a config with roles defined
+			_, err = os.Stat(fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, targetRange.RangeID))
 			if err == nil {
-				err = os.Remove(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername))
+				err = os.Remove(fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, targetRange.RangeID))
 				if err != nil {
 					return fmt.Errorf("failed to remove user-defined-roles.yml: %v", err)
 				}

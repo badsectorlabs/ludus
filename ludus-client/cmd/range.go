@@ -928,13 +928,13 @@ var rangeAccessibleCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Range Network", "Range ID", "Access Type"})
+		table.SetHeader([]string{"Range ID", "Range Network", "Access Type"})
 
 		// Add data to table
 		for _, rangeObj := range data.Result {
 			table.Append([]string{
-				fmt.Sprintf("10.%d.0.0/16", rangeObj.RangeNumber),
 				rangeObj.RangeID,
+				fmt.Sprintf("10.%d.0.0/16", rangeObj.RangeNumber),
 				rangeObj.AccessType,
 			})
 		}

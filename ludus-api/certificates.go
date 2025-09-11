@@ -14,7 +14,7 @@ import (
 func getCRLDomainsFromDomain(domain string) []string {
 	conn, err := tls.Dial("tcp", domain+":443", nil)
 	if err != nil {
-		logger.Error("Failed to connect to", domain)
+		logger.Error(fmt.Sprintf("Failed to connect to %s", domain))
 		return nil
 	}
 	defer conn.Close()
@@ -26,7 +26,7 @@ func getCRLDomainsFromDomain(domain string) []string {
 		block := &pem.Block{Type: "CERTIFICATE", Bytes: chain.Raw}
 		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			logger.Error("Failed to parse certificate:", err)
+			logger.Error(fmt.Sprintf("Failed to parse certificate: %v\n", err))
 			continue
 		}
 
@@ -42,7 +42,7 @@ func getCRLDomainsFromDomain(domain string) []string {
 		for _, ocspURL := range cert.OCSPServer {
 			u, err := url.Parse(ocspURL)
 			if err != nil {
-				logger.Error("Error parsing URL: %v\n", err)
+				logger.Error(fmt.Sprintf("Error parsing URL: %v\n", err))
 				continue
 			}
 

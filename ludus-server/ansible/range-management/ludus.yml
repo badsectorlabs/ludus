@@ -721,7 +721,7 @@
 
 - name: Run the user-defined roles playbook
   tags: [user-defined-roles]
-  ansible.builtin.import_playbook: "{{ lookup('env','ANSIBLE_HOME') }}/user-defined-roles.yml"
+  ansible.builtin.import_playbook: "{{ ludus_install_path }}/ranges/{{ range_id }}/user-defined-roles.yml"
 
 # ==========================================================
 # User management

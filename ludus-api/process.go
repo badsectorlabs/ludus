@@ -19,7 +19,7 @@ func findAnsiblePidForUser(username string) (string, error) {
 			// egrep failed, no ansible running
 			return "", errors.New("no ansible processes are running")
 		}
-		logger.Error("Error executing command: ", err)
+		logger.Error(fmt.Sprintf("Error executing command: %v\n", err))
 		return "", err
 	}
 
@@ -34,14 +34,14 @@ func findAnsiblePidForUser(username string) (string, error) {
 				// Get the environment variables for the process
 				envOut, err := exec.Command("bash", "-c", fmt.Sprintf("cat /proc/%s/environ", pid)).Output()
 				if err != nil {
-					logger.Error("Error executing command: cat /proc/%s/environ: %v\n", pid, err)
+					logger.Error(fmt.Sprintf("Error executing command: cat /proc/%s/environ: %v\n", pid, err))
 					continue
 				}
 
 				envVars := strings.Split(string(envOut), "\\0")
 				for _, envVar := range envVars {
 					if strings.Contains(envVar, fmt.Sprintf("%s@pam", username)) {
-						logger.Error("Process %s has '%s@pam' in its environment variables\n", pid, username)
+						logger.Error(fmt.Sprintf("Process %s has '%s@pam' in its environment variables\n", pid, username))
 						return pid, nil
 					}
 				}
@@ -149,7 +149,7 @@ func RunWithOutput(command string) (string, error) {
 	shellBin := "/bin/bash"
 	if _, err := os.Stat(shellBin); err != nil {
 		if _, err = os.Stat("/bin/sh"); err != nil {
-			return "", errors.New("Could not find /bin/bash or /bin/sh")
+			return "", errors.New("could not find /bin/bash or /bin/sh")
 		} else {
 			shellBin = "/bin/sh"
 		}
@@ -162,7 +162,7 @@ func RunWithOutput(command string) (string, error) {
 	cmd.Stderr = &out
 	err := cmd.Run()
 	if err != nil {
-		return "", errors.New("Error running command: " + err.Error())
+		return "", errors.New("error running command: " + err.Error())
 	}
 	return out.String(), nil
 }

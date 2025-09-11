@@ -257,12 +257,12 @@ func GetRDP(c *gin.Context) {
 
 // GetLogs - retrieves the latest range logs
 func GetLogs(c *gin.Context) {
-	_, targetUser, err := CheckRangeAccessAndGetObjects(c)
+	targetRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
 		return // JSON set in CheckRangeAccessAndGetObjects
 	}
 
-	ansibleLogPath := fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, targetUser.ProxmoxUsername)
+	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeID)
 	GetLogsFromFile(c, ansibleLogPath)
 }
 
@@ -373,7 +373,7 @@ func ListAllRanges(c *gin.Context) {
 
 // PutConfig - updates the range config
 func PutConfig(c *gin.Context) {
-	targetRange, targetUser, err := CheckRangeAccessAndGetObjects(c)
+	targetRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
 		return // JSON set in CheckRangeAccessAndGetObjects
 	}
@@ -418,9 +418,9 @@ func PutConfig(c *gin.Context) {
 	// Check the roles and dependencies
 	userHasRoles, exists := c.Get("userHasRoles")
 	if exists && userHasRoles.(bool) {
-		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, targetUser.ProxmoxUsername), "Resolving dependencies for user-defined roles..\n", false)
+		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeID), "Resolving dependencies for user-defined roles..\n", false)
 		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(c, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
-		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, targetUser.ProxmoxUsername), rolesOutput, true)
+		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeID), rolesOutput, true)
 		if err != nil {
 			db.Model(&targetRange).Update("range_state", "ERROR")
 			// Find the 'ERROR' line in the output and return it to the user
