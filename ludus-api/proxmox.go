@@ -358,10 +358,11 @@ func addUserToGroupInProxmox(username string, realm string, groupName string) er
 		return errors.New("unable to get user object: " + err.Error())
 	}
 
-	user.Groups = append(user.Groups, groupName)
-	logger.Debug(godump.DumpStr(user))
+	userOptions := goproxmox.UserOptions{
+		Groups: append(user.Groups, groupName),
+	}
 
-	err = user.Update(context.Background())
+	err = user.Update(context.Background(), userOptions)
 	if err != nil {
 		return errors.New("unable to add user to group: " + err.Error())
 	}
@@ -382,7 +383,11 @@ func removeUserFromGroupInProxmox(username string, realm string, groupName strin
 		return group == groupName
 	})
 
-	err = user.Update(context.Background())
+	userOptions := goproxmox.UserOptions{
+		Groups: user.Groups,
+	}
+
+	err = user.Update(context.Background(), userOptions)
 	if err != nil {
 		return errors.New("unable to remove user from group: " + err.Error())
 	}
