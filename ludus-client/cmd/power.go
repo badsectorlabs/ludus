@@ -45,11 +45,7 @@ func genericPowerCmd(value string) *cobra.Command {
 
 			var responseJSON []byte
 			var success bool
-			if userID != "" {
-				responseJSON, success = rest.GenericJSONPut(client, fmt.Sprintf("/range/power%s?userID=%s", value, userID), string(payload))
-			} else {
-				responseJSON, success = rest.GenericJSONPut(client, "/range/power"+value, string(payload))
-			}
+			responseJSON, success = rest.GenericJSONPut(client, buildURLWithRangeAndUserID(fmt.Sprintf("/range/power%s", value)), string(payload))
 			if didFailOrWantJSON(success, responseJSON) {
 				return
 			}
