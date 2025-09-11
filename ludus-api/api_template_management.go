@@ -183,7 +183,7 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 
 	tmpl, err := template.New("command").Parse(tmplStr)
 	if err != nil {
-		logger.Error("Failed to parse template:", err)
+		logger.Error(fmt.Sprintf("Failed to parse template: %v\n", err))
 		return
 	}
 
@@ -192,7 +192,7 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 
 	err = tmpl.Execute(&renderedOutput, data)
 	if err != nil {
-		logger.Error("Failed to execute template:", err)
+		logger.Error(fmt.Sprintf("Failed to execute template: %v\n", err))
 		return
 	}
 
@@ -206,19 +206,19 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 	if verbose && packerCommandError == nil {
 		file, err := os.OpenFile(packerLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			logger.Error("Error opening file: %v\n", err)
+			logger.Error(fmt.Sprintf("Error opening file: %v\n", err))
 			return
 		}
 		defer file.Close()
 
 		if _, err := file.Write([]byte("\n\n=>================\n=> Build complete!\n=>================\n\n")); err != nil {
-			logger.Error("Error writing to file: %v\n", err)
+			logger.Error(fmt.Sprintf("Error writing to file: %v\n", err))
 			return
 		}
 	} else if verbose && packerCommandError != nil {
 		// Copy the debug log to the regular log if the command failed
 		if err := copyFileContents(packerLogFileDebug, packerLogFile); err != nil {
-			logger.Error("Failed to copy file contents:", err)
+			logger.Error(fmt.Sprintf("Failed to copy file contents: %v\n", err))
 		}
 	}
 

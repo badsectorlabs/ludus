@@ -19,7 +19,7 @@ func findAnsiblePidForUser(username string) (string, error) {
 			// egrep failed, no ansible running
 			return "", errors.New("no ansible processes are running")
 		}
-		logger.Error("Error executing command: ", err)
+		logger.Error(fmt.Sprintf("Error executing command: %v\n", err))
 		return "", err
 	}
 
