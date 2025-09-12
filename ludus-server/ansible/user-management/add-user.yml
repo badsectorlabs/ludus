@@ -28,17 +28,21 @@
         state: directory
         mode: '0770'
 
-    - name: Create a pool for this user (range_id)
-      ansible.builtin.shell: |
-        pvesh create /pools --poolid {{ user_range_id }}
-      register: pool_create
-      failed_when: pool_create.rc > 0 and 'already exists' not in pool_create.stderr
+    - name: Create range directory for this user's default range
+      ansible.builtin.file:
+        path: "{{ ludus_ranges_dir }}/{{ user_id }}"
+        state: directory
+        owner: ludus
+        group: ludus
+        mode: '0770'
 
-    - name: Create client range config
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/templates/range-config.yml.j2"
-        dest: "{{ ludus_users_dir }}/{{ username }}/range-config.yml"
-        mode: "0600"
+    - name: Create range config for the user's default range
+      ansible.builtin.template:
+        dest: "{{ ludus_install_path }}/ranges/{{ user_id }}/range-config.yml"
+        src: range-config.yml.j2
+        owner: ludus
+        group: ludus
+        mode: '0600'
 
     - name: Store proxmox password for user
       ansible.builtin.copy:
@@ -64,12 +68,12 @@
 
     - name: Check if wg key files exists for this user
       ansible.builtin.stat:
-        path: /etc/wireguard/{{ user_range_id }}-client-private-key
+        path: /etc/wireguard/{{ user_id }}-client-private-key
       register: key_stat
 
     - name: Generate the wireguard keys
       ansible.builtin.shell: |
-        wg genkey | tee /etc/wireguard/{{ user_range_id }}-client-private-key | wg pubkey > /etc/wireguard/{{ user_range_id }}-client-public-key
+        wg genkey | tee /etc/wireguard/{{ user_id }}-client-private-key | wg pubkey > /etc/wireguard/{{ user_id }}-client-public-key
       when: not key_stat.stat.exists
 
     - name: Get wg server public key
@@ -79,12 +83,12 @@
 
     - name: Get wg client private key
       ansible.builtin.slurp:
-        src: /etc/wireguard/{{ user_range_id }}-client-private-key
+        src: /etc/wireguard/{{ user_id }}-client-private-key
       register: wg_client_private_key_slurp
 
     - name: Get wg client public key
       ansible.builtin.slurp:
-        src: /etc/wireguard/{{ user_range_id }}-client-public-key
+        src: /etc/wireguard/{{ user_id }}-client-public-key
       register: wg_client_public_key_slurp
 
     - name: Set the server and client key facts
@@ -95,7 +99,7 @@
 
     - name: Create client wireguard config
       ansible.builtin.template:
-        dest: /etc/wireguard/{{ user_range_id }}_client.conf
+        dest: /etc/wireguard/{{ user_id }}_client.conf
         src: wg_client.conf.j2
         owner: root
         group: root
@@ -108,7 +112,7 @@
           [Peer]
           PublicKey = {{ client_public_key }}
           AllowedIPs = 198.51.100.{{ user_number }}/32
-        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR {{ user_range_id }}"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR {{ user_id }}"
         insertafter: EOF
 
     # This can be used to sync the config, but it causes a hiccup in all client's connections
@@ -120,7 +124,7 @@
 
     - name: Get the client config
       ansible.builtin.copy:
-        src: "/etc/wireguard/{{ user_range_id }}_client.conf"
+        src: "/etc/wireguard/{{ user_id }}_client.conf"
         dest: "{{ ludus_users_dir }}/{{ username }}/"
         mode: "0600"
 
@@ -150,12 +154,12 @@
       args:
         executable: /bin/bash
 
-    - name: Add the vmbr interface for this user
-      ansible.builtin.include_tasks: vmbr-management.yml
-      vars:
-        state_var: present
-      loop:
-        - 1
+    # - name: Add the vmbr interface for this user
+    #   ansible.builtin.include_tasks: vmbr-management.yml
+    #   vars:
+    #     state_var: present
+    #   loop:
+    #     - 1
 
     # - name: Add a portforward for this user (Enterprise)
     #   ansible.builtin.include_tasks: portforward-management.yml
@@ -176,11 +180,11 @@
 
     - name: Set the acls for the user on their own pool
       ansible.builtin.shell:
-        cmd: pveum aclmod /pool/{{ user_range_id }} -user {{ username }}@pam -role PVEAdmin -role PVESDNAdmin
+        cmd: pveum aclmod /pool/{{ user_id }} -user {{ username }}@pam -role PVEAdmin -role PVESDNAdmin
 
     - name: Set the acls users pool for admins
       ansible.builtin.shell:
-        cmd: pveum aclmod /pool/{{ user_range_id }} -group ludus_admins -role PVEAdmin -role PVESDNAdmin
+        cmd: pveum aclmod /pool/{{ user_id }} -group ludus_admins -role PVEAdmin -role PVESDNAdmin
 
     - name: Set acls for local "/storage/local"
       ansible.builtin.shell:

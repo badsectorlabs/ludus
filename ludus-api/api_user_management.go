@@ -38,164 +38,179 @@ func AddUser(c *gin.Context) {
 	var user UserWithEmailAndPassword
 	c.Bind(&user)
 
-	if user.Name != "" && user.UserID != "" {
-		if UserIDRegex.MatchString(user.UserID) {
-
-			// ADMIN is the pool used for generally available VMs (Nexus cache)
-			// ROOT is the ID of the root ludus user
-			// CICD is the ID of the CI/CD user
-			// SHARED is the pool used for shared VMs (templates)
-			// 0 is a bug in proxmox where creating a resource pool with ID 0 succeeds but doesn't actually create the pool
-			reservedUserIDs := []string{"ADMIN", "ROOT", "CICD", "SHARED", "0"}
-
-			// Do not allow users to be created with the reserved user IDs
-			if slices.Contains(reservedUserIDs, user.UserID) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s is a reserved user ID", user.UserID)})
-				return
-			}
-
-			// Validate there is an email and password
-			if user.Email == "" || user.Password == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Email and password are required"})
-				return
-			}
-
-			// Check that the password is at least 8 characters long
-			if len(user.Password) < 8 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 8 characters long"})
-				return
-			}
-
-			var users []UserObject
-			db.First(&users, "user_id = ?", user.UserID)
-			if len(users) > 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "User with that ID already exists"})
-				return
-			}
-			// Convert to lower-case, and replace spaces with "-"
-			user.ProxmoxUsername = strings.ReplaceAll(strings.ToLower(user.Name), " ", "-")
-
-			db.First(&users, "proxmox_username = ?", user.ProxmoxUsername)
-			if len(users) > 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "User with that name already exists"})
-				return
-			}
-
-			// Check if the username already exists on the host system
-			if userExistsOnHostSystem(user.ProxmoxUsername) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "User with that name already exists on the host system. Ludus uses the PAM for user authentication, so you must use a unique username for each Ludus user."})
-				return
-			}
-
-			// Create a default range for the user using the new utility function, also creates a UserRangeAccess record
-			err := CreateDefaultUserRange(db, user.UserID)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating user's default range: %v", err)})
-				return
-			}
-
-			// Get the created range
-			var usersRange RangeObject
-			usersRange, err = GetUserDefaultRange(db, user.UserID)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error retrieving created range"})
-				return
-			}
-
-			// Get the next available user number
-			user.UserNumber = findNextAvailableUserNumber(db)
-
-			// Refuse to create more than 150 users
-			if user.UserNumber > 150 {
-				// Remove the user range access and range from the database
-				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
-				db.Where("range_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot create more than 150 users per Ludus due to networking constraints"})
-				return
-			}
-
-			playbook := []string{ludusInstallPath + "/ansible/user-management/add-user.yml"}
-			extraVars := map[string]interface{}{
-				"username":            user.ProxmoxUsername,
-				"user_range_id":       user.UserID,
-				"user_number":         user.UserNumber,
-				"proxmox_public_ip":   ServerConfiguration.ProxmoxPublicIP,
-				"user_is_admin":       user.IsAdmin,
-				"portforward_enabled": user.PortforwardingEnabled,
-				"proxmox_password":    user.Password,
-			}
-			output, err := server.RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": output})
-				// Remove the range record since creation failed
-				db.Where("range_id = ?", user.UserID).Delete(&usersRange)
-				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
-				// Remove the user from the host system - we validated the user did not exist on the host system before running the playbook, so this is safe to do
-				removeUserFromHostSystem(user.ProxmoxUsername)
-				// TODO: Remove the user from proxmox
-				return
-			}
-			// If this endpoint is called by a user that is not ROOT and this is their first ansible action, their log file will be owned by root
-			// Chown the ansible log file to ludus to prevent errors when they use the normal ludus endpoint (which runs as ludus)
-			chownFileToUsername(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID), "ludus")
-
-			user.DateCreated = time.Now()
-			user.DateLastActive = time.Now()
-			apiKey := GenerateAPIKey(&user.UserObject)
-			user.HashedAPIKey, _ = HashString(apiKey)
-
-			// Create a new user in Supabase
-			supabaseUser, err := createUserInSupabase(user, user.Password)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				// Rollback the user creation
-				db.Delete(&user)
-				db.Where("range_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
-				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
-				removeUserFromHostSystem(user.ProxmoxUsername)
-				// TODO: Remove the user from proxmox
-				return
-			}
-			user.UUID = supabaseUser.ID
-
-			// Create a Proxmox API Token for the user
-			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.UserObject)
-			if err != nil {
-				// Rollback the user creation
-				db.Delete(&user)
-				db.Where("range_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&RangeObject{})
-				db.Where("user_id = ? AND range_number = ?", user.UserID, usersRange.RangeNumber).Delete(&UserRangeAccess{})
-				removeUserFromHostSystem(user.ProxmoxUsername)
-				// TODO: Remove the user from Supabase
-				// TODO: Remove the user from proxmox
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			user.ProxmoxTokenID = tokenID
-			user.ProxmoxTokenSecret = tokenSecret
-
-			// Create the user in the database
-			err = db.Create(&user.UserObject).Error
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-
-			// Add the plaintext API Key to this response only
-			var userDataWithAPIKey map[string]interface{}
-			userMap, _ := json.Marshal(user.UserObject)
-			json.Unmarshal(userMap, &userDataWithAPIKey)
-			userDataWithAPIKey["apiKey"] = apiKey
-			delete(userDataWithAPIKey, "HashedAPIKey")
-
-			c.JSON(http.StatusCreated, gin.H{"result": userDataWithAPIKey})
-		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "provided userID does not match ^[A-Za-z0-9]{1,20}$"})
-		}
-
-	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Fields are empty"})
+	if user.Name == "" || user.UserID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Name and userID are required"})
+		return
 	}
+
+	if !UserIDRegex.MatchString(user.UserID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provided userID does not match ^[A-Za-z0-9]{1,20}$"})
+		return
+	}
+
+	// ADMIN is the pool used for generally available VMs (Nexus cache)
+	// ROOT is the ID of the root ludus user
+	// CICD is the ID of the CI/CD user
+	// SHARED is the pool used for shared VMs (templates)
+	// 0 is a bug in proxmox where creating a resource pool with ID 0 succeeds but doesn't actually create the pool
+	reservedUserIDs := []string{"ADMIN", "ROOT", "CICD", "SHARED", "0"}
+
+	// Do not allow users to be created with the reserved user IDs
+	if slices.Contains(reservedUserIDs, user.UserID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s is a reserved user ID", user.UserID)})
+		return
+	}
+
+	// Validate there is an email and password
+	if user.Email == "" || user.Password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email and password are required"})
+		return
+	}
+
+	// Check that the password is at least 8 characters long
+	if len(user.Password) < 8 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 8 characters long"})
+		return
+	}
+
+	var users []UserObject
+	db.First(&users, "user_id = ?", user.UserID)
+	if len(users) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User with that ID already exists"})
+		return
+	}
+	// Convert to lower-case, and replace spaces with "-"
+	user.ProxmoxUsername = strings.ReplaceAll(strings.ToLower(user.Name), " ", "-")
+
+	db.First(&users, "proxmox_username = ?", user.ProxmoxUsername)
+	if len(users) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User with that name already exists"})
+		return
+	}
+
+	// Check if the username already exists on the host system
+	if userExistsOnHostSystem(user.ProxmoxUsername) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User with that name already exists on the host system. Ludus uses the PAM for user authentication, so you must use a unique username for each Ludus user."})
+		return
+	}
+
+	if poolExists(user.UserID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Pool with the name %s already exists", user.UserID)})
+		return
+	}
+
+	// Start database transaction and setup the error handling to clean up if anything fails during user creation
+	tx := db.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to start database transaction: %v", tx.Error)})
+		return
+	}
+	wasError := false
+	defer func() {
+		if wasError {
+			tx.Rollback()
+			// Remove the user from the host system - we validated the user did not exist on the host system before running the playbook, so this is safe to do
+			removeUserFromHostSystem(user.ProxmoxUsername)
+			removeUserFromProxmox(user.ProxmoxUsername, "pam")
+			removeUserFromSupabaseByUUID(user.UUID)
+			removePool(user.UserID)
+		}
+	}()
+
+	// Create a default range for the user using the new utility function, also creates a UserRangeAccess record
+	err := CreateDefaultUserRange(tx, user.UserID)
+	if err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating user's default range: %v", err)})
+		return
+	}
+
+	// Get the created range
+	var usersRange RangeObject
+	usersRange, err = GetUserDefaultRange(tx, user.UserID)
+	if err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error retrieving created range"})
+		return
+	}
+
+	// Get the next available user number
+	user.UserNumber = findNextAvailableUserNumber(db)
+
+	// Refuse to create more than 150 users
+	if user.UserNumber > 150 {
+		tx.Rollback()
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot create more than 150 users per Ludus due to networking constraints"})
+		return
+	}
+
+	playbook := []string{ludusInstallPath + "/ansible/user-management/add-user.yml"}
+	extraVars := map[string]interface{}{
+		"username":          user.ProxmoxUsername,
+		"user_id":           user.UserID,
+		"user_number":       user.UserNumber,
+		"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
+		"user_is_admin":     user.IsAdmin,
+		"proxmox_password":  user.Password,
+	}
+	output, err := server.RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
+	if err != nil {
+		wasError = true
+		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
+		return
+	}
+	// If this endpoint is called by a user that is not ROOT and this is their first ansible action, their log file will be owned by root
+	// Chown the ansible log file to ludus to prevent errors when they use the normal ludus endpoint (which runs as ludus)
+	chownFileToUsername(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID), "ludus")
+
+	user.DateCreated = time.Now()
+	user.DateLastActive = time.Now()
+	apiKey := GenerateAPIKey(&user.UserObject)
+	user.HashedAPIKey, _ = HashString(apiKey)
+
+	// Create a new user in Supabase
+	supabaseUser, err := createUserInSupabase(user, user.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		wasError = true
+		return
+	}
+	user.UUID = supabaseUser.ID
+
+	// Create a Proxmox API Token for the user
+	tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.UserObject)
+	if err != nil {
+		wasError = true
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	user.ProxmoxTokenID = tokenID
+	user.ProxmoxTokenSecret = tokenSecret
+
+	// Create the user in the database
+	err = tx.Create(&user.UserObject).Error
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		wasError = true
+		return
+	}
+
+	// Commit the transaction
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to commit database transaction: %v", err)})
+		wasError = true
+		return
+	}
+
+	// Add the plaintext API Key to this response only
+	var userDataWithAPIKey map[string]interface{}
+	userMap, _ := json.Marshal(user.UserObject)
+	json.Unmarshal(userMap, &userDataWithAPIKey)
+	userDataWithAPIKey["apiKey"] = apiKey
+	delete(userDataWithAPIKey, "HashedAPIKey")
+
+	c.JSON(http.StatusCreated, gin.H{"result": userDataWithAPIKey})
+
 }
 
 // DeleteUser - removes a user to the system
@@ -224,78 +239,15 @@ func DeleteUser(c *gin.Context) {
 	var user UserObject
 	result := db.First(&user, "user_id = ?", userID)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s not found", user.UserID)})
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s not found", userID)})
 		return
-	}
-
-	var usersRange RangeObject
-	result = db.First(&usersRange, "user_id = ?", user.UserID)
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s range not found", user.UserID)})
-		return
-	}
-
-	var usersAccess RangeAccessObject
-	rangeAccessResult := db.First(&usersAccess, "target_user_id = ?", user.UserID)
-	if !errors.Is(rangeAccessResult.Error, gorm.ErrRecordNotFound) && rangeAccessResult.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting user access grants for %s", user.UserID)})
-		return
-	}
-
-	// Search for any RangeAccessObjects where the user.UserID is in the SourceUserIDs array
-	var userAccessGrants []RangeAccessObject
-	rangeAccessGrants := db.Where("source_user_ids LIKE ?", fmt.Sprintf("%%%s%%", user.UserID)).Find(&userAccessGrants)
-	if !errors.Is(rangeAccessGrants.Error, gorm.ErrRecordNotFound) && rangeAccessGrants.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting user access grants that contain user %s", user.UserID)})
-		return
-	}
-
-	var errorUserIDs []string
-	// Remove any RangeAccessObjects where the user.UserID is in the SourceUserIDs array
-	if rangeAccessGrants.RowsAffected != 0 {
-		// Loop over rows returned in the userAccessGrants object
-		for _, accessObject := range userAccessGrants {
-			// Remove the user from the SourceUserIDs array
-			accessObject.SourceUserIDs = removeStringExact(accessObject.SourceUserIDs, user.UserID)
-			if len(accessObject.SourceUserIDs) == 0 {
-				// If the SourceUserIDs array is empty, delete the object
-				db.Delete(&accessObject)
-			} else {
-				db.Save(&accessObject)
-			}
-			// Revoke the user being deleted access to the range
-			var targetUserRangeObject RangeObject
-			db.First(&targetUserRangeObject, "user_id = ?", accessObject.TargetUserID)
-
-			var tarGetUserObject UserObject
-			db.First(&tarGetUserObject, "user_id = ?", accessObject.TargetUserID)
-
-			var sourceUserRangeObject RangeObject
-			db.First(&sourceUserRangeObject, "user_id = ?", user.UserID)
-
-			extraVars := map[string]interface{}{
-				"target_username":           tarGetUserObject.ProxmoxUsername,
-				"target_range_id":           tarGetUserObject.UserID,
-				"target_range_second_octet": targetUserRangeObject.RangeNumber,
-				"source_username":           user.ProxmoxUsername,
-				"source_range_id":           user.UserID,
-				"source_range_second_octet": sourceUserRangeObject.RangeNumber,
-			}
-			output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, "revoke", false, "")
-			if err != nil {
-				routerWANFatalRegex := regexp.MustCompile(`fatal:.*?192\.0\.2\\"`)
-				if routerWANFatalRegex.MatchString(output) {
-					errorUserIDs = append(errorUserIDs, accessObject.TargetUserID)
-				}
-			}
-		}
 	}
 
 	playbook := []string{ludusInstallPath + "/ansible/user-management/del-user.yml"}
 	extraVars := map[string]interface{}{
 		"username":      user.ProxmoxUsername,
-		"user_range_id": user.UserID,
-		"second_octet":  usersRange.RangeNumber,
+		"user_id":       user.UserID,
+		"user_number":   user.UserNumber,
 		"user_is_admin": user.IsAdmin,
 	}
 	output, err := server.RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
@@ -304,55 +256,28 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 
-	// There are users with access to this user's range, revoke their access
-	if !errors.Is(rangeAccessResult.Error, gorm.ErrRecordNotFound) {
-		db.Delete(&usersAccess, "target_user_id = ?", user.UserID)
-		for _, userID := range usersAccess.SourceUserIDs {
-			// Remove the network range of the user being deleted from each source user's WireGuard config
-			var sourceUser UserObject
-			db.First(&sourceUser, "user_id = ?", userID)
-			sourceUserWireGuardConfigPath := fmt.Sprintf("%s/users/%s/%s_client.conf", ludusInstallPath, sourceUser.ProxmoxUsername, sourceUser.UserID)
-			sourceUserWireGuardConfig, err := GetFileContents(sourceUserWireGuardConfigPath)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error reading WireGuard config for user %s", sourceUser.UserID)})
-				return
-			}
-			// Replace the network with an empty string, it may end in a comma or not
-			sourceUserWireGuardConfig = strings.ReplaceAll(sourceUserWireGuardConfig, fmt.Sprintf("10.%d.0.0/16, ", usersRange.RangeNumber), "")
-			sourceUserWireGuardConfig = strings.ReplaceAll(sourceUserWireGuardConfig, fmt.Sprintf(", 10.%d.0.0/16", usersRange.RangeNumber), "")
-			err = os.WriteFile(sourceUserWireGuardConfigPath, []byte(sourceUserWireGuardConfig), 0660)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error writing WireGuard config for user %s", sourceUser.UserID)})
-				return
-			}
-		}
-	}
-	// Clean up all access records for this user
-	db.Where("user_id = ?", userID).Delete(&UserRangeAccess{})
-	db.Where("user_id = ?", userID).Delete(&UserGroupMembership{})
-
-	// Clean up group range access records for groups this user was a member of
-	var userGroups []UserGroupMembership
-	db.Where("user_id = ?", userID).Find(&userGroups)
-	for _, membership := range userGroups {
-		// Check if this group has any other members
-		var memberCount int64
-		db.Model(&UserGroupMembership{}).Where("group_id = ?", membership.GroupID).Count(&memberCount)
-		if memberCount == 0 {
-			// Group has no members left, clean up group range access
-			db.Where("group_id = ?", membership.GroupID).Delete(&GroupRangeAccess{})
-		}
-	}
-
-	db.Delete(&user, "user_id = ?", userID)
-	db.Delete(&usersRange, "range_id = ?", user.UserID)
-
-	if len(errorUserIDs) > 0 {
-		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("User deleted but access was not revoked from ranges: %v\nIf these users do not have a range deployed, this is ok.\nOtherwise, the next user created with range number %d could have access to their range if they modify their WireGuard config manually.", errorUserIDs, usersRange.RangeNumber)})
+	err = db.Delete(&user).Error
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	} else {
-		c.JSON(http.StatusOK, gin.H{"result": "User deleted"})
 	}
+
+	// Remove the user user from the UserRangeAccess and UserGroupMembership tables
+	err = db.Delete(&UserRangeAccess{}, "user_id = ?", user.UserID).Error
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	err = db.Delete(&UserGroupMembership{}, "user_id = ?", user.UserID).Error
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	removeUserFromProxmox(user.ProxmoxUsername, "pam")
+	removeUserFromSupabaseByUUID(user.UUID)
+
+	c.JSON(http.StatusOK, gin.H{"result": "User deleted"})
 }
 
 // GetAPIKey - reset and retrieve the Ludus API key for the user

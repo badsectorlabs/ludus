@@ -255,7 +255,7 @@ func createRootAPITokenWithShell() (string, string, error) {
 	return tokenResponse.TokenID, tokenResponse.Value, nil
 }
 
-func createPool(c *gin.Context, poolName string) error {
+func createPool(poolName string) error {
 	proxmoxClient, err := getRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client")
@@ -267,7 +267,7 @@ func createPool(c *gin.Context, poolName string) error {
 	return nil
 }
 
-func removePool(c *gin.Context, poolName string) error {
+func removePool(poolName string) error {
 	proxmoxClient, err := getRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client")
@@ -312,6 +312,26 @@ func poolACLAction(username string, realm string, poolName string, revoke bool) 
 }
 
 var proxmoxGroupNameRegex = regexp.MustCompile(`^[A-Za-z0-9_\-]+$`)
+
+func poolExists(poolName string) bool {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return false
+	}
+	pools, err := proxmoxClient.Pools(context.Background())
+	if err != nil {
+		logger.Error("unable to get proxmox pools: " + err.Error())
+		return false
+	}
+
+	for _, pool := range pools {
+		if pool.PoolID == poolName {
+			return true
+		}
+	}
+
+	return false
+}
 
 func createGroupInProxmox(groupName string) error {
 
@@ -436,5 +456,21 @@ func groupACLAction(groupID string, poolName string, revoke bool) error {
 		return errors.New("unable to set permissions for group: " + err.Error())
 	}
 
+	return nil
+}
+
+func removeUserFromProxmox(username string, realm string) error {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client: " + err.Error())
+	}
+	user, err := proxmoxClient.User(context.Background(), username+"@"+realm)
+	if err != nil {
+		return errors.New("unable to get user object: " + err.Error())
+	}
+	user.Delete(context.Background())
+	if err != nil {
+		return errors.New("unable to delete user: " + err.Error())
+	}
 	return nil
 }
