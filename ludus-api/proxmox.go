@@ -194,7 +194,7 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 	// Get the user object from go-proxmox
 	goProxmoxUserObject, err := proxmoxClient.User(context.Background(), user.ProxmoxUsername+"@pam")
 	if err != nil {
-		log.Fatalf("Failed to retrieve created user: %v", err)
+		log.Printf("Failed to retrieve created user %s@pam: %v", user.ProxmoxUsername, err)
 		return "", "", errors.New("failed to retrieve created user")
 	}
 
@@ -359,7 +359,14 @@ func addUserToGroupInProxmox(username string, realm string, groupName string) er
 	}
 
 	userOptions := goproxmox.UserOptions{
-		Groups: append(user.Groups, groupName),
+		Comment:   user.Comment,
+		Email:     user.Email,
+		Enable:    user.Enable,
+		Expire:    user.Expire,
+		Firstname: user.Firstname,
+		Groups:    append(user.Groups, groupName),
+		Keys:      user.Keys,
+		Lastname:  user.Lastname,
 	}
 
 	err = user.Update(context.Background(), userOptions)
@@ -384,7 +391,14 @@ func removeUserFromGroupInProxmox(username string, realm string, groupName strin
 	})
 
 	userOptions := goproxmox.UserOptions{
-		Groups: user.Groups,
+		Comment:   user.Comment,
+		Email:     user.Email,
+		Enable:    user.Enable,
+		Expire:    user.Expire,
+		Firstname: user.Firstname,
+		Groups:    user.Groups,
+		Keys:      user.Keys,
+		Lastname:  user.Lastname,
 	}
 
 	err = user.Update(context.Background(), userOptions)
