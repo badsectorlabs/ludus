@@ -274,3 +274,68 @@ func FileExists(filename string) bool {
 	}
 	return !info.IsDir()
 }
+
+// applyBlockInFile is a Go implementation of Ansible's blockinfile logic.
+// It correctly updates a block in-place, removes it, or adds it to the end if not found.
+// It returns the new file content and a boolean indicating if a change was made.
+func applyBlockInFile(originalContent, marker, block string, present bool) (string, bool) {
+	startMarker := strings.Replace(marker, "{mark}", "BEGIN", 1)
+	endMarker := strings.Replace(marker, "{mark}", "END", 1)
+	lines := strings.Split(originalContent, "\n")
+
+	var newLines []string
+	blockFound := false
+	i := 0
+
+	for i < len(lines) {
+		line := lines[i]
+
+		// Check if we found the start of our managed block.
+		if strings.TrimSpace(line) == startMarker {
+			blockFound = true
+
+			// If the desired state is 'present', write the new block.
+			if present {
+				newLines = append(newLines, startMarker)
+				newLines = append(newLines, block)
+				newLines = append(newLines, endMarker)
+			}
+
+			// Skip the old block in the original content by advancing the loop counter 'i'
+			// until we find the end marker or the end of the file.
+			for i < len(lines) && strings.TrimSpace(lines[i]) != endMarker {
+				i++
+			}
+		} else {
+			// This line is not part of our managed block, so keep it.
+			newLines = append(newLines, line)
+		}
+		i++
+	}
+
+	// If the block was never found and the state is 'present', add it to the end.
+	if !blockFound && present {
+		// If the file ended with a newline, the final line will be empty, which would add a blank line in the updated file
+		// so we need to remove it
+		if len(newLines[len(newLines)-1]) == 0 {
+			newLines = newLines[:len(newLines)-1]
+		}
+		newLines = append(newLines, startMarker)
+		newLines = append(newLines, block)
+		newLines = append(newLines, endMarker)
+	}
+
+	// Reconstruct the final content string.
+	finalContent := strings.Join(newLines, "\n")
+
+	// If the original content ended with a newline, add one to the final content if the final content does not already end with a newline
+	if originalContent[len(originalContent)-1] == '\n' && finalContent[len(finalContent)-1] != '\n' {
+		finalContent += "\n"
+	}
+
+	// Determine if the content actually changed.
+	// We compare stripped versions to avoid false positives from trailing whitespace differences.
+	changed := strings.TrimSpace(originalContent) != strings.TrimSpace(finalContent)
+
+	return finalContent, changed
+}

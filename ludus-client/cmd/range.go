@@ -772,7 +772,7 @@ var rangeCreateCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Printf("Range '%s' created successfully\n", rangeID)
+		logger.Logger.Info(fmt.Sprintf("Range '%s' created successfully", rangeID))
 	},
 }
 

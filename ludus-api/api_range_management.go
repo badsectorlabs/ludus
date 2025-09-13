@@ -149,6 +149,20 @@ func DeleteRange(c *gin.Context) {
 		}
 	}
 
+	// Remove the range from the UserRangeAccess table
+	err = db.Delete(&UserRangeAccess{}, "range_number = ?", targetRange.RangeNumber).Error
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Remove the range from the GroupRangeAccess table
+	err = db.Delete(&GroupRangeAccess{}, "range_number = ?", targetRange.RangeNumber).Error
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
 	// Remove the Resource Pool from Proxmox (also removes all ACLs for the pool)
 	err = removePool(targetRange.RangeID)
 	if err != nil {
@@ -156,7 +170,7 @@ func DeleteRange(c *gin.Context) {
 		return
 	}
 
-	err = manageVmbrInterfaceLocally(targetRange.RangeNumber, "absent")
+	err = manageVmbrInterfaceLocally(targetRange.RangeNumber, false)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -770,7 +784,7 @@ func CreateRange(c *gin.Context) {
 	}
 
 	// Create the vmbr interface for the range
-	err = manageVmbrInterfaceLocally(rangeNumber, "present")
+	err = manageVmbrInterfaceLocally(rangeNumber, true)
 	if err != nil {
 		removePool(payload.RangeID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -791,6 +805,8 @@ func CreateRange(c *gin.Context) {
 	tx := db.Begin()
 	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error starting database transaction: %v", tx.Error)})
+		removePool(payload.RangeID)
+		manageVmbrInterfaceLocally(rangeNumber, false)
 		return
 	}
 
@@ -798,7 +814,7 @@ func CreateRange(c *gin.Context) {
 	defer func() {
 		if wasError {
 			removePool(payload.RangeID)
-			manageVmbrInterfaceLocally(rangeNumber, "absent")
+			manageVmbrInterfaceLocally(rangeNumber, false)
 			tx.Rollback()
 		}
 	}()

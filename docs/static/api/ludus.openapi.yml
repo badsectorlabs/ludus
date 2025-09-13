@@ -2982,7 +2982,8 @@ paths:
             application/json:
               schema:
                 type: array
-                $ref: "#/components/schemas/RangeObject"
+                items:
+                  $ref: "#/components/schemas/RangeObject"
   /ranges/create:
     post:
       tags:
@@ -3020,6 +3021,13 @@ paths:
       responses:
         "201":
           description: Range created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    $ref: "#/components/schemas/RangeObject"
         "400":
           description: Invalid input
   /ranges/assign/{userID}/{rangeID}:

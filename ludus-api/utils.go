@@ -530,10 +530,19 @@ func CreateDefaultUserRange(db *gorm.DB, userID string) error {
 			return err
 		}
 	}
-	err := createPool(userID)
+
+	err := manageVmbrInterfaceLocally(rangeNumber, true)
 	if err != nil {
 		db.Delete(&rangeObj)
 		db.Delete(&userRangeAccess)
+		return err
+	}
+
+	err = createPool(userID)
+	if err != nil {
+		db.Delete(&rangeObj)
+		db.Delete(&userRangeAccess)
+		manageVmbrInterfaceLocally(rangeNumber, false)
 		return err
 	}
 	return err
@@ -661,7 +670,7 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 		// No rangeID specified, get the target user's default range
 		usersRange, err = GetUserDefaultRange(db, targetUserID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "No accessible ranges found for user"})
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("No accessible ranges found for user %s", targetUserID)})
 			return usersRange, targetUser, err
 		}
 	}
@@ -671,64 +680,4 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 	c.Set("userObject", targetUser)
 
 	return usersRange, targetUser, nil
-}
-
-// applyBlockInFile is a Go implementation of Ansible's blockinfile logic.
-// It correctly updates a block in-place, removes it, or adds it to the end if not found.
-// It returns the new file content and a boolean indicating if a change was made.
-// state is either "present" or "absent"
-func applyBlockInFile(originalContent, marker, block, state string) (string, bool) {
-	startMarker := strings.Replace(marker, "{mark}", "BEGIN", 1)
-	endMarker := strings.Replace(marker, "{mark}", "END", 1)
-	lines := strings.Split(originalContent, "\n")
-
-	var newLines []string
-	blockFound := false
-	i := 0
-
-	for i < len(lines) {
-		line := lines[i]
-
-		// Check if we found the start of our managed block.
-		if strings.TrimSpace(line) == startMarker {
-			blockFound = true
-
-			// If the desired state is 'present', write the new block.
-			if state == "present" {
-				newLines = append(newLines, startMarker)
-				newLines = append(newLines, block)
-				newLines = append(newLines, endMarker)
-			}
-
-			// Skip the old block in the original content by advancing the loop counter 'i'
-			// until we find the end marker or the end of the file.
-			for i < len(lines) && strings.TrimSpace(lines[i]) != endMarker {
-				i++
-			}
-		} else {
-			// This line is not part of our managed block, so keep it.
-			newLines = append(newLines, line)
-		}
-		i++
-	}
-
-	// If the block was never found and the state is 'present', add it to the end.
-	if !blockFound && state == "present" {
-		// Ensure there's a newline before our block if the file isn't empty.
-		if len(newLines) > 0 && newLines[len(newLines)-1] != "" {
-			newLines = append(newLines, "")
-		}
-		newLines = append(newLines, startMarker)
-		newLines = append(newLines, block)
-		newLines = append(newLines, endMarker)
-	}
-
-	// Reconstruct the final content string.
-	finalContent := strings.Join(newLines, "\n")
-
-	// Determine if the content actually changed.
-	// We compare stripped versions to avoid false positives from trailing whitespace differences.
-	changed := strings.TrimSpace(originalContent) != strings.TrimSpace(finalContent)
-
-	return finalContent, changed
 }

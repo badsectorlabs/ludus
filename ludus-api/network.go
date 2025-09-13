@@ -9,15 +9,11 @@ import (
 
 // manageVmbrInterfaceLocally directly edits /etc/network/interfaces
 // This function MUST be run as root on the Proxmox host.
-// state is either "present" or "absent"
-func manageVmbrInterfaceLocally(rangeNumber int32, state string) error {
-	if state != "present" && state != "absent" {
-		return fmt.Errorf("state must be either 'present' or 'absent'")
-	}
-
+func manageVmbrInterfaceLocally(rangeNumber int32, present bool) error {
 	interfacesPath := "/etc/network/interfaces"
 	ifaceName := fmt.Sprintf("vmbr1%03d", rangeNumber)
 
+	// We have to use the term "USER" instead of "RANGE" because ludus 1.x used it
 	marker := fmt.Sprintf("# LUDUS MANAGED INTERFACE FOR USER %d {mark}", rangeNumber)
 
 	block := fmt.Sprintf(`auto %s
@@ -36,24 +32,24 @@ iface %s inet manual
 		return fmt.Errorf("failed to read %s: %w", interfacesPath, err)
 	}
 
-	newContent, contentChanged := applyBlockInFile(string(originalContent), marker, block, state)
+	newContent, contentChanged := applyBlockInFile(string(originalContent), marker, block, present)
 
 	if contentChanged {
-		fmt.Printf("Configuration in %s has changed. Applying...\n", interfacesPath)
+		logger.Debug(fmt.Sprintf("Configuration in %s has changed. Applying...", interfacesPath))
 		if err := os.WriteFile(interfacesPath, []byte(newContent), 0644); err != nil {
 			return fmt.Errorf("failed to write changes to %s: %w", interfacesPath, err)
 		}
 
 		// Apply network changes based on the desired state.
-		switch state {
-		case "present":
-			runNetworkCommand("ifup", ifaceName)
-		case "absent":
-			runNetworkCommand("ifdown", ifaceName)
+		switch present {
+		case true:
+			runNetworkCommand("/usr/sbin/ifup", ifaceName)
+		case false:
+			runNetworkCommand("/usr/sbin/ifdown", ifaceName)
 		}
-		fmt.Println("Network configuration applied.")
+		logger.Debug("Network configuration applied.")
 	} else {
-		fmt.Printf("Configuration in %s is already in the desired state. No action taken.\n", interfacesPath)
+		logger.Debug(fmt.Sprintf("Configuration in %s is already in the desired state. No action taken.", interfacesPath))
 	}
 
 	return nil
@@ -68,10 +64,10 @@ func runNetworkCommand(command string, args ...string) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	logger.Debug("Executing: %s\n", cmd.String())
+	logger.Debug(fmt.Sprintf("Executing: %s\n", cmd.String()))
 	err := cmd.Run()
 	if err != nil {
-		logger.Debug("Warning: Command '%s' failed (ignoring error): %v\n", cmd.String(), err)
-		logger.Debug("Stderr: %s\n", stderr.String())
+		logger.Debug(fmt.Sprintf("Warning: Command '%s' failed (ignoring error): %v\n", cmd.String(), err))
+		logger.Debug(fmt.Sprintf("Stderr: %s\n", stderr.String()))
 	}
 }

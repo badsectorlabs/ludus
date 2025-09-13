@@ -203,12 +203,12 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 		Comment: "Ludus Token - Do not modify or delete",
 		Privsep: false, // This token has the same permissions as the user
 	}
-	fmt.Printf("Attempting to create API token '%s' for user '%s'\n", token.TokenID, user.UserID)
+	logger.Debug(fmt.Sprintf("Attempting to create API token '%s' for user '%s'\n", token.TokenID, user.UserID))
 	apiToken, err := goProxmoxUserObject.NewAPIToken(context.Background(), token)
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			// Remove the token and try again
-			log.Printf("API token already exists for user '%s', removing it and recreating", user.UserID)
+			logger.Debug(fmt.Sprintf("API token already exists for user '%s', removing it and recreating", user.UserID))
 			_, err = RunWithOutput(fmt.Sprintf("pveum user token del %s@pam ludus-token", user.ProxmoxUsername))
 			if err != nil {
 				return "", "", errors.New("unable to remove existing API token: " + err.Error())
@@ -221,7 +221,7 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 			return "", "", errors.New("failed to create API token: " + err.Error())
 		}
 	}
-	fmt.Printf("Created API token '%s' for user '%s'\n", apiToken.FullTokenID, user.UserID)
+	logger.Debug(fmt.Sprintf("Created API token '%s' for user '%s'\n", apiToken.FullTokenID, user.UserID))
 	return apiToken.FullTokenID, apiToken.Value, nil
 }
 
