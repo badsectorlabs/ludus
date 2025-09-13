@@ -2982,15 +2982,7 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  type: object
-                  properties:
-                    rangeNumber:
-                      type: integer
-                    userID:
-                      type: string
-                    rangeState:
-                      type: string
+                $ref: "#/components/schemas/RangeObject"
   /ranges/create:
     post:
       tags:
