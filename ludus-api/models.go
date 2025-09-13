@@ -69,8 +69,6 @@ type UserObject struct {
 
 	ProxmoxTokenSecret string `json:"-"`
 
-	PortforwardingEnabled bool `json:"portforwardingEnabled"`
-
 	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
 	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
 }

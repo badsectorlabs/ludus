@@ -96,6 +96,12 @@ func DeployRange(c *gin.Context) {
 
 // DeleteRange - deletes a range object from the database and proxmox host
 func DeleteRange(c *gin.Context) {
+
+	if os.Geteuid() != 0 {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus range rm command with --url https://127.0.0.1:8081"})
+		return
+	}
+
 	targetRange, _, err := CheckRangeAccessAndGetObjects(c)
 	if err != nil {
 		return // JSON set in CheckRangeAccessAndGetObjects
@@ -144,7 +150,18 @@ func DeleteRange(c *gin.Context) {
 	}
 
 	// Remove the Resource Pool from Proxmox (also removes all ACLs for the pool)
-	err = removePool(c, targetRange.RangeID)
+	err = removePool(targetRange.RangeID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	err = manageVmbrInterfaceLocally(targetRange.RangeNumber, "absent")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	err = os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, targetRange.RangeID))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -158,17 +175,28 @@ func DeleteRange(c *gin.Context) {
 
 // DeleteRangeVMs - stops and deletes all range VMs (keeps range object in database)
 func DeleteRangeVMs(c *gin.Context) {
-	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
-	if err != nil {
-		return // JSON set in CheckRangeAccessAndGetObjects
+	// Get the range ID from the URL
+	rangeID := c.Param("rangeID")
+
+	if rangeID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "rangeID not provided"})
+		return
 	}
+
+	var usersRange RangeObject
+	if err := db.Where("range_id = ?", rangeID).First(&usersRange).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeID)})
+		return
+	}
+
+	logger.Debug("DeleteRangeVMs for range ID: " + usersRange.RangeID)
 
 	// Set range state to "DESTROYING"
 	db.Model(&usersRange).Update("range_state", "DESTROYING")
 
 	// This can take a long time, so run as a go routine and have the user check the status via another endpoint
 	go func(c *gin.Context) {
-		_, err = RunPlaybookWithTag(c, "power.yml", "destroy-range", false)
+		_, err := RunPlaybookWithTag(c, "power.yml", "destroy-range", false)
 		if err != nil {
 			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
 			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "Error with destroy-range\n")
@@ -661,6 +689,12 @@ func RangeAccessList(c *gin.Context) {
 // CreateRange allows users to create ranges not tied to a specific user
 func CreateRange(c *gin.Context) {
 
+	// Make sure this is the admin server (root) as we need to create a vmbr interface for the range
+	if os.Geteuid() != 0 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus range create command with --url https://127.0.0.1:8081"})
+		return
+	}
+
 	type CreateRangePayload struct {
 		Name        string `json:"name" binding:"required"`
 		RangeID     string `json:"rangeID" binding:"required"`
@@ -689,6 +723,11 @@ func CreateRange(c *gin.Context) {
 		}
 	}
 
+	if poolExists(payload.RangeID) {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("Pool with the name %s already exists", payload.RangeID)})
+		return
+	}
+
 	// Determine range number
 	var rangeNumber int32
 	if payload.RangeNumber > 0 {
@@ -696,6 +735,11 @@ func CreateRange(c *gin.Context) {
 		var existingRange RangeObject
 		if err := db.Where("range_number = ?", payload.RangeNumber).First(&existingRange).Error; err == nil {
 			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("Range number %d already in use", payload.RangeNumber)})
+			return
+		}
+		// Make sure the range number is not a reserved range number
+		if slices.Contains(ServerConfiguration.ReservedRangeNumbers, payload.RangeNumber) {
+			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("Range number %d is a reserved range number. Edit the reserved_range_numbers array in /opt/ludus/config.yml to use this range number.", payload.RangeNumber)})
 			return
 		}
 		rangeNumber = payload.RangeNumber
@@ -719,8 +763,16 @@ func CreateRange(c *gin.Context) {
 	}
 
 	// Create a new resource pool for the range
-	err := createPool(c, payload.RangeID)
+	err := createPool(payload.RangeID)
 	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Create the vmbr interface for the range
+	err = manageVmbrInterfaceLocally(rangeNumber, "present")
+	if err != nil {
+		removePool(payload.RangeID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -736,9 +788,24 @@ func CreateRange(c *gin.Context) {
 		RangeState:  "NEVER DEPLOYED",
 	}
 
-	if err := db.Create(&rangeObj).Error; err != nil {
+	tx := db.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error starting database transaction: %v", tx.Error)})
+		return
+	}
+
+	wasError := false
+	defer func() {
+		if wasError {
+			removePool(payload.RangeID)
+			manageVmbrInterfaceLocally(rangeNumber, "absent")
+			tx.Rollback()
+		}
+	}()
+
+	if err := tx.Create(&rangeObj).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating range: %v", err)})
-		removePool(c, payload.RangeID)
+		wasError = true
 		return
 	}
 
@@ -748,29 +815,30 @@ func CreateRange(c *gin.Context) {
 			UserID:      payload.UserID,
 			RangeNumber: rangeNumber,
 		}
-		if err := db.Create(&userRangeAccess).Error; err != nil {
+		if err := tx.Create(&userRangeAccess).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating user range access: %v", err)})
-			removePool(c, payload.RangeID)
-			db.Delete(&rangeObj)
+			wasError = true
 			return
 		}
 		// Give the user in proxmox permissions to the pool
 		_, user, err := CheckRangeAccessAndGetObjects(c)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			removePool(c, payload.RangeID)
-			db.Delete(&rangeObj)
-			db.Delete(&userRangeAccess)
+			wasError = true
 			return
 		}
 		err = giveUserAccessToPool(user.ProxmoxUsername, "pam", payload.RangeID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			removePool(c, payload.RangeID)
-			db.Delete(&rangeObj)
-			db.Delete(&userRangeAccess)
+			wasError = true
 			return
 		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error committing database transaction: %v", err)})
+		wasError = true
+		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"result": rangeObj})
@@ -829,6 +897,7 @@ func AssignOrRevokeRangeAccess(c *gin.Context, actionVerb string, force bool) {
 	logger.Debug(godump.DumpStr(extraVars))
 	output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, actionVerb, false, "")
 	if err != nil {
+		logger.Debug("actionVerb: " + actionVerb)
 		if strings.Contains(output, "Target router is not up") && actionVerb == "grant" {
 			c.JSON(http.StatusOK, gin.H{"result": `WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!
 The target range router VM is inaccessible!
@@ -867,7 +936,10 @@ WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`})
 			return
 		}
 
-		c.JSON(http.StatusCreated, gin.H{"result": "Range assigned to user successfully"})
+		// Check if c.Writer.Written() is false to prevent double response if we set the warning result above
+		if !c.Writer.Written() {
+			c.JSON(http.StatusCreated, gin.H{"result": "Range assigned to user successfully"})
+		}
 
 	} else if actionVerb == "revoke" {
 

@@ -70,6 +70,12 @@ func InitDb() *gorm.DB {
 				log.Fatal(err.Error())
 			}
 			os.Chown(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), 0, 0)
+			tokenID, tokenSecret, err := createRootAPITokenWithShell()
+			if err != nil {
+				log.Fatal(err.Error())
+			}
+			user.ProxmoxTokenID = tokenID
+			user.ProxmoxTokenSecret = tokenSecret
 
 			os.MkdirAll(fmt.Sprintf("%s/users/root", ludusInstallPath), 0700)
 
@@ -79,22 +85,6 @@ func InitDb() *gorm.DB {
 			}
 			db.Create(&user)
 
-			// Create a dummy range for ROOT to take up the range_id of 1 (since the server has the .1 address)
-			var usersRange RangeObject
-			usersRange.Name = "Root System Range"
-			usersRange.Description = "System range for root user operations"
-			usersRange.Purpose = "System administration and management"
-			usersRange.RangeID = "ROOT"
-			usersRange.RangeNumber = 1
-			usersRange.NumberOfVMs = 0
-			usersRange.RangeState = "NEVER DEPLOYED"
-			db.Create(&usersRange)
-
-			// Create UserRangeAccess record for root user's default range
-			var userRangeAccess UserRangeAccess
-			userRangeAccess.UserID = user.UserID
-			userRangeAccess.RangeNumber = usersRange.RangeNumber
-			db.Create(&userRangeAccess)
 		}
 		// Only do migrations as ludus-admin service to prevent a race condition when starting services
 		// that leads to the ludus service creating the tables via migration before the root api key
@@ -174,7 +164,8 @@ func findNextAvailableUserNumber(db *gorm.DB) int32 {
 	var userNumbers []int32
 	db.Model(&UserObject{}).Select("user_number").Order("user_number").Scan(&userNumbers)
 
-	for i := int32(1); ; i++ {
+	// Start at 2 since 1 is reserved for the root user (198.51.100.1 is reserved for the server)
+	for i := int32(2); ; i++ {
 		found := false
 		for _, num := range userNumbers {
 			if num == i {

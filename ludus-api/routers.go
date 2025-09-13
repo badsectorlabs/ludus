@@ -36,11 +36,26 @@ var logger *slog.Logger
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
+
+	ludusServer.ParseConfig()
+	server = ludusServer
+
+	// Transition from using log.Printf to using slog.Info, slog.Error, etc.
+	// Adopts the debug level from the main server logger
+	if server.Logger != nil {
+		logger = server.Logger
+		slog.SetDefault(server.Logger)
+	} else {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+		slog.SetDefault(logger)
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 	router.SetTrustedProxies(nil)
 	RegisterRoutes(router, routes)
-	ludusServer.ParseConfig()
 	InitDb()
 	LudusVersion = ludusVersion
 
@@ -54,20 +69,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 			c.String(http.StatusOK, "Embedded documentation is not available for this build of ludus-server.")
 		})
 	}
-	server = ludusServer
 	Router = router
-
-	// Transition from using log.Printf to using slog.Info, slog.Error, etc.
-	// Adopts the debug level from the main server logger
-	if server.Logger != nil {
-		logger = server.Logger
-		slog.SetDefault(server.Logger)
-	} else {
-		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}))
-		slog.SetDefault(logger)
-	}
 
 	return router
 }
@@ -182,8 +184,12 @@ func authenticationMiddleware(c *gin.Context) {
 
 // This function makes sure the request is to a user endpoint if the server is running as root (i.e. :8081)
 func limitRootEndpoints(c *gin.Context) {
-	if os.Geteuid() == 0 && !strings.HasPrefix(c.Request.URL.Path, "/user") && !strings.HasPrefix(c.Request.URL.Path, "/antisandbox/") {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The :8081 endpoint can only be used for user actions. Use the :8080 endpoint for all other actions."})
+	if os.Geteuid() == 0 &&
+		!strings.HasPrefix(c.Request.URL.Path, "/user") &&
+		!strings.HasPrefix(c.Request.URL.Path, "/antisandbox/") &&
+		!strings.HasPrefix(c.Request.URL.Path, "/ranges/create") &&
+		!(strings.HasPrefix(c.Request.URL.Path, "/range") && c.Request.Method == http.MethodDelete) {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The :8081 endpoint can only be used for user, range creation/deletion, and anti-sandbox actions. Use the :8080 endpoint for all other actions."})
 		return
 	}
 }

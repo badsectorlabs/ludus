@@ -375,10 +375,10 @@ var rangeErrorsCmd = &cobra.Command{
 }
 
 var rangeDeleteCmd = &cobra.Command{
-	Use:     "rm",
+	Use:     "rm-range",
 	Short:   "Delete your range object from database and optionally destroy all VMs",
 	Long:    `Delete your range object from the database and destroy all VMs. Use --force to delete all VMs.`,
-	Aliases: []string{"destroy"},
+	Aliases: []string{"destroy-range"},
 	Args:    cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
@@ -430,10 +430,10 @@ func setupDeleteCmd(command *cobra.Command) {
 }
 
 var rangeDestroyVmsCmd = &cobra.Command{
-	Use:     "destroy-vms",
+	Use:     "rm",
 	Short:   "Destroy all VMs in your range (keeps range)",
 	Long:    `Destroy all VMs in your range but keep the range object in the database. Use this to start fresh with your range configuration.`,
-	Aliases: []string{"rm-vms"},
+	Aliases: []string{"rm-vms", "destroy"},
 	Args:    cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
@@ -742,17 +742,18 @@ type RangeCreatePayload struct {
 
 // Commands for range management
 var rangeCreateCmd = &cobra.Command{
-	Use:   "create [name]",
+	Use:   "create",
 	Short: "Create a new range",
 	Long:  `Create a new range with a name and pool name. Description, purpose, and userID are optional.`,
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		name := args[0]
-
 		if rangeID == "" {
 			logger.Logger.Fatal("Range ID is required. Use --range-id or -r to specify the range ID.")
+		}
+		if name == "" {
+			logger.Logger.Fatal("Name is required. Use --name or -n to specify the name.")
 		}
 
 		payload := RangeCreatePayload{
@@ -767,23 +768,20 @@ var rangeCreateCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericJSONPost(client, "/ranges/create", payload)
-		if !success {
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-		} else {
-			fmt.Printf("Range '%s' created successfully\n", rangeID)
-		}
+		fmt.Printf("Range '%s' created successfully\n", rangeID)
 	},
 }
 
 func setupRangeCreateCmd(command *cobra.Command) {
+	command.Flags().StringVarP(&name, "name", "n", "", "Name of the range")
 	command.Flags().StringVarP(&description, "description", "d", "", "Description of the range")
 	command.Flags().StringVarP(&purpose, "purpose", "o", "", "Purpose of the range")
 	command.Flags().StringVar(&userIDForRange, "user", "", "User ID to assign the range to (optional)")
-	command.Flags().Int32VarP(&rangeNumber, "range-number", "n", 0, "Specific range number to assign (optional)")
+	command.Flags().Int32Var(&rangeNumber, "range-number", 0, "Specific range number to assign (optional)")
 }
 
 var rangeAssignCmd = &cobra.Command{
@@ -800,15 +798,11 @@ var rangeAssignCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/ranges/assign/%s/%s", userID, rangeID), nil)
-		if !success {
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-		} else {
-			fmt.Printf("Range %s assigned to user %s successfully\n", rangeID, userID)
-		}
+		handleGenericResult(responseJSON)
+		// fmt.Printf("Range %s assigned to user %s successfully\n", rangeID, userID)
 	},
 }
 
@@ -826,15 +820,11 @@ var rangeRevokeCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/ranges/revoke/%s/%s?force=%t", userID, rangeID, force))
-		if !success {
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-		} else {
-			fmt.Printf("Range %s access revoked from user %s successfully\n", rangeID, userID)
-		}
+		fmt.Printf("Range %s access revoked from user %s successfully\n", rangeID, userID)
 	},
 }
 
@@ -855,7 +845,7 @@ var rangeUsersCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ranges/%s/users", rangeID))
-		if !success {
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
@@ -871,11 +861,6 @@ var rangeUsersCmd = &cobra.Command{
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
-		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-			return
 		}
 
 		// Create table
@@ -903,7 +888,7 @@ var rangeAccessibleCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/ranges/accessible"))
-		if !success {
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
@@ -919,11 +904,6 @@ var rangeAccessibleCmd = &cobra.Command{
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
-		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-			return
 		}
 
 		// Create table

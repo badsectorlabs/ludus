@@ -19,7 +19,7 @@ func MigrateFromSQLite() error {
 
 	// Check if SQLite database exists
 	if _, err := os.Stat(sqlitePath); os.IsNotExist(err) {
-		log.Println("SQLite database not found, skipping migration")
+		logger.Debug("SQLite database not found, skipping migration")
 		return nil
 	}
 
@@ -30,7 +30,7 @@ func MigrateFromSQLite() error {
 	}
 
 	if userCount > 1 {
-		log.Println("PostgreSQL database has more than ROOT user, skipping migration")
+		logger.Debug("PostgreSQL database has more than ROOT user, skipping migration")
 		return nil
 	}
 
@@ -102,17 +102,16 @@ func MigrateFromSQLite() error {
 
 		// Create PostgreSQL user object
 		user := UserObject{
-			Name:                  sqliteUser.Name,
-			UserID:                sqliteUser.UserID,
-			UserNumber:            rangeObj.RangeNumber, // The user only has one range, so their "range number" becomes their user number
-			DateCreated:           sqliteUser.DateCreated,
-			DateLastActive:        sqliteUser.DateLastActive,
-			IsAdmin:               sqliteUser.IsAdmin,
-			HashedAPIKey:          sqliteUser.HashedAPIKey,
-			ProxmoxUsername:       sqliteUser.ProxmoxUsername,
-			PortforwardingEnabled: sqliteUser.PortforwardingEnabled,
-			CreatedAt:             time.Now(),
-			UpdatedAt:             time.Now(),
+			Name:            sqliteUser.Name,
+			UserID:          sqliteUser.UserID,
+			UserNumber:      rangeObj.RangeNumber, // The user only has one range, so their "range number" becomes their user number
+			DateCreated:     sqliteUser.DateCreated,
+			DateLastActive:  sqliteUser.DateLastActive,
+			IsAdmin:         sqliteUser.IsAdmin,
+			HashedAPIKey:    sqliteUser.HashedAPIKey,
+			ProxmoxUsername: sqliteUser.ProxmoxUsername,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
 		}
 
 		// Create user in PostgreSQL

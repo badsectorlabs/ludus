@@ -10,10 +10,8 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -189,8 +187,18 @@ func GetRangeObject(c *gin.Context) (RangeObject, error) {
 		return usersRange, gorm.ErrRecordNotFound // Status and JSON set in getUserID
 	}
 
-	// Check if a specific range ID was provided in the query
-	rangeIDStr, hasRangeID := c.GetQuery("rangeID")
+	var rangeIDStr string
+	var hasRangeID bool
+	// Check the URL for a range ID, it takes priority
+	rangeID := c.Param("rangeID")
+	if rangeID != "" {
+		rangeIDStr = rangeID
+		hasRangeID = true
+	} else {
+		// Check if a specific range ID was provided in the query
+		rangeIDStr, hasRangeID = c.GetQuery("rangeID")
+	}
+
 	if hasRangeID {
 		logger.Debug(fmt.Sprintf("Getting range for: %s", rangeIDStr))
 		rangeNumber, err := GetRangeNumberFromRangeID(db, rangeIDStr)
@@ -369,44 +377,6 @@ func getUIDandGIDFromUsername(username string) (int, int, error) {
 	return uid, gid, nil
 }
 
-// Chown a file to a user and their group
-func chownFileToUsername(filePath string, username string) {
-	uid, gid, err := getUIDandGIDFromUsername(username)
-	if err != nil {
-		logger.Error("Failed to get UID and GID for user " + username + ": " + err.Error())
-		return
-	}
-
-	// Change ownership of the file
-	err = os.Chown(filePath, uid, gid)
-	if err != nil {
-		logger.Error("Failed to change ownership of the file: " + err.Error())
-		return
-	}
-}
-
-func chownDirToUsernameRecursive(filePath string, username string) {
-	uid, gid, err := getUIDandGIDFromUsername(username)
-	if err != nil {
-		fmt.Printf("Failed to get UID and GID for user %s: %s\n", username, err)
-		return
-	}
-	err = filepath.Walk(filePath, func(path string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		// os.Chown requires numeric UID and GID
-		if err := os.Chown(path, uid, gid); err != nil {
-			return fmt.Errorf("failed to chown %s: %w", path, err)
-		}
-		return nil
-	})
-	if err != nil {
-		fmt.Printf("Failed to chown directory %s: %s\n", filePath, err)
-		return
-	}
-}
-
 // userExistsOnHostSystem checks if a user exists on the host system
 func userExistsOnHostSystem(username string) bool {
 	cmd := exec.Command("id", username)
@@ -553,7 +523,20 @@ func CreateDefaultUserRange(db *gorm.DB, userID string) error {
 		RangeNumber: rangeNumber,
 	}
 
-	return db.Create(&userRangeAccess).Error
+	if err := db.Create(&userRangeAccess).Error; err != nil {
+		// if the error is a duplicate key error, continue as the record already exists
+		if !strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
+			db.Delete(&rangeObj)
+			return err
+		}
+	}
+	err := createPool(userID)
+	if err != nil {
+		db.Delete(&rangeObj)
+		db.Delete(&userRangeAccess)
+		return err
+	}
+	return err
 }
 
 // GetRangeObjectByNumber gets a range object by range number (for multi-range support)
@@ -614,7 +597,17 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 	targetUserID := targetUser.UserID
 
 	// Check if rangeID parameter was provided
-	rangeIDStr, hasRangeID := c.GetQuery("rangeID")
+	var rangeIDStr string
+	var hasRangeID bool
+	// Check the URL for a range ID, it takes priority
+	rangeID := c.Param("rangeID")
+	if rangeID != "" {
+		rangeIDStr = rangeID
+		hasRangeID = true
+	} else {
+		// Check if a specific range ID was provided in the query
+		rangeIDStr, hasRangeID = c.GetQuery("rangeID")
+	}
 	rangeNumberStr, hasRangeNumber := c.GetQuery("rangeNumber")
 
 	if hasRangeNumber && hasRangeID {
@@ -678,4 +671,64 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 	c.Set("userObject", targetUser)
 
 	return usersRange, targetUser, nil
+}
+
+// applyBlockInFile is a Go implementation of Ansible's blockinfile logic.
+// It correctly updates a block in-place, removes it, or adds it to the end if not found.
+// It returns the new file content and a boolean indicating if a change was made.
+// state is either "present" or "absent"
+func applyBlockInFile(originalContent, marker, block, state string) (string, bool) {
+	startMarker := strings.Replace(marker, "{mark}", "BEGIN", 1)
+	endMarker := strings.Replace(marker, "{mark}", "END", 1)
+	lines := strings.Split(originalContent, "\n")
+
+	var newLines []string
+	blockFound := false
+	i := 0
+
+	for i < len(lines) {
+		line := lines[i]
+
+		// Check if we found the start of our managed block.
+		if strings.TrimSpace(line) == startMarker {
+			blockFound = true
+
+			// If the desired state is 'present', write the new block.
+			if state == "present" {
+				newLines = append(newLines, startMarker)
+				newLines = append(newLines, block)
+				newLines = append(newLines, endMarker)
+			}
+
+			// Skip the old block in the original content by advancing the loop counter 'i'
+			// until we find the end marker or the end of the file.
+			for i < len(lines) && strings.TrimSpace(lines[i]) != endMarker {
+				i++
+			}
+		} else {
+			// This line is not part of our managed block, so keep it.
+			newLines = append(newLines, line)
+		}
+		i++
+	}
+
+	// If the block was never found and the state is 'present', add it to the end.
+	if !blockFound && state == "present" {
+		// Ensure there's a newline before our block if the file isn't empty.
+		if len(newLines) > 0 && newLines[len(newLines)-1] != "" {
+			newLines = append(newLines, "")
+		}
+		newLines = append(newLines, startMarker)
+		newLines = append(newLines, block)
+		newLines = append(newLines, endMarker)
+	}
+
+	// Reconstruct the final content string.
+	finalContent := strings.Join(newLines, "\n")
+
+	// Determine if the content actually changed.
+	// We compare stripped versions to avoid false positives from trailing whitespace differences.
+	changed := strings.TrimSpace(originalContent) != strings.TrimSpace(finalContent)
+
+	return finalContent, changed
 }
