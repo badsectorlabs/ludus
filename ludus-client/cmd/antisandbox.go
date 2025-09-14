@@ -15,6 +15,7 @@ var (
 	RegisteredOwner        string
 	RegisteredOrganization string
 	Vendor                 string
+	Product                string
 	dropFiles              bool
 	processorName          string
 	processorVendor        string
@@ -88,6 +89,7 @@ var antiSandboxEnableCmd = &cobra.Command{
 			Owner               string `json:"registeredOwner,omitempty"`
 			Org                 string `json:"registeredOrganization,omitempty"`
 			Vendor              string `json:"vendor,omitempty"`
+			Product             string `json:"product,omitempty"`
 			DropFiles           bool   `json:"dropFiles,omitempty"`
 			ProcessorName       string `json:"processorName,omitempty"`
 			ProcessorVendor     string `json:"processorVendor,omitempty"`
@@ -101,6 +103,7 @@ var antiSandboxEnableCmd = &cobra.Command{
 		antiSandboxPayload.Owner = RegisteredOwner
 		antiSandboxPayload.Org = RegisteredOrganization
 		antiSandboxPayload.Vendor = Vendor
+		antiSandboxPayload.Product = Product
 		antiSandboxPayload.DropFiles = dropFiles
 		antiSandboxPayload.ProcessorName = processorName
 		antiSandboxPayload.ProcessorVendor = processorVendor
@@ -148,6 +151,7 @@ func setupAntiSandboxEnableCmd(command *cobra.Command) {
 	command.Flags().StringVar(&RegisteredOrganization, "org", "", "The RegisteredOrganization value to use for the VMs")
 	command.Flags().StringVar(&Vendor, "vendor", "", "The Vendor value to use for the SMBIOS information (Dell, HP, Lenovo, or Google)")
 	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
+	command.Flags().StringVar(&Product, "product", "", "The Product value to use for the SMBIOS information (e.g. Latitude 7420)")
 	command.Flags().BoolVar(&dropFiles, "drop-files", false, "drop random pdf, doc, ppt, and xlsx files on the desktop and downloads folder of the VMs")
 	command.Flags().StringVar(&processorName, "processor-name", "", "The ProcessorNameString value to use for the VMs (e.g. Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz)")
 	command.Flags().StringVar(&processorVendor, "processor-vendor", "", "The VendorIdentifier value to use for the VMs (e.g. GenuineIntel or AuthenticAMD)")

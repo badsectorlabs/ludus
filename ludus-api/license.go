@@ -53,6 +53,13 @@ func (s *Server) checkLicense() {
 		pluginsDir = fmt.Sprintf("%s/plugins/enterprise", ludusInstallPath)
 	}
 	enterpriseLoaded := false
+
+	licenseCheckBucket := NewLeakyBucket(fmt.Sprintf("%s/install/.license-check-bucket", ludusInstallPath), 6, 0.02)
+	if !licenseCheckBucket.Allow() {
+		log.Println("LICENSE: license check bucket is full, skipping license check")
+		return
+	}
+
 	// Validate the license for the current fingerprint
 	license, err := keygen.Validate(ctx, fingerprint)
 	switch {
@@ -115,6 +122,10 @@ func (s *Server) checkLicense() {
 			log.Printf("LICENSE: error loading enterprise plugin: %v", err)
 			log.Println("LICENSE: pulling compatible plugin from server (version: " + s.Version + ")")
 			// Pull down the enterprise plugin since we have a valid license, perhaps we had a old version
+			if !licenseCheckBucket.Allow() {
+				log.Println("LICENSE: license check bucket is full, skipping plugin download")
+				return
+			}
 			err = PullPlugin(fmt.Sprintf("/artifacts/ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey)
 			if err != nil {
 				log.Printf("LICENSE: error getting enterprise plugin: %v", err)
@@ -124,6 +135,10 @@ func (s *Server) checkLicense() {
 		}
 	} else {
 		log.Println("LICENSE: no enterprise plugin found, pulling compatible plugin from server")
+		if !licenseCheckBucket.Allow() {
+			log.Println("LICENSE: license check bucket is full, skipping plugin download")
+			return
+		}
 		err = PullPlugin(fmt.Sprintf("/artifacts/ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey)
 		if err != nil {
 			log.Printf("LICENSE: error getting enterprise plugin: %v", err)
