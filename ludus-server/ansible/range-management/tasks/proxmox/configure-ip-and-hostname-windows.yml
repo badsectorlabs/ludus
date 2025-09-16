@@ -1,4 +1,17 @@
 #######################################
+## Check windows version             ##
+#######################################
+- name: Detect Windows version
+  ansible.windows.win_shell: |
+    $version = [System.Environment]::OSVersion.Version
+    if ($version.Major -gt 6 -or ($version.Major -eq 6 -and $version.Minor -ge 2)) {
+        Write-Output "modern"
+    } else {
+        Write-Output "legacy"
+    }
+  register: windows_version_type
+
+#######################################
 ## Check if we need to change the IP ##
 #######################################
 - name: Get network interface configuration (Windows)
@@ -54,7 +67,7 @@
 ## Windows ##
 #############
 # Static IP - Windows
-- name: Primary Method - Set up static IP address (Windows)
+- name: Modern Method - Set up static IP address (Windows 8+/Server 2012+)
   ansible.windows.win_shell: |
     $eAdapter = Get-NetIpAddress -InterfaceAlias 'Ethernet*'
     $eAdapter | New-NetIpAddress -IpAddress {{ static_ip }} -PrefixLength {{ cidr_netmask }} -DefaultGateway {{ default_gateway }}
@@ -63,6 +76,18 @@
   async: 100 # Using "fire-and-forget" asynchronous execution for this task, otherwise it will always fail and time out
   poll: 0
   ignore_errors: true
+  when: windows_version_type.stdout | trim == "modern"
+  register: potential_error_old_hardware
+
+- name: Legacy Method - Set up static IP address (Windows 7/Server 2008 R2 and earlier)
+  ansible.windows.win_shell: |
+    $interfaceName = (netsh interface show interface | Select-String "Connected" | Select-Object -First 1).Line -replace '.*\s{2,}', ''
+    netsh.exe interface ipv4 set address name="$interfaceName" source=static addr={{ static_ip }} mask=255.255.255.0  gateway={{ default_gateway }}
+    netsh.exe interface ipv4 set dns "$interfaceName" static {{ default_gateway }}
+  async: 100 # Using "fire-and-forget" asynchronous execution for this task, otherwise it will always fail and time out
+  poll: 0
+  ignore_errors: true
+  when: windows_version_type.stdout | trim == "legacy"
   register: potential_error_old_hardware
 
 - name: Set old_hardware fact (Windows)
@@ -128,7 +153,7 @@
 
 - name: Set DNS (Windows)
   ansible.windows.win_dns_client:
-    adapter_names: '*'
+    adapter_names: "*"
     dns_servers:
       - "{{ dns_server }}"
   when: dns_server is defined

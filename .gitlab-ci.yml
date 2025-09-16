@@ -35,8 +35,8 @@ stages:
 # YAML ANCHORS #
 ################
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key
-.common-setup: &common-setup
-  # Sync time in the event this test is being run after a snapshot rollback
+.common-setup:
+  &common-setup # Sync time in the event this test is being run after a snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
   - cd binaries
@@ -89,14 +89,13 @@ stages:
   # Set the config to simple-domain.yml
   - ludus range config set -f ludus-server/ci/configs/simple-domain.yml
 
-.ansible-tests: &ansible-tests
-  # Add and remove a role
+.ansible-tests: &ansible-tests # Add and remove a role
   - ludus ansible role list
   - ludus ansible role rm geerlingguy.docker || true
   - ludus ansible role add geerlingguy.docker
   - ludus ansible role list | grep geerlingguy.docker
   - ludus ansible role rm geerlingguy.docker
-  - '! ludus ansible role list | grep geerlingguy.docker'
+  - "! ludus ansible role list | grep geerlingguy.docker"
   # Install a specific version
   - ludus ansible role add geerlingguy.docker --version 7.0.1
   - ludus ansible role list | grep geerlingguy.docker | grep 7.0.1
@@ -106,7 +105,7 @@ stages:
   - set -o pipefail
   - ludus ansible role add geerlingguy.docker --force
   - ludus ansible role list | grep geerlingguy.docker
-  - '! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1'
+  - "! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1"
   # Test collections
   - ludus ansible collection list
   - ludus ansible collection add maxhoesel.smallstep || true
@@ -131,7 +130,6 @@ stages:
   - ludus range config set -f ludus-server/ci/configs/depends-on-complex.yml
   - ludus range deploy -t user-defined-roles
   - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
-
 
 .testing-mode-tests: &testing-mode-tests
   - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
@@ -168,8 +166,7 @@ stages:
   - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
   - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
 
-.power-tests: &power-tests
-  # Power on/off tests - single VM
+.power-tests: &power-tests # Power on/off tests - single VM
   - ludus power off -n ${LUDUS_USER_ID}-kali
   - timeout 60 bash -c 'until [[ $(ludus range list --json | jq ".VMs[] | select(.name == \"${LUDUS_USER_ID}-kali\").poweredOn") == "false" ]]; do echo "Waiting for ${LUDUS_USER_ID}-kali to power off"; sleep 5; done'
   - ludus range status | grep "${LUDUS_USER_ID}-kali" | grep 'Off'
@@ -179,7 +176,7 @@ stages:
   - timeout 60 bash -c 'until [[ $(ludus range list --json | jq ".VMs[] | select(.name == \"${LUDUS_USER_ID}-kali\").poweredOn") == "true" ]]; do echo "Waiting for ${LUDUS_USER_ID}-kali to power on"; sleep 5; done'
   - ludus range status | grep "${LUDUS_USER_ID}-kali" | grep 'On'
   - ludus range status | grep "${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1" | grep 'On'
-  - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'    
+  - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'
   # Power on/off tests - comma separated
   - ludus power off -n ${LUDUS_USER_ID}-kali,${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1
   - timeout 120 bash -c 'until [[ $(ludus range list --json | jq "[.VMs[] | select(.name == \"${LUDUS_USER_ID}-kali\" or .name == \"${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1\").poweredOn] | all(.[]; . == false)") == "true" ]]; do echo "Waiting for ${LUDUS_USER_ID}-kali and ${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1 to power off"; sleep 5; done'
@@ -205,8 +202,7 @@ stages:
   - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'
   - ludus range status | grep "${LUDUS_USER_ID}-router-debian11-x64" | grep 'On'
 
-.template-tests: &template-tests
-  # Remove debian 10 if it exists (retry)
+.template-tests: &template-tests # Remove debian 10 if it exists (retry)
   - ludus templates list --json | jq -r '.[] | select(.name == "debian-10-x64-server-template") | .name' | grep -q 'debian-10-x64-server-template' && ludus templates rm -n "debian-10-x64-server-template" || echo "No debian10 on the server"
   - cd templates
   - ludus templates list
@@ -255,7 +251,7 @@ stages:
   - ludus power on -n all
   - sleep 10
   - ludus range status
-  
+
 #################
 # DOCUMENTATION #
 #################
@@ -276,16 +272,16 @@ pages:
   retry:
     max: 2
   script:
-  - cd docs
-  # Change the base URL as we are hosting the site straight off the root of the domain
-  - "sed -i \"s|baseUrl: '/ludus/'|baseUrl: '/'|\" docusaurus.config.js"
-  - yarn install
-  - yarn build
-  - rm -f ./build/video/*
-  - mv ./build ../public
+    - cd docs
+    # Change the base URL as we are hosting the site straight off the root of the domain
+    - 'sed -i "s|baseUrl: ''/ludus/''|baseUrl: ''/''|" docusaurus.config.js'
+    - yarn install
+    - yarn build
+    - rm -f ./build/video/*
+    - mv ./build ../public
   artifacts:
     paths:
-    - public
+      - public
 
 documentation:
   stage: documentation
@@ -302,19 +298,19 @@ documentation:
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - changes:
-      - "docs/**/*"
+        - "docs/**/*"
   retry:
     max: 2
   script:
-  - cd docs
-  - yarn install
-  - yarn build
-  - rm -f ./build/video/*
-  - rm -f ./build/img/hardware/Debian_12_RAID0.mp4
-  - mv ./build ../built-docs
+    - cd docs
+    - yarn install
+    - yarn build
+    - rm -f ./build/video/*
+    - rm -f ./build/img/hardware/Debian_12_RAID0.mp4
+    - mv ./build ../built-docs
   artifacts:
     paths:
-    - built-docs
+      - built-docs
 
 #########
 # BUILD #
@@ -329,8 +325,9 @@ build all:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
       when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - changes:
-      - "**/*"
+        - "**/*"
   artifacts:
     paths:
       - binaries/*
@@ -408,8 +405,8 @@ install kickoff:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes: # Only run if we need to test installer related changes
-      - ludus-server/*.go
-      - ludus-server/ansible/proxmox-install/**/*
+        - ludus-server/*.go
+        - ludus-server/ansible/proxmox-install/**/*
   variables:
     LUDUS_BUILD_TYPE: full # We have to test the install process, so do a full build
     LUDUS_INSTALL_STEP: kickoff
@@ -435,8 +432,8 @@ install check:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes: # Only run if we need to test installer related changes
-      - ludus-server/*.go
-      - ludus-server/ansible/proxmox-install/**/*
+        - ludus-server/*.go
+        - ludus-server/ansible/proxmox-install/**/*
   variables:
     LUDUS_BUILD_TYPE: full
     LUDUS_INSTALL_STEP: check
@@ -460,11 +457,11 @@ install snapshot:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes: # Only run if we need to test installer related changes
-      - ludus-server/*.go
-      - ludus-server/ansible/proxmox-install/**/*
+        - ludus-server/*.go
+        - ludus-server/ansible/proxmox-install/**/*
   variables:
     LUDUS_BUILD_TYPE: full
-    LUDUS_INSTALL_STEP: take-snapshot  # The magic happens in prepare.sh
+    LUDUS_INSTALL_STEP: take-snapshot # The magic happens in prepare.sh
     LUDUS_SNAPSHOT_NAME: clean_install
   timeout: 5m
   script:
@@ -500,7 +497,7 @@ templates build:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-server/packer/**/*
+        - ludus-server/packer/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
@@ -539,7 +536,7 @@ templates check:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-server/packer/**/*
+        - ludus-server/packer/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
@@ -550,7 +547,7 @@ templates check:
     - *ci-setup-admin
     # If there is no template building process, start one
     # This may happen on a failed ISO upload
-    - pgrep -f 'packer' || ludus templates build 
+    - pgrep -f 'packer' || ludus templates build
     # Wait for all templates to build
     - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
     - ludus templates list
@@ -580,7 +577,7 @@ templates snapshot:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-server/packer/**/*
+        - ludus-server/packer/**/*
   variables:
     LUDUS_INSTALL_STEP: take-snapshot
     LUDUS_SNAPSHOT_NAME: templates_built
@@ -618,10 +615,10 @@ client basic-commands:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/**/*.go
-      - ludus-server/ansible/range-management/**/*
-      - ludus-server/ansible/user-management/**/*
-      - ludus-server/ansible/user-files/**/*
+        - ludus-client/**/*.go
+        - ludus-server/ansible/range-management/**/*
+        - ludus-server/ansible/user-management/**/*
+        - ludus-server/ansible/user-files/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
@@ -668,16 +665,16 @@ range deploy-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/range.go
-      - ludus-server/ansible/range-management/**/*
-      - ludus-server/ansible/user-management/**/*
+        - ludus-client/cmd/range.go
+        - ludus-server/ansible/range-management/**/*
+        - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: templates_built
   timeout: 5m
   retry:
     max: 2
-    when: 
+    when:
       - script_failure
       - job_execution_timeout
   script:
@@ -688,7 +685,7 @@ range deploy-admin:
 range check-admin:
   stage: range-admin-check
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   dependencies:
     - build all
   rules:
@@ -711,7 +708,7 @@ range check-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-server/ansible/range-management/**/*
+        - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: templates_built
@@ -727,7 +724,7 @@ range check-admin:
     # Check to make sure the IPs were set correctly
     - export valid_last_octets=(1 11 21 254)
     - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
-    - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
+    - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
 
 range snapshot-admin:
   stage: range-admin-snapshot
@@ -753,7 +750,7 @@ range snapshot-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-server/ansible/range-management/**/*
+        - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_INSTALL_STEP: take-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -793,8 +790,8 @@ post-deploy testing-as-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/testing.go
-      - ludus-server/ansible/range-management/**/*
+        - ludus-client/cmd/testing.go
+        - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -832,10 +829,10 @@ post-deploy power-as-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/power.go
-      - ludus-server/ansible/range-management/power.yml
-      - ludus-server/ansible/range-management/pre-run-checks.yml
-      - ludus-server/ansible/range-management/tasks/proxmox/set-vm-state.yml
+        - ludus-client/cmd/power.go
+        - ludus-server/ansible/range-management/power.yml
+        - ludus-server/ansible/range-management/pre-run-checks.yml
+        - ludus-server/ansible/range-management/tasks/proxmox/set-vm-state.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -850,7 +847,7 @@ post-deploy power-as-admin:
 post-deploy ansible-as-admin:
   stage: post-deploy-admin-ansible
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   dependencies:
     - build all
   rules:
@@ -873,9 +870,9 @@ post-deploy ansible-as-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/ansible.go
-      - ludus-server/src/ansible.go
-      - ludus-server/src/api_ansible.go
+        - ludus-client/cmd/ansible.go
+        - ludus-server/src/ansible.go
+        - ludus-server/src/api_ansible.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -890,7 +887,7 @@ post-deploy ansible-as-admin:
 post-deploy user-cmds-as-admin:
   stage: post-deploy-admin-user
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   dependencies:
     - build all
   rules:
@@ -913,9 +910,9 @@ post-deploy user-cmds-as-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/user.go
-      - ludus-server/src/api_user_management.go
-      - ludus-server/ansible/user-management/**/*
+        - ludus-client/cmd/user.go
+        - ludus-server/src/api_user_management.go
+        - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -964,7 +961,7 @@ post-deploy user-cmds-as-admin:
 post-deploy templates-as-admin:
   stage: post-deploy-admin-templates
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   dependencies:
     - build all
   rules:
@@ -987,8 +984,8 @@ post-deploy templates-as-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/templates.go
-      - ludus-server/src/api_template_management.go
+        - ludus-client/cmd/templates.go
+        - ludus-server/src/api_template_management.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1027,9 +1024,9 @@ range deploy-user:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/range.go
-      - ludus-server/ansible/range-management/**/*
-      - ludus-server/ansible/user-management/**/*
+        - ludus-client/cmd/range.go
+        - ludus-server/ansible/range-management/**/*
+        - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1047,7 +1044,7 @@ range deploy-user:
 range check-user:
   stage: range-user-check
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   dependencies:
     - build all
   rules:
@@ -1068,7 +1065,7 @@ range check-user:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-server/ansible/range-management/**/*
+        - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1084,7 +1081,7 @@ range check-user:
     # Check to make sure the IPs were set correctly
     - export valid_last_octets=(1 11 21 254)
     - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
-    - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
+    - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
 
 range snapshot-user:
   stage: range-user-snapshot
@@ -1110,7 +1107,7 @@ range snapshot-user:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-server/ansible/range-management/**/*
+        - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_INSTALL_STEP: take-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
@@ -1148,8 +1145,8 @@ post-deploy testing-as-user:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/testing.go
-      - ludus-server/ansible/range-management/**/*
+        - ludus-client/cmd/testing.go
+        - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
@@ -1185,10 +1182,10 @@ post-deploy power-as-user:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/power.go
-      - ludus-server/ansible/range-management/power.yml
-      - ludus-server/ansible/range-management/pre-run-checks.yml
-      - ludus-server/ansible/range-management/tasks/proxmox/set-vm-state.yml
+        - ludus-client/cmd/power.go
+        - ludus-server/ansible/range-management/power.yml
+        - ludus-server/ansible/range-management/pre-run-checks.yml
+        - ludus-server/ansible/range-management/tasks/proxmox/set-vm-state.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
@@ -1204,7 +1201,7 @@ post-deploy power-as-user:
 post-deploy ansible-as-user:
   stage: post-deploy-user-ansible
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   dependencies:
     - build all
   rules:
@@ -1225,9 +1222,9 @@ post-deploy ansible-as-user:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/ansible.go
-      - ludus-server/src/ansible.go
-      - ludus-server/src/api_ansible.go
+        - ludus-client/cmd/ansible.go
+        - ludus-server/src/ansible.go
+        - ludus-server/src/api_ansible.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
@@ -1242,7 +1239,7 @@ post-deploy ansible-as-user:
 post-deploy user-cmds-as-user:
   stage: post-deploy-user-user
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   dependencies:
     - build all
   rules:
@@ -1263,9 +1260,9 @@ post-deploy user-cmds-as-user:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/user.go
-      - ludus-server/src/api_user_management.go
-      - ludus-server/ansible/user-management/**/*
+        - ludus-client/cmd/user.go
+        - ludus-server/src/api_user_management.go
+        - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
@@ -1308,7 +1305,7 @@ post-deploy user-cmds-as-user:
 post-deploy templates-as-user:
   stage: post-deploy-user-templates
   tags:
-    - ludus-proxmox-runner  
+    - ludus-proxmox-runner
   dependencies:
     - build all
   rules:
@@ -1329,8 +1326,8 @@ post-deploy templates-as-user:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/templates.go
-      - ludus-server/src/api_template_management.go
+        - ludus-client/cmd/templates.go
+        - ludus-server/src/api_template_management.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
@@ -1365,8 +1362,8 @@ post-deploy snapshots-as-user:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
-      - ludus-client/cmd/snapshots.go
-      - ludus-server/src/api_snapshot_management.go
+        - ludus-client/cmd/snapshots.go
+        - ludus-server/src/api_snapshot_management.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
@@ -1431,7 +1428,7 @@ test-everything:
     - while [ "$(ludus range list --json | jq -r '.rangeState')" == "DEPLOYING" ]; do date; sleep 60; done
     - if [[ "$(ludus range list --json | jq -r '.rangeState')" == "ERROR" ]]; then ludus range errors; fi
     - ludus range list
-    - "[ \"$(ludus range list --json | jq -r '.rangeState')\" = \"SUCCESS\" ]"
+    - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
     # Check to make sure the IPs were set correctly
     - export valid_last_octets=(1 2 11 12 21 254)
     - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
@@ -1589,7 +1586,7 @@ release:
     - git-cliff -t ${CI_COMMIT_TAG} --current -o CHANGELOG.txt
     - sudo curl --location --output /usr/local/bin/release-cli "https://gitlab.com/api/v4/projects/gitlab-org%2Frelease-cli/packages/generic/release-cli/latest/release-cli-linux-amd64"
     - sudo chmod +x /usr/local/bin/release-cli
-    - 'release-cli create --name "ludus $CI_COMMIT_TAG" --description CHANGELOG.txt --tag-name $CI_COMMIT_TAG --assets-link 
+    - 'release-cli create --name "ludus $CI_COMMIT_TAG" --description CHANGELOG.txt --tag-name $CI_COMMIT_TAG --assets-link
       "[{\"name\":\"ludus-server-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus_${CI_COMMIT_TAG}_checksums.txt\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus_${CI_COMMIT_TAG}_checksums.txt\"},
       {\"name\":\"ludus-client_linux-amd64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}\"},

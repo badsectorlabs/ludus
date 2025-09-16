@@ -2,7 +2,7 @@
 # https://getadmx.com/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_DISABLE_CONNECTIONS
 - name: Allow users to connect remotely by using Remote Desktop Services
   ansible.windows.win_regedit:
-    path: '{{ item }}'
+    path: "{{ item }}"
     name: fDenyTSConnections
     data: 0x00000000
     type: dword
@@ -27,3 +27,18 @@
   when:
     - firewall_service_running is defined
     - firewall_service_running
+
+- name: Ensure Remote Desktop Group rules are enabled (Windows 7 fallback)
+  community.windows.win_firewall_rule:
+    name: "Remote Desktop"
+    localport: 3389
+    protocol: tcp
+    direction: in
+    action: allow
+    enabled: true
+  when:
+    - firewall_service_running is defined
+    - firewall_service_running
+    - ansible_os_family == "Windows"
+    - ansible_distribution_major_version == "6.1" # Windows 7
+    - ansible_distribution_version == "6.1.7601" # Windows Server 2008 R2
