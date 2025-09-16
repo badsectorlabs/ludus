@@ -513,7 +513,11 @@
       when: dc_vm_name is undefined or dc_vm_name == ''
     - name: Set DC IP
       ansible.builtin.set_fact:
-        dc_ip: "{{ hostvars[dc_vm_name].ansible_host }}"
+        dc_ip: "{{ hostvars[dc_vm_name].ansible_host | default('FAIL') }}"
+    - name: Check that we have a primary DC IP
+      ansible.builtin.fail:
+        msg: "The primary DC does not have an ansible_host value - it is likely unreachable. Reboot the primary DC ({{ dc_vm_name }}) and try again."
+      when: dc_ip == "FAIL"
     - name: Join VMs to the domain
       ansible.builtin.include_tasks: tasks/windows/join-domain.yml
   vars:
@@ -1086,9 +1090,21 @@
 # ==========================================================
 - name: Debug
   tags: [never, debug]
-  hosts: alma-test
+  hosts: localhost
+  gather_facts: true
   tasks:
+    - name: set local nameservers
+      ansible.builtin.set_fact:
+        local_nameserver: >-
+          {{
+            (
+              ansible_dns.nameservers
+              | reject('match', '^127\.|^::1')
+              | list
+              | default(['1.1.1.1'], true)
+            )[0]
+          }}
+
     - name: Debug
       ansible.builtin.debug:
-        var: hostvars[inventory_hostname]
-
+        var: local_nameserver
