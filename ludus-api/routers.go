@@ -388,20 +388,6 @@ var routes = Routes{
 	},
 
 	{
-		"RangeAccessAction",
-		http.MethodPost,
-		"/range/access",
-		RangeAccessAction,
-	},
-
-	{
-		"RangeAccessList",
-		http.MethodGet,
-		"/range/access",
-		RangeAccessList,
-	},
-
-	{
 		"StartTesting",
 		http.MethodPut,
 		"/testing/start",
