@@ -24,8 +24,8 @@
 
 - name: Set DNS (macOS)
   ansible.builtin.shell: |
-    networksetup -setdnsservers Ethernet {{ dns_server }}
-  when: dns_server is defined
+    networksetup -setdnsservers Ethernet {{ primary_dns_server }} {{ secondary_dns_server | default('') }}
+  when: primary_dns_server is defined
 
 - name: Setting hostname (macOS)
   ansible.builtin.hostname:

@@ -50,20 +50,21 @@
   ansible.windows.win_shell: |
     (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
   register: domain_check
-  when: dns_server is defined
+  when: primary_dns_server is defined
 
 - name: Set DNS skip_dns_change fact
   ansible.builtin.set_fact:
     skip_dns_change: "{{ domain_check.stdout | trim == 'True' }}"
-  when: dns_server is defined
+  when: primary_dns_server is defined
 
 # We only set the DNS server is not domain joined as things like GOAD set up domains outside of Ludus
 - name: Set DNS (Windows) if not domain joined
   ansible.windows.win_dns_client:
     adapter_names: '*'
     dns_servers:
-      - "{{ dns_server }}"
-  when: dns_server is defined and not skip_dns_change
+      - "{{ primary_dns_server }}"
+      - "{{ secondary_dns_server | default(omit) }}"
+  when: primary_dns_server is defined and not skip_dns_change
 
 - name: Get bginfo.exe if needed
   run_once: true

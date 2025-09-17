@@ -111,9 +111,9 @@
 - name: Set DNS server for systemd-resolved
   ansible.builtin.lineinfile:
     path: /etc/systemd/resolved.conf
-    line: "DNS={{ dns_server }}"
+    line: "DNS={{ primary_dns_server }} {{ secondary_dns_server | default('') }}"
   become: true
-  when: ansible_distribution == "Ubuntu" and dns_server is defined
+  when: ansible_distribution == "Ubuntu" and primary_dns_server is defined
 
 - name: Check for systemd-networkd-wait-online service
   ansible.builtin.stat:

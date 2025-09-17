@@ -155,14 +155,15 @@
   ansible.windows.win_dns_client:
     adapter_names: "*"
     dns_servers:
-      - "{{ dns_server }}"
-  when: dns_server is defined
+      - "{{ primary_dns_server }}"
+      - "{{ secondary_dns_server | default(omit) }}"
+  when: primary_dns_server is defined
 
 - name: Set DNS search domain (Windows)
   ansible.windows.win_powershell:
     script: |
       Set-DnsClientGlobalSetting -SuffixSearchList @("home.arpa")
-  when: dns_server is defined
+  when: primary_dns_server is defined
 
 - name: Lookup the timezone string for Windows
   ansible.builtin.set_fact:

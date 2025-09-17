@@ -43,7 +43,7 @@
     cidr_netmask: "24"
     default_gateway: "192.0.2.254"
     vm_hostname: "{{ range_id }}-router"
-    dns_server: "192.0.2.254"
+    primary_dns_server: "192.0.2.254"
 
 - name: Setup VLANs
   tags: [network]
@@ -233,7 +233,8 @@
     cidr_netmask: "24"
     default_gateway: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
     vm_hostname: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).hostname }}"
-    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan | string + '.254') }}"
+    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
 
 # ==========================================================
 # Set up DNS on the router for range hosts
@@ -321,7 +322,8 @@
     - name: Configure GPOs
       ansible.builtin.include_tasks: tasks/windows/gpo/gpo.yml
   vars:
-    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan | string + '.254') }}"
+    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
     dc_ip: "{{ ansible_host }}"
     # The autologon user should be the user defined user (if defined) or the domain admin
     autologon_user: |-
@@ -366,7 +368,8 @@
     - name: Configure additional Domain Controllers
       ansible.builtin.include_tasks: tasks/windows/configure-additional-dc.yml
   vars:
-    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan | string + '.254') }}"
+    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
     netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
     fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
     domain_admin: "{{ defaults.ad_domain_admin }}"
@@ -418,7 +421,8 @@
     - name: Enable Network Sharing
       ansible.builtin.include_tasks: tasks/windows/enable-network-sharing.yml
   vars:
-    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan | string + '.254') }}"
+    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
     # The autologon user should be the user defined user (if defined) or the domain user (if a domain is defined) otherwise localuser
     autologon_user: |-
       {{
@@ -783,7 +787,7 @@
         cidr_netmask: "24"
         default_gateway: "192.0.2.254"
         vm_hostname: "nexus"
-        dns_server: "192.0.2.254"
+        primary_dns_server: "192.0.2.254"
         vlan: 1
 
 - name: Configure Nexus nuget cache VM requirements
@@ -945,7 +949,7 @@
         cidr_netmask: "24"
         default_gateway: "192.0.2.254"
         vm_hostname: "share"
-        dns_server: "192.0.2.254"
+        primary_dns_server: "192.0.2.254"
         vlan: 1
 
 - name: Configure Ludus share VM requirements

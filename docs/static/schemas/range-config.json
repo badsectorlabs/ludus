@@ -407,6 +407,14 @@
                 },
                 "dns_rewrites": {
                     "$ref": "#/definitions/DNSRewrites"
+                },
+                "primary_dns_server": {
+                    "type": "string",
+                    "description": "The primary DNS server to set for the VM"
+                },
+                "secondary_dns_server": {
+                    "type": "string",
+                    "description": "A secondary DNS server to set for the VM"
                 }
             },
             "required": [
