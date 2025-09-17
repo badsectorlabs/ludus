@@ -180,14 +180,26 @@
   when: defaults.timezone is defined
 
 # Hostname - Windows
+- name: Check the current Hostname
+  ansible.windows.win_shell: |
+    hostname
+  register: current_hostname
+
+- name: Check if the current hostname is the same as the desired hostname
+  ansible.builtin.debug:
+    msg: "Current hostname: {{ current_hostname.stdout | trim }}, Desired hostname: {{ vm_hostname }}"
+
 - name: Hostname change (Windows)
   ansible.windows.win_hostname:
     name: "{{ vm_hostname }}"
   register: res
+  when: current_hostname.stdout | trim != vm_hostname
 
 - name: Reboot
   ansible.windows.win_reboot:
-  when: res.reboot_required
+  when:
+    - current_hostname.stdout | trim != vm_hostname
+    - res.reboot_required
 
 - name: Wait for the host's control interface (WinRM via HTTPS) to come up
   ansible.builtin.wait_for:
@@ -198,7 +210,9 @@
   delegate_to: localhost
   become: false
   register: wait_result
-  when: res.reboot_required
+  when:
+    - current_hostname.stdout | trim != vm_hostname
+    - res.reboot_required
 
 - name: Refresh inventory
   ansible.builtin.meta: refresh_inventory
