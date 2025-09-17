@@ -151,13 +151,24 @@
     state: absent
   when: old_hardware
 
-- name: Set DNS (Windows)
+- name: Set DNS (Primary and secondary)
   ansible.windows.win_dns_client:
     adapter_names: "*"
     dns_servers:
       - "{{ primary_dns_server }}"
-      - "{{ secondary_dns_server | default(omit) }}"
-  when: primary_dns_server is defined
+      - "{{ secondary_dns_server }}"
+  when:
+    - primary_dns_server is defined
+    - secondary_dns_server is defined
+
+- name: Set DNS (Primary only)
+  ansible.windows.win_dns_client:
+    adapter_names: "*"
+    dns_servers:
+      - "{{ primary_dns_server }}"
+  when:
+    - primary_dns_server is defined
+    - secondary_dns_server is not defined
 
 - name: Set DNS search domain (Windows)
   ansible.windows.win_powershell:
