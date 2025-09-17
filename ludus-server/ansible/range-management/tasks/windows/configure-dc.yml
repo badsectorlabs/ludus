@@ -64,7 +64,7 @@
 - name: Configure DNS forwarding
   ansible.windows.win_powershell:
     script: |
-      $dnsip = "{{ dns_server }}"
+      $dnsip = "{{ primary_dns_server }}"
       $newDNSServers = "127.0.0.1", "$dnsip"
       Add-DnsServerForwarder -IPAddress $dnsip
       Set-DnsClientGlobalSetting -SuffixSearchList @( "{{ netbios_name }}.{{ fqdn_tail }}", "home.arpa")

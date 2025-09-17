@@ -57,14 +57,22 @@
     skip_dns_change: "{{ domain_check.stdout | trim == 'True' }}"
   when: primary_dns_server is defined
 
+- name: Debug DNS server
+  ansible.builtin.debug:
+    var: primary_dns_server
+
+- name: Debug secondary DNS server
+  ansible.builtin.debug:
+    var: secondary_dns_server
+
 # We only set the DNS server is not domain joined as things like GOAD set up domains outside of Ludus
-- name: Set DNS (Windows) if not domain joined
+- name: Set DNS if not domain joined
   ansible.windows.win_dns_client:
     adapter_names: '*'
-    dns_servers:
-      - "{{ primary_dns_server }}"
-      - "{{ secondary_dns_server | default(omit) }}"
-  when: primary_dns_server is defined and not skip_dns_change
+    dns_servers: "{{ [primary_dns_server] + ([secondary_dns_server | default(omit)] | reject('equalto', omit) | list) }}"
+  when:
+    - primary_dns_server is defined
+    - not skip_dns_change
 
 - name: Get bginfo.exe if needed
   run_once: true

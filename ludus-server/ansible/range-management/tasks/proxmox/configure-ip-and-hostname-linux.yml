@@ -111,7 +111,7 @@
 - name: Set DNS server for systemd-resolved
   ansible.builtin.lineinfile:
     path: /etc/systemd/resolved.conf
-    line: "DNS={{ primary_dns_server }} {{ secondary_dns_server | default('') }}"
+    line: "DNS={{ ([primary_dns_server] + ([secondary_dns_server | default(omit)] | reject('equalto', omit) | list)) | join(' ') }}"
   become: true
   when: ansible_distribution == "Ubuntu" and primary_dns_server is defined
 
