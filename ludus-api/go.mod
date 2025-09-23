@@ -12,7 +12,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/keygen-sh/keygen-go/v3 v3.2.0
-	github.com/luthermonson/go-proxmox v0.2.3
+	github.com/luthermonson/go-proxmox v0.2.4-0.20250923162601-ef332f9e265b
 	github.com/spf13/viper v1.19.0
 	github.com/supabase-community/auth-go v1.4.0
 	github.com/xeipuuv/gojsonschema v1.2.0
@@ -97,5 +97,3 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/luthermonson/go-proxmox => ../../go-proxmox
