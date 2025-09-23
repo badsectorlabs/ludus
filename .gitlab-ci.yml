@@ -962,6 +962,139 @@ post-deploy user-cmds-as-admin:
     - ludus --url https://127.0.0.1:8081 user rm -i TU
     - '! ludus users list all | grep "Test User"'
 
+post-deploy groups-as-admin:
+  stage: post-deploy-admin-user
+  tags:
+    - ludus-proxmox-runner
+  dependencies:
+    - build all
+  rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[group tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/group.go
+      - ludus-api/api_group_management.go
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_admin
+  timeout: 15m
+  retry:
+    max: 2
+    when: script_failure
+  script:
+    - *ci-setup-admin
+    # Clean up from previous retries if necessary
+    - ludus groups delete ci-group-test || true
+    - ludus --url https://127.0.0.1:8081 user rm -i GTU || true
+    # Ensure a normal user exists for membership tests (creates default range for GTU)
+    - ludus --url https://127.0.0.1:8081 user add -n "Group Test User" -i GTU
+    # Create a group
+    - ludus groups create ci-group-test --description "CI Group Test"
+    - ludus groups list | grep ci-group-test
+    # Add user to group (idempotency + conflict check)
+    - ludus groups add user GTU ci-group-test
+    - ludus groups members ci-group-test | grep GTU
+    - set +o pipefail
+    - ludus groups add user GTU ci-group-test 2>&1 | grep "already a member"
+    - set -o pipefail
+    # Grant group access to CIA's default range
+    - ludus groups add range CIA ci-group-test
+    - ludus groups ranges ci-group-test | grep CIA
+    # Verify that GTU now appears as having access to CIA's range via group
+    - ludus range users CIA | grep GTU
+    # Idempotency/conflict on range access
+    - set +o pipefail
+    - ludus groups add range CIA ci-group-test 2>&1 | grep "already has access"
+    - set -o pipefail
+    # Remove user from group, ensure access is gone
+    - ludus groups remove user GTU ci-group-test
+    - '! ludus range users CIU | grep GTU'
+    # Re-add and then remove range access
+    - ludus groups add user GTU ci-group-test
+    - ludus groups remove range CIA ci-group-test
+    - '! ludus groups ranges ci-group-test | grep CIA'
+    # Delete group and cleanup user
+    - ludus groups delete ci-group-test
+    - '! ludus groups list | grep ci-group-test'
+    - ludus --url https://127.0.0.1:8081 user rm -i GTU
+
+post-deploy ranges-as-admin:
+  stage: post-deploy-admin-user
+  tags:
+    - ludus-proxmox-runner
+  dependencies:
+    - build all
+  rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[range mgmt tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/range.go
+      - ludus-api/api_range_management.go
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_admin
+  timeout: 15m
+  retry:
+    max: 2
+    when: script_failure
+  script:
+    - *ci-setup-admin
+    # Clean up potential leftovers (ignore errors)
+    - ludus --url https://127.0.0.1:8081 range rm-range -r CIA-extra-1 --no-prompt --force || true
+    - ludus --url https://127.0.0.1:8081 range rm-range -r CIU-extra-1 --no-prompt --force || true
+    - ludus --url https://127.0.0.1:8081 range rm-range -r CIU-extra-2 --no-prompt --force || true
+    # Create two additional ranges for CIU (standard user)
+    - ludus --url https://127.0.0.1:8081 range create -n "CIU Extra Range 1" -r CIU-extra-1 --user CIU
+    - ludus --url https://127.0.0.1:8081 range create -n "CIU Extra Range 2" -r CIU-extra-2 --user CIU
+    # Verify CIU can access both ranges (admin impersonation)
+    - ludus --user CIU range accessible | grep CIU-extra-1
+    - ludus --user CIU range accessible | grep CIU-extra-2
+    # Verify users list for the new range contains CIU
+    - ludus range users CIU-extra-1 | grep CIU
+    # Delete first CIU range (no VMs => no --force)
+    - ludus --url https://127.0.0.1:8081 range rm-range -r CIU-extra-1 --no-prompt
+    - '! ludus --user CIU range accessible | grep CIU-extra-1'
+    # Delete second CIU range
+    - ludus --url https://127.0.0.1:8081 range rm-range -r CIU-extra-2 --no-prompt
+    - '! ludus --user CIU range accessible | grep CIU-extra-2'
+    # Create and delete an extra range for CIA (admin)
+    - ludus --url https://127.0.0.1:8081 range create -n "CIA Extra Range" -r CIA-extra-1 --user CIA
+    - ludus --user CIA range accessible | grep CIA-extra-1
+    - ludus --url https://127.0.0.1:8081 range rm-range -r CIA-extra-1 --no-prompt
+    - '! ludus --user CIA range accessible | grep CIA-extra-1'
+
 post-deploy templates-as-admin:
   stage: post-deploy-admin-templates
   tags:

@@ -62,10 +62,12 @@ The available tags are listed below:
 - `[client tests]` - test basic client commands that do not deploy templates or ranges
 - `[template tests]` - run a template build and wait for all templates to complete building
 - `[range tests]` - run a range deploy and wait for it to succeed. This uses the `simple-domain.yml` range config.
+- `[range mgmt tests]` - run range management tests (create additional ranges, list accessible ranges, and destroy ranges) validating multi-range support per user
 - `[post-deploy tests]` - runs all tests related post-deployment tasks (testing mode, allowing and denying domains and IPs, powering on and off a VM, adding and removing users, etc)
 - `[testing-mode tests]` - runs tests to determine if testing mode functions properly
 - `[ansible tests]` - runs tests to determine if ansible features function properly
 - `[user tests]` - runs tests to determine if the functions related to user management function properly
+- `[group tests]` - runs tests to validate group features (create/list, add/remove users, grant/revoke range access) and user-permission denials
 - `[template tests]` - runs tests related to adding, building, and removing custom templates
 - `[start-at templates]` - run all test starting at the template builds
 - `[start-at range-admin]` - run all test starting at the deployment of the admin user range
