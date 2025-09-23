@@ -1,11 +1,14 @@
 package ludusapi
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io/fs"
 	"log"
 	"log/slog"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -33,6 +36,7 @@ type Routes []Route
 var server *Server
 var Router *gin.Engine
 var logger *slog.Logger
+var adminProxy *httputil.ReverseProxy
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
@@ -70,6 +74,16 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 		})
 	}
 	Router = router
+
+	// Setup a reverse proxy for the admin API
+	adminURL, _ := url.Parse("https://127.0.0.1:8081")
+	adminProxy = httputil.NewSingleHostReverseProxy(adminURL)
+	customTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // Allow self-signed certificate
+		},
+	}
+	adminProxy.Transport = customTransport
 
 	return router
 }
@@ -191,7 +205,20 @@ func limitRootEndpoints(c *gin.Context) {
 		!(strings.HasPrefix(c.Request.URL.Path, "/range") && c.Request.Method == http.MethodDelete) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The :8081 endpoint can only be used for user, range creation/deletion, and anti-sandbox actions. Use the :8080 endpoint for all other actions."})
 		return
+	} else if os.Geteuid() != 0 &&
+		(strings.HasPrefix(c.Request.URL.Path, "/user") ||
+			strings.HasPrefix(c.Request.URL.Path, "/antisandbox/") ||
+			strings.HasPrefix(c.Request.URL.Path, "/ranges/create") ||
+			(strings.HasPrefix(c.Request.URL.Path, "/range") && c.Request.Method == http.MethodDelete)) {
+		// Reverse proxy to the admin API
+		adminProxy.ServeHTTP(c.Writer, c.Request)
+
+		// Abort the middleware chain to prevent the user-facing server
+		// from also handling the request and writing a second response.
+		c.Abort()
+		return
 	}
+
 }
 
 func RegisterRoutes(router *gin.Engine, routes Routes) {
