@@ -326,11 +326,12 @@ func setupUsersAddCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the new user (2-20 chars, typically capitalized initials)")
 	command.Flags().StringVarP(&userName, "name", "n", "", "the name of the user (typically 'first last')")
 	command.Flags().BoolVarP(&userIsAdmin, "admin", "a", false, "set this flag to make the user an admin of Ludus")
-	command.Flags().BoolVarP(&enablePortforwarding, "portforward", "w", false, "set this flag to portfoward UDP port 51000+range_number to the range's router for inbound WireGuard support (Enterprise)")
 	command.Flags().StringVarP(&password, "password", "p", "", "the password for the user (must be at least 8 characters long)")
 	command.Flags().StringVarP(&email, "email", "e", "", "the email for the user")
+	_ = command.MarkFlagRequired("email")
 	_ = command.MarkFlagRequired("userid")
 	_ = command.MarkFlagRequired("name")
+	_ = command.MarkFlagRequired("password")
 }
 
 var usersDeleteCmd = &cobra.Command{

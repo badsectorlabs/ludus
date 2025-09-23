@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type VmObject struct {
@@ -37,9 +39,11 @@ type RangeObject struct {
 }
 
 type UserObject struct {
-	Name            string    `json:"name"`
-	UserID          string    `json:"userID"`
-	DateCreated     time.Time `json:"dateCreated"`
+	Name            string    `json:"name" gorm:"not null"`
+	UserID          string    `json:"userID" gorm:"primaryKey"`
+	UserNumber      int32     `json:"userNumber" gorm:"unique"`
+	UUID            uuid.UUID `json:"uuid"`
+	DateCreated     time.Time `gorm:"autoCreateTime" json:"dateCreated"`
 	DateLastActive  time.Time `json:"dateLastActive"`
 	IsAdmin         bool      `json:"isAdmin"`
 	ProxmoxUsername string    `json:"proxmoxUsername"`
