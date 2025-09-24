@@ -2,10 +2,8 @@ package ludusapi
 
 import (
 	crypto_rand "crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"math/rand"
 	"net"
@@ -101,24 +99,6 @@ func getUserID(c *gin.Context) (string, bool) {
 
 type IP struct {
 	Query string
-}
-
-func GetPublicIPviaAPI() string {
-	req, err := http.Get("http://ip-api.com/json/")
-	if err != nil {
-		return err.Error()
-	}
-	defer req.Body.Close()
-
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return err.Error()
-	}
-
-	var ip IP
-	json.Unmarshal(body, &ip)
-
-	return ip.Query
 }
 
 func removeStringExact(slice []string, target string) []string {
@@ -379,13 +359,13 @@ func getUIDandGIDFromUsername(username string) (int, int, error) {
 
 // userExistsOnHostSystem checks if a user exists on the host system
 func userExistsOnHostSystem(username string) bool {
-	cmd := exec.Command("id", username)
+	cmd := exec.Command("/usr/bin/id", username)
 	return cmd.Run() == nil
 }
 
 // removeUserFromHostSystem removes a user from the host system
 func removeUserFromHostSystem(username string) {
-	cmd := exec.Command("userdel", "-r", username)
+	cmd := exec.Command("/usr/sbin/userdel", "-r", username)
 	err := cmd.Run()
 	if err != nil {
 		fmt.Printf("Failed to remove user %s from host system: %s\n", username, err)
@@ -669,9 +649,12 @@ func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, err
 	} else {
 		// No rangeID specified, get the target user's default range
 		usersRange, err = GetUserDefaultRange(db, targetUserID)
-		if err != nil {
+		if err != nil && targetUserID != "ROOT" {
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("No accessible ranges found for user %s", targetUserID)})
 			return usersRange, targetUser, err
+		} else if err != nil && targetUserID == "ROOT" {
+			// If the target user is ROOT and there is an error, allow it to continue as the root user is being used to create a user
+			return RangeObject{}, targetUser, nil
 		}
 	}
 

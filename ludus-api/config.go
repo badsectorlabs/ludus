@@ -11,27 +11,29 @@ const LudusInstallPath = ludusInstallPath // Export the path for use in plugins
 
 // Configurations exported
 type Configuration struct {
-	ProxmoxNode            string  `mapstructure:"proxmox_node" yaml:"proxmox_node"`
-	ProxmoxInterface       string  `mapstructure:"proxmox_interface" yaml:"proxmox_interface"`
-	ProxmoxInvalidCert     bool    `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
-	ProxmoxURL             string  `mapstructure:"proxmox_url" yaml:"proxmox_url"`
-	ProxmoxHostname        string  `mapstructure:"proxmox_hostname" yaml:"proxmox_hostname"`
-	ProxmoxLocalIP         string  `mapstructure:"proxmox_local_ip" yaml:"proxmox_local_ip"`
-	ProxmoxPublicIP        string  `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"`
-	ProxmoxGateway         string  `mapstructure:"proxmox_gateway" yaml:"proxmox_gateway"`
-	ProxmoxNetmask         string  `mapstructure:"proxmox_netmask" yaml:"proxmox_netmask"`
-	ProxmoxVMStoragePool   string  `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
-	ProxmoxVMStorageFormat string  `mapstructure:"proxmox_vm_storage_format" yaml:"proxmox_vm_storage_format"`
-	ProxmoxISOStoragePool  string  `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
-	LudusNATInterface      string  `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
-	PreventUserAnsibleAdd  bool    `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
-	LicenseKey             string  `mapstructure:"license_key" yaml:"license_key"`
-	ExposeAdminPort        bool    `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
-	ReservedRangeNumbers   []int32 `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
-	DatabaseURL            string  `mapstructure:"database_url" yaml:"database_url"`
-	JWTSecret              string  `mapstructure:"jwt_secret" yaml:"jwt_secret"`
-	ServiceRoleKey         string  `mapstructure:"service_role_key" yaml:"service_role_key"`
-	SupabaseURL            string  `mapstructure:"supabase_url" yaml:"supabase_url"`
+	ProxmoxNode                string  `mapstructure:"proxmox_node" yaml:"proxmox_node"`
+	ProxmoxInterface           string  `mapstructure:"proxmox_interface" yaml:"proxmox_interface"`
+	ProxmoxInvalidCert         bool    `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
+	ProxmoxURL                 string  `mapstructure:"proxmox_url" yaml:"proxmox_url"`
+	ProxmoxHostname            string  `mapstructure:"proxmox_hostname" yaml:"proxmox_hostname"`
+	ProxmoxLocalIP             string  `mapstructure:"proxmox_local_ip" yaml:"proxmox_local_ip"`
+	ProxmoxPublicIP            string  `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"`
+	ProxmoxGateway             string  `mapstructure:"proxmox_gateway" yaml:"proxmox_gateway"`
+	ProxmoxNetmask             string  `mapstructure:"proxmox_netmask" yaml:"proxmox_netmask"`
+	ProxmoxVMStoragePool       string  `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
+	ProxmoxVMStorageFormat     string  `mapstructure:"proxmox_vm_storage_format" yaml:"proxmox_vm_storage_format"`
+	ProxmoxISOStoragePool      string  `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
+	LudusNATInterface          string  `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
+	PreventUserAnsibleAdd      bool    `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
+	LicenseKey                 string  `mapstructure:"license_key" yaml:"license_key"`
+	ExposeAdminPort            bool    `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
+	ReservedRangeNumbers       []int32 `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
+	DatabaseURL                string  `mapstructure:"database_url" yaml:"database_url"`
+	DatabaseEncryptionPassword string  `mapstructure:"database_encryption_password" yaml:"database_encryption_password"`
+	DatabaseEncryptionSalt     string  `mapstructure:"database_encryption_salt" yaml:"database_encryption_salt"`
+	JWTSecret                  string  `mapstructure:"jwt_secret" yaml:"jwt_secret"`
+	ServiceRoleKey             string  `mapstructure:"service_role_key" yaml:"service_role_key"`
+	SupabaseURL                string  `mapstructure:"supabase_url" yaml:"supabase_url"`
 }
 
 var ServerConfiguration Configuration
@@ -51,16 +53,18 @@ func (s *Server) ParseConfig() {
 	// Set defaults
 	viper.SetDefault("proxmox_invalid_cert", true)
 	viper.SetDefault("proxmox_url", "https://127.0.0.1:8006")
-	viper.SetDefault("proxmox_public_ip", GetPublicIPviaAPI())
+	viper.SetDefault("proxmox_public_ip", "127.0.0.1")
 	viper.SetDefault("proxmox_vm_storage_pool", "local")
 	viper.SetDefault("proxmox_vm_storage_format", "qcow2")
 	viper.SetDefault("proxmox_iso_storage_pool", "local")
-	viper.SetDefault("ludus_nat_interface", "vmbr0") // Backwards compatibility for < v1.0.4
+	viper.SetDefault("ludus_nat_interface", "vmbr1000")
 	viper.SetDefault("prevent_user_ansible_add", false)
 	viper.SetDefault("database_url", "postgresql://postgres.your-tenant-id:your-super-secret-and-long-postgres-password@192.0.2.1:5432/postgres")
 	viper.SetDefault("jwt_secret", "your-super-secret-jwt-token-with-at-least-32-characters-long")
 	viper.SetDefault("service_role_key", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q")
 	viper.SetDefault("supabase_url", "http://192.0.2.1:8000/")
+	viper.SetDefault("database_encryption_password", "hZD6RwYxrcQ7CS4lRxjdKI7thWp3jg48kaVts8DEE8pQrJXAi6s1X2eQp1jxJFBQL3yn")
+	viper.SetDefault("database_encryption_salt", "208bbe5dd02cc23a3d7450816a641fed")
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)
 	}

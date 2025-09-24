@@ -125,15 +125,6 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	// Get the created range
-	var usersRange RangeObject
-	usersRange, err = GetUserDefaultRange(tx, user.UserID)
-	if err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error retrieving created range"})
-		return
-	}
-
 	// Get the next available user number
 	user.UserNumber = findNextAvailableUserNumber(db)
 
@@ -156,12 +147,11 @@ func AddUser(c *gin.Context) {
 	output, err := server.RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "", false, "")
 	if err != nil {
 		wasError = true
-		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
+		if !c.Writer.Written() {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": output})
+		}
 		return
 	}
-	// If this endpoint is called by a user that is not ROOT and this is their first ansible action, their log file will be owned by root
-	// Chown the ansible log file to ludus to prevent errors when they use the normal ludus endpoint (which runs as ludus)
-	chownFileToUsername(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID), "ludus")
 
 	user.DateCreated = time.Now()
 	user.DateLastActive = time.Now()
@@ -184,8 +174,16 @@ func AddUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	encryptedTokenSecret, err := EncryptStringForDatabase(tokenSecret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		wasError = true
+		return
+	}
+
 	user.ProxmoxTokenID = tokenID
-	user.ProxmoxTokenSecret = tokenSecret
+	user.ProxmoxTokenSecret = encryptedTokenSecret
 
 	// Create the user in the database
 	err = tx.Create(&user.UserObject).Error

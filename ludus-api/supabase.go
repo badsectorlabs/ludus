@@ -13,7 +13,7 @@ import (
 func createUserInSupabase(user UserWithEmailAndPassword, password string) (types.User, error) {
 	// For admin actions, you must use your service_role key.
 	// The client is initialized with the URL and the key.
-	var supabaseAuthClient = auth.New("default", ServerConfiguration.ServiceRoleKey).
+	var supabaseAuthClient = auth.New("ludus", ServerConfiguration.ServiceRoleKey).
 		WithCustomAuthURL(ServerConfiguration.SupabaseURL + "/auth/v1").
 		WithToken(ServerConfiguration.ServiceRoleKey)
 

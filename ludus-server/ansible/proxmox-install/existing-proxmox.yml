@@ -230,6 +230,9 @@
     - name: Setup WireGuard VPN server
       ansible.builtin.include_tasks: tasks/setup-wg.yml
 
+    - name: Setup Supabase database container
+      ansible.builtin.include_tasks: tasks/setup-db-container.yml
+
     - name: Ensure group "ludus" exists
       ansible.builtin.group:
         name: ludus

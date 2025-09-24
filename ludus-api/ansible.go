@@ -91,15 +91,21 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 
 	// Open a file for saving the ansible log, TRUNC will overwrite
 	// TODO, figure out a way to keep the last 10(?) logs?
-	logger.Debug("Opening ansible log file: " + fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID))
-	ansibleLogFile, err := os.OpenFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0660)
+	var ansibleLogFilePath string
+	if user.UserID != "ROOT" {
+		ansibleLogFilePath = fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID)
+	} else {
+		ansibleLogFilePath = fmt.Sprintf("%s/install/ansible.log", ludusInstallPath)
+	}
+	logger.Debug("Opening ansible log file: " + ansibleLogFilePath)
+	ansibleLogFile, err := os.OpenFile(ansibleLogFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0660)
 	if err != nil {
 		return "Failed to open ansible log file", errors.New("failed to open ansible log file")
 	}
 	// If we are running as root, chown this log file to ludus:ludus to prevent potential issues when running future commands as a regular user
 	defer func() {
 		if os.Geteuid() != 0 {
-			changeFileOwner(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID), "ludus")
+			changeFileOwner(ansibleLogFilePath, "ludus")
 		}
 	}()
 	// defer is last in, first out, so this will close the file and then chown it

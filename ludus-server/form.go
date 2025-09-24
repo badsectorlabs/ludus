@@ -517,7 +517,7 @@ func runInteractiveInstall(existingProxmox bool) {
 	}
 
 	if !existingProxmox {
-		showWarning("Only run Ludus install on a clean Debian 12 machine that will be dedicated to Ludus",
+		showWarning("Only run Ludus install on a clean Debian 12/13 machine that will be dedicated to Ludus",
 			"I Understand", "Bail", 50, 11)
 	} else {
 		uglyWarning := `

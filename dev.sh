@@ -4,7 +4,7 @@
 # It assumes you are on a macOS or Linux host and have root SSH access to the target machine
 
 # Parse command line arguments
-while getopts "hlat:n:cd" opt; do
+while getopts "hlap:t:n:cd" opt; do
   case $opt in
     h)
       echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c]"
@@ -15,6 +15,7 @@ while getopts "hlat:n:cd" opt; do
       echo "  -n  Number of log lines to show (default 100)"
       echo "  -c  Build and install client locally"
       echo "  -d  Build and install debug mode"
+      echo "  -p  Port to use for SSH/rsync"
       exit 0
       ;;
     l)
@@ -35,6 +36,9 @@ while getopts "hlat:n:cd" opt; do
     d)
       DEBUG_MODE=true
       ;;
+    p)
+      PORT=$OPTARG
+      ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
       exit 1
@@ -45,6 +49,10 @@ done
 # Set default hostname if not specified
 if [ -z "$DEVELOPMENT_HOSTNAME" ]; then
   DEVELOPMENT_HOSTNAME="lkdev2"
+fi
+
+if [ -z "${PORT}" ]; then
+  PORT=22
 fi
 
 # Add the plugins to the go workspace if they exist
@@ -66,25 +74,26 @@ rsync -av --progress \
     --include='ludus-enterprise-plugin/' \
     --filter=':- ./*/.gitignore' \
     --delete \
+    -e "ssh -p $PORT" \
     . "$DEVELOPMENT_HOSTNAME":~/ludus-dev
 
 # If the enterprise plugin exists, build it first
 if [ -d "./ludus-enterprise-plugin" ]; then
-    ssh "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-enterprise-plugin && ./dev.sh"
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-enterprise-plugin && ./dev.sh"
 fi
 
 # If the anti-sandbox plugin exists, build it before the Ludus server
 if [ -d "./ludus-antisandbox-plugin" ]; then
-    ssh "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-antisandbox-plugin && ./dev.sh"
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-antisandbox-plugin && ./dev.sh"
 fi
 
 # SSH into the target machine and build the ludus server binary\
 if [ "$DEBUG_MODE" = true ]; then
     echo "[+] Building ludus server with LUDUS_DEBUG=1"
-    ssh "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh -d"
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh -d"
 else
     echo "[-] Building ludus server with LUDUS_DEBUG=0"
-    ssh "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh"
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh"
 fi
 
 # Build the client locally if requested
@@ -102,10 +111,10 @@ if [ "$SHOW_LOGS" = true ]; then
   sleep 1
 
   if [ "$ADMIN_LOGS" = true ]; then
-    ssh "$DEVELOPMENT_HOSTNAME" "journalctl -u ludus-admin -n $NUM_LINES"
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "journalctl -u ludus-admin -n $NUM_LINES"
     exit 0
   else
-    ssh "$DEVELOPMENT_HOSTNAME" "journalctl -u ludus -n $NUM_LINES"
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "journalctl -u ludus -n $NUM_LINES"
     exit 0
   fi
 fi

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
@@ -209,7 +210,7 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 		if strings.Contains(err.Error(), "already exists") {
 			// Remove the token and try again
 			logger.Debug(fmt.Sprintf("API token already exists for user '%s', removing it and recreating", user.UserID))
-			_, err = RunWithOutput(fmt.Sprintf("pveum user token del %s@pam ludus-token", user.ProxmoxUsername))
+			_, err = exec.Command("/usr/sbin/pveum", "user", "token", "del", user.ProxmoxUsername+"@pam", "ludus-token").CombinedOutput()
 			if err != nil {
 				return "", "", errors.New("unable to remove existing API token: " + err.Error())
 			}
@@ -226,21 +227,23 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 }
 
 func createRootAPITokenWithShell() (string, string, error) {
-	out, err := RunWithOutput("pveum user token add root@pam ludus-token -privsep 0 -comment 'Ludus Token - Do not modify or delete' --output-format json")
+	out, err := exec.Command("/usr/sbin/pveum", "user", "token", "add", "root@pam", "ludus-token", "-privsep", "0", "-comment", "'Ludus Token - Do not modify or delete'", "--output-format", "json").CombinedOutput()
 	if err != nil {
-		if strings.Contains(err.Error(), "already exists") {
+		if strings.Contains(string(out), "already exists") {
 			// Remove the token and try again
-			log.Printf("API token already exists for root@pam, removing it and recreating")
-			_, err = RunWithOutput("pveum user token del root@pam ludus-token")
+			logger.Debug("API token already exists for root@pam, removing it and recreating")
+			_, err = exec.Command("/usr/sbin/pveum", "user", "token", "del", "root@pam", "ludus-token").CombinedOutput()
 			if err != nil {
 				return "", "", errors.New("unable to remove existing root API token: " + err.Error())
 			}
-			out, err = RunWithOutput("pveum user token add root@pam ludus-token -privsep 0 -comment 'Ludus Token - Do not modify or delete' --output-format json")
+			out, err = exec.Command("/usr/sbin/pveum", "user", "token", "add", "root@pam", "ludus-token", "-privsep", "0", "-comment", "'Ludus Token - Do not modify or delete'", "--output-format", "json").CombinedOutput()
 			if err != nil {
-				return "", "", errors.New("unable to create root API token: " + err.Error())
+				return "", "", errors.New("unable to create root API token: " + err.Error() + " |" + string(out) + "| ")
+			} else {
+				logger.Debug("Created API token for root@pam")
 			}
 		} else {
-			return "", "", errors.New("unable to create root API token: " + err.Error())
+			return "", "", errors.New("unable to create root API token: " + err.Error() + " |" + string(out) + "| ")
 		}
 	}
 	type TokenResponse struct {
@@ -258,7 +261,7 @@ func createRootAPITokenWithShell() (string, string, error) {
 func createPool(poolName string) error {
 	proxmoxClient, err := getRootGoProxmoxClient()
 	if err != nil {
-		return errors.New("unable to create proxmox client")
+		return errors.New("unable to create proxmox client: " + err.Error())
 	}
 	err = proxmoxClient.NewPool(context.Background(), poolName, "Created by Ludus")
 	if err != nil {
@@ -270,7 +273,7 @@ func createPool(poolName string) error {
 func removePool(poolName string) error {
 	proxmoxClient, err := getRootGoProxmoxClient()
 	if err != nil {
-		return errors.New("unable to create proxmox client")
+		return errors.New("unable to create proxmox client: " + err.Error())
 	}
 	pool, err := proxmoxClient.Pool(context.Background(), poolName)
 	if err != nil {

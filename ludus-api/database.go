@@ -3,7 +3,9 @@ package ludusapi
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -43,11 +45,32 @@ func InitDb() *gorm.DB {
 			Logger:                 newLogger,
 		})
 		if err != nil {
-			log.Fatalf("error opening db: %v", err)
+			// Check if there was a previous sqlite db, and if so, run the setup-db-container.yml to migrate to postgres
+			if FileExists(fmt.Sprintf("%s/ludus.db", ludusInstallPath)) && !FileExists(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath)) {
+				slog.Info("SQLite database found, running setup-db-container.yml, this will take a minute or two...")
+				output, err := exec.Command("ansible-playbook", "-i", "localhost", fmt.Sprintf("%s/ansible/proxmox-install/tasks/setup-db-container.yml", ludusInstallPath)).CombinedOutput()
+				slog.Debug(string(output))
+				if err != nil {
+					log.Fatalf("error running ansible-playbook: %v", err)
+				}
+				// Open the database connection again
+				db, err = gorm.Open(postgres.Open(databaseURL), &gorm.Config{
+					SkipDefaultTransaction: true,
+					Logger:                 newLogger,
+				})
+				if err != nil {
+					log.Fatalf("error opening db after db setup: %v", err)
+				}
+			} else {
+				log.Fatalf("error opening db: %v", err)
+			}
 		}
 
 		// Create the tables if they don't exist and we are root
 		if !db.Migrator().HasTable(&UserObject{}) && os.Geteuid() == 0 {
+
+			logger.Info("Creating tables in PostgreSQL")
+
 			db.Migrator().CreateTable(&UserObject{})
 			db.Migrator().CreateTable(&RangeObject{})
 			db.Migrator().CreateTable(&VmObject{})
@@ -56,35 +79,8 @@ func InitDb() *gorm.DB {
 			db.Migrator().CreateTable(&UserGroupMembership{})
 			db.Migrator().CreateTable(&GroupRangeAccess{})
 
-			// Create a root user
-			var user UserObject
-			user.Name = "root"
-			user.ProxmoxUsername = "root"
-			user.UserID = "ROOT"
-			user.DateCreated = time.Now()
-			user.DateLastActive = time.Now()
-			user.IsAdmin = true
-			apiKey := GenerateAPIKey(&user)
-			err := os.WriteFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), []byte(apiKey), 0400)
-			if err != nil {
-				log.Fatal(err.Error())
-			}
-			os.Chown(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), 0, 0)
-			tokenID, tokenSecret, err := createRootAPITokenWithShell()
-			if err != nil {
-				log.Fatal(err.Error())
-			}
-			user.ProxmoxTokenID = tokenID
-			user.ProxmoxTokenSecret = tokenSecret
-
-			os.MkdirAll(fmt.Sprintf("%s/users/root", ludusInstallPath), 0700)
-
-			user.HashedAPIKey, err = HashString(apiKey)
-			if err != nil {
-				log.Fatal("error hashing API Key for root user")
-			}
-			db.Create(&user)
-
+			logger.Info("Creating root user in database")
+			createRootUserInDatabase()
 		}
 		// Only do migrations as ludus-admin service to prevent a race condition when starting services
 		// that leads to the ludus service creating the tables via migration before the root api key
@@ -101,10 +97,62 @@ func InitDb() *gorm.DB {
 			if err := MigrateFromSQLite(); err != nil {
 				log.Printf("Warning: SQLite migration failed: %v", err)
 			}
+
+			// If a root-api-key file doesn't exist, recreate the root user in the database
+			if !FileExists(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath)) {
+				logger.Info("Recreating root user in database")
+				createRootUserInDatabase()
+			}
 		}
 	})
 
 	return db
+}
+
+func createRootUserInDatabase() {
+
+	// Check if the root user already exists in the database
+	var rootUser UserObject
+	db.First(&rootUser, "user_id = ?", "ROOT")
+	if rootUser.UserID != "" {
+		logger.Info("Root user already exists in database, removing it")
+		db.Delete(&rootUser)
+	}
+
+	// Create a root user
+	var user UserObject
+	user.Name = "root"
+	user.ProxmoxUsername = "root"
+	user.UserID = "ROOT"
+	user.DateCreated = time.Now()
+	user.DateLastActive = time.Now()
+	user.IsAdmin = true
+	apiKey := GenerateAPIKey(&user)
+	err := os.WriteFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), []byte(apiKey), 0400)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	os.Chown(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), 0, 0)
+	tokenID, tokenSecret, err := createRootAPITokenWithShell()
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	encryptedTokenSecret, err := EncryptStringForDatabase(tokenSecret)
+	if err != nil {
+		log.Fatal("error encrypting Root API Token secret")
+	}
+
+	user.ProxmoxTokenID = tokenID
+	user.ProxmoxTokenSecret = encryptedTokenSecret
+
+	os.MkdirAll(fmt.Sprintf("%s/users/root", ludusInstallPath), 0700)
+
+	user.HashedAPIKey, err = HashString(apiKey)
+	if err != nil {
+		log.Fatal("error hashing API Key for root user")
+	}
+	db.Create(&user)
 }
 
 // findNextAvailableRangeNumber finds the smallest positive integer that is not

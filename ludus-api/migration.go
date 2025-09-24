@@ -34,7 +34,7 @@ func MigrateFromSQLite() error {
 		return nil
 	}
 
-	log.Println("Starting migration from SQLite to PostgreSQL...")
+	logger.Info("Starting migration from SQLite to PostgreSQL...")
 
 	// Open SQLite database
 	sqliteDB, err := gorm.Open(sqlite.Open(sqlitePath), &gorm.Config{})
@@ -51,7 +51,7 @@ func MigrateFromSQLite() error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
-			log.Printf("Migration failed, rolling back: %v", r)
+			logger.Error(fmt.Sprintf("Migration failed, rolling back: %v", r))
 		}
 	}()
 
@@ -82,7 +82,7 @@ func MigrateFromSQLite() error {
 		// Look up the range that has the user_id of the user
 		var rangeObj RangeObject
 		if err := sqliteDB.Table("range_objects").Where("user_id = ?", sqliteUser.UserID).First(&rangeObj).Error; err != nil {
-			log.Printf("Error looking up range for user %s: %v", sqliteUser.UserID, err)
+			logger.Error(fmt.Sprintf("Error looking up range for user %s: %v", sqliteUser.UserID, err))
 			continue
 		}
 
@@ -96,7 +96,7 @@ func MigrateFromSQLite() error {
 				tx.Save(&existingUser)
 			}
 
-			log.Printf("User %s already exists in PostgreSQL, skipping", sqliteUser.UserID)
+			logger.Info(fmt.Sprintf("User %s already exists in PostgreSQL, skipping", sqliteUser.UserID))
 			continue
 		}
 
@@ -119,7 +119,7 @@ func MigrateFromSQLite() error {
 			tx.Rollback()
 			return fmt.Errorf("error creating user %s: %v", user.UserID, err)
 		}
-		log.Printf("Migrated user: %s", user.UserID)
+		logger.Info(fmt.Sprintf("Migrated user: %s", user.UserID))
 	}
 
 	// Create temporary struct for reading SQLite ranges (with string fields for arrays)
@@ -147,7 +147,7 @@ func MigrateFromSQLite() error {
 			var rootUserObject UserObject
 			db.First(&rootUserObject, "user_id = ?", "ROOT")
 			if rootUserObject.ProxmoxTokenID != "" {
-				log.Printf("User ROOT already has an API key, skipping migration")
+				logger.Info("User ROOT already has an API key, skipping migration")
 				continue
 			}
 			// Only create an API key for ROOT, otherwise skip migration
@@ -160,7 +160,7 @@ func MigrateFromSQLite() error {
 			rootUserObject.ProxmoxTokenID = tokenID
 			encryptedSecret, err := EncryptStringForDatabase(tokenSecret)
 			if err != nil {
-				log.Printf("Error encrypting proxmox API token for user root@pam: %v", err)
+				logger.Error(fmt.Sprintf("Error encrypting proxmox API token for user root@pam: %v", err))
 			}
 			rootUserObject.ProxmoxTokenSecret = encryptedSecret
 			db.Save(&rootUserObject)
@@ -170,7 +170,7 @@ func MigrateFromSQLite() error {
 		// Check if range already exists in PostgreSQL
 		var existingRange RangeObject
 		if err := tx.Where("range_number = ?", sqliteRange.RangeNumber).First(&existingRange).Error; err == nil {
-			log.Printf("Range %d already exists in PostgreSQL, skipping", sqliteRange.RangeNumber)
+			logger.Info(fmt.Sprintf("Range %d already exists in PostgreSQL, skipping", sqliteRange.RangeNumber))
 			continue
 		}
 
@@ -223,7 +223,7 @@ func MigrateFromSQLite() error {
 			tx.Rollback()
 			return fmt.Errorf("error creating range %d: %v", rangeObj.RangeNumber, err)
 		}
-		log.Printf("Migrated range: %d (User: %s)", rangeObj.RangeNumber, rangeObj.RangeID)
+		logger.Info(fmt.Sprintf("Migrated range: %d (User: %s)", rangeObj.RangeNumber, rangeObj.RangeID))
 
 		// Create UserRangeAccess record for the range owner
 		userRangeAccess := UserRangeAccess{
@@ -257,7 +257,7 @@ func MigrateFromSQLite() error {
 		// Check if VM already exists in PostgreSQL
 		var existingVM VmObject
 		if err := tx.Where("proxmox_id = ? AND range_number = ?", sqliteVM.ProxmoxID, sqliteVM.RangeNumber).First(&existingVM).Error; err == nil {
-			log.Printf("VM %d in range %d already exists in PostgreSQL, skipping", sqliteVM.ProxmoxID, sqliteVM.RangeNumber)
+			logger.Info(fmt.Sprintf("VM %d in range %d already exists in PostgreSQL, skipping", sqliteVM.ProxmoxID, sqliteVM.RangeNumber))
 			continue
 		}
 
@@ -278,7 +278,7 @@ func MigrateFromSQLite() error {
 			tx.Rollback()
 			return fmt.Errorf("error creating VM %d: %v", vm.ProxmoxID, err)
 		}
-		log.Printf("Migrated VM: %d (Range: %d)", vm.ProxmoxID, vm.RangeNumber)
+		logger.Info(fmt.Sprintf("Migrated VM: %d (Range: %d)", vm.ProxmoxID, vm.RangeNumber))
 	}
 
 	// Create temporary struct for reading SQLite range access objects (with string field for array)
@@ -311,14 +311,14 @@ func MigrateFromSQLite() error {
 			// Find the range number for the target user
 			var targetRange RangeObject
 			if err := tx.Where("range_id = ?", rangeAccess.TargetUserID).First(&targetRange).Error; err != nil {
-				log.Printf("Warning: Could not find range for target user %s, skipping access grant", rangeAccess.TargetUserID)
+				logger.Error(fmt.Sprintf("Warning: Could not find range for target user %s, skipping access grant", rangeAccess.TargetUserID))
 				continue
 			}
 
 			// Check if this access already exists
 			var existingAccess UserRangeAccess
 			if err := tx.Where("user_id = ? AND range_number = ?", sourceUserID, targetRange.RangeNumber).First(&existingAccess).Error; err == nil {
-				log.Printf("Access for user %s to range %d already exists, skipping", sourceUserID, targetRange.RangeNumber)
+				logger.Info(fmt.Sprintf("Access for user %s to range %d already exists, skipping", sourceUserID, targetRange.RangeNumber))
 				continue
 			}
 
@@ -331,7 +331,7 @@ func MigrateFromSQLite() error {
 				tx.Rollback()
 				return fmt.Errorf("error creating user range access for user %s to range %d: %v", sourceUserID, targetRange.RangeNumber, err)
 			}
-			log.Printf("Migrated access: User %s -> Range %d (Target User: %s)", sourceUserID, targetRange.RangeNumber, rangeAccess.TargetUserID)
+			logger.Info(fmt.Sprintf("Migrated access: User %s -> Range %d (Target User: %s)", sourceUserID, targetRange.RangeNumber, rangeAccess.TargetUserID))
 		}
 	}
 
@@ -346,7 +346,7 @@ func MigrateFromSQLite() error {
 	// Migrate range files
 	migrateRangeFiles()
 
-	log.Println("Migration from SQLite to PostgreSQL completed successfully")
+	logger.Info("Migration from SQLite to PostgreSQL completed successfully")
 
 	// Optionally, backup the SQLite database
 	// backupPath := fmt.Sprintf("%s/ludus.db.backup.%s", ludusInstallPath, time.Now().Format("20060102-150405"))
@@ -356,6 +356,12 @@ func MigrateFromSQLite() error {
 	// 	log.Printf("SQLite database backed up to: %s", backupPath)
 	// }
 
+	// Create the .sqlite_db_migrated file to prevent the migration from running again
+	err = os.WriteFile(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath), []byte{}, 0644)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error creating .sqlite_db_migrated file: %v", err))
+	}
+
 	return nil
 }
 
@@ -363,7 +369,7 @@ func migrateExistingUsersToSupabase() {
 	// Read the users from /etc/pve/user.cfg
 	userCfg, err := os.ReadFile("/etc/pve/user.cfg")
 	if err != nil {
-		log.Printf("Error reading /etc/pve/user.cfg: %v", err)
+		logger.Error(fmt.Sprintf("Error reading /etc/pve/user.cfg: %v", err))
 		return
 	}
 
@@ -389,14 +395,14 @@ func migrateExistingUsersToSupabase() {
 				// Read the password from the user's proxmox_password file
 				passwordBytes, err := os.ReadFile(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, username))
 				if err != nil {
-					log.Printf("Error reading proxmox password for user %s: %v", username, err)
+					logger.Error(fmt.Sprintf("Error reading proxmox password for user %s: %v", username, err))
 					continue
 				}
 				password := strings.Trim(string(passwordBytes), "\n")
 				// Lookup the user in the database
 				var user UserObject
 				if err := db.Where("proxmox_username = ?", username).First(&user).Error; err != nil {
-					log.Printf("Error looking up user %s in database, user folder exists on disk but not in database: %v", username, err)
+					logger.Error(fmt.Sprintf("Error looking up user %s in database, user folder exists on disk but not in database: %v", username, err))
 					continue
 				}
 
@@ -410,7 +416,7 @@ func migrateExistingUsersToSupabase() {
 				if user.UUID == uuid.Nil {
 					supabaseUser, err = createUserInSupabase(userWithEmailAndPassword, password)
 					if err != nil {
-						log.Printf("Error creating user %s in Supabase: %v", username, err)
+						logger.Error(fmt.Sprintf("Error creating user %s in Supabase: %v", username, err))
 						continue
 					}
 					user.UUID = supabaseUser.ID
@@ -421,18 +427,18 @@ func migrateExistingUsersToSupabase() {
 					tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user)
 					if err != nil {
 						// This is a fatal error, as every user needs a Proxmox API token to be able to deploy VMs
-						log.Fatalf("Error creating proxmox API token for user %s: %v", username, err)
+						logger.Error(fmt.Sprintf("Error creating proxmox API token for user %s: %v", username, err))
 					}
 					user.ProxmoxTokenID = tokenID
 					encryptedSecret, err := EncryptStringForDatabase(tokenSecret)
 					if err != nil {
-						log.Fatalf("Error encrypting proxmox API token for user %s: %v", username, err)
+						logger.Error(fmt.Sprintf("Error encrypting proxmox API token for user %s: %v", username, err))
 					}
 					user.ProxmoxTokenSecret = encryptedSecret
 					db.Save(&user)
 				}
 
-				log.Printf("Migrated user %s to Supabase", username)
+				logger.Info(fmt.Sprintf("Migrated user %s to Supabase", username))
 			}
 		}
 	}
@@ -446,35 +452,35 @@ func migrateRangeFiles() {
 	// First loop over all the user directories in /opt/ludus/users/
 	userDirs, err := os.ReadDir(fmt.Sprintf("%s/users/", ludusInstallPath))
 	if err != nil {
-		log.Fatalf("Error reading user directories: %v", err)
+		logger.Error(fmt.Sprintf("Error reading user directories: %v", err))
 	}
 
 	for _, userDir := range userDirs {
 		// Read the range config file from /opt/ludus/users/{username}/range-config.yml
 		rangeConfig, err := os.ReadFile(fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, userDir.Name()))
 		if err != nil {
-			log.Printf("Error reading range config file for user %s: %v", userDir.Name(), err)
+			logger.Error(fmt.Sprintf("Error reading range config file for user %s: %v", userDir.Name(), err))
 			continue
 		}
 
 		// Look up the user ID using the ProxmoxUsername
 		var user UserObject
 		if err := db.Where("proxmox_username = ?", userDir.Name()).First(&user).Error; err != nil {
-			log.Printf("Error looking up user ID for user %s: %v", userDir.Name(), err)
+			logger.Error(fmt.Sprintf("Error looking up user ID for user %s: %v", userDir.Name(), err))
 			continue
 		}
 
 		// Create the range directory if it doesn't exist
 		err = os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, user.UserID), 0755)
 		if err != nil {
-			log.Printf("Error creating range directory for user %s: %v", user.UserID, err)
+			logger.Error(fmt.Sprintf("Error creating range directory for user %s: %v", user.UserID, err))
 			continue
 		}
 
 		// Create the range config file at /opt/ludus/ranges/{rangeID}/range-config.yml
 		err = os.WriteFile(fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, user.UserID), rangeConfig, 0644)
 		if err != nil {
-			log.Printf("Error creating range config file for user %s: %v", user.UserID, err)
+			logger.Error(fmt.Sprintf("Error creating range config file for user %s: %v", user.UserID, err))
 			continue
 		}
 		log.Printf("Migrated range config file for user %s", user.UserID)
