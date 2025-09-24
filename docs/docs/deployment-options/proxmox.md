@@ -6,11 +6,11 @@ title: Proxmox
 
 :::warning
 
-Using an existing Proxmox installation may cause issues with existing customizations as it is impossible for Ludus to account for every Proxmox setup. If starting from scratch the [bare metal Debian 12 install](./bare-metal) is recommended.
+Using an existing Proxmox installation may cause issues with existing customizations as it is impossible for Ludus to account for every Proxmox setup. If starting from scratch the [bare metal Debian 12/13 install](./bare-metal) is recommended.
 
 :::
 
-Existing Proxmox 8 servers can install Ludus without a reboot.
+Existing Proxmox 8/9 servers can install Ludus without a reboot.
 
 Ludus will make the following changes - **do NOT do any actions below yourself before running the install script**:
 
