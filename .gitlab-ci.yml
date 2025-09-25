@@ -1007,7 +1007,7 @@ post-deploy groups-as-admin:
     # Create a group
     - ludus groups create ci-group-test --description "CI Group Test"
     - ludus groups list | grep ci-group-test
-    # Add user to group (idempotency + conflict check)
+    # Add user to group
     - ludus groups add user GTU ci-group-test
     - ludus groups members ci-group-test | grep GTU
     - set +o pipefail
