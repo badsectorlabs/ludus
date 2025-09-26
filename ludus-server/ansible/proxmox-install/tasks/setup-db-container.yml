@@ -203,6 +203,7 @@
             mkdir supabase-ludus
             cp -rf supabase/docker/* supabase-ludus/
             rm supabase-ludus/docker-compose.yml # We will use our own stripped down version
+            mkdir ludus-gui
           "
 
 
@@ -214,12 +215,18 @@
         owner: root
         group: root
 
-    - name: Copy the .env file to the Supabase container
+    - name: Copy the daemon.json file to the container
+      ansible.builtin.shell:
+        cmd: |
+          pct push {{ container_id }} "{{ ludus_install_path }}/ansible/proxmox-install/templates/daemon.json" /etc/docker/daemon.json
+          systemctl restart docker
+
+    - name: Copy the .env file to the container
       ansible.builtin.shell:
         cmd: |
           pct push {{ container_id }} "{{ ludus_install_path }}/install/supabase/env" /supabase-ludus/.env
 
-    - name: Copy the compose file to the Supabase container
+    - name: Copy the compose file to the container
       ansible.builtin.shell:
         cmd: |
           pct push {{ container_id }} "{{ ludus_install_path }}/ansible/proxmox-install/templates/supabase-compose.yml" /supabase-ludus/docker-compose.yml
@@ -243,6 +250,18 @@
           pct exec {{ container_id }} -- bash -c "
             cd /supabase-ludus
             docker compose up -d db auth rest kong studio
+          "
+
+# TODO Authenticate to the registry.badsectorlabs.com with a read-only account
+
+    - name: Copy the ludus-gui compose file to the container and start the ludus-gui containers
+      ansible.builtin.shell:
+        cmd: |
+          pct push {{ container_id }} "{{ ludus_install_path }}/ansible/proxmox-install/templates/ludus-gui-compose.yml" /ludus-gui/docker-compose.yml
+          pct push {{ container_id }} "{{ ludus_install_path }}/ansible/proxmox-install/templates/Caddyfile" /ludus-gui/Caddyfile
+          pct exec {{ container_id }} -- bash -c "
+            cd /ludus-gui
+            docker compose up -d
           "
 
   rescue:

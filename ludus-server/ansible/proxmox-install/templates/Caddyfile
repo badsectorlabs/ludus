@@ -1,0 +1,14 @@
+:80, :443 {
+    # Handle authentication requests
+    handle_path /auth/v1/* {
+        reverse_proxy http://192.0.2.1:8000
+    }
+
+    # Handle all other requests
+    handle {
+        reverse_proxy ludus-gui:3000
+    }
+
+    # Configure TLS with a self-signed certificate
+    tls internal
+}
