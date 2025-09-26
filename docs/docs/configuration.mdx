@@ -68,6 +68,8 @@ ludus:
       - example.com         # rewrites responses for this domain name only
       - '*.example.com'     # rewrites responses for all example.com subdomains but *not* example.com
     unmanaged: false        # Set this to true for VMs that cannot report an IP to ansible via proxmox (no qemu-guest-agent, i.e. EDR appliances). You will have to manually configure this VM to have the IP defined in the config. Default: false
+    primary_dns_server: 1.1.1.1   # Set a primary DNS server to be set for this VM. Defaults to 10.range_number1.vlan.254 (the router) when not set
+    secondary_dns_server: 8.8.8.8 # Set a secondary DNS server for this VM
   - vm_name: "{{ range_id }}-ad-win11-22h2-enterprise-x64-1"
     hostname: "{{ range_id }}-WIN11-22H2-1"
     template: win11-22h2-x64-enterprise-template
