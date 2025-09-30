@@ -171,9 +171,9 @@ class ProxmoxAPI(object):
                 'password': self.options.password,
             })
 
-        data = json.load(open_url(request_path, data=request_params,
-                                  validate_certs=self.options.validate,
-                                  timeout=90))
+            data = json.load(open_url(request_path, data=request_params,
+                                      validate_certs=self.options.validate,
+                                      timeout=90))
 
             self.credentials = {
                 'ticket': data['data']['ticket'],
