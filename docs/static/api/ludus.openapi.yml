@@ -1977,6 +1977,45 @@ paths:
                     type: string
                     example: "Error installing standard OMVF, check /tmp/anti-sandbox-debug.log:
                       ..."
+  /antisandbox/status:
+    get:
+      tags:
+        - Anti-Sandbox Management
+      summary: Get antisandbox installation status
+      operationId: antiSandboxStatus
+      description: |
+        Returns whether custom antisandbox packages, standard packages, or no packages are installed on the Ludus host (Enterprise only)
+      responses:
+        "200":
+          description: Antisandbox status retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        enum:
+                          - custom
+                          - standard
+                          - not_installed
+                        example: custom
+                      message:
+                        type: string
+                        example: Custom antisandbox packages are installed and held
+        "500":
+          description: Error checking package status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Failed to check package hold status"
   /templates:
     get:
       tags:
@@ -2357,14 +2396,14 @@ paths:
               userID:
                 $ref: "#/components/schemas/userID"
         - in: query
-          name: vmids
+          name: vmIDs
           description: >
             pass an optional comma separated list of VMIDs to get the snapshots
             for
           required: false
           schema:
             properties:
-              vmids:
+              vmIDs:
                 type: string
                 example: 100,101
       responses:
