@@ -149,7 +149,7 @@ func RunWithOutput(command string) (string, error) {
 	shellBin := "/bin/bash"
 	if _, err := os.Stat(shellBin); err != nil {
 		if _, err = os.Stat("/bin/sh"); err != nil {
-			return "", errors.New("could not find /bin/bash or /bin/sh")
+			return "", errors.New("Could not find /bin/bash or /bin/sh")
 		} else {
 			shellBin = "/bin/sh"
 		}
@@ -162,7 +162,7 @@ func RunWithOutput(command string) (string, error) {
 	cmd.Stderr = &out
 	err := cmd.Run()
 	if err != nil {
-		return "", errors.New("error running command: " + err.Error())
+		return "", errors.New("Error running command: " + err.Error())
 	}
 	return out.String(), nil
 }

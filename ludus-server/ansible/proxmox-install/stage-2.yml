@@ -27,7 +27,7 @@
               "GRUB auto-install failed, attempting automatic recoverty. Run `dpkg --configure grub-pc` to manually fix this error."
             seconds: 1
           when: '"You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout'
-        
+
         - name: Check for sda
           ansible.builtin.shell: |
             df | egrep '/$' | grep sda
@@ -38,7 +38,7 @@
         - name: Fail if sda is not the disk
           ansible.builtin.fail:
             msg: "Unable to determine boot disk, Run `dpkg --configure grub-pc` to manually fix this error."
-          when: sda_check.failed is true and "You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout 
+          when: sda_check.failed is true and "You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout
 
         - name: Select SDA for grub-pc
           ansible.builtin.shell: |
@@ -49,7 +49,7 @@
           ansible.builtin.debug:
             msg: "dpkg is stuck, going to reboot"
           when: '"Another instance of this program is already running." in _system_upgrade.stdout'
-        
+
         - name: Alert
           ansible.builtin.pause:
             prompt: |

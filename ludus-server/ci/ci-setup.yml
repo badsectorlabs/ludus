@@ -4,7 +4,7 @@
     - name: Check inventory
       ansible.builtin.fail:
         msg: The CI/CD template has already been created. Manually remove it and re-run this play to recreate it.
-      when: "'debian-12-x64-server-ludus-ci-template' in hostvars"
+      when: "'debian-13-x64-server-ludus-ci-template' in hostvars"
 
     - name: Add the user to the host
       ansible.builtin.user:
@@ -102,14 +102,14 @@
         state: restarted
       when: dnsmasq_written is changed
 
-    - name: Create CI VM from a Debian 12 template
+    - name: Create CI VM from a Debian 13 template
       community.general.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
         node: "{{ node_name }}"
-        clone: debian-12-x64-server-template
-        name: debian-12-x64-server-ludus-ci
+        clone: debian-13-x64-server-template
+        name: debian-13-x64-server-ludus-ci
         pool: CICD
         full: true
         timeout: 600
@@ -239,7 +239,7 @@
       when: clone_vm is changed
 
 - name: Install Gitlab runner prerequisites
-  hosts: debian-12-x64-server-ludus-ci
+  hosts: debian-13-x64-server-ludus-ci
   vars:
     - ansible_connection: ssh
     - ansible_user: debian
@@ -303,6 +303,7 @@
           - tmux
           - htop
           - jq
+          - python3-debian
         state: present
         update_cache: true
       become: true
@@ -336,8 +337,15 @@
         line: "if [ -f /opt/ludus/ci/.apikey-admin ]; then export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin); fi"
         create: true
 
+    - name: Automatically load the CI key if it exists on login for gitlab-runner (helpful for interactive debugging CI builds)
+      become: true
+      lineinfile:
+        path: /home/gitlab-runner/.bashrc
+        line: "if [ -f /opt/ludus/ci/.apikey-user ]; then export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user); fi"
+        create: true
+
 - name: Install Go # Must come after the tasks or ca certificates may not exist
-  hosts: debian-12-x64-server-ludus-ci
+  hosts: debian-13-x64-server-ludus-ci
   vars:
     - ansible_connection: ssh
     - ansible_user: debian
@@ -346,7 +354,7 @@
     - ansible_sudo_pass: debian
   roles:
     - role: gantsign.golang
-      golang_version: '1.21.1'
+      golang_version: '1.24.2'
   tasks:
     # Install node + yarn to build the documentation
     - name: Install node
@@ -392,7 +400,7 @@
         node: "{{ node_name }}"
         vmid: "{{ vm_id }}"
         state: present
-        name: debian-12-x64-server-ludus-ci-template
+        name: debian-13-x64-server-ludus-ci-template
         update: true
 
     - name: Power off template VM

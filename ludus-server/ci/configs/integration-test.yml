@@ -27,6 +27,8 @@ ludus:
     domain:
       fqdn: ludus.domain
       role: alt-dc
+    primary_dns_server: 10.{{ range_second_octet }}.10.11    # The DC
+    secondary_dns_server: 10.{{ range_second_octet }}.10.254 # The router
 
   - vm_name: "{{ range_id }}-ad-win11-22h2-enterprise-x64-1"
     hostname: "{{ range_id }}-WIN11-22H2-1"
@@ -68,6 +70,8 @@ ludus:
     dns_rewrites:
       - example.com
       - '*.example.com'
+    primary_dns_server: 1.1.1.1
+    secondary_dns_server: 8.8.8.8
 
   - vm_name: "{{ range_id }}-kali"
     hostname: "{{ range_id }}-kali"

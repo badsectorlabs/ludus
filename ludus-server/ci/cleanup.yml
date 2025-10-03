@@ -1,4 +1,4 @@
-- name: Create the VM for this CI run and power it on waiting for SSH to be available
+- name: Power off and remove the CI VM
   hosts: localhost
   tasks:
     - name: Check inventory

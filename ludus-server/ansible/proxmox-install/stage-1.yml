@@ -149,6 +149,7 @@
           - pywinrm
           - dnspython
           - jmespath
+          - passlib # required for creating users on Debian 13
 
     - name: Set a hostname
       ansible.builtin.hostname:

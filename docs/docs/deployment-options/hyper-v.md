@@ -22,7 +22,7 @@ title: Hyper-V
 Set-VMProcessor -VMName <Ludus VM Name> -ExposeVirtualizationExtensions $true
 ```
 
-4. Boot the VM and install Debian 12.
+4. Boot the VM and install Debian 12/13.
 
 ## Install
 

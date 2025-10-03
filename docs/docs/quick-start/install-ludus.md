@@ -19,7 +19,7 @@ Ludus is not supported on hosts that are connected to the network via WiFi. Plea
 Ludus can **only** be installed on a host that meets the following requirements:
 
 - x86_64 (aka amd64 aka 64-bit "Intel") CPU with a [Passmark](https://www.cpubenchmark.net/cpu_list.php) score > 6,000
-- Debian 12 or Proxmox 8 (If Proxmox, see [this page](../deployment-options/proxmox.md) for details)
+- Debian 12/13 or Proxmox 8/9 (If Proxmox, see [this page](../deployment-options/proxmox.md) for details)
 - Supports virtualization - vmx or svm in /proc/cpuinfo (nested virtualization is supported, but has a performance penalty)
 - Has at least 32 GB of RAM
 - Has at least 200 GB of disk space (fast NVMe recommended)
@@ -28,7 +28,7 @@ Ludus can **only** be installed on a host that meets the following requirements:
 
 Machines with lower specs than listed above may work, but are not tested/supported.
 
-If you are installing Debian 12, the [netinst ISO](https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/) (scroll down to `debian-12.x.x-amd64-netinst.iso`) is recommended. 
+If you are installing Debian 12, use the [Debian 12 netinst ISO](https://cdimage.debian.org/cdimage/archive/12.11.0/amd64/iso-cd/debian-12.11.0-amd64-netinst.iso) for Debian 13, use the [Debian 13 netinst ISO](https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/) (scroll down to `debian-13.x.x-amd64-netinst.iso`). 
 At the screen below during install, uncheck `Debain desktop environment` and check `SSH server`.
 
 ![A screenshot of the Debain 12 install page with SSH Server and standard system utilities checked](/img/intro/debain-12-install.png)
@@ -50,7 +50,7 @@ ssh user@debian12
 su -
 # Enter root password to elevate to root
 # terminal-command-root-at-debian
-apt update && apt install curl sudo
+apt update && apt install curl sudo git ca-certificates python3-debian
 
 # All-in-one command
 # terminal-command-root-at-debian

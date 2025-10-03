@@ -47,6 +47,13 @@
     # "The dependency service or group failed to start.\"\r\n", "reboot_required": true}
     - name: Reboot the Additional DC
       ansible.windows.win_reboot:
+    - name: Wait for WinRM to be available
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 5986
+        delay: 10
+        state: started
+      delegate_to: localhost
     - name: Disable password policy
       community.windows.win_security_policy:
         section: System Access

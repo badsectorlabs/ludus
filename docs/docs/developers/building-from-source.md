@@ -22,7 +22,7 @@ git checkout tags/$STABLE_VERSION
 
 ### Building without embedded documentation
 
-Assuming a Debian 12/Proxmox 8 host, install the build dependencies 
+Assuming a Debian 12/13 or Proxmox 8/9 host, install the build dependencies 
 
 ```shell
 # Install Go
@@ -44,7 +44,7 @@ GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash
 
 ### Building with embedded documentation
 
-Assuming a Debian 12/Proxmox 8 host, install the build dependencies 
+Assuming a Debian 12/13 or Proxmox 8/9 host, install the build dependencies 
 
 ```shell
 # Install yarn

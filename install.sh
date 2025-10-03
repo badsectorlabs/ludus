@@ -435,7 +435,7 @@ install_file_freebsd() {
 
 #---  FUNCTION  ----------------------------------------------------------------
 #          NAME:  install_completions
-#   DESCRIPTION:  Installs completion filkes for bash and zsh
+#   DESCRIPTION:  Installs completion files for bash and zsh
 #    PARAMETERS:  none; must be called after install
 #       RETURNS:  0 = All good
 #                 1 = Something went wrong
@@ -478,6 +478,31 @@ install_completions() {
       return 1
       ;;
   esac
+
+  # If the shell is bash, check the user's .bashrc file to make sure completions are enabled
+  if [[ "$SHELL" == "/bin/bash" ]]; then
+    if [[ ! -f "${HOME}/.bashrc" ]]; then
+      print_message "[+] .bashrc file not found. Skipping completions check." "info"
+    else
+      # Add the completions script to the .bashrc file if it's not already there
+      if [[ "${EUID}" == "0" ]] && { ! grep -q 'enable bash completion in interactive shells' "${HOME}/.bashrc" && ! grep -q 'enable programmable completion features' "${HOME}/.bashrc"; }; then 
+        cat > "${HOME}/.bashrc" <<EOF
+# enable bash completion in interactive shells
+if ! shopt -oq posix; then
+  if [ -f /usr/share/bash-completion/bash_completion ]; then
+    . /usr/share/bash-completion/bash_completion
+  elif [ -f /etc/bash_completion ]; then
+    . /etc/bash_completion
+  fi
+fi
+EOF
+        print_message "[+] Installed bash completion commands to .bashrc" "info"
+        print_message "[+] Bash completions will be enabled when you spawn a new shell" "info"
+      else
+        print_message "[+] Bash completion commands already in .bashrc" "info"
+      fi
+    fi
+  fi
   return 0
 }
 
