@@ -246,6 +246,9 @@
       ansible.builtin.service:
         name: getty@tty1
         state: restarted
+      # There have been cases where this will hang the install, and it's really just for cosmetics.
+      timeout: 5
+      ignore_errors: true
 
     - name: Disable SSH banner messages
       ansible.builtin.lineinfile:
