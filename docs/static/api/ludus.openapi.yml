@@ -2669,6 +2669,36 @@ paths:
                           description: The error message associated with the failed vmID
         "500":
           description: internal error creating snapshots
+  /kms/status:
+    get:
+      tags:
+        - KMS Management
+      summary: Check KMS server status
+      operationId: kmsStatus
+      description: >
+        Checks if the KMS server is running and reachable at 192.0.2.1:1688
+        (Enterprise only)
+      responses:
+        "200":
+          description: KMS status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        enum: [running, not_running]
+                        example: running
+                      message:
+                        type: string
+                        example: "KMS Server is reachable at 192.0.2.1:1688"
+                  error:
+                    type: string
+                    example: ""
   /groups:
     post:
       tags:
