@@ -2632,15 +2632,10 @@ paths:
                   description: "The volume license product key to license the VMs with (if blank
                     or not sent: determine from Windows version)"
                   example: TVRH6-WHNXV-R9WG3-9XRFY-MY832
-                vmids:
-                  type: array
-                  items:
-                    type: integer
-                    format: int32
-                  description: Array of VMIDs to license
-                  example:
-                    - 179
-                    - 180
+                vmIDs:
+                  type: string
+                  description: "A comma-separated list of VMIDs to license"
+                  example: "179,180"
       responses:
         "200":
           description: license success and error arrays
@@ -2696,9 +2691,6 @@ paths:
                       message:
                         type: string
                         example: "KMS Server is reachable at 192.0.2.1:1688"
-                  error:
-                    type: string
-                    example: ""
   /groups:
     post:
       tags:
