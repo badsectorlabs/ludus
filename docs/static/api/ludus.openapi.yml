@@ -2632,15 +2632,10 @@ paths:
                   description: "The volume license product key to license the VMs with (if blank
                     or not sent: determine from Windows version)"
                   example: TVRH6-WHNXV-R9WG3-9XRFY-MY832
-                vmids:
-                  type: array
-                  items:
-                    type: integer
-                    format: int32
-                  description: Array of VMIDs to license
-                  example:
-                    - 179
-                    - 180
+                vmIDs:
+                  type: string
+                  description: "A comma-separated list of VMIDs to license"
+                  example: "179,180"
       responses:
         "200":
           description: license success and error arrays
@@ -2669,6 +2664,33 @@ paths:
                           description: The error message associated with the failed vmID
         "500":
           description: internal error creating snapshots
+  /kms/status:
+    get:
+      tags:
+        - KMS Management
+      summary: Check KMS server status
+      operationId: kmsStatus
+      description: >
+        Checks if the KMS server is running and reachable at 192.0.2.1:1688
+        (Enterprise only)
+      responses:
+        "200":
+          description: KMS status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        enum: [running, not_running]
+                        example: running
+                      message:
+                        type: string
+                        example: "KMS Server is reachable at 192.0.2.1:1688"
   /groups:
     post:
       tags:
