@@ -101,7 +101,7 @@
       ansible.builtin.include_tasks: tasks/setup-wg.yml
 
     - name: Setup Supabase database container
-      ansible.builtin.include_tasks: tasks/setup-db-container.yml
+      ansible.builtin.include_tasks: tasks/setup-gui-container.yml
 
     - name: Update install progress
       ansible.builtin.include_tasks: tasks/update-install-progress.yml

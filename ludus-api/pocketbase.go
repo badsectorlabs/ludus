@@ -1,0 +1,63 @@
+package ludusapi
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+
+	"github.com/pocketbase/pocketbase/core"
+)
+
+// Returns the PocketBase ID of the created user
+func createUserInPocketBase(user UserWithEmailAndPassword, password string) (string, error) {
+	logger.Debug(fmt.Sprintf("Creating user %s in PocketBase", user.Name))
+	collection, err := app.FindCollectionByNameOrId("users")
+	if err != nil {
+		logger.Error("Failed to find collection: %v", err)
+	}
+	record := core.NewRecord(collection)
+	record.SetEmail(user.Email)
+	record.SetPassword(password)
+	record.Set("name", user.Name)
+
+	if err := app.Save(record); err != nil {
+		logger.Error("Failed to create user: %v", err)
+	}
+
+	logger.Info(fmt.Sprintf("Successfully created PocketBase user with ID: %s", record.Id))
+
+	return record.Id, nil
+}
+
+func removeUserFromPocketBaseByUserID(userID string) error {
+	// Get the user's PocketBase ID from the database
+	var user UserObject
+	db.First(&user, "user_id = ?", userID)
+	if user.UserID == "" {
+		return errors.New("user not found in database")
+	}
+
+	return removeUserFromPocketBaseByID(user.PocketbaseID)
+}
+
+func removeUserFromPocketBaseByID(pocketbaseID string) error {
+	record, err := app.FindRecordById("users", pocketbaseID)
+	if err != nil {
+		// It's good practice to check if the error is because the record was not found.
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("user with PocketBase ID %q not found, nothing to delete", pocketbaseID)
+		}
+		// Another error occurred (e.g., database connection issue).
+		return fmt.Errorf("failed to find user: %w", err)
+	}
+
+	logger.Debug(fmt.Sprintf("Found user record with ID: %s. Proceeding with deletion...\n", record.Id))
+
+	// 2. Delete the retrieved record.
+	// This will also trigger any configured cascade-delete operations.
+	if err := app.Delete(record); err != nil {
+		return fmt.Errorf("failed to delete user record: %w", err)
+	}
+
+	return nil
+}

@@ -4,17 +4,29 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/supabase-community/auth-go/types"
+	"github.com/pocketbase/pocketbase/core"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
-// MigrateFromSQLite migrates data from SQLite to PostgreSQL if conditions are met
-func MigrateFromSQLite() error {
+// Create struct for reading SQLite users (without CreatedAt/UpdatedAt)
+type SQLiteUserObject struct {
+	Name                  string    `json:"name"`
+	UserID                string    `json:"userID"`
+	DateCreated           time.Time `json:"dateCreated"`
+	DateLastActive        time.Time `json:"dateLastActive"`
+	IsAdmin               bool      `json:"isAdmin"`
+	HashedAPIKey          string    `json:"-"`
+	ProxmoxUsername       string    `json:"proxmoxUsername"`
+	PortforwardingEnabled bool      `json:"portforwardingEnabled"`
+}
+
+// MigrateFromSQLiteToPocketBase migrates data from SQLite to PocketBase if conditions are met
+func MigrateFromSQLiteToPocketBase() error {
 	sqlitePath := fmt.Sprintf("%s/ludus.db", ludusInstallPath)
 
 	// Check if SQLite database exists
@@ -23,18 +35,18 @@ func MigrateFromSQLite() error {
 		return nil
 	}
 
-	// Check if PostgreSQL database only has ROOT user
+	// Check if PocketBase only has ROOT user
 	var userCount int64
 	if err := db.Model(&UserObject{}).Count(&userCount).Error; err != nil {
 		return fmt.Errorf("error checking user count: %v", err)
 	}
 
 	if userCount > 1 {
-		logger.Debug("PostgreSQL database has more than ROOT user, skipping migration")
+		logger.Debug("New database has more than ROOT user, skipping migration")
 		return nil
 	}
 
-	logger.Info("Starting migration from SQLite to PostgreSQL...")
+	logger.Info("Starting migration from SQLite to PocketBase...")
 
 	// Open SQLite database
 	sqliteDB, err := gorm.Open(sqlite.Open(sqlitePath), &gorm.Config{})
@@ -51,21 +63,9 @@ func MigrateFromSQLite() error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
-			logger.Error(fmt.Sprintf("Migration failed, rolling back: %v", r))
+			logger.Error(fmt.Sprintf("Migration failed, rolling back: %v\nStack trace:\n%s", r, debug.Stack()))
 		}
 	}()
-
-	// Create temporary struct for reading SQLite users (without CreatedAt/UpdatedAt)
-	type SQLiteUserObject struct {
-		Name                  string    `json:"name"`
-		UserID                string    `json:"userID"`
-		DateCreated           time.Time `json:"dateCreated"`
-		DateLastActive        time.Time `json:"dateLastActive"`
-		IsAdmin               bool      `json:"isAdmin"`
-		HashedAPIKey          string    `json:"-"`
-		ProxmoxUsername       string    `json:"proxmoxUsername"`
-		PortforwardingEnabled bool      `json:"portforwardingEnabled"`
-	}
 
 	// Migrate users (excluding ROOT which already exists)
 	var sqliteUsers []SQLiteUserObject
@@ -76,7 +76,7 @@ func MigrateFromSQLite() error {
 
 	for _, sqliteUser := range sqliteUsers {
 		if sqliteUser.UserID == "ROOT" {
-			continue // Skip ROOT user as it already exists in PostgreSQL
+			continue // Skip ROOT user as it already exists in PocketBase
 		}
 
 		// Look up the range that has the user_id of the user
@@ -86,7 +86,7 @@ func MigrateFromSQLite() error {
 			continue
 		}
 
-		// Check if user already exists in PostgreSQL
+		// Check if user already exists in PocketBase
 		var existingUser UserObject
 		if err := tx.Where("user_id = ?", sqliteUser.UserID).First(&existingUser).Error; err == nil {
 
@@ -96,11 +96,11 @@ func MigrateFromSQLite() error {
 				tx.Save(&existingUser)
 			}
 
-			logger.Info(fmt.Sprintf("User %s already exists in PostgreSQL, skipping", sqliteUser.UserID))
+			logger.Info(fmt.Sprintf("User %s already exists in PocketBase, skipping", sqliteUser.UserID))
 			continue
 		}
 
-		// Create PostgreSQL user object
+		// Create PocketBase user object
 		user := UserObject{
 			Name:            sqliteUser.Name,
 			UserID:          sqliteUser.UserID,
@@ -114,7 +114,7 @@ func MigrateFromSQLite() error {
 			UpdatedAt:       time.Now(),
 		}
 
-		// Create user in PostgreSQL
+		// Create user in PocketBase
 		if err := tx.Create(&user).Error; err != nil {
 			tx.Rollback()
 			return fmt.Errorf("error creating user %s: %v", user.UserID, err)
@@ -167,10 +167,10 @@ func MigrateFromSQLite() error {
 			continue
 		}
 
-		// Check if range already exists in PostgreSQL
+		// Check if range already exists in PocketBase
 		var existingRange RangeObject
 		if err := tx.Where("range_number = ?", sqliteRange.RangeNumber).First(&existingRange).Error; err == nil {
-			logger.Info(fmt.Sprintf("Range %d already exists in PostgreSQL, skipping", sqliteRange.RangeNumber))
+			logger.Info(fmt.Sprintf("Range %d already exists in PocketBase, skipping", sqliteRange.RangeNumber))
 			continue
 		}
 
@@ -198,10 +198,10 @@ func MigrateFromSQLite() error {
 
 		// Set default values for new fields (not present in old SQLite schema)
 		name := fmt.Sprintf("Default Range for %s", sqliteRange.UserID)
-		description := "Range migrated from SQLite"
+		description := "Range migrated from Ludus 1.x"
 		purpose := "General testing and development"
 
-		// Create PostgreSQL range object
+		// Create PocketBase range object
 		rangeObj := RangeObject{
 			RangeID:        sqliteRange.UserID,
 			RangeNumber:    sqliteRange.RangeNumber,
@@ -218,7 +218,7 @@ func MigrateFromSQLite() error {
 			UpdatedAt:      time.Now(),
 		}
 
-		// Create range in PostgreSQL
+		// Create range in PocketBase
 		if err := tx.Create(&rangeObj).Error; err != nil {
 			tx.Rollback()
 			return fmt.Errorf("error creating range %d: %v", rangeObj.RangeNumber, err)
@@ -254,14 +254,14 @@ func MigrateFromSQLite() error {
 	}
 
 	for _, sqliteVM := range sqliteVMs {
-		// Check if VM already exists in PostgreSQL
+		// Check if VM already exists in PocketBase
 		var existingVM VmObject
 		if err := tx.Where("proxmox_id = ? AND range_number = ?", sqliteVM.ProxmoxID, sqliteVM.RangeNumber).First(&existingVM).Error; err == nil {
-			logger.Info(fmt.Sprintf("VM %d in range %d already exists in PostgreSQL, skipping", sqliteVM.ProxmoxID, sqliteVM.RangeNumber))
+			logger.Info(fmt.Sprintf("VM %d in range %d already exists in PocketBase, skipping", sqliteVM.ProxmoxID, sqliteVM.RangeNumber))
 			continue
 		}
 
-		// Create PostgreSQL VM object
+		// Create PocketBase VM object
 		vm := VmObject{
 			ID:          sqliteVM.ID,
 			ProxmoxID:   sqliteVM.ProxmoxID,
@@ -273,7 +273,7 @@ func MigrateFromSQLite() error {
 			UpdatedAt:   time.Now(),
 		}
 
-		// Create VM in PostgreSQL
+		// Create VM in PocketBase
 		if err := tx.Create(&vm).Error; err != nil {
 			tx.Rollback()
 			return fmt.Errorf("error creating VM %d: %v", vm.ProxmoxID, err)
@@ -340,13 +340,13 @@ func MigrateFromSQLite() error {
 		return fmt.Errorf("error committing migration: %v", err)
 	}
 
-	// Migrate existing users to Supabase
-	migrateExistingUsersToSupabase()
+	// Migrate existing users to PocketBase
+	migrateExistingUsersToPocketBase(sqliteUsers)
 
 	// Migrate range files
 	migrateRangeFiles()
 
-	logger.Info("Migration from SQLite to PostgreSQL completed successfully")
+	logger.Info("Migration from SQLite to PocketBase completed successfully")
 
 	// Optionally, backup the SQLite database
 	// backupPath := fmt.Sprintf("%s/ludus.db.backup.%s", ludusInstallPath, time.Now().Format("20060102-150405"))
@@ -365,84 +365,88 @@ func MigrateFromSQLite() error {
 	return nil
 }
 
-func migrateExistingUsersToSupabase() {
-	// Read the users from /etc/pve/user.cfg
-	userCfg, err := os.ReadFile("/etc/pve/user.cfg")
-	if err != nil {
-		logger.Error(fmt.Sprintf("Error reading /etc/pve/user.cfg: %v", err))
-		return
-	}
+func migrateExistingUsersToPocketBase(sqliteUsers []SQLiteUserObject) {
+	for _, sqliteUser := range sqliteUsers {
 
-	// Parse the user.cfg file
-	userCfgLines := strings.Split(string(userCfg), "\n")
-	// Find lines that start with "user: "
-	for _, line := range userCfgLines {
-		if strings.HasPrefix(line, "user:") {
-			// Extract the username from the line
-			usernamePlusExtra := strings.TrimPrefix(line, "user:")
-			username := strings.Split(usernamePlusExtra, ":")[0]
+		username := sqliteUser.ProxmoxUsername
 
-			// Only migrate local PAM users (Ludus 1.x only supported local PAM users)
-			if strings.Contains(username, "@pam") {
-
-				username = strings.Split(username, "@pam")[0]
-
-				// Ignore the root user
-				if username == "root" {
-					continue
-				}
-
-				// Read the password from the user's proxmox_password file
-				passwordBytes, err := os.ReadFile(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, username))
-				if err != nil {
-					logger.Error(fmt.Sprintf("Error reading proxmox password for user %s: %v", username, err))
-					continue
-				}
-				password := strings.Trim(string(passwordBytes), "\n")
-				// Lookup the user in the database
-				var user UserObject
-				if err := db.Where("proxmox_username = ?", username).First(&user).Error; err != nil {
-					logger.Error(fmt.Sprintf("Error looking up user %s in database, user folder exists on disk but not in database: %v", username, err))
-					continue
-				}
-
-				userWithEmailAndPassword := UserWithEmailAndPassword{
-					UserObject: user,
-					Password:   password,
-					Email:      user.ProxmoxUsername + "@ludus.localhost",
-				}
-
-				var supabaseUser types.User
-				if user.UUID == uuid.Nil {
-					supabaseUser, err = createUserInSupabase(userWithEmailAndPassword, password)
-					if err != nil {
-						logger.Error(fmt.Sprintf("Error creating user %s in Supabase: %v", username, err))
-						continue
-					}
-					user.UUID = supabaseUser.ID
-					db.Save(&user)
-				}
-
-				if user.ProxmoxTokenID == "" {
-					tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user)
-					if err != nil {
-						// This is a fatal error, as every user needs a Proxmox API token to be able to deploy VMs
-						logger.Error(fmt.Sprintf("Error creating proxmox API token for user %s: %v", username, err))
-					}
-					user.ProxmoxTokenID = tokenID
-					encryptedSecret, err := EncryptStringForDatabase(tokenSecret)
-					if err != nil {
-						logger.Error(fmt.Sprintf("Error encrypting proxmox API token for user %s: %v", username, err))
-					}
-					user.ProxmoxTokenSecret = encryptedSecret
-					db.Save(&user)
-				}
-
-				logger.Info(fmt.Sprintf("Migrated user %s to Supabase", username))
+		// Make the root user a superuser in PocketBase
+		if username == "root" {
+			logger.Info("Making root user a superuser in PocketBase - Password is the ROOT API key")
+			adminCollection, err := app.FindCollectionByNameOrId(core.CollectionNameSuperusers)
+			if err != nil {
+				logger.Error(fmt.Sprintf("'_superusers' collection not found: %v", err))
+				continue
 			}
-		}
-	}
 
+			newAdmin := core.NewRecord(adminCollection)
+
+			newAdmin.SetEmail(username + "@ludus.internal")
+
+			// The password for the new superuser is the ROOT API key
+			rootAPIKey, err := os.ReadFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath))
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error reading root API key: %v", err))
+				continue
+			}
+			rootAPIKeyString := strings.Trim(string(rootAPIKey), "\n")
+			newAdmin.SetPassword(rootAPIKeyString)
+
+			if err := app.Save(newAdmin); err != nil {
+				logger.Error(fmt.Sprintf("failed to save new superuser: %v", err))
+			}
+			logger.Debug("Successfully made root@ludus.internal a superuser in PocketBase")
+			continue
+		}
+
+		// Read the password from the user's proxmox_password file
+		passwordBytes, err := os.ReadFile(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, username))
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error reading proxmox password for user %s: %v", username, err))
+			continue
+		}
+		password := strings.Trim(string(passwordBytes), "\n")
+		// Lookup the user in the database
+		var user UserObject
+		if err := db.Where("proxmox_username = ?", username).First(&user).Error; err != nil {
+			logger.Error(fmt.Sprintf("Error looking up user %s in database, user folder exists on disk but not in database: %v", username, err))
+			continue
+		}
+
+		userWithEmailAndPassword := UserWithEmailAndPassword{
+			UserObject: user,
+			Password:   password,
+			Email:      user.ProxmoxUsername + "@ludus.internal", // https://www.icann.org/en/board-activities-and-meetings/materials/approved-resolutions-special-meeting-of-the-icann-board-29-07-2024-en#section2.a
+		}
+
+		var pocketBaseUserID string
+		if user.PocketbaseID == "" {
+			pocketBaseUserID, err = createUserInPocketBase(userWithEmailAndPassword, password)
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error creating user %s in PocketBase: %v", username, err))
+				continue
+			}
+			user.PocketbaseID = pocketBaseUserID
+			db.Save(&user)
+		}
+
+		if user.ProxmoxTokenID == "" {
+			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user)
+			if err != nil {
+				// This is a fatal error, as every user needs a Proxmox API token to be able to deploy VMs
+				logger.Error(fmt.Sprintf("Error creating proxmox API token for user %s: %v", username, err))
+			}
+			user.ProxmoxTokenID = tokenID
+			encryptedSecret, err := EncryptStringForDatabase(tokenSecret)
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error encrypting proxmox API token for user %s: %v", username, err))
+			}
+			user.ProxmoxTokenSecret = encryptedSecret
+			db.Save(&user)
+		}
+
+		logger.Info(fmt.Sprintf("Migrated user %s to PocketBase", username))
+	}
 }
 
 func migrateRangeFiles() {

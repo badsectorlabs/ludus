@@ -5,30 +5,25 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"os/exec"
 	"sync"
 	"time"
 
-	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
 	gormlogger "gorm.io/gorm/logger"
 )
 
 var (
-	once sync.Once
-	db   *gorm.DB
+	once     sync.Once
+	db       *gorm.DB
+	database string = fmt.Sprintf("%s/db/data.db?cache=shared&_journal_mode=WAL", ludusInstallPath)
 )
 
 func InitDb() *gorm.DB {
 	// Only initialize and open the DB once per run
 	once.Do(func() {
 		var err error
-
-		// Use PostgreSQL connection string from configuration
-		databaseURL := ServerConfiguration.DatabaseURL
-		if databaseURL == "" {
-			databaseURL = "postgres://postgres.your-tenant-id:your-super-secret-and-long-postgres-password@192.0.2.1:5432/postgres"
-		}
 
 		newLogger := gormlogger.New(
 			log.New(os.Stdout, "[DATABASE] ", log.LstdFlags),
@@ -40,36 +35,37 @@ func InitDb() *gorm.DB {
 			},
 		)
 
-		db, err = gorm.Open(postgres.Open(databaseURL), &gorm.Config{
+		db, err = gorm.Open(sqlite.Open(database), &gorm.Config{
 			SkipDefaultTransaction: true,
 			Logger:                 newLogger,
 		})
 		if err != nil {
-			// Check if there was a previous sqlite db, and if so, run the setup-db-container.yml to migrate to postgres
+			// Check if there was a previous sqlite db, and if so, run the migrations
 			if FileExists(fmt.Sprintf("%s/ludus.db", ludusInstallPath)) && !FileExists(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath)) {
-				slog.Info("SQLite database found, running setup-db-container.yml, this will take a minute or two...")
-				output, err := exec.Command("ansible-playbook", "-i", "localhost", "-e", "ludus_install_path="+ludusInstallPath, fmt.Sprintf("%s/ansible/proxmox-install/ludus-1-to-2-migration.yml", ludusInstallPath)).CombinedOutput()
-				slog.Debug(string(output))
-				if err != nil {
-					log.Fatalf("error running ansible-playbook: %v", err)
+				slog.Info("SQLite database found, running migrations")
+				if err := MigrateFromSQLiteToPocketBase(); err != nil {
+					logger.Error("SQLite migration failed: %v", err)
+					os.Exit(2)
 				}
 				// Open the database connection again
-				db, err = gorm.Open(postgres.Open(databaseURL), &gorm.Config{
+				db, err = gorm.Open(sqlite.Open(database), &gorm.Config{
 					SkipDefaultTransaction: true,
 					Logger:                 newLogger,
 				})
 				if err != nil {
-					log.Fatalf("error opening db after db setup: %v", err)
+					logger.Error("Error opening db after db migration: %v", err)
+					os.Exit(2)
 				}
 			} else {
-				log.Fatalf("error opening db: %v", err)
+				logger.Error("Error opening db: %v", err)
+				os.Exit(2)
 			}
 		}
 
 		// Create the tables if they don't exist and we are root
 		if !db.Migrator().HasTable(&UserObject{}) && os.Geteuid() == 0 {
 
-			logger.Info("Creating tables in PostgreSQL")
+			logger.Info("Creating tables in SQLite")
 
 			db.Migrator().CreateTable(&UserObject{})
 			db.Migrator().CreateTable(&RangeObject{})
@@ -94,7 +90,7 @@ func InitDb() *gorm.DB {
 			}
 
 			// Attempt to migrate from SQLite if conditions are met
-			if err := MigrateFromSQLite(); err != nil {
+			if err := MigrateFromSQLiteToPocketBase(); err != nil {
 				log.Printf("Warning: SQLite migration failed: %v", err)
 			}
 

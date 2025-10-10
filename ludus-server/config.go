@@ -85,6 +85,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					f.WriteString("prevent_user_ansible_add: false\n")
 					f.WriteString("license_key: community\n")
 					f.WriteString("expose_admin_port: false\n")
+					f.WriteString(fmt.Sprintf("data_directory: %s/db\n", ludusInstallPath))
 				} else {
 					config.ProxmoxNode = nodeName
 					config.ProxmoxInterface = inter.Name
@@ -101,6 +102,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					config.ProxmoxURL = "https://127.0.0.1:8006"
 					config.LicenseKey = "community"
 					config.ExposeAdminPort = false
+					config.DataDirectory = fmt.Sprintf("%s/db", ludusInstallPath)
 				}
 				return
 			}

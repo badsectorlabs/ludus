@@ -115,49 +115,7 @@
       ansible.builtin.debug:
         msg: "Using next container ID: {{ container_id }}"
 
-    - name: Create the install directory for the Supabase credentials
-      ansible.builtin.file:
-        path: "{{ ludus_install_path }}/install/supabase"
-        state: directory
-        mode: '0700'
-        owner: root
-        group: root
-
-    - name: Remove the existing values for the Supabase credentials in the ludus config.yml
-      ansible.builtin.blockinfile:
-        path: "{{ ludus_install_path }}/config.yml"
-        block: |
-          database_url: ""
-          database_encryption_password: ""
-          database_encryption_salt: ""
-          jwt_secret: ""
-          service_role_key: ""
-          supabase_url: ""
-        state: absent
-
-    - name: Generate secrets for the Supabase container and add them to the ludus config.yml
-      ansible.builtin.set_fact:
-        supabase_postgres_password: "{{ lookup('ansible.builtin.password', ludus_install_path + '/install/supabase/postgres_password', length=24, chars=['ascii_letters', 'digits']) }}"
-        supabase_jwt_secret: "{{ lookup('ansible.builtin.password', ludus_install_path + '/install/supabase/jwt_secret', length=32, chars=['ascii_letters', 'digits']) }}"
-        supabase_vault_enc_key: "{{ lookup('ansible.builtin.password', ludus_install_path + '/install/supabase/vault_enc_key', length=32, chars=['ascii_letters', 'digits']) }}"
-        supabase_dashboard_password: "{{ lookup('ansible.builtin.password', ludus_install_path + '/install/supabase/dashboard_password', length=24, chars=['ascii_letters', 'digits']) }}"
-        supabase_secret_key_base: "{{ lookup('ansible.builtin.password', ludus_install_path + '/install/supabase/secret_key_base', length=45, chars=['ascii_letters', 'digits']) }}"
-        container_password: "{{ lookup('ansible.builtin.password', ludus_install_path + '/install/supabase/container_password', length=12, chars=['ascii_letters', 'digits']) }}"
-        supabase_database_password: "{{ lookup('ansible.builtin.password', ludus_install_path + '/install/supabase/database_password', length=24, chars=['ascii_letters', 'digits']) }}"
-        supabase_database_salt: "{{ lookup('ansible.builtin.password', ludus_install_path + '/install/supabase/database_salt', length=24, chars=['ascii_letters', 'digits']) }}"
-
-    - name: Generate the JWT secret for the Supabase container
-      ansible.builtin.shell:
-        cmd: |
-            python3 {{ ludus_install_path }}/ansible/proxmox-install/generate_jwt.py $(cat {{ ludus_install_path }}/install/supabase/jwt_secret) service_role > {{ ludus_install_path }}/install/supabase/service_role_key
-            python3 {{ ludus_install_path }}/ansible/proxmox-install/generate_jwt.py $(cat {{ ludus_install_path }}/install/supabase/jwt_secret) anon > {{ ludus_install_path }}/install/supabase/anon_key
-
-    - name: Load the JWT secrets into facts
-      ansible.builtin.set_fact:
-        supabase_anon_key: "{{ lookup('ansible.builtin.password', ludus_install_path + '/install/supabase/anon_key') }}"
-        supabase_service_role_key: "{{ lookup('ansible.builtin.password', ludus_install_path + '/install/supabase/service_role_key') }}"
-
-    - name: Create database container
+    - name: Create container
       ansible.builtin.shell:
         cmd: |
           pct create {{ container_id }} {{ storage_template }}:vztmpl/{{ template }} --hostname ludus-services --memory 2048 --cores 2 --rootfs {{ storage_container }}:100 --onboot 1 --startup order=1 --net0 name=eth0,bridge=vmbr1000,ip=192.0.2.1/24,gw=192.0.2.254,firewall=1 --nameserver 192.0.2.254 --password {{ container_password }} --features nesting=1,keyctl=1 --pool ADMIN
@@ -189,7 +147,7 @@
       ansible.builtin.shell:
         cmd: |
           pct exec {{ container_id }} -- bash -c "
-            apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq curl wget ca-certificates git libnss3-tools >/dev/null 2>&1
+            apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq curl wget ca-certificates libnss3-tools >/dev/null 2>&1
             ln -sf /usr/share/zoneinfo/UTC /etc/localtime 2>/dev/null
             echo 'net.core.somaxconn=1024' >> /etc/sysctl.conf
             echo 'net.ipv4.tcp_keepalive_time=60' >> /etc/sysctl.conf
@@ -200,68 +158,14 @@
             if [[ -f /etc/bash.bashrc ]] && ! grep -q '/usr/local/bin' /etc/bash.bashrc 2>/dev/null; then
                 echo 'export PATH="/usr/local/bin:$PATH"' >> /etc/bash.bashrc
             fi
-          "
-
-    - name: Install Supabase inside the container
-      ansible.builtin.shell:
-        cmd: |
-          pct exec {{ container_id }} -- bash -c "
             curl -s https://get.docker.com | sh
-            git clone --depth 1 https://github.com/supabase/supabase
-            cd supabase
-            git checkout 081a75350eaf77ddf2f38429adf7de53017130f0 # Known good commit 2025-09-23
-            cd ..
-            mkdir supabase-ludus
-            cp -rf supabase/docker/* supabase-ludus/
-            rm supabase-ludus/docker-compose.yml # We will use our own stripped down version
-            mkdir ludus-gui
           "
-
-
-    - name: Create the .env file for the Supabase container
-      ansible.builtin.template:
-        src: supabase-env.j2
-        dest: "{{ ludus_install_path }}/install/supabase/env"
-        mode: '0600'
-        owner: root
-        group: root
 
     - name: Copy the daemon.json file to the container
       ansible.builtin.shell:
         cmd: |
           pct push {{ container_id }} "{{ ludus_install_path }}/ansible/proxmox-install/templates/daemon.json" /etc/docker/daemon.json
           pct exec {{ container_id }} -- bash -c "systemctl restart docker"
-
-    - name: Copy the .env file to the container
-      ansible.builtin.shell:
-        cmd: |
-          pct push {{ container_id }} "{{ ludus_install_path }}/install/supabase/env" /supabase-ludus/.env
-
-    - name: Copy the compose file to the container
-      ansible.builtin.shell:
-        cmd: |
-          pct push {{ container_id }} "{{ ludus_install_path }}/ansible/proxmox-install/templates/supabase-compose.yml" /supabase-ludus/docker-compose.yml
-
-    - name: Update the Ludus config.yml with the Supabase variables
-      ansible.builtin.blockinfile:
-        path: "{{ ludus_install_path }}/config.yml"
-        block: |
-          supabase_url: http://192.0.2.1:8000/
-          jwt_secret: "{{ supabase_jwt_secret }}"
-          service_role_key: "{{ supabase_service_role_key }}"
-          database_url: "postgresql://postgres:{{ supabase_postgres_password }}@192.0.2.1:5432/postgres"
-          database_encryption_password: "{{ supabase_database_password }}"
-          database_encryption_salt: "{{ supabase_database_salt }}"
-        state: present
-        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR SUPABASE CONNECTION"
-
-    - name: Start the Supabase containers
-      ansible.builtin.shell:
-        cmd: |
-          pct exec {{ container_id }} -- bash -c "
-            cd /supabase-ludus
-            docker compose up -d db auth rest kong studio
-          "
 
     - name: Create the ludus-gui docker compose file from template
       ansible.builtin.template:

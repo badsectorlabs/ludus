@@ -2,8 +2,6 @@ package ludusapi
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type RangeObject struct {
@@ -53,7 +51,7 @@ type UserObject struct {
 
 	UserNumber int32 `json:"userNumber" gorm:"unique"`
 
-	UUID uuid.UUID `json:"uuid"`
+	PocketbaseID string `json:"pocketbaseID"`
 
 	DateCreated time.Time `gorm:"autoCreateTime" json:"dateCreated"`
 

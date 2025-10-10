@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/apis"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 var LudusVersion string
@@ -37,12 +40,28 @@ var server *Server
 var Router *gin.Engine
 var logger *slog.Logger
 var adminProxy *httputil.ReverseProxy
+var PB *pocketbase.PocketBase
+var app core.App
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 
 	ludusServer.ParseConfig()
 	server = ludusServer
+
+	// PocketBase Config
+	pbConfig := pocketbase.Config{
+		HideStartBanner:      true,
+		DefaultDev:           false,
+		DefaultDataDir:       ServerConfiguration.DataDirectory,
+		DefaultEncryptionEnv: "LUDUS_DB_ENCRYPTION_PASSWORD",
+	}
+	PB = pocketbase.NewWithConfig(pbConfig)
+	app = PB.App
+	// We must bootstrap PocketBase before we can use it, and we use it for migrations in InitDB()
+	if err := app.Bootstrap(); err != nil {
+		logger.Error(fmt.Sprintf("Error bootstrapping PocketBase: %v", err))
+	}
 
 	// Transition from using log.Printf to using slog.Info, slog.Error, etc.
 	// Adopts the debug level from the main server logger
@@ -84,6 +103,29 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 		},
 	}
 	adminProxy.Transport = customTransport
+
+	// Only start PocketBase if not running as root (running as ludus)
+	if os.Geteuid() != 0 {
+		// Start PocketBase in a separate goroutine
+
+		serveConfig := apis.ServeConfig{
+			HttpAddr: fmt.Sprintf("%s:8082", ServerConfiguration.ProxmoxPublicIP),
+			// HttpsAddr:          fmt.Sprintf("%s:8083", ServerConfiguration.ProxmoxPublicIP),
+			ShowStartBanner: true,
+			// CertificateDomains: []string{"db.my.ludus.internal"},
+		}
+
+		go func() {
+			logger.Info("Starting PocketBase")
+			logger.Debug(fmt.Sprintf("Starting server on %s\n", serveConfig.HttpAddr))
+			// PB has to be bootstrapped before we can serve but we bootstrapped previously
+			if err := apis.Serve(app, serveConfig); err != nil {
+				log.Fatalf("Failed to start the server: %v", err)
+			}
+
+			logger.Debug("PocketBase started")
+		}()
+	}
 
 	return router
 }
@@ -130,29 +172,43 @@ func authenticationMiddleware(c *gin.Context) {
 
 	if len(APIKey) == 0 {
 		// Check for JWT token
-		tokenString := c.GetHeader("Authorization")
-		if tokenString == "" {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "No API Key or JWT token provided"})
 			return
 		} else {
-			// Validate token
-			// convert string to a byte array
-			userEmail, userUUID, err := parseJWTToken(tokenString, []byte(ServerConfiguration.JWTSecret))
+			token := ""
+			// Check for "Bearer" scheme
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				token = strings.TrimPrefix(authHeader, "Bearer ")
+			}
 
-			if err != nil {
-				log.Printf("Error parsing token: %s", err)
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("Error parsing token: %s", err)})
+			if token == "" {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization token is missing"})
 				return
 			}
+
+			// The FindAuthRecordByToken function handles parsing, signature verification,
+			// and checking for the record's existence.
+			// It accepts the token string and an optional list of token types to validate against.
+			// By default, it checks for the standard 'auth' token type.
+			record, err := app.FindAuthRecordByToken(token, core.TokenTypeAuth)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+				return
+			}
+
+			// Attach the authenticated record to the context
+			c.Set("authRecord", record)
 
 			// Get the user object from the database using the UUID from the validated JWT token
 			var user UserObject
-			userLookupError := db.First(&user, "uuid = ?", userUUID).Error
+			userLookupError := db.First(&user, "pocketbase_id = ?", record.Id).Error
 			if userLookupError != nil {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("Error looking up user %s in database: %v", userUUID, userLookupError)})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("Error looking up user with ID %s in database: %v", record.Id, userLookupError)})
 				return
 			}
-			c.Set("email", userEmail)
+			c.Set("email", record.Email())
 			c.Set("thisUser", user)
 			c.Set("userID", user.UserID)
 			if user.IsAdmin {
@@ -680,6 +736,6 @@ var routes = Routes{
 		"MigrateSQLiteToPostgreSQL",
 		http.MethodPost,
 		"/migrate/sqlite",
-		MigrateSQLiteToPostgreSQL,
+		MigrateSQLiteToPocketBaseHandler,
 	},
 }

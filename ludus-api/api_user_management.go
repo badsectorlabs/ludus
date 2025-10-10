@@ -112,7 +112,7 @@ func AddUser(c *gin.Context) {
 			// Remove the user from the host system - we validated the user did not exist on the host system before running the playbook, so this is safe to do
 			removeUserFromHostSystem(user.ProxmoxUsername)
 			removeUserFromProxmox(user.ProxmoxUsername, "pam")
-			removeUserFromSupabaseByUUID(user.UUID)
+			removeUserFromPocketBaseByID(user.PocketbaseID)
 			removePool(user.UserID)
 		}
 	}()
@@ -159,13 +159,13 @@ func AddUser(c *gin.Context) {
 	user.HashedAPIKey, _ = HashString(apiKey)
 
 	// Create a new user in Supabase
-	supabaseUser, err := createUserInSupabase(user, user.Password)
+	pocketBaseUserID, err := createUserInPocketBase(user, user.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		wasError = true
 		return
 	}
-	user.UUID = supabaseUser.ID
+	user.PocketbaseID = pocketBaseUserID
 
 	// Create a Proxmox API Token for the user
 	tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.UserObject)
@@ -273,7 +273,7 @@ func DeleteUser(c *gin.Context) {
 	}
 
 	removeUserFromProxmox(user.ProxmoxUsername, "pam")
-	removeUserFromSupabaseByUUID(user.UUID)
+	removeUserFromPocketBaseByID(user.PocketbaseID)
 
 	c.JSON(http.StatusOK, gin.H{"result": "User deleted"})
 }
