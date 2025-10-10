@@ -123,6 +123,17 @@
         owner: root
         group: root
 
+    - name: Remove the existing values for the Supabase credentials in the ludus config.yml
+      ansible.builtin.blockinfile:
+        path: "{{ ludus_install_path }}/config.yml"
+        block: |
+          database_url: ""
+          database_encryption_password: ""
+          database_encryption_salt: ""
+          jwt_secret: ""
+          service_role_key: ""
+          supabase_url: ""
+        state: absent
 
     - name: Generate secrets for the Supabase container and add them to the ludus config.yml
       ansible.builtin.set_fact:
@@ -178,7 +189,7 @@
       ansible.builtin.shell:
         cmd: |
           pct exec {{ container_id }} -- bash -c "
-            apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq curl wget ca-certificates git >/dev/null 2>&1
+            apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq curl wget ca-certificates git libnss3-tools >/dev/null 2>&1
             ln -sf /usr/share/zoneinfo/UTC /etc/localtime 2>/dev/null
             echo 'net.core.somaxconn=1024' >> /etc/sysctl.conf
             echo 'net.ipv4.tcp_keepalive_time=60' >> /etc/sysctl.conf
@@ -219,7 +230,7 @@
       ansible.builtin.shell:
         cmd: |
           pct push {{ container_id }} "{{ ludus_install_path }}/ansible/proxmox-install/templates/daemon.json" /etc/docker/daemon.json
-          systemctl restart docker
+          pct exec {{ container_id }} -- bash -c "systemctl restart docker"
 
     - name: Copy the .env file to the container
       ansible.builtin.shell:
@@ -252,17 +263,30 @@
             docker compose up -d db auth rest kong studio
           "
 
-# TODO Authenticate to the registry.badsectorlabs.com with a read-only account
+    - name: Create the ludus-gui docker compose file from template
+      ansible.builtin.template:
+        src: ludus-gui-compose.j2
+        dest: "/tmp/ludus-gui-compose.yml"
+        mode: '0600'
+        owner: root
+        group: root
 
     - name: Copy the ludus-gui compose file to the container and start the ludus-gui containers
       ansible.builtin.shell:
         cmd: |
-          pct push {{ container_id }} "{{ ludus_install_path }}/ansible/proxmox-install/templates/ludus-gui-compose.yml" /ludus-gui/docker-compose.yml
+          pct push {{ container_id }} "/tmp/ludus-gui-compose.yml" /ludus-gui/docker-compose.yml
           pct push {{ container_id }} "{{ ludus_install_path }}/ansible/proxmox-install/templates/Caddyfile" /ludus-gui/Caddyfile
           pct exec {{ container_id }} -- bash -c "
             cd /ludus-gui
+            # This is a ready only account! The "password" is fine to be public
+            echo "readonlypassword" | docker login -u "ludus-read-only-user" --password-stdin registry.badsectorlabs.com
             docker compose up -d
           "
+
+    - name: Remove the ludus-gui compose file
+      ansible.builtin.file:
+        path: "/tmp/ludus-gui-compose.yml"
+        state: absent
 
   rescue:
     - name: Stop the container

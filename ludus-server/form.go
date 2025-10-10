@@ -521,7 +521,7 @@ func runInteractiveInstall(existingProxmox bool) {
 			"I Understand", "Bail", 50, 11)
 	} else {
 		uglyWarning := `
-    ~~~ You are installing Ludus on an existing Proxmox 8 host ~~~
+    ~~~ You are installing Ludus on an existing Proxmox host ~~~
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!! Ludus will install: ansible, packer, dnsmasq, sshpass, curl, jq, iptables-persistent !!!
 !!!                     gpg-agent, dbus, dbus-user-session, and vim                      !!!
@@ -546,6 +546,11 @@ to function. The Ludus install process will not reboot your host.
 		showWarning(uglyWarning,
 			"I have read and accept the above statement", "Bail", 93, 40)
 	}
+
+	showLicenseDialog()
+
+	// Clear the terminal before showing the interactive installer
+	fmt.Print("\033[H\033[2J")
 
 	if fileExists(fmt.Sprintf("%s/config.yml", ludusInstallPath)) {
 		loadConfig()

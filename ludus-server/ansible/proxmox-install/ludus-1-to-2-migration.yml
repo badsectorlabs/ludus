@@ -1,0 +1,5 @@
+- name: Migration from Ludus 1.x to 2.x
+  hosts: localhost
+  tasks:
+    - name: Setup Supabase database container
+      ansible.builtin.include_tasks: tasks/setup-db-container.yml

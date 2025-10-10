@@ -48,7 +48,7 @@ func InitDb() *gorm.DB {
 			// Check if there was a previous sqlite db, and if so, run the setup-db-container.yml to migrate to postgres
 			if FileExists(fmt.Sprintf("%s/ludus.db", ludusInstallPath)) && !FileExists(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath)) {
 				slog.Info("SQLite database found, running setup-db-container.yml, this will take a minute or two...")
-				output, err := exec.Command("ansible-playbook", "-i", "localhost", fmt.Sprintf("%s/ansible/proxmox-install/tasks/setup-db-container.yml", ludusInstallPath)).CombinedOutput()
+				output, err := exec.Command("ansible-playbook", "-i", "localhost", "-e", "ludus_install_path="+ludusInstallPath, fmt.Sprintf("%s/ansible/proxmox-install/ludus-1-to-2-migration.yml", ludusInstallPath)).CombinedOutput()
 				slog.Debug(string(output))
 				if err != nil {
 					log.Fatalf("error running ansible-playbook: %v", err)

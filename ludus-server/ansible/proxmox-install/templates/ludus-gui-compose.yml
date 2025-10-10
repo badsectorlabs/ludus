@@ -2,7 +2,7 @@ name: ludus-gui
 
 services:
   ludus-gui:
-    image: registry.badsectorlabs.com/ludus-gui:latest
+    image: registry.badsectorlabs.com/ludus-gui:beta-latest
     environment:
       - LUDUS_API_BASE_URL=https://198.51.100.1:8080
       - NEXT_PUBLIC_SUPABASE_URL=https://192.0.2.1

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/supabase-community/auth-go"
@@ -13,6 +14,7 @@ import (
 func createUserInSupabase(user UserWithEmailAndPassword, password string) (types.User, error) {
 	// For admin actions, you must use your service_role key.
 	// The client is initialized with the URL and the key.
+	ServerConfiguration.SupabaseURL = strings.TrimSuffix(ServerConfiguration.SupabaseURL, "/")
 	var supabaseAuthClient = auth.New("ludus", ServerConfiguration.ServiceRoleKey).
 		WithCustomAuthURL(ServerConfiguration.SupabaseURL + "/auth/v1").
 		WithToken(ServerConfiguration.ServiceRoleKey)
@@ -33,6 +35,8 @@ func createUserInSupabase(user UserWithEmailAndPassword, password string) (types
 	supabaseAdminCreateUserResponse, err := supabaseAuthClient.AdminCreateUser(params)
 	if err != nil {
 		log.Printf("Error creating user: %v", err)
+		logger.Debug(fmt.Sprintf("Used service key: %s", ServerConfiguration.ServiceRoleKey))
+		logger.Debug(fmt.Sprintf("Used supabase URL: %s", ServerConfiguration.SupabaseURL))
 		return types.User{}, err
 	}
 
