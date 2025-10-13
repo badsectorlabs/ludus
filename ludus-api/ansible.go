@@ -104,7 +104,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	}
 	// If we are running as root, chown this log file to ludus:ludus to prevent potential issues when running future commands as a regular user
 	defer func() {
-		if os.Geteuid() != 0 {
+		if os.Geteuid() == 0 {
 			changeFileOwner(ansibleLogFilePath, "ludus")
 		}
 	}()
