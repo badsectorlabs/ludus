@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
@@ -78,6 +79,17 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 	router.SetTrustedProxies(nil)
+
+	// Enable CORS
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-API-Key"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
 	RegisterRoutes(router, routes)
 	InitDb()
 	LudusVersion = ludusVersion
@@ -104,15 +116,26 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 	}
 	adminProxy.Transport = customTransport
 
+	// Strip CORS headers from proxied responses to prevent duplicates
+	// since the Gin CORS middleware will add them
+	adminProxy.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Del("Access-Control-Allow-Origin")
+		resp.Header.Del("Access-Control-Allow-Methods")
+		resp.Header.Del("Access-Control-Allow-Headers")
+		resp.Header.Del("Access-Control-Expose-Headers")
+		resp.Header.Del("Access-Control-Allow-Credentials")
+		resp.Header.Del("Access-Control-Max-Age")
+		return nil
+	}
+
 	// Only start PocketBase if not running as root (running as ludus)
 	if os.Geteuid() != 0 {
 		// Start PocketBase in a separate goroutine
 
 		serveConfig := apis.ServeConfig{
-			HttpAddr: fmt.Sprintf("%s:8082", ServerConfiguration.ProxmoxPublicIP),
-			// HttpsAddr:          fmt.Sprintf("%s:8083", ServerConfiguration.ProxmoxPublicIP),
+			HttpAddr:        fmt.Sprintf("%s:8082", ServerConfiguration.ProxmoxPublicIP),
 			ShowStartBanner: true,
-			// CertificateDomains: []string{"db.my.ludus.internal"},
+			AllowedOrigins:  []string{"*"},
 		}
 
 		go func() {
