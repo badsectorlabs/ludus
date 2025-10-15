@@ -61,7 +61,13 @@ func InitClient(url string, apiKey string, proxy string, verify bool, debug bool
 		var apiKeyMasked string
 		apiKey = r.Header.Get("X-API-KEY")
 		if len(apiKey) > 4 && strings.Contains(apiKey, ".") {
-			apiKeyMasked = strings.Split(apiKey, ".")[0] + ".***REDACTED***"
+			parts := strings.Split(apiKey, ".")
+			if len(parts) == 2 && len(parts[1]) >= 10 {
+				secondPart := parts[1]
+				apiKeyMasked = parts[0] + "." + secondPart[:3] + "***REDACTED***" + secondPart[len(secondPart)-3:]
+			} else {
+				apiKeyMasked = parts[0] + ".***Less than 10 characters?***"
+			}
 		} else {
 			apiKeyMasked = "API Key not set"
 		}
