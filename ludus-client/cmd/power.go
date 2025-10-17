@@ -23,7 +23,7 @@ func genericPowerCmd(value string) *cobra.Command {
 
 	return &cobra.Command{
 		Use:   value,
-		Short: fmt.Sprintf("Power %s all range VMs", value),
+		Short: fmt.Sprintf("Power %s range VMs (all, comma separated list, or specific VM name)", value),
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
