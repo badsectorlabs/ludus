@@ -85,7 +85,7 @@
 # which prevents the next task's loop from failing with a template error, despite being set to an empty array by default...
 - name: Set range_access_grants_array from access_grants_array
   ansible.builtin.set_fact:
-    range_access_grants_array: "{{ access_grants_array | default([]) }}"
+    range_access_grants_array: "{{ access_grants_array | default([], true) }}"
 
 # Make sure any existing access grants are set up (in the event the range is destroyed and then rebuilt after an access grant)
 - name: Modify router firewall to allow WireGuard IP's for access grants to this range
