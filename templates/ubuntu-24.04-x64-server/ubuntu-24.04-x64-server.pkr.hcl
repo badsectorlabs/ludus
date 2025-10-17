@@ -11,7 +11,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://releases.ubuntu.com/24.04.2/ubuntu-24.04.2-live-server-amd64.iso"
+  default = "https://old-releases.ubuntu.com/releases/24.04.2/ubuntu-24.04.2-live-server-amd64.iso"
 }
 
 variable "vm_cpu_cores" {
