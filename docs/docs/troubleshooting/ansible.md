@@ -45,3 +45,14 @@ Try to `curl https://<node name>:8006/`
 If you get an ssl error (`SSL certificate problem: unable to get local issuer certificate`) try copying the `/etc/pve/pve-root-ca.pem` file to `/usr/local/share/ca-certificates/pve-root-ca.crt` (make sure to change the `.pem` extension to `.crt` and run `update-ca-certificates`).
 
 Then try again to `curl https://<node name>:8006/`. If the ssl error issue is gone, chances are ansible API task ID error will be resolved.
+
+
+## Multiple VMs with name found
+
+### Error:
+
+`Multiple VMs with name ... found, provide vmid instead`
+
+### Resolution:
+
+This issue occurs when there are multiple VMs accessible to the user with the exact same name. This has been seen when a duplicate VM template was created but never fully converted to template (failed build). Make sure that all VM names are unique in both the `SHARED` pool (templates) and the user's range pool.
