@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"ludus/logger"
 	"ludus/rest"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -25,10 +24,6 @@ var (
 	persist                bool
 )
 
-func isUsingAdminPort() bool {
-	return strings.Contains(url, ":8081")
-}
-
 var antiSandboxCmd = &cobra.Command{
 	Use:   "antisandbox",
 	Short: "Install and enable anti-sandbox for VMs (enterprise)",
@@ -41,10 +36,6 @@ var antiSandboxInstallCustomCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-
-		if !isUsingAdminPort() {
-			logger.Logger.Fatal("Anti-Sandbox is only available on the admin port (:8081)")
-		}
 
 		responseJSON, success := rest.GenericJSONPost(client, "/antisandbox/install-custom", "")
 		if didFailOrWantJSON(success, responseJSON) {
@@ -61,10 +52,6 @@ var antiSandboxInstallStandardCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		if !isUsingAdminPort() {
-			logger.Logger.Fatal("Anti-Sandbox is only available on the admin port (:8081)")
-		}
-
 		responseJSON, success := rest.GenericJSONPost(client, "/antisandbox/install-standard", "")
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -79,10 +66,6 @@ var antiSandboxEnableCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-
-		if !isUsingAdminPort() {
-			logger.Logger.Fatal("Anti-Sandbox is only available on the admin port (:8081)")
-		}
 
 		type AntiSandboxPayload struct {
 			VMIDs               string `json:"vmIDs"`
@@ -194,10 +177,38 @@ func handleSuccessErrorArrayResult(responseJSON []byte, feature string) {
 	}
 }
 
+var antiSandboxStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Get the status of anti-sandbox package installation (enterprise)",
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		responseJSON, success := rest.GenericGet(client, "/antisandbox/status")
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+
+		type AntiSandboxStatus struct {
+			Result struct {
+				Status  string `json:"status"`
+				Message string `json:"message"`
+			} `json:"result"`
+		}
+		antiSandboxStatus := AntiSandboxStatus{}
+		err := json.Unmarshal(responseJSON, &antiSandboxStatus)
+		if err != nil {
+			logger.Logger.Fatal(err.Error())
+		}
+		fmt.Println(antiSandboxStatus.Result.Message)
+	},
+}
+
 func init() {
 	antiSandboxCmd.AddCommand(antiSandboxInstallCustomCmd)
 	antiSandboxCmd.AddCommand(antiSandboxInstallStandardCmd)
 	setupAntiSandboxEnableCmd(antiSandboxEnableCmd)
 	antiSandboxCmd.AddCommand(antiSandboxEnableCmd)
+	antiSandboxCmd.AddCommand(antiSandboxStatusCmd)
 	rootCmd.AddCommand(antiSandboxCmd)
 }

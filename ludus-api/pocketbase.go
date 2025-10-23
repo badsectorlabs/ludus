@@ -13,15 +13,23 @@ func createUserInPocketBase(user UserWithEmailAndPassword, password string) (str
 	logger.Debug(fmt.Sprintf("Creating user %s in PocketBase", user.Name))
 	collection, err := app.FindCollectionByNameOrId("users")
 	if err != nil {
-		logger.Error("Failed to find collection: %v", err)
+		logger.Error(fmt.Sprintf("Failed to find collection: %v", err))
 	}
 	record := core.NewRecord(collection)
 	record.SetEmail(user.Email)
 	record.SetPassword(password)
-	record.Set("name", user.Name)
+	record.Set("name", user.UserObject.Name)
+	record.Set("userID", user.UserObject.UserID)
+	record.Set("userNumber", user.UserObject.UserNumber)
+	record.Set("isAdmin", user.UserObject.IsAdmin)
+	record.Set("proxmoxUsername", user.UserObject.ProxmoxUsername)
+	record.Set("hashedAPIKey", user.UserObject.HashedAPIKey)
+	record.Set("proxmoxTokenID", user.UserObject.ProxmoxTokenID)
+	record.Set("proxmoxTokenSecret", user.UserObject.ProxmoxTokenSecret)
+	record.Set("dateLastActive", user.UserObject.DateLastActive)
 
 	if err := app.Save(record); err != nil {
-		logger.Error("Failed to create user: %v", err)
+		logger.Error(fmt.Sprintf("Failed to create user: %v", err))
 	}
 
 	logger.Info(fmt.Sprintf("Successfully created PocketBase user with ID: %s", record.Id))

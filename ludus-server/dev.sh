@@ -12,14 +12,26 @@ if [ "$1" == "docs" ]; then
     yarn build
     rm -f ./build/video/*
     rm -f ./build/img/hardware/Debian_12_RAID0.mp4
-    mv ./build ../ludus-server/src/docs
+    mv ./build ../ludus-api/docs
     cd ../ludus-server || exit
-    TAGS="-tags=embeddocs"
+fi
+
+TAGS=""
+if [ -d "../ludus-api/docs" ]; then
+    TAGS="embeddocs"
+fi
+if [ -d "../ludus-api/webUI" ]; then
+    if [ -n "$TAGS" ]; then
+        TAGS="${TAGS} embedwebui"
+    else
+        TAGS="embedwebui"
+    fi
 fi
 
 GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
 GIT_ABBREV_REF=$(git rev-parse --abbrev-ref HEAD)
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build  -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${GIT_ABBREV_REF}" ${TAGS} -o ludus-server
+echo CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${GIT_ABBREV_REF}" -tags "${TAGS}" -o ludus-server
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${GIT_ABBREV_REF}" -tags "${TAGS}" -o ludus-server
 if [[ $? -ne 0 ]]; then
     echo
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"

@@ -12,6 +12,8 @@ import (
 	"gorm.io/gorm"
 
 	gormlogger "gorm.io/gorm/logger"
+
+	_ "ludusapi/migrations"
 )
 
 var (

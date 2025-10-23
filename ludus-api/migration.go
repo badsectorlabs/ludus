@@ -413,6 +413,21 @@ func migrateExistingUsersToPocketBase(sqliteUsers []SQLiteUserObject) {
 			continue
 		}
 
+		if user.ProxmoxTokenID == "" {
+			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user)
+			if err != nil {
+				// This is a fatal error, as every user needs a Proxmox API token to be able to deploy VMs
+				logger.Error(fmt.Sprintf("Error creating proxmox API token for user %s: %v", username, err))
+			}
+			user.ProxmoxTokenID = tokenID
+			encryptedSecret, err := EncryptStringForDatabase(tokenSecret)
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error encrypting proxmox API token for user %s: %v", username, err))
+			}
+			user.ProxmoxTokenSecret = encryptedSecret
+			db.Save(&user)
+		}
+
 		userWithEmailAndPassword := UserWithEmailAndPassword{
 			UserObject: user,
 			Password:   password,
@@ -427,21 +442,6 @@ func migrateExistingUsersToPocketBase(sqliteUsers []SQLiteUserObject) {
 				continue
 			}
 			user.PocketbaseID = pocketBaseUserID
-			db.Save(&user)
-		}
-
-		if user.ProxmoxTokenID == "" {
-			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user)
-			if err != nil {
-				// This is a fatal error, as every user needs a Proxmox API token to be able to deploy VMs
-				logger.Error(fmt.Sprintf("Error creating proxmox API token for user %s: %v", username, err))
-			}
-			user.ProxmoxTokenID = tokenID
-			encryptedSecret, err := EncryptStringForDatabase(tokenSecret)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Error encrypting proxmox API token for user %s: %v", username, err))
-			}
-			user.ProxmoxTokenSecret = encryptedSecret
 			db.Save(&user)
 		}
 

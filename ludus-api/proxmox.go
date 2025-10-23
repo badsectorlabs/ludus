@@ -471,7 +471,7 @@ func removeUserFromProxmox(username string, realm string) error {
 	if err != nil {
 		return errors.New("unable to get user object: " + err.Error())
 	}
-	user.Delete(context.Background())
+	err = user.Delete(context.Background())
 	if err != nil {
 		return errors.New("unable to delete user: " + err.Error())
 	}

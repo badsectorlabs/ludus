@@ -4,7 +4,7 @@
 # It assumes you are on a macOS or Linux host and have root SSH access to the target machine
 
 # Parse command line arguments
-while getopts "hlap:t:n:cd" opt; do
+while getopts "hlap:t:n:cdw" opt; do
   case $opt in
     h)
       echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c]"
@@ -16,6 +16,7 @@ while getopts "hlap:t:n:cd" opt; do
       echo "  -c  Build and install client locally"
       echo "  -d  Build and install debug mode"
       echo "  -p  Port to use for SSH/rsync"
+      echo "  -w  Build and install web UI"
       exit 0
       ;;
     l)
@@ -38,6 +39,9 @@ while getopts "hlap:t:n:cd" opt; do
       ;;
     p)
       PORT=$OPTARG
+      ;;
+    w)
+      BUILD_WEB_UI=true
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -70,6 +74,8 @@ rsync -av --progress \
     --no-owner --no-group \
     --exclude='.vscode/' \
     --exclude='docs/' \
+    --exclude='webUI/' \
+    --exclude='ludus-gui/node_modules/' \
     --include='ludus-antisandbox-plugin/' \
     --include='ludus-enterprise-plugin/' \
     --filter=':- ./*/.gitignore' \
@@ -85,6 +91,11 @@ fi
 # If the anti-sandbox plugin exists, build it before the Ludus server
 if [ -d "./ludus-antisandbox-plugin" ]; then
     ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-antisandbox-plugin && ./dev.sh"
+fi
+
+# If the web UI exists, build it before the Ludus server
+if [ -d "./ludus-gui" ] && [ "$BUILD_WEB_UI" = true ]; then
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-gui && ./dev.sh"
 fi
 
 # SSH into the target machine and build the ludus server binary\

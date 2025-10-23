@@ -3,7 +3,6 @@ package ludusapi
 import (
 	"crypto/tls"
 	"fmt"
-	"io/fs"
 	"log"
 	"log/slog"
 	"net/http"
@@ -13,11 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-contrib/cors"
+	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 )
 
 var LudusVersion string
@@ -41,11 +41,15 @@ var server *Server
 var Router *gin.Engine
 var logger *slog.Logger
 var adminProxy *httputil.ReverseProxy
+var pbProxy *httputil.ReverseProxy
 var PB *pocketbase.PocketBase
 var app core.App
+var LudusPluginHandlerManager *HandlerManager
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
+
+	LudusPluginHandlerManager = NewHandlerManager()
 
 	ludusServer.ParseConfig()
 	server = ludusServer
@@ -59,6 +63,12 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 	}
 	PB = pocketbase.NewWithConfig(pbConfig)
 	app = PB.App
+
+	migratecmd.MustRegister(app, PB.RootCmd, migratecmd.Config{
+		// enable auto creation of migration files when making collection changes in the Dashboard
+		Automigrate: false,
+	})
+
 	// We must bootstrap PocketBase before we can use it, and we use it for migrations in InitDB()
 	if err := app.Bootstrap(); err != nil {
 		logger.Error(fmt.Sprintf("Error bootstrapping PocketBase: %v", err))
@@ -80,30 +90,51 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 	router := gin.Default()
 	router.SetTrustedProxies(nil)
 
-	// Enable CORS
-	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-API-Key"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
-
+	RegisterPluginPlaceholderRoutes(router)
 	RegisterRoutes(router, routes)
 	InitDb()
 	LudusVersion = ludusVersion
 
-	if checkEmbeddedDocs() {
+	docsAvailable := checkEmbeddedDocs()
+	webUIAvailable := checkEmbeddedWebUI()
+
+	// Keep a reference to the UI filesystem for SPA fallbacks
+	var webUIFileSystem http.FileSystem
+	var docsFileSystem http.FileSystem
+
+	if docsAvailable {
 		// Set up the route to serve the static site
 		// The 'docs' is the directory inside the embedded file system
-		docs, _ := fs.Sub(embeddedDocs, "docs")
-		router.StaticFS("/ludus", http.FS(docs))
+		docsFS, err := static.EmbedFolder(embeddedDocs, "docs")
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error embedding docs: %v", err))
+		}
+		router.Use(static.Serve("/docs", docsFS))
+		docsFileSystem = docsFS
+		logger.Debug("Embedded documentation is available for this build of ludus-server.")
 	} else {
-		router.GET("/ludus", func(c *gin.Context) {
+		router.GET("/docs", func(c *gin.Context) {
 			c.String(http.StatusOK, "Embedded documentation is not available for this build of ludus-server.")
 		})
+		logger.Debug("Embedded documentation is NOT available for this build of ludus-server.")
 	}
+
+	if webUIAvailable {
+		webUIFS, err := static.EmbedFolder(embeddedWebUI, "webUI")
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error embedding web UI: %v", err))
+		}
+		router.Use(static.Serve("/ui", webUIFS))
+		webUIFileSystem = webUIFS
+
+		logger.Debug("Embedded web UI is available for this build of ludus-server.")
+	} else {
+		router.GET("/ui", func(c *gin.Context) {
+			c.String(http.StatusOK, "Embedded web UI is not available for this build of ludus-server.")
+		})
+		logger.Debug("Embedded web UI is NOT available for this build of ludus-server.")
+	}
+
 	Router = router
 
 	// Setup a reverse proxy for the admin API
@@ -116,25 +147,32 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 	}
 	adminProxy.Transport = customTransport
 
-	// Strip CORS headers from proxied responses to prevent duplicates
-	// since the Gin CORS middleware will add them
-	adminProxy.ModifyResponse = func(resp *http.Response) error {
-		resp.Header.Del("Access-Control-Allow-Origin")
-		resp.Header.Del("Access-Control-Allow-Methods")
-		resp.Header.Del("Access-Control-Allow-Headers")
-		resp.Header.Del("Access-Control-Expose-Headers")
-		resp.Header.Del("Access-Control-Allow-Credentials")
-		resp.Header.Del("Access-Control-Max-Age")
-		return nil
+	// Setup a reverse proxy for the PocketBase API and web UI
+	// Strip off the /pb prefix from the request URL as pocketbase doesn't support
+	// running on a subpath
+	pbURL, _ := url.Parse("http://127.0.0.1:8082")
+	pbProxy = &httputil.ReverseProxy{
+		Director: func(r *http.Request) {
+			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/pb")
+			r.RequestURI = strings.TrimPrefix(r.RequestURI, "/pb")
+			r.Host = pbURL.Host
+			r.URL.Host = pbURL.Host
+			r.URL.Scheme = pbURL.Scheme
+			r.Header.Add("X-Forwarded-For", r.RemoteAddr)
+		},
 	}
+
+	// Single unified NoRoute for SPA fallbacks and custom handling
+	registerUnifiedNoRoute(router, docsAvailable, docsFileSystem, webUIAvailable, webUIFileSystem)
 
 	// Only start PocketBase if not running as root (running as ludus)
 	if os.Geteuid() != 0 {
 		// Start PocketBase in a separate goroutine
 
 		serveConfig := apis.ServeConfig{
-			HttpAddr:        fmt.Sprintf("%s:8082", ServerConfiguration.ProxmoxPublicIP),
-			ShowStartBanner: true,
+			// HttpAddr:        fmt.Sprintf("%s:8082", ServerConfiguration.ProxmoxPublicIP),
+			HttpAddr:        "127.0.0.1:8082",
+			ShowStartBanner: false,
 			AllowedOrigins:  []string{"*"},
 		}
 
@@ -148,9 +186,72 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 
 			logger.Debug("PocketBase started")
 		}()
+
 	}
 
 	return router
+}
+
+// registerUnifiedNoRoute registers a single NoRoute handler that:
+// - reverse proxies to PocketBase any requests to /pb
+// - serves SPA index.html for /ui and /docs routes when embedded and the path is otherwise not found (i.e. a direct link to /ui/blah or /docs/blah)
+// - for other unmatched paths, serves a 404 JSON response
+func registerUnifiedNoRoute(router *gin.Engine, docsAvailable bool, docsFileSystem http.FileSystem, webUIAvailable bool, webUIFileSystem http.FileSystem) {
+	router.NoRoute(func(c *gin.Context) {
+		logger.Debug(fmt.Sprintf("No route found for %s", c.Request.URL.Path))
+
+		// UI SPA fallback
+		if c.Request.Method == http.MethodGet &&
+			!strings.ContainsRune(c.Request.URL.Path, '.') &&
+			strings.HasPrefix(c.Request.URL.Path, "/ui") {
+			if webUIAvailable && webUIFileSystem != nil {
+				logger.Debug(fmt.Sprintf("Serving UI index.html for %s", c.Request.URL.Path))
+				index, err := webUIFileSystem.Open("index.html")
+				if err != nil {
+					logger.Error(fmt.Sprintf("Error opening UI index.html: %v", err))
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Error opening UI index.html for SPA fallback"})
+					return
+				}
+				defer index.Close()
+				stat, _ := index.Stat()
+				http.ServeContent(c.Writer, c.Request, "index.html", stat.ModTime(), index)
+				return
+			}
+		}
+
+		// Docs SPA fallback
+		if c.Request.Method == http.MethodGet &&
+			!strings.ContainsRune(c.Request.URL.Path, '.') &&
+			strings.HasPrefix(c.Request.URL.Path, "/docs") {
+			if docsAvailable {
+				logger.Debug(fmt.Sprintf("Serving docs index.html for %s", c.Request.URL.Path))
+				index, err := docsFileSystem.Open("index.html")
+				if err != nil {
+					logger.Error(fmt.Sprintf("Error opening docs index.html: %v", err))
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Error opening docs index.html for SPA fallback"})
+					return
+				}
+				defer index.Close()
+				stat, _ := index.Stat()
+				http.ServeContent(c.Writer, c.Request, "index.html", stat.ModTime(), index)
+				return
+			}
+		}
+
+		// If the request is to the PocketBase API, reverse proxy it
+		if strings.HasPrefix(c.Request.URL.Path, "/pb") {
+			logger.Debug(fmt.Sprintf("Reverse proxying request to PocketBase: %s", c.Request.URL.Path))
+			pbProxy.ServeHTTP(c.Writer, c.Request)
+			c.Abort()
+			return
+		}
+
+		// Custom logic for any other unmatched path that doesn't start with /docs or /ui or /pb
+		if !strings.HasPrefix(c.Request.URL.Path, "/docs") && !strings.HasPrefix(c.Request.URL.Path, "/ui") && !strings.HasPrefix(c.Request.URL.Path, "/pb") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
+			return
+		}
+	})
 }
 
 // Index is the index handler.
@@ -175,6 +276,12 @@ func isAdmin(c *gin.Context, setJSON bool) bool {
 // Updates the date_last_active column in the database for the user making the API call
 // Also logs the API action to a file
 func updateLastActiveTimeAndLog(c *gin.Context) {
+	// Prevent locking issues with proxied requests, don't log the last active time for ludus-admin requests
+	// as they are already logged by the regular ludus service proxy
+	if os.Geteuid() == 0 {
+		return
+	}
+
 	anyTypeUser, exists := c.Get("thisUser")
 	if !exists {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "error getting this user from context"})
@@ -277,6 +384,7 @@ func authenticationMiddleware(c *gin.Context) {
 
 // This function makes sure the request is to a user endpoint if the server is running as root (i.e. :8081)
 func limitRootEndpoints(c *gin.Context) {
+	logger.Debug(fmt.Sprintf("Request URL: %s", c.Request.URL.Path))
 	if os.Geteuid() == 0 &&
 		!strings.HasPrefix(c.Request.URL.Path, "/user") &&
 		!strings.HasPrefix(c.Request.URL.Path, "/antisandbox/") &&

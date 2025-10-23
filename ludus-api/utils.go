@@ -38,6 +38,19 @@ func checkEmbeddedDocs() bool {
 	return true
 }
 
+func checkEmbeddedWebUI() bool {
+	dirEntries, err := fs.ReadDir(embeddedWebUI, "webUI")
+	if err != nil {
+		return false
+	}
+
+	if len(dirEntries) == 0 {
+		return false
+	}
+
+	return true
+}
+
 func HashString(password string) (string, error) {
 	// Use a lower cost for the hash than the recommended 14
 	// We have to hash the API key each request during the compare, so we don't want to use too much CPU

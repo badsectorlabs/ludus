@@ -158,7 +158,7 @@ func AddUser(c *gin.Context) {
 	apiKey := GenerateAPIKey(&user.UserObject)
 	user.HashedAPIKey, _ = HashString(apiKey)
 
-	// Create a new user in Supabase
+	// Create a new user in Pocketbase
 	pocketBaseUserID, err := createUserInPocketBase(user, user.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
