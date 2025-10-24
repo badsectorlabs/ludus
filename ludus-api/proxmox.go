@@ -165,15 +165,15 @@ func getRootGoProxmoxClient() (*goproxmox.Client, error) {
 // 	return createProxmoxAPITokenForUserWithClient(proxmoxClient, user)
 // }
 
-func createProxmoxAPITokenForUserWithoutContext(user UserObject) (string, string, error) {
-	proxmoxPasswordRaw, err := GetFileContents(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, user.ProxmoxUsername))
+func createProxmoxAPITokenForUserWithoutContext(username string) (string, string, error) {
+	proxmoxPasswordRaw, err := GetFileContents(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, username))
 	proxmoxPassword := strings.TrimSuffix(proxmoxPasswordRaw, "\n")
 
 	if err != nil {
 		return "", "", errors.New("could not get proxmox password for user")
 	}
 	proxmoxCredentials := &goproxmox.Credentials{
-		Username: user.ProxmoxUsername + "@pam",
+		Username: username + "@pam",
 		Password: proxmoxPassword,
 	}
 	insecureHTTPClient := http.Client{
@@ -188,14 +188,14 @@ func createProxmoxAPITokenForUserWithoutContext(user UserObject) (string, string
 		goproxmox.WithCredentials(proxmoxCredentials),
 	)
 
-	return createProxmoxAPITokenForUserWithClient(proxmoxClient, user)
+	return createProxmoxAPITokenForUserWithClient(proxmoxClient, username)
 }
 
-func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, user UserObject) (string, string, error) {
+func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, username string) (string, string, error) {
 	// Get the user object from go-proxmox
-	goProxmoxUserObject, err := proxmoxClient.User(context.Background(), user.ProxmoxUsername+"@pam")
+	goProxmoxUserObject, err := proxmoxClient.User(context.Background(), username+"@pam")
 	if err != nil {
-		log.Printf("Failed to retrieve created user %s@pam: %v", user.ProxmoxUsername, err)
+		log.Printf("Failed to retrieve created user %s@pam: %v", username, err)
 		return "", "", errors.New("failed to retrieve created user")
 	}
 
@@ -204,13 +204,13 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 		Comment: "Ludus Token - Do not modify or delete",
 		Privsep: false, // This token has the same permissions as the user
 	}
-	logger.Debug(fmt.Sprintf("Attempting to create API token '%s' for user '%s'\n", token.TokenID, user.UserID))
+	logger.Debug(fmt.Sprintf("Attempting to create API token '%s' for user '%s'\n", token.TokenID, username))
 	apiToken, err := goProxmoxUserObject.NewAPIToken(context.Background(), token)
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			// Remove the token and try again
-			logger.Debug(fmt.Sprintf("API token already exists for user '%s', removing it and recreating", user.UserID))
-			_, err = exec.Command("/usr/sbin/pveum", "user", "token", "del", user.ProxmoxUsername+"@pam", "ludus-token").CombinedOutput()
+			logger.Debug(fmt.Sprintf("API token already exists for user '%s', removing it and recreating", username))
+			_, err = exec.Command("/usr/sbin/pveum", "user", "token", "del", username+"@pam", "ludus-token").CombinedOutput()
 			if err != nil {
 				return "", "", errors.New("unable to remove existing API token: " + err.Error())
 			}
@@ -222,7 +222,7 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 			return "", "", errors.New("failed to create API token: " + err.Error())
 		}
 	}
-	logger.Debug(fmt.Sprintf("Created API token '%s' for user '%s'\n", apiToken.FullTokenID, user.UserID))
+	logger.Debug(fmt.Sprintf("Created API token '%s' for user '%s'\n", apiToken.FullTokenID, username))
 	return apiToken.FullTokenID, apiToken.Value, nil
 }
 

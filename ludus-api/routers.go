@@ -69,11 +69,6 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 		Automigrate: false,
 	})
 
-	// We must bootstrap PocketBase before we can use it, and we use it for migrations in InitDB()
-	if err := app.Bootstrap(); err != nil {
-		logger.Error(fmt.Sprintf("Error bootstrapping PocketBase: %v", err))
-	}
-
 	// Transition from using log.Printf to using slog.Info, slog.Error, etc.
 	// Adopts the debug level from the main server logger
 	if server.Logger != nil {
@@ -84,6 +79,11 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 			Level: slog.LevelInfo,
 		}))
 		slog.SetDefault(logger)
+	}
+
+	// We must bootstrap PocketBase before we can use it, and we use it for migrations in InitDB()
+	if err := app.Bootstrap(); err != nil {
+		logger.Error(fmt.Sprintf("Error bootstrapping PocketBase: %v", err))
 	}
 
 	gin.SetMode(gin.ReleaseMode)

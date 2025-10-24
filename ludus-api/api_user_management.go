@@ -159,7 +159,7 @@ func AddUser(c *gin.Context) {
 	user.HashedAPIKey, _ = HashString(apiKey)
 
 	// Create a new user in Pocketbase
-	pocketBaseUserID, err := createUserInPocketBase(user, user.Password)
+	pocketBaseUserID, err := createUserInPocketBase(app, user, user.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		wasError = true
@@ -168,7 +168,7 @@ func AddUser(c *gin.Context) {
 	user.PocketbaseID = pocketBaseUserID
 
 	// Create a Proxmox API Token for the user
-	tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.UserObject)
+	tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.UserObject.ProxmoxUsername)
 	if err != nil {
 		wasError = true
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

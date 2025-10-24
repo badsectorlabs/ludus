@@ -1,29 +1,18 @@
 package ludusapi
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
-	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/security"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
-
-// Create struct for reading SQLite users (without CreatedAt/UpdatedAt)
-type SQLiteUserObject struct {
-	Name                  string    `json:"name"`
-	UserID                string    `json:"userID"`
-	DateCreated           time.Time `json:"dateCreated"`
-	DateLastActive        time.Time `json:"dateLastActive"`
-	IsAdmin               bool      `json:"isAdmin"`
-	HashedAPIKey          string    `json:"-"`
-	ProxmoxUsername       string    `json:"proxmoxUsername"`
-	PortforwardingEnabled bool      `json:"portforwardingEnabled"`
-}
 
 // MigrateFromSQLiteToPocketBase migrates data from SQLite to PocketBase if conditions are met
 func MigrateFromSQLiteToPocketBase() error {
@@ -37,12 +26,12 @@ func MigrateFromSQLiteToPocketBase() error {
 
 	// Check if PocketBase only has ROOT user
 	var userCount int64
-	if err := db.Model(&UserObject{}).Count(&userCount).Error; err != nil {
+	userCount, err := app.CountRecords("users")
+	if err != nil {
 		return fmt.Errorf("error checking user count: %v", err)
 	}
-
 	if userCount > 1 {
-		logger.Debug("New database has more than ROOT user, skipping migration")
+		logger.Debug("New database has more than one user, skipping migration")
 		return nil
 	}
 
@@ -55,28 +44,146 @@ func MigrateFromSQLiteToPocketBase() error {
 	}
 
 	// Begin transaction for migration
-	tx := db.Begin()
-	if tx.Error != nil {
-		return fmt.Errorf("error starting transaction: %v", tx.Error)
+	err = app.RunInTransaction(func(txApp core.App) error {
+		err := migrateUsersToPocketBase(txApp, sqliteDB)
+		if err != nil {
+			return err
+		}
+		err = migrateRangesToPocketBase(txApp, sqliteDB)
+		if err != nil {
+			return err
+		}
+		err = migrateVMsToPocketBase(txApp, sqliteDB)
+		if err != nil {
+			return err
+		}
+		err = migrateAccessesToPocketBase(txApp, sqliteDB)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("error running transaction: %v", err)
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-			logger.Error(fmt.Sprintf("Migration failed, rolling back: %v\nStack trace:\n%s", r, debug.Stack()))
+	// Migrate range files
+	migrateRangeFiles()
+
+	logger.Info("Migration from SQLite to PocketBase completed successfully")
+
+	// Optionally, backup the SQLite database
+	// backupPath := fmt.Sprintf("%s/ludus.db.backup.%s", ludusInstallPath, time.Now().Format("20060102-150405"))
+	// if err := os.Rename(sqlitePath, backupPath); err != nil {
+	// 	log.Printf("Warning: Could not backup SQLite database: %v", err)
+	// } else {
+	// 	log.Printf("SQLite database backed up to: %s", backupPath)
+	// }
+
+	// Create the .sqlite_db_migrated file to prevent the migration from running again
+	err = os.WriteFile(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath), []byte{}, 0644)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error creating .sqlite_db_migrated file: %v", err))
+	}
+
+	return nil
+}
+
+func migrateRangeFiles() {
+	// Read all the range config files from /opt/ludus/users/{username}/range-config.yml and create them at
+	// /opt/ludus/ranges/{rangeID}/range-config.yml
+
+	// First loop over all the user directories in /opt/ludus/users/
+	userDirs, err := os.ReadDir(fmt.Sprintf("%s/users/", ludusInstallPath))
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error reading user directories: %v", err))
+	}
+
+	for _, userDir := range userDirs {
+		// Read the range config file from /opt/ludus/users/{username}/range-config.yml
+		rangeConfig, err := os.ReadFile(fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, userDir.Name()))
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error reading range config file for user %s: %v", userDir.Name(), err))
+			continue
 		}
-	}()
+
+		// Look up the user ID using the ProxmoxUsername
+		userRecord, err := app.FindFirstRecordByData("users", "proxmoxUsername", userDir.Name())
+		if err != nil && err != sql.ErrNoRows {
+			logger.Error(fmt.Sprintf("Error looking up user %s in database: %v", userDir.Name(), err))
+			continue
+		}
+		if userRecord == nil {
+			logger.Debug(fmt.Sprintf("User %s not found in PocketBase, skipping range config file", userDir.Name()))
+			continue
+		}
+
+		// Create the range directory if it doesn't exist
+		err = os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, userRecord.Id), 0755)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error creating range directory for user %s: %v", userRecord.Get("userID"), err))
+			continue
+		}
+
+		// Create the range config file at /opt/ludus/ranges/{rangeID}/range-config.yml
+		err = os.WriteFile(fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, userRecord.Get("userID")), rangeConfig, 0644)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error creating range config file for user %s: %v", userRecord.Get("userID"), err))
+			continue
+		}
+		log.Printf("Migrated range config file for user %s", userRecord.Get("userID"))
+	}
+
+	// Chown the range directories to the ludus user
+	chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/", ludusInstallPath), "ludus")
+}
+
+func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
+	// Create struct for reading SQLite users (without CreatedAt/UpdatedAt)
+	type SQLiteUserObject struct {
+		Name                  string    `json:"name"`
+		UserID                string    `json:"userID"`
+		DateCreated           time.Time `json:"dateCreated"`
+		DateLastActive        time.Time `json:"dateLastActive"`
+		IsAdmin               bool      `json:"isAdmin"`
+		HashedAPIKey          string    `json:"-"`
+		ProxmoxUsername       string    `json:"proxmoxUsername"`
+		PortforwardingEnabled bool      `json:"portforwardingEnabled"`
+	}
 
 	// Migrate users (excluding ROOT which already exists)
 	var sqliteUsers []SQLiteUserObject
 	if err := sqliteDB.Table("user_objects").Find(&sqliteUsers).Error; err != nil {
-		tx.Rollback()
 		return fmt.Errorf("error reading users from SQLite: %v", err)
 	}
 
 	for _, sqliteUser := range sqliteUsers {
 		if sqliteUser.UserID == "ROOT" {
-			continue // Skip ROOT user as it already exists in PocketBase
+			logger.Info("Making root user a superuser in PocketBase - Password is the ROOT API key")
+			adminCollection, err := txApp.FindCollectionByNameOrId(core.CollectionNameSuperusers)
+			if err != nil {
+				logger.Error(fmt.Sprintf("'_superusers' collection not found: %v", err))
+				continue
+			}
+
+			newAdmin := core.NewRecord(adminCollection)
+
+			newAdmin.SetEmail("root@ludus.internal")
+
+			// The password for the new superuser is the ROOT API key
+			rootAPIKey, err := os.ReadFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath))
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error reading root API key: %v", err))
+				continue
+			}
+			rootAPIKeyString := strings.Trim(string(rootAPIKey), "\n")
+			newAdmin.SetPassword(rootAPIKeyString)
+
+			if err := txApp.Save(newAdmin); err != nil {
+				logger.Error(fmt.Sprintf("failed to save new superuser: %v", err))
+			}
+			logger.Debug("Successfully made root@ludus.internal a superuser in PocketBase")
+			continue
 		}
 
 		// Look up the range that has the user_id of the user
@@ -87,41 +194,75 @@ func MigrateFromSQLiteToPocketBase() error {
 		}
 
 		// Check if user already exists in PocketBase
-		var existingUser UserObject
-		if err := tx.Where("user_id = ?", sqliteUser.UserID).First(&existingUser).Error; err == nil {
-
+		existingUser, err := txApp.FindRecordById("users", sqliteUser.UserID)
+		if err == nil {
 			// if the user doesn't have a user number, set it to the range number
-			if existingUser.UserNumber == 0 {
-				existingUser.UserNumber = rangeObj.RangeNumber
-				tx.Save(&existingUser)
+			if existingUser.GetInt("userNumber") == 0 {
+				existingUser.Set("userNumber", rangeObj.RangeNumber)
 			}
 
 			logger.Info(fmt.Sprintf("User %s already exists in PocketBase, skipping", sqliteUser.UserID))
 			continue
 		}
 
-		// Create PocketBase user object
-		user := UserObject{
-			Name:            sqliteUser.Name,
-			UserID:          sqliteUser.UserID,
-			UserNumber:      rangeObj.RangeNumber, // The user only has one range, so their "range number" becomes their user number
-			DateCreated:     sqliteUser.DateCreated,
-			DateLastActive:  sqliteUser.DateLastActive,
-			IsAdmin:         sqliteUser.IsAdmin,
-			HashedAPIKey:    sqliteUser.HashedAPIKey,
-			ProxmoxUsername: sqliteUser.ProxmoxUsername,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
+		// Read the password from the user's proxmox_password file
+		passwordBytes, err := os.ReadFile(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, sqliteUser.ProxmoxUsername))
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error reading proxmox password for user %s: %v", sqliteUser.ProxmoxUsername, err))
+			continue
+		}
+		password := strings.Trim(string(passwordBytes), "\n")
+		// Lookup the user in the database
+		userRecord, err := txApp.FindFirstRecordByData("users", "userID", sqliteUser.UserID)
+		if err != nil && err != sql.ErrNoRows {
+			logger.Error(fmt.Sprintf("Error looking up user %s in database: %v", sqliteUser.UserID, err))
+			continue
 		}
 
-		// Create user in PocketBase
-		if err := tx.Create(&user).Error; err != nil {
-			tx.Rollback()
-			return fmt.Errorf("error creating user %s: %v", user.UserID, err)
+		if userRecord != nil && userRecord.Get("proxmoxTokenID") == "" {
+			logger.Debug(fmt.Sprintf("Creating proxmox API token for existing PocketBase user %s", sqliteUser.ProxmoxUsername))
+			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(sqliteUser.ProxmoxUsername)
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error creating proxmox API token for user %s: %v", sqliteUser.ProxmoxUsername, err))
+				continue
+			}
+			userRecord.Set("proxmoxTokenID", tokenID)
+			userRecord.Set("proxmoxTokenSecret", tokenSecret)
 		}
-		logger.Info(fmt.Sprintf("Migrated user: %s", user.UserID))
+
+		collection, err := txApp.FindCollectionByNameOrId("users")
+		if err != nil {
+			logger.Error(fmt.Sprintf("Failed to find collection: %v", err))
+		}
+
+		if userRecord == nil {
+			logger.Error(fmt.Sprintf("User %s not found in PocketBase, creating", sqliteUser.UserID))
+			userRecord = core.NewRecord(collection)
+		}
+
+		logger.Debug(fmt.Sprintf("Creating user %s in PocketBase", sqliteUser.ProxmoxUsername))
+		userRecord.SetEmail(sqliteUser.ProxmoxUsername + "@ludus.internal") // https://www.icann.org/en/board-activities-and-meetings/materials/approved-resolutions-special-meeting-of-the-icann-board-29-07-2024-en#section2.a
+		userRecord.SetPassword(password)
+		userRecord.Set("name", sqliteUser.Name)
+		userRecord.Set("userID", sqliteUser.UserID)
+		userRecord.Set("userNumber", rangeObj.RangeNumber)
+		userRecord.Set("isAdmin", sqliteUser.IsAdmin)
+		userRecord.Set("proxmoxUsername", sqliteUser.ProxmoxUsername)
+		userRecord.Set("hashedAPIKey", sqliteUser.HashedAPIKey)
+		userRecord.Set("lastActive", sqliteUser.DateLastActive)
+
+		if err := txApp.Save(userRecord); err != nil {
+			logger.Error(fmt.Sprintf("Failed to create user: %v", err))
+		}
+
+		logger.Info(fmt.Sprintf("Successfully created PocketBase user with ID: %s", userRecord.Id))
+
+		logger.Info(fmt.Sprintf("Migrated user: %s", sqliteUser.UserID))
 	}
+	return nil
+}
 
+func migrateRangesToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 	// Create temporary struct for reading SQLite ranges (with string fields for arrays)
 	type SQLiteRangeObject struct {
 		UserID         string    `json:"userID"`
@@ -137,16 +278,14 @@ func MigrateFromSQLiteToPocketBase() error {
 	// Migrate ranges (excluding ROOT's range which already exists)
 	var sqliteRanges []SQLiteRangeObject
 	if err := sqliteDB.Table("range_objects").Find(&sqliteRanges).Error; err != nil {
-		tx.Rollback()
 		return fmt.Errorf("error reading ranges from SQLite: %v", err)
 	}
 
 	for _, sqliteRange := range sqliteRanges {
 		if sqliteRange.UserID == "ROOT" {
 			// Check if the user already has an API key
-			var rootUserObject UserObject
-			db.First(&rootUserObject, "user_id = ?", "ROOT")
-			if rootUserObject.ProxmoxTokenID != "" {
+			rootRecord, err := txApp.FindFirstRecordByData("users", "userID", "ROOT")
+			if err == nil && rootRecord.Get("proxmoxTokenID") != "" {
 				logger.Info("User ROOT already has an API key, skipping migration")
 				continue
 			}
@@ -157,21 +296,40 @@ func MigrateFromSQLiteToPocketBase() error {
 				log.Fatalf("Error creating proxmox API token for user root@pam: %v", err)
 			}
 
-			rootUserObject.ProxmoxTokenID = tokenID
+			if rootRecord == nil {
+				usersCollection, err := txApp.FindCollectionByNameOrId("users")
+				if err != nil {
+					return fmt.Errorf("error finding admin collection: %v", err)
+				}
+				rootRecord = core.NewRecord(usersCollection)
+				rootRecord.Set("userID", "ROOT")
+				rootRecord.Set("name", "root")
+				rootRecord.Set("email", "root@ludus.internal")
+				rootRecord.Set("password", security.RandomString(25)) // Will never be used, but needed to create the record
+				rootRecord.Set("proxmoxUsername", "root")
+				rootRecord.Set("userNumber", 1)
+			}
+
+			rootRecord.Set("proxmoxTokenID", tokenID)
 			encryptedSecret, err := EncryptStringForDatabase(tokenSecret)
 			if err != nil {
-				logger.Error(fmt.Sprintf("Error encrypting proxmox API token for user root@pam: %v", err))
+				return fmt.Errorf("error encrypting proxmox API token for user root@pam: %v", err)
 			}
-			rootUserObject.ProxmoxTokenSecret = encryptedSecret
-			db.Save(&rootUserObject)
+			rootRecord.Set("proxmoxTokenSecret", encryptedSecret)
+			if err := txApp.Save(rootRecord); err != nil {
+				return fmt.Errorf("error saving root user object: %v", err)
+			}
 			continue
 		}
 
 		// Check if range already exists in PocketBase
-		var existingRange RangeObject
-		if err := tx.Where("range_number = ?", sqliteRange.RangeNumber).First(&existingRange).Error; err == nil {
+		existingRange, err := txApp.FindFirstRecordByData("ranges", "rangeNumber", sqliteRange.RangeNumber)
+		if existingRange != nil {
 			logger.Info(fmt.Sprintf("Range %d already exists in PocketBase, skipping", sqliteRange.RangeNumber))
 			continue
+		}
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("error finding range %d: %v", sqliteRange.RangeNumber, err)
 		}
 
 		// Convert string arrays to []string
@@ -201,41 +359,31 @@ func MigrateFromSQLiteToPocketBase() error {
 		description := "Range migrated from Ludus 1.x"
 		purpose := "General testing and development"
 
-		// Create PocketBase range object
-		rangeObj := RangeObject{
-			RangeID:        sqliteRange.UserID,
-			RangeNumber:    sqliteRange.RangeNumber,
-			Name:           name,
-			Description:    description,
-			Purpose:        purpose,
-			LastDeployment: sqliteRange.LastDeployment,
-			NumberOfVMs:    sqliteRange.NumberOfVMs,
-			TestingEnabled: sqliteRange.TestingEnabled,
-			AllowedDomains: allowedDomains,
-			AllowedIPs:     allowedIPs,
-			RangeState:     sqliteRange.RangeState,
-			CreatedAt:      time.Now(),
-			UpdatedAt:      time.Now(),
+		rangeCollection, err := txApp.FindCollectionByNameOrId("ranges")
+		if err != nil {
+			return fmt.Errorf("error finding ranges collection: %v", err)
 		}
-
-		// Create range in PocketBase
-		if err := tx.Create(&rangeObj).Error; err != nil {
-			tx.Rollback()
-			return fmt.Errorf("error creating range %d: %v", rangeObj.RangeNumber, err)
+		rangeRecord := core.NewRecord(rangeCollection)
+		rangeRecord.Set("rangeNumber", sqliteRange.RangeNumber)
+		rangeRecord.Set("rangeID", sqliteRange.UserID)
+		rangeRecord.Set("name", name)
+		rangeRecord.Set("description", description)
+		rangeRecord.Set("purpose", purpose)
+		rangeRecord.Set("lastDeployment", sqliteRange.LastDeployment)
+		rangeRecord.Set("numberOfVMs", sqliteRange.NumberOfVMs)
+		rangeRecord.Set("testingEnabled", sqliteRange.TestingEnabled)
+		rangeRecord.Set("allowedDomains", allowedDomains)
+		rangeRecord.Set("allowedIPs", allowedIPs)
+		rangeRecord.Set("rangeState", sqliteRange.RangeState)
+		if err := txApp.Save(rangeRecord); err != nil {
+			return fmt.Errorf("error saving range %d: %v", sqliteRange.RangeNumber, err)
 		}
-		logger.Info(fmt.Sprintf("Migrated range: %d (User: %s)", rangeObj.RangeNumber, rangeObj.RangeID))
-
-		// Create UserRangeAccess record for the range owner
-		userRangeAccess := UserRangeAccess{
-			UserID:      rangeObj.RangeID,
-			RangeNumber: rangeObj.RangeNumber,
-		}
-		if err := tx.Create(&userRangeAccess).Error; err != nil {
-			tx.Rollback()
-			return fmt.Errorf("error creating user range access for range %d: %v", rangeObj.RangeNumber, err)
-		}
+		logger.Info(fmt.Sprintf("Migrated range: %d (User: %s)", sqliteRange.RangeNumber, sqliteRange.UserID))
 	}
+	return nil
+}
 
+func migrateVMsToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 	// Create temporary struct for reading SQLite VMs (without CreatedAt/UpdatedAt)
 	type SQLiteVmObject struct {
 		ID          uint   `json:"id"`
@@ -249,38 +397,49 @@ func MigrateFromSQLiteToPocketBase() error {
 	// Migrate VMs
 	var sqliteVMs []SQLiteVmObject
 	if err := sqliteDB.Table("vm_objects").Find(&sqliteVMs).Error; err != nil {
-		tx.Rollback()
 		return fmt.Errorf("error reading VMs from SQLite: %v", err)
 	}
 
 	for _, sqliteVM := range sqliteVMs {
 		// Check if VM already exists in PocketBase
-		var existingVM VmObject
-		if err := tx.Where("proxmox_id = ? AND range_number = ?", sqliteVM.ProxmoxID, sqliteVM.RangeNumber).First(&existingVM).Error; err == nil {
+		vmCheckRecord, err := txApp.FindFirstRecordByData("vms", "proxmoxID", sqliteVM.ProxmoxID)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("error finding VM %d: %v", sqliteVM.ProxmoxID, err)
+		}
+		if vmCheckRecord != nil {
 			logger.Info(fmt.Sprintf("VM %d in range %d already exists in PocketBase, skipping", sqliteVM.ProxmoxID, sqliteVM.RangeNumber))
 			continue
 		}
 
-		// Create PocketBase VM object
-		vm := VmObject{
-			ID:          sqliteVM.ID,
-			ProxmoxID:   sqliteVM.ProxmoxID,
-			RangeNumber: sqliteVM.RangeNumber,
-			Name:        sqliteVM.Name,
-			PoweredOn:   sqliteVM.PoweredOn,
-			IP:          sqliteVM.IP,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+		vmCollection, err := txApp.FindCollectionByNameOrId("vms")
+		if err != nil {
+			return fmt.Errorf("error finding vms collection: %v", err)
+		}
+		vmRecord := core.NewRecord(vmCollection)
+		vmRecord.Set("proxmoxID", sqliteVM.ProxmoxID)
+		vmRecord.Set("name", sqliteVM.Name)
+		vmRecord.Set("poweredOn", sqliteVM.PoweredOn)
+		vmRecord.Set("ip", sqliteVM.IP)
+		// Lookup the range record
+		rangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeNumber", sqliteVM.RangeNumber)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("error finding range %d: %v", sqliteVM.RangeNumber, err)
+		}
+		if rangeRecord == nil {
+			logger.Error(fmt.Sprintf("Warning: Could not find range %d, skipping VM %d", sqliteVM.RangeNumber, sqliteVM.ProxmoxID))
+			continue
+		}
+		vmRecord.Set("range", rangeRecord.Id)
+		if err := txApp.Save(vmRecord); err != nil {
+			return fmt.Errorf("error saving VM %d: %v", sqliteVM.ProxmoxID, err)
 		}
 
-		// Create VM in PocketBase
-		if err := tx.Create(&vm).Error; err != nil {
-			tx.Rollback()
-			return fmt.Errorf("error creating VM %d: %v", vm.ProxmoxID, err)
-		}
-		logger.Info(fmt.Sprintf("Migrated VM: %d (Range: %d)", vm.ProxmoxID, vm.RangeNumber))
+		logger.Info(fmt.Sprintf("Migrated VM: %d (Range: %d)", sqliteVM.ProxmoxID, sqliteVM.RangeNumber))
 	}
+	return nil
+}
 
+func migrateAccessesToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 	// Create temporary struct for reading SQLite range access objects (with string field for array)
 	type SQLiteRangeAccessObject struct {
 		TargetUserID  string `json:"targetUserID"`
@@ -290,7 +449,6 @@ func MigrateFromSQLiteToPocketBase() error {
 	// Migrate RangeAccessObjects to UserRangeAccess entries
 	var sqliteRangeAccesses []SQLiteRangeAccessObject
 	if err := sqliteDB.Table("range_access_objects").Find(&sqliteRangeAccesses).Error; err != nil {
-		tx.Rollback()
 		return fmt.Errorf("error reading range access objects from SQLite: %v", err)
 	}
 
@@ -309,187 +467,32 @@ func MigrateFromSQLiteToPocketBase() error {
 		// For each source user ID, create a UserRangeAccess entry
 		for _, sourceUserID := range sourceUserIDs {
 			// Find the range number for the target user
-			var targetRange RangeObject
-			if err := tx.Where("range_id = ?", rangeAccess.TargetUserID).First(&targetRange).Error; err != nil {
+			targetRangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeID", rangeAccess.TargetUserID)
+			if err != nil && err != sql.ErrNoRows {
+				return fmt.Errorf("error finding range for target user %s: %v", rangeAccess.TargetUserID, err)
+			}
+			if targetRangeRecord == nil {
 				logger.Error(fmt.Sprintf("Warning: Could not find range for target user %s, skipping access grant", rangeAccess.TargetUserID))
 				continue
 			}
 
 			// Check if this access already exists
-			var existingAccess UserRangeAccess
-			if err := tx.Where("user_id = ? AND range_number = ?", sourceUserID, targetRange.RangeNumber).First(&existingAccess).Error; err == nil {
-				logger.Info(fmt.Sprintf("Access for user %s to range %d already exists, skipping", sourceUserID, targetRange.RangeNumber))
+			userRecord, err := txApp.FindFirstRecordByData("users", "userID", sourceUserID)
+			if err != nil && err != sql.ErrNoRows {
+				return fmt.Errorf("error finding user %s: %v", sourceUserID, err)
+			}
+			if userRecord == nil {
+				logger.Error(fmt.Sprintf("Warning: Could not find user %s, skipping access grant", sourceUserID))
 				continue
 			}
 
 			// Create UserRangeAccess entry
-			userRangeAccess := UserRangeAccess{
-				UserID:      sourceUserID,
-				RangeNumber: targetRange.RangeNumber,
+			userRecord.Set("ranges+", targetRangeRecord.Id)
+			if err := txApp.Save(userRecord); err != nil {
+				return fmt.Errorf("error saving user %s: %v", sourceUserID, err)
 			}
-			if err := tx.Create(&userRangeAccess).Error; err != nil {
-				tx.Rollback()
-				return fmt.Errorf("error creating user range access for user %s to range %d: %v", sourceUserID, targetRange.RangeNumber, err)
-			}
-			logger.Info(fmt.Sprintf("Migrated access: User %s -> Range %d (Target User: %s)", sourceUserID, targetRange.RangeNumber, rangeAccess.TargetUserID))
+			logger.Info(fmt.Sprintf("Migrated access: User %s -> Range %d (Target User: %s)", sourceUserID, targetRangeRecord.GetInt("rangeNumber"), rangeAccess.TargetUserID))
 		}
 	}
-
-	// Commit the transaction
-	if err := tx.Commit().Error; err != nil {
-		return fmt.Errorf("error committing migration: %v", err)
-	}
-
-	// Migrate existing users to PocketBase
-	migrateExistingUsersToPocketBase(sqliteUsers)
-
-	// Migrate range files
-	migrateRangeFiles()
-
-	logger.Info("Migration from SQLite to PocketBase completed successfully")
-
-	// Optionally, backup the SQLite database
-	// backupPath := fmt.Sprintf("%s/ludus.db.backup.%s", ludusInstallPath, time.Now().Format("20060102-150405"))
-	// if err := os.Rename(sqlitePath, backupPath); err != nil {
-	// 	log.Printf("Warning: Could not backup SQLite database: %v", err)
-	// } else {
-	// 	log.Printf("SQLite database backed up to: %s", backupPath)
-	// }
-
-	// Create the .sqlite_db_migrated file to prevent the migration from running again
-	err = os.WriteFile(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath), []byte{}, 0644)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Error creating .sqlite_db_migrated file: %v", err))
-	}
-
 	return nil
-}
-
-func migrateExistingUsersToPocketBase(sqliteUsers []SQLiteUserObject) {
-	for _, sqliteUser := range sqliteUsers {
-
-		username := sqliteUser.ProxmoxUsername
-
-		// Make the root user a superuser in PocketBase
-		if username == "root" {
-			logger.Info("Making root user a superuser in PocketBase - Password is the ROOT API key")
-			adminCollection, err := app.FindCollectionByNameOrId(core.CollectionNameSuperusers)
-			if err != nil {
-				logger.Error(fmt.Sprintf("'_superusers' collection not found: %v", err))
-				continue
-			}
-
-			newAdmin := core.NewRecord(adminCollection)
-
-			newAdmin.SetEmail(username + "@ludus.internal")
-
-			// The password for the new superuser is the ROOT API key
-			rootAPIKey, err := os.ReadFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath))
-			if err != nil {
-				logger.Error(fmt.Sprintf("Error reading root API key: %v", err))
-				continue
-			}
-			rootAPIKeyString := strings.Trim(string(rootAPIKey), "\n")
-			newAdmin.SetPassword(rootAPIKeyString)
-
-			if err := app.Save(newAdmin); err != nil {
-				logger.Error(fmt.Sprintf("failed to save new superuser: %v", err))
-			}
-			logger.Debug("Successfully made root@ludus.internal a superuser in PocketBase")
-			continue
-		}
-
-		// Read the password from the user's proxmox_password file
-		passwordBytes, err := os.ReadFile(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, username))
-		if err != nil {
-			logger.Error(fmt.Sprintf("Error reading proxmox password for user %s: %v", username, err))
-			continue
-		}
-		password := strings.Trim(string(passwordBytes), "\n")
-		// Lookup the user in the database
-		var user UserObject
-		if err := db.Where("proxmox_username = ?", username).First(&user).Error; err != nil {
-			logger.Error(fmt.Sprintf("Error looking up user %s in database, user folder exists on disk but not in database: %v", username, err))
-			continue
-		}
-
-		if user.ProxmoxTokenID == "" {
-			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user)
-			if err != nil {
-				// This is a fatal error, as every user needs a Proxmox API token to be able to deploy VMs
-				logger.Error(fmt.Sprintf("Error creating proxmox API token for user %s: %v", username, err))
-			}
-			user.ProxmoxTokenID = tokenID
-			encryptedSecret, err := EncryptStringForDatabase(tokenSecret)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Error encrypting proxmox API token for user %s: %v", username, err))
-			}
-			user.ProxmoxTokenSecret = encryptedSecret
-			db.Save(&user)
-		}
-
-		userWithEmailAndPassword := UserWithEmailAndPassword{
-			UserObject: user,
-			Password:   password,
-			Email:      user.ProxmoxUsername + "@ludus.internal", // https://www.icann.org/en/board-activities-and-meetings/materials/approved-resolutions-special-meeting-of-the-icann-board-29-07-2024-en#section2.a
-		}
-
-		var pocketBaseUserID string
-		if user.PocketbaseID == "" {
-			pocketBaseUserID, err = createUserInPocketBase(userWithEmailAndPassword, password)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Error creating user %s in PocketBase: %v", username, err))
-				continue
-			}
-			user.PocketbaseID = pocketBaseUserID
-			db.Save(&user)
-		}
-
-		logger.Info(fmt.Sprintf("Migrated user %s to PocketBase", username))
-	}
-}
-
-func migrateRangeFiles() {
-	// Read all the range config files from /opt/ludus/users/{username}/range-config.yml and create them at
-	// /opt/ludus/ranges/{rangeID}/range-config.yml
-
-	// First loop over all the user directories in /opt/ludus/users/
-	userDirs, err := os.ReadDir(fmt.Sprintf("%s/users/", ludusInstallPath))
-	if err != nil {
-		logger.Error(fmt.Sprintf("Error reading user directories: %v", err))
-	}
-
-	for _, userDir := range userDirs {
-		// Read the range config file from /opt/ludus/users/{username}/range-config.yml
-		rangeConfig, err := os.ReadFile(fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, userDir.Name()))
-		if err != nil {
-			logger.Error(fmt.Sprintf("Error reading range config file for user %s: %v", userDir.Name(), err))
-			continue
-		}
-
-		// Look up the user ID using the ProxmoxUsername
-		var user UserObject
-		if err := db.Where("proxmox_username = ?", userDir.Name()).First(&user).Error; err != nil {
-			logger.Error(fmt.Sprintf("Error looking up user ID for user %s: %v", userDir.Name(), err))
-			continue
-		}
-
-		// Create the range directory if it doesn't exist
-		err = os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, user.UserID), 0755)
-		if err != nil {
-			logger.Error(fmt.Sprintf("Error creating range directory for user %s: %v", user.UserID, err))
-			continue
-		}
-
-		// Create the range config file at /opt/ludus/ranges/{rangeID}/range-config.yml
-		err = os.WriteFile(fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, user.UserID), rangeConfig, 0644)
-		if err != nil {
-			logger.Error(fmt.Sprintf("Error creating range config file for user %s: %v", user.UserID, err))
-			continue
-		}
-		log.Printf("Migrated range config file for user %s", user.UserID)
-	}
-
-	// Chown the range directories to the ludus user
-	chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/", ludusInstallPath), "ludus")
 }

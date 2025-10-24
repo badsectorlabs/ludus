@@ -11,6 +11,14 @@ func init() {
 		// init a new auth collection with the default system fields and auth options
 		groupsCollection := core.NewBaseCollection("groups")
 
+		usersCollection, err := app.FindCollectionByNameOrId("users")
+		if err != nil {
+			return err
+		}
+		rangesCollection, err := app.FindCollectionByNameOrId("ranges")
+		if err != nil {
+			return err
+		}
 		// Only superusers can list, view, update, and delete VMs
 		groupsCollection.ListRule = nil
 		groupsCollection.ViewRule = nil
@@ -28,18 +36,21 @@ func init() {
 			},
 			&core.RelationField{
 				Name:         "managers",
-				CollectionId: "users",
+				CollectionId: usersCollection.Id,
 				Required:     false,
+				MaxSelect:    9999, // Groups can have many managers
 			},
 			&core.RelationField{
 				Name:         "members",
-				CollectionId: "users",
+				CollectionId: usersCollection.Id,
 				Required:     false,
+				MaxSelect:    9999, // Groups can have many members
 			},
 			&core.RelationField{
 				Name:         "ranges",
-				CollectionId: "ranges",
+				CollectionId: rangesCollection.Id,
 				Required:     false,
+				MaxSelect:    9999, // Groups can have many ranges
 			},
 			&core.AutodateField{
 				Name:     "createdAt",

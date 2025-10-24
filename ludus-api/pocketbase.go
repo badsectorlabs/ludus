@@ -9,9 +9,9 @@ import (
 )
 
 // Returns the PocketBase ID of the created user
-func createUserInPocketBase(user UserWithEmailAndPassword, password string) (string, error) {
+func createUserInPocketBase(txApp core.App, user UserWithEmailAndPassword, password string) (string, error) {
 	logger.Debug(fmt.Sprintf("Creating user %s in PocketBase", user.Name))
-	collection, err := app.FindCollectionByNameOrId("users")
+	collection, err := txApp.FindCollectionByNameOrId("users")
 	if err != nil {
 		logger.Error(fmt.Sprintf("Failed to find collection: %v", err))
 	}
@@ -28,7 +28,7 @@ func createUserInPocketBase(user UserWithEmailAndPassword, password string) (str
 	record.Set("proxmoxTokenSecret", user.UserObject.ProxmoxTokenSecret)
 	record.Set("dateLastActive", user.UserObject.DateLastActive)
 
-	if err := app.Save(record); err != nil {
+	if err := txApp.Save(record); err != nil {
 		logger.Error(fmt.Sprintf("Failed to create user: %v", err))
 	}
 

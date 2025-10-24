@@ -11,7 +11,7 @@ func init() {
 		// init a new auth collection with the default system fields and auth options
 		rangesCollection := core.NewBaseCollection("ranges")
 
-		// Only superusers can list, view, update, and delete VMs
+		// Only superusers can list, view, update, and delete ranges
 		rangesCollection.ListRule = nil
 		rangesCollection.ViewRule = nil
 		rangesCollection.UpdateRule = nil
@@ -66,12 +66,12 @@ func init() {
 				Required: false,
 			},
 			&core.AutodateField{
-				Name:     "createdAt",
+				Name:     "created",
 				OnCreate: true,
 				OnUpdate: false,
 			},
 			&core.AutodateField{
-				Name:     "updatedAt",
+				Name:     "updated",
 				OnCreate: true,
 				OnUpdate: true,
 			},

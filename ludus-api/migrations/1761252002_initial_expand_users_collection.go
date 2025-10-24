@@ -34,7 +34,7 @@ func init() {
 				OnlyInt:  true,
 			},
 			&core.DateField{
-				Name:     "dateLastActive",
+				Name:     "lastActive",
 				Required: false,
 			},
 			&core.BoolField{
@@ -48,6 +48,10 @@ func init() {
 			},
 			&core.TextField{
 				Name:     "proxmoxUsername",
+				Required: false,
+			},
+			&core.TextField{
+				Name:     "proxmoxRealm",
 				Required: false,
 			},
 			&core.TextField{
