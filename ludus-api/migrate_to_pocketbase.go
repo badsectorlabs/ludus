@@ -16,6 +16,13 @@ import (
 
 // MigrateFromSQLiteToPocketBase migrates data from SQLite to PocketBase if conditions are met
 func MigrateFromSQLiteToPocketBase() error {
+
+	// Check if the migration has already been run
+	if FileExists(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath)) {
+		logger.Debug(fmt.Sprintf("Migration has already been run (%s/install/.sqlite_db_migrated exists), skipping migration", ludusInstallPath))
+		return nil
+	}
+
 	sqlitePath := fmt.Sprintf("%s/ludus.db", ludusInstallPath)
 
 	// Check if SQLite database exists
@@ -151,7 +158,7 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 		PortforwardingEnabled bool      `json:"portforwardingEnabled"`
 	}
 
-	// Migrate users (excluding ROOT which already exists)
+	// Migrate users
 	var sqliteUsers []SQLiteUserObject
 	if err := sqliteDB.Table("user_objects").Find(&sqliteUsers).Error; err != nil {
 		return fmt.Errorf("error reading users from SQLite: %v", err)
@@ -178,6 +185,7 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 			}
 			rootAPIKeyString := strings.Trim(string(rootAPIKey), "\n")
 			newAdmin.SetPassword(rootAPIKeyString)
+			newAdmin.Set("hashedAPIKey", sqliteUser.HashedAPIKey)
 
 			if err := txApp.Save(newAdmin); err != nil {
 				logger.Error(fmt.Sprintf("failed to save new superuser: %v", err))
@@ -236,18 +244,19 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 		}
 
 		if userRecord == nil {
-			logger.Error(fmt.Sprintf("User %s not found in PocketBase, creating", sqliteUser.UserID))
+			logger.Debug(fmt.Sprintf("User %s not found in PocketBase, creating", sqliteUser.UserID))
 			userRecord = core.NewRecord(collection)
 		}
 
 		logger.Debug(fmt.Sprintf("Creating user %s in PocketBase", sqliteUser.ProxmoxUsername))
-		userRecord.SetEmail(sqliteUser.ProxmoxUsername + "@ludus.internal") // https://www.icann.org/en/board-activities-and-meetings/materials/approved-resolutions-special-meeting-of-the-icann-board-29-07-2024-en#section2.a
+		userRecord.SetEmail(sqliteUser.ProxmoxUsername + "@ludus.internal") // .internal is a reserved TLD for internal use, see: https://www.icann.org/en/board-activities-and-meetings/materials/approved-resolutions-special-meeting-of-the-icann-board-29-07-2024-en#section2.a
 		userRecord.SetPassword(password)
 		userRecord.Set("name", sqliteUser.Name)
 		userRecord.Set("userID", sqliteUser.UserID)
 		userRecord.Set("userNumber", rangeObj.RangeNumber)
 		userRecord.Set("isAdmin", sqliteUser.IsAdmin)
 		userRecord.Set("proxmoxUsername", sqliteUser.ProxmoxUsername)
+		userRecord.Set("proxmoxRealm", "pam") // Ludus 1.x only supported PAM authentication
 		userRecord.Set("hashedAPIKey", sqliteUser.HashedAPIKey)
 		userRecord.Set("lastActive", sqliteUser.DateLastActive)
 

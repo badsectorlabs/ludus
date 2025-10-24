@@ -1855,8 +1855,11 @@ paths:
                   type: string
                   enum:
                     - Dell
-                  description: The computer vendor to use for all hardware values (currently only
-                    Dell is supported)
+                    - HP
+                    - Lenovo
+                    - Google
+                    - IBM
+                  description: The computer vendor to use for all hardware values
                 dropFiles:
                   type: boolean
                   example: true

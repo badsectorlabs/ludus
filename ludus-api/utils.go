@@ -59,7 +59,7 @@ func HashString(password string) (string, error) {
 	// ~ 2.5697 × 10^55 years to crack an API key with 100 million parallel guesses and a average time of .003 seconds per guess
 	// For comparison, the universe is about 13.8 × 10^9 years old
 	// High cost is good for users who pick bad passwords, but since we generate random keys, it is not a risk here
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 6)
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 4)
 	return string(bytes), err
 }
 

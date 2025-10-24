@@ -32,6 +32,7 @@ func init() {
 				Name:         "groups", // Groups the user is a member of
 				CollectionId: groupsCollection.Id,
 				Required:     false,
+				MaxSelect:    9999, // Users can be a member of many groups
 			},
 		)
 

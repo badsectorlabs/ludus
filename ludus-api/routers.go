@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"crypto/tls"
 	"fmt"
+	"io/fs"
 	"log"
 	"log/slog"
 	"net/http"
@@ -161,6 +162,50 @@ func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
 			r.Header.Add("X-Forwarded-For", r.RemoteAddr)
 		},
 	}
+
+	// Serve the web UI from PocketBase if available
+	if webUIAvailable {
+		logger.Debug("Serving web UI from PocketBase")
+		app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+			webUIFSRoot, err := fs.Sub(embeddedWebUI, "webUI")
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error serving web UI from PocketBase: %v", err))
+				return err
+			}
+			se.Router.GET("/ui/{path...}", apis.Static(webUIFSRoot, true))
+			return se.Next()
+		})
+	}
+
+	// Serve the docs from PocketBase if available
+	if docsAvailable {
+		app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+			docsFSRoot, err := fs.Sub(embeddedDocs, "docs")
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error serving docs from PocketBase: %v", err))
+				return err
+			}
+			se.Router.GET("/docs/{path...}", apis.Static(docsFSRoot, true))
+			return se.Next()
+		})
+	}
+
+	// Setup API key authentication for the PocketBase API
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.BindFunc(APIKeyAuthenticationMiddleware)
+		return se.Next()
+	})
+
+	// Simple whoami
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.GET("/whoami", func(e *core.RequestEvent) error {
+			if e.Auth == nil {
+				return e.UnauthorizedError("Authentication failed", "You are not authenticated")
+			}
+			return e.String(http.StatusOK, "You are authenticated as "+e.Auth.GetString("name"))
+		})
+		return se.Next()
+	})
 
 	// Single unified NoRoute for SPA fallbacks and custom handling
 	registerUnifiedNoRoute(router, docsAvailable, docsFileSystem, webUIAvailable, webUIFileSystem)

@@ -9,7 +9,7 @@ func init() {
 	m.Register(func(app core.App) error {
 		settings := app.Settings()
 
-		// for all available settings fields you could check
+		// for all available settings fields see
 		// https://github.com/pocketbase/pocketbase/blob/develop/core/settings_model.go#L121-L130
 		settings.Meta.AppName = "Ludus"
 		settings.Meta.AppURL = "https://my.ludus.cloud:8080"
