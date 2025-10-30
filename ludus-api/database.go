@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pocketbase/pocketbase/core"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -194,6 +195,52 @@ func findNextAvailableRangeNumber(db *gorm.DB, reservedRangeNumbers []int32) int
 	}
 }
 
+func findNextAvailableRangeNumberPB(txApp core.App) int {
+
+	type RangeResult struct {
+		RangeNumber int `db:"range_number" json:"range_number"`
+	}
+
+	var queryResult []RangeResult
+	var rangeNumbers []int
+
+	err := txApp.DB().
+		Select("range_number").
+		From("ranges").
+		OrderBy("range_number").
+		All(&queryResult)
+	if err != nil {
+		return -1
+	}
+
+	for _, item := range queryResult {
+		rangeNumbers = append(rangeNumbers, item.RangeNumber)
+	}
+
+	for i := int(1); ; i++ {
+		found := false
+		for _, num := range rangeNumbers {
+			if num == i {
+				found = true
+				break
+			}
+		}
+		if !found {
+			// Check if this is a reserved range number
+			for _, num := range ServerConfiguration.ReservedRangeNumbers {
+				if int(num) == i {
+					found = true
+					break
+				}
+			}
+			// The number is not in the DB and not reserved, return it
+			if !found {
+				return i
+			}
+		}
+	}
+}
+
 // findNextAvailableUserNumber finds the smallest positive integer that is not
 // present in the UserNumber column of the UserObject table. This function
 // assumes that the UserNumber values are positive integers and that there can
@@ -212,6 +259,43 @@ func findNextAvailableUserNumber(db *gorm.DB) int32 {
 
 	// Start at 2 since 1 is reserved for the root user (198.51.100.1 is reserved for the server)
 	for i := int32(2); ; i++ {
+		found := false
+		for _, num := range userNumbers {
+			if num == i {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return i
+		}
+	}
+}
+
+func findNextAvailableUserNumberPB(txApp core.App) int {
+	var userNumbers []int
+
+	type UserResult struct {
+		UserNumber int `db:"user_number" json:"user_number"`
+	}
+
+	var queryResult []UserResult
+
+	err := txApp.DB().
+		Select("user_number").
+		From("users").
+		OrderBy("user_number").
+		All(&userNumbers)
+	if err != nil {
+		return -1
+	}
+
+	for _, item := range queryResult {
+		userNumbers = append(userNumbers, item.UserNumber)
+	}
+
+	// Start at 2 since 1 is reserved for the root user (198.51.100.1 is reserved for the server)
+	for i := int(2); ; i++ {
 		found := false
 		for _, num := range userNumbers {
 			if num == i {

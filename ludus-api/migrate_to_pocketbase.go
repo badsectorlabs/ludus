@@ -185,7 +185,6 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 			}
 			rootAPIKeyString := strings.Trim(string(rootAPIKey), "\n")
 			newAdmin.SetPassword(rootAPIKeyString)
-			newAdmin.Set("hashedAPIKey", sqliteUser.HashedAPIKey)
 
 			if err := txApp.Save(newAdmin); err != nil {
 				logger.Error(fmt.Sprintf("failed to save new superuser: %v", err))
@@ -317,6 +316,19 @@ func migrateRangesToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 				rootRecord.Set("password", security.RandomString(25)) // Will never be used, but needed to create the record
 				rootRecord.Set("proxmoxUsername", "root")
 				rootRecord.Set("userNumber", 1)
+				rootRecord.Set("isAdmin", true)
+				rootAPIKey, err := os.ReadFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath))
+				if err != nil {
+					logger.Error(fmt.Sprintf("Error reading root API key: %v", err))
+					continue
+				}
+				rootAPIKeyString := strings.Trim(string(rootAPIKey), "\n")
+				hashedAPIKey, err := HashString(rootAPIKeyString)
+				if err != nil {
+					logger.Error(fmt.Sprintf("Error hashing root API key: %v", err))
+					continue
+				}
+				rootRecord.Set("hashedAPIKey", hashedAPIKey)
 			}
 
 			rootRecord.Set("proxmoxTokenID", tokenID)

@@ -39,13 +39,12 @@ func createUserInPocketBase(txApp core.App, user UserWithEmailAndPassword, passw
 
 func removeUserFromPocketBaseByUserID(userID string) error {
 	// Get the user's PocketBase ID from the database
-	var user UserObject
-	db.First(&user, "user_id = ?", userID)
-	if user.UserID == "" {
-		return errors.New("user not found in database")
+	record, err := app.FindFirstRecordByData("users", "userID", userID)
+	if err != nil {
+		return fmt.Errorf("user %s not found in database: %w", userID, err)
 	}
 
-	return removeUserFromPocketBaseByID(user.PocketbaseID)
+	return removeUserFromPocketBaseByID(record.Id)
 }
 
 func removeUserFromPocketBaseByID(pocketbaseID string) error {

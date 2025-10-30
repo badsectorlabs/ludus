@@ -2,9 +2,9 @@ package ludusapi
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
-	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -19,24 +19,27 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 
 	parts := strings.Split(apiKey, ".")
 	if len(parts) != 2 {
-		return e.UnauthorizedError("Malformed API Key provided", nil)
+		// return e.UnauthorizedError("Malformed API Key provided", nil)
+		return JSONError(e, http.StatusUnauthorized, "Malformed API Key provided")
 	}
 
 	userID := parts[0]
 
 	record, err := e.App.FindFirstRecordByData("users", "userID", userID)
 	if err != nil {
-		return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
-			"error_data": validation.NewError("user_not_found", fmt.Sprintf("user %s not found", userID)),
-		})
+		// return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
+		// 	"error_data": validation.NewError("user_not_found", fmt.Sprintf("user %s not found", userID)),
+		// })
+		return JSONError(e, http.StatusUnauthorized, fmt.Sprintf("user %s not found", userID))
 	}
 
 	storedHash := record.GetString("hashedAPIKey")
-	logger.Debug(fmt.Sprintf("Stored hash: %s", storedHash))
+	logger.Debug(fmt.Sprintf("storedHash: %s", storedHash))
 	if !CheckHash(apiKey, storedHash) {
-		return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
-			"error_data": validation.NewError("invalid_api_key", "Invalid API key"),
-		})
+		// return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
+		// 	"error_data": validation.NewError("invalid_api_key", "Invalid API key"),
+		// })
+		return JSONError(e, http.StatusUnauthorized, "Invalid API key")
 	}
 
 	// Check if the request path has a ?userID= parameter
@@ -46,14 +49,16 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 		if record.Get("isAdmin").(bool) {
 			record, err = e.App.FindFirstRecordByData("users", "userID", requestedUserID)
 			if err != nil {
-				return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
-					"error_data": validation.NewError("user_not_found", fmt.Sprintf("user %s not found", requestedUserID)),
-				})
+				// return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
+				// 	"error_data": validation.NewError("user_not_found", fmt.Sprintf("user %s not found", requestedUserID)),
+				// })
+				return JSONError(e, http.StatusUnauthorized, fmt.Sprintf("user %s not found", requestedUserID))
 			}
 		} else {
-			return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
-				"error_data": validation.NewError("not_admin", "You are not an admin and cannot impersonate other users"),
-			})
+			// return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
+			// 	"error_data": validation.NewError("not_admin", "You are not an admin and cannot impersonate other users"),
+			// })
+			return JSONError(e, http.StatusUnauthorized, "You are not an admin and cannot impersonate other users")
 		}
 	}
 

@@ -35,6 +35,15 @@ type Route struct {
 	HandlerFunc gin.HandlerFunc
 }
 
+type PocketBaseRoute struct {
+	Method      string
+	Pattern     string
+	HandlerFunc func(*core.RequestEvent) error
+}
+type PocketBaseRoutes []PocketBaseRoute
+
+const APIBasePath = "/api/v2"
+
 // Routes is the list of the generated Route.
 type Routes []Route
 
@@ -466,6 +475,23 @@ func RegisterRoutes(router *gin.Engine, routes Routes) {
 			router.PATCH(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
 		case http.MethodDelete:
 			router.DELETE(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+		}
+	}
+}
+
+func RegisterRoutesWithPocketBase(se *core.ServeEvent, routes PocketBaseRoutes) {
+	for _, route := range routes {
+		switch route.Method {
+		case http.MethodGet:
+			se.Router.GET(APIBasePath+route.Pattern, route.HandlerFunc)
+		case http.MethodPost:
+			se.Router.POST(APIBasePath+route.Pattern, route.HandlerFunc)
+		case http.MethodPut:
+			se.Router.PUT(APIBasePath+route.Pattern, route.HandlerFunc)
+		case http.MethodPatch:
+			se.Router.PATCH(APIBasePath+route.Pattern, route.HandlerFunc)
+		case http.MethodDelete:
+			se.Router.DELETE(APIBasePath+route.Pattern, route.HandlerFunc)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"ludusapi/models"
 	"math/rand"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/Telmate/proxmox-api-go/proxmox"
 	"github.com/gin-gonic/gin"
 	"github.com/goforj/godump"
+	"github.com/pocketbase/pocketbase/core"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -82,6 +84,27 @@ func GenerateAPIKey(user *UserObject) string {
 	var stringBuilder strings.Builder
 	// Add the userID to the front of the API Key
 	stringBuilder.WriteString(user.UserID)
+	stringBuilder.WriteRune('.')
+	for i := 0; i < length; i++ {
+		stringBuilder.WriteRune(chars[rand.Intn(len(chars))])
+	}
+	return stringBuilder.String()
+}
+
+func GenerateAPIKeyPB(userID string) string {
+	var bytes [8]byte
+	_, err := crypto_rand.Read(bytes[:])
+	if err != nil {
+		panic("cannot seed math/rand package with cryptographically secure random number generator")
+	}
+	chars := []rune("ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
+		"abcdefghijklmnopqrstuvwxyz" +
+		"0123456789" +
+		"@%-_+=") // Should be shell safe for setting the api key in an env var without single quotes
+	length := 40
+	var stringBuilder strings.Builder
+	// Add the userID to the front of the API Key
+	stringBuilder.WriteString(userID)
 	stringBuilder.WriteRune('.')
 	for i := 0; i < length; i++ {
 		stringBuilder.WriteRune(chars[rand.Intn(len(chars))])
@@ -539,6 +562,39 @@ func CreateDefaultUserRange(db *gorm.DB, userID string) error {
 		return err
 	}
 	return err
+}
+
+func CreateDefaultUserRangePB(txApp core.App, userID string) error {
+	// Find next available range number
+	rangeNumber := findNextAvailableRangeNumberPB(txApp)
+
+	rangeRecord := models.Ranges{}
+	rangeRecord.SetRangeNumber(rangeNumber)
+	rangeRecord.SetRangeId(userID)
+	rangeRecord.SetName(fmt.Sprintf("Default Range for %s", userID))
+	rangeRecord.SetDescription("Default range created automatically for user")
+	rangeRecord.SetPurpose("General testing and development")
+	if err := txApp.Save(rangeRecord); err != nil {
+		return err
+	}
+
+	// Make sure the user can access their range
+	userRecord, err := txApp.FindFirstRecordByData("users", "userID", userID)
+	if err != nil {
+		return err
+	}
+
+	rangeRecordWithId, err := txApp.FindFirstRecordByData("ranges", "rangeNumber", rangeNumber)
+	if err != nil {
+		return err
+	}
+
+	// Add the range to the user's ranges array
+	userRecord.Set("ranges+", rangeRecordWithId.Id)
+	if err := txApp.Save(userRecord); err != nil {
+		return err
+	}
+	return nil
 }
 
 // GetRangeObjectByNumber gets a range object by range number (for multi-range support)
