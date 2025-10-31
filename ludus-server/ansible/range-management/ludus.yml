@@ -1069,7 +1069,10 @@
         src: etc-hosts.j2
         dest: "{{ ludus_install_path }}/users/{{ username }}/etc-hosts"
       # Skip this when doing a destroy-range, but run for every other tag
-      when: "'destroy-range' not in ansible_run_tags and ansible_limit is undefined"
+      when: 
+        - "'destroy-range' not in ansible_run_tags"
+        - 'ansible_limit is undefined'
+        - 'range_id is defined and range_id in groups' # This will error if the user doesn't have any VMs in their range, like deploying a nexus cache with an empty range.
 
 # ==========================================================
 # Alert the user on failed office install
