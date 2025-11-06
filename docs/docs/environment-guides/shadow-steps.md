@@ -1,10 +1,11 @@
 ---
-title: "SANS Workshop: Shadow Steps: Understanding and Detecting User Impersonation and Lateral Movement in Active Directory"
+title: "SANS Workshop: Shadow Steps"
 ---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# SANS Workshop: Shadow Steps: Understanding and Detecting User Impersonation and Lateral Movement in Active Directory
+# SANS Workshop: Shadow Steps
+## Understanding and Detecting User Impersonation and Lateral Movement in Active Directory
 
 :::success Props!
 
@@ -40,7 +41,9 @@ Have fun !
 
 ## Deployment
 
-### 1. Add the `badsectorlabs.ludus_elastic_container` and `badsectorlabs.ludus_elastic_agent` roles to your Ludus server
+### 1. Add roles
+
+Add the `badsectorlabs.ludus_elastic_container` and `badsectorlabs.ludus_elastic_agent` roles to your Ludus server
 
 ```shell-session
 #terminal-command-local
@@ -160,13 +163,14 @@ This will take a few hours. You'll know it is done when you see:
 ```
 The Empire's dominion is complete! But Rebel operatives remain hidden. Your mission: eliminate them.
 ```
+
+### 6. Snapshot VMs
+
 :::note
 
 You must be connected to your Ludus wireguard VPN for these commands to work
 
 :::
-
-### 6. Snapshot VMs
 
 Take snapshots via the proxmox web UI or SSH run the following ludus command:
 
@@ -192,7 +196,7 @@ You can also use a standard RDP client on your local machine if your WireGuard i
 
 :::
 
-If you want a challange and want to do the lab with defender enabled, edit the `ad/SANS/data/inventory` file and change the last part to look like this
+If you want a challenge and want to do the lab with defender enabled, edit the `ad/SANS/data/inventory` file and change the last part to look like this
 
 ```
 ; allow defender
