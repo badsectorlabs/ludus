@@ -5,6 +5,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"embed"
 	"fmt"
 	"log"
@@ -13,6 +14,9 @@ import (
 	"path/filepath"
 
 	ludusapi "ludusapi"
+
+	"github.com/pocketbase/pocketbase/apis"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 const ludusInstallPath string = "/opt/ludus"
@@ -45,8 +49,8 @@ func serve() {
 		Logger:           logger,
 	}
 
-	// Setup Gin router
-	router := ludusapi.NewRouter(LudusVersion, server)
+	// Setup PocketBase app
+	app := ludusapi.NewRouter(LudusVersion, server)
 
 	if server.LicenseType == "community" {
 		logger.Info("LICENSE: Community Edition")
@@ -81,7 +85,7 @@ func serve() {
 	server.InitializePlugins()
 
 	// Register plugin routes
-	server.RegisterPluginRoutes(router)
+	server.RegisterPluginRoutes(app)
 
 	certPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.pem"
 	keyPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.key"
@@ -93,21 +97,43 @@ func serve() {
 		certPath = "/opt/ludus/cert.pem"
 		keyPath = "/opt/ludus/key.pem"
 	}
+
+	// Setup the server to use the certificate/key found above
+	serveConfig := apis.ServeConfig{
+		ShowStartBanner: false,
+		AllowedOrigins:  []string{"*"},
+	}
+	ludusApp := *app
+	ludusApp.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		certificate, err := tls.LoadX509KeyPair(certPath, keyPath)
+		if err != nil {
+			return err
+		}
+		e.Server.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{certificate},
+		}
+		return e.Next()
+	})
+
 	// If we're running as a non-root user, bind to all interfaces, else (running as root) bind to localhost unless the user has opted to expose the admin API globally
-	var err error
 	if os.Geteuid() != 0 {
-		err = router.RunTLS("0.0.0.0:8080", certPath, keyPath)
+		serveConfig.HttpsAddr = "0.0.0.0:8080"
+		logger.Debug("Starting server on 0.0.0.0:8080")
+		if err := apis.Serve(ludusApp, serveConfig); err != nil {
+			logger.Error(fmt.Sprintf("Failed to start the server: %v", err))
+		}
 	} else {
 		if config.ExposeAdminPort {
-			err = router.RunTLS("0.0.0.0:8081", certPath, keyPath)
+			serveConfig.HttpsAddr = "0.0.0.0:8081"
 		} else {
-			err = router.RunTLS("127.0.0.1:8081", certPath, keyPath)
+			serveConfig.HttpsAddr = "127.0.0.1:8081"
+		}
+		logger.Debug("Starting server on " + serveConfig.HttpsAddr)
+		if err := apis.Serve(ludusApp, serveConfig); err != nil {
+			logger.Error(fmt.Sprintf("Failed to start the server: %v", err))
 		}
 	}
 	server.ShutdownPlugins()
-	if err != nil {
-		log.Fatalf("Error in Ludus API server: %v", err)
-	}
 
 }
 

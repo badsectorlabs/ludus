@@ -57,6 +57,10 @@ variable "proxmox_password" {
   type      = string
   sensitive = true
 }
+variable "proxmox_token" {
+  type      = string
+  sensitive = true
+}
 variable "proxmox_storage_pool" {
   type = string
 }
@@ -137,6 +141,7 @@ source "proxmox-iso" "win2022-server-x64" {
   node                 = "${var.proxmox_host}"
   os                   = "${var.os}"
   password             = "${var.proxmox_password}"
+  token                = "${var.proxmox_token}"
   proxmox_url          = "${var.proxmox_url}"
   template_description = "${local.template_description}"
   username             = "${var.proxmox_username}"

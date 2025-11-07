@@ -79,8 +79,8 @@ type Ranges struct {
 	lastDeployment types.DateTime
 	numberOfVMs    int
 	testingEnabled bool
-	allowedDomains string
-	allowedIPs     string
+	allowedDomains []string
+	allowedIPs     []string
 	rangeState     string
 	created        types.DateTime
 	updated        types.DateTime

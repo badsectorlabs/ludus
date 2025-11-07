@@ -89,6 +89,10 @@ func init() {
 				Required: false,
 				OnlyInt:  true,
 			},
+			&core.TextField{
+				Name:     "defaultRangeID",
+				Required: false,
+			},
 		)
 
 		// enable password auth and disable OTP

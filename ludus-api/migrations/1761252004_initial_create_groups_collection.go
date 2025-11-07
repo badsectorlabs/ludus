@@ -53,12 +53,12 @@ func init() {
 				MaxSelect:    9999, // Groups can have many ranges
 			},
 			&core.AutodateField{
-				Name:     "createdAt",
+				Name:     "created",
 				OnCreate: true,
 				OnUpdate: false,
 			},
 			&core.AutodateField{
-				Name:     "updatedAt",
+				Name:     "updated",
 				OnCreate: true,
 				OnUpdate: true,
 			},

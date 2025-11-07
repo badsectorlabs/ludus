@@ -1,374 +1,409 @@
 package ludusapi
 
 import (
+	"database/sql"
 	"fmt"
+	"ludusapi/dto"
+	"ludusapi/models"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
+	"github.com/pocketbase/pocketbase/core"
 )
 
-func getGroupObjectFromRequest(c *gin.Context) (GroupObject, error) {
-	groupName := c.Param("groupName")
+func getGroupObjectFromRequest(e *core.RequestEvent) (*models.Group, error) {
+	groupName := e.Request.PathValue("groupName")
 
-	var group GroupObject
-	if err := db.First(&group, "name = ?", groupName).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Group not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding group: %v", err)})
-		}
-		return group, err
+	groupRecord, err := e.App.FindFirstRecordByData("groups", "name", groupName)
+	if err != nil {
+		return nil, JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding group: %v", err))
 	}
-	return group, nil
+	group := models.Group{}
+	group.SetProxyRecord(groupRecord)
+	return &group, nil
 }
 
 // CreateGroup creates a new group (admin only)
-func CreateGroup(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+func CreateGroup(e *core.RequestEvent) error {
+	if !e.Auth.GetBool("isAdmin") {
+		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot create groups")
 	}
 
-	var group GroupObject
-	if err := c.Bind(&group); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
-		return
+	var payload dto.CreateGroupRequest
+	if err := e.BindBody(&payload); err != nil {
+		return JSONError(e, http.StatusBadRequest, "Invalid request body: "+err.Error())
 	}
 
-	if group.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Group name is required"})
-		return
+	if payload.Name == "" {
+		return JSONError(e, http.StatusBadRequest, "Group name is required")
 	}
 
 	// Check if group with this name already exists
-	var existingGroup GroupObject
-	if err := db.Where("name = ?", group.Name).First(&existingGroup).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Group with this name already exists"})
-		return
+	existingGroupRecord, err := e.App.FindFirstRecordByData("groups", "name", payload.Name)
+	if err != nil && err != sql.ErrNoRows {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding group: %v", err))
+	}
+	if existingGroupRecord != nil {
+		return JSONError(e, http.StatusConflict, "Group with this name already exists")
 	}
 
-	if err := db.Create(&group).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating group: %v", err)})
-		return
+	groupCollection, err := e.App.FindCollectionByNameOrId("groups")
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding group collection: %v", err))
+	}
+	groupRecord := core.NewRecord(groupCollection)
+	group := models.Groups{}
+	group.SetProxyRecord(groupRecord)
+	group.SetName(payload.Name)
+
+	if err := e.App.Save(group); err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error creating group: %v", err))
 	}
 
 	// Create the group in proxmox
-	err := createGroupInProxmox(group.Name)
+	err = createGroupInProxmox(group.Name())
 	if err != nil {
-		db.Delete(&group)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating group in proxmox: %v", err)})
-		return
+		e.App.Delete(group)
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error creating group in proxmox: %v", err))
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"result": group})
+	return JSONResult(e, http.StatusCreated, "Group created successfully")
 }
 
 // DeleteGroup deletes a group and cleans up memberships (admin only)
-func DeleteGroup(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+func DeleteGroup(e *core.RequestEvent) error {
+	if !e.Auth.GetBool("isAdmin") {
+		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot delete groups")
 	}
 
-	group, err := getGroupObjectFromRequest(c)
+	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
-		return
+		return err
 	}
 
 	// Delete the group from proxmox
-	err = removeGroupFromProxmox(group.Name)
+	err = removeGroupFromProxmox(group.Name())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error deleting group from proxmox: %v", err)})
-		return
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error deleting group from proxmox: %v", err))
 	}
-
-	// Clean up all memberships and range access for this group
-	db.Where("group_id = ?", group.ID).Delete(&UserGroupMembership{})
-	db.Where("group_id = ?", group.ID).Delete(&GroupRangeAccess{})
 
 	// Delete the group
-	if err := db.Delete(&group).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error deleting group: %v", err)})
-		return
+	if err := e.App.Delete(group); err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error deleting group: %v", err))
 	}
 
-	c.JSON(http.StatusOK, gin.H{"result": "Group deleted successfully"})
+	return JSONResult(e, http.StatusOK, "Group deleted successfully")
 }
 
 // ListGroups lists all groups (admin only)
-func ListGroups(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+func ListGroups(e *core.RequestEvent) error {
+	if !e.Auth.GetBool("isAdmin") {
+		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot list groups")
 	}
 
-	var groups []GroupObject
-	if err := db.Find(&groups).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error listing groups: %v", err)})
-		return
+	var groups []dto.ListGroupsResponseItem
+	groupsRecords, err := e.App.FindAllRecords("groups")
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error listing groups: %v", err))
 	}
 
-	c.JSON(http.StatusOK, gin.H{"result": groups})
+	for _, groupRecord := range groupsRecords {
+		group := &models.Group{}
+		group.SetProxyRecord(groupRecord)
+		groupItem := dto.ListGroupsResponseItem{
+			Id:          group.Id,
+			Name:        group.Name(),
+			Description: group.Description(),
+		}
+		groups = append(groups, groupItem)
+	}
+	response := dto.ListGroupsResponse{
+		Value: groups,
+	}
+	return e.JSON(http.StatusOK, response)
 }
 
 // AddUserToGroup adds a user to a group (admin only)
-func AddUserToGroup(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+func AddUserToGroup(e *core.RequestEvent) error {
+	if !e.Auth.GetBool("isAdmin") {
+		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot add users to groups")
 	}
 
-	group, err := getGroupObjectFromRequest(c)
+	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
-		return
+		return err
 	}
 
-	userID := c.Param("userID")
+	userID := e.Request.PathValue("userID")
 	if userID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
-		return
+		return JSONError(e, http.StatusBadRequest, "User ID is required")
 	}
 
 	// Check if user exists
-	var user UserObject
-	if err := db.First(&user, "user_id = ?", userID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s not found", userID)})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding user %s: %v", userID, err)})
-		}
-		return
+	var user models.User
+	userRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
+	if err != nil && err != sql.ErrNoRows {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user: %v", err))
 	}
+	if err == sql.ErrNoRows {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("User %s not found", userID))
+	}
+	user.SetProxyRecord(userRecord)
 
 	// Check if user is already a member
-	var existingMembership UserGroupMembership
-	if err := db.Where("user_id = ? AND group_id = ?", userID, group.ID).First(&existingMembership).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("User %s is already a member of group %s", userID, group.Name)})
-		return
+	e.App.ExpandRecord(userRecord, []string{"groups"}, nil)
+	userGroups := user.Groups()
+	for _, userGroup := range userGroups {
+		if userGroup.Id == group.Id {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("User %s is already a member of group %s", userID, group.Name()))
+		}
 	}
 
 	// Add user to group
-	membership := UserGroupMembership{
-		UserID:  userID,
-		GroupID: uint(group.ID),
+	user.Set("groups+", group.Id)
+
+	// Check if the user is to be a manager of the group
+	if e.Request.URL.Query().Get("manager") == "true" {
+		group.Set("managers+", user.Id)
+	} else {
+		group.Set("members+", user.Id)
 	}
 
-	if err := db.Create(&membership).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error adding user %s to group %s: %v", userID, group.Name, err)})
-		return
-	}
+	e.App.Save(user)
+	e.App.Save(group)
 
 	// Add user to group in proxmox
-	err = addUserToGroupInProxmox(user.ProxmoxUsername, "pam", group.Name)
+	err = addUserToGroupInProxmox(user.ProxmoxUsername(), user.ProxmoxRealm(), group.Name())
 	if err != nil {
-		db.Delete(&membership)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error adding user %s to group %s in proxmox: %v", userID, group.Name, err)})
-		return
+		user.Set("groups-", group.Id)
+		if e.Request.URL.Query().Get("manager") == "true" {
+			group.Set("managers-", user.Id)
+		} else {
+			group.Set("members-", user.Id)
+		}
+		e.App.Save(user)
+		e.App.Save(group)
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error adding user %s to group %s in proxmox: %v", userID, group.Name(), err))
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"result": "User added to group successfully"})
+	return JSONResult(e, http.StatusCreated, "User added to group successfully")
 }
 
 // RemoveUserFromGroup removes a user from a group (admin only)
-func RemoveUserFromGroup(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+func RemoveUserFromGroup(e *core.RequestEvent) error {
+	if !e.Auth.GetBool("isAdmin") {
+		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot remove users from groups")
 	}
 
-	group, err := getGroupObjectFromRequest(c)
+	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
-		return
+		return err
 	}
 
-	userID := c.Param("userID")
+	userID := e.Request.PathValue("userID")
 	if userID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
-		return
+		return JSONError(e, http.StatusBadRequest, "User ID is required")
 	}
 
 	// Check if user exists
-	var user UserObject
-	if err := db.First(&user, "user_id = ?", userID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s not found", userID)})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding user %s: %v", userID, err)})
-		}
-		return
+	var user models.User
+	userRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
+	if err != nil && err != sql.ErrNoRows {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user: %v", err))
 	}
+	if err == sql.ErrNoRows {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("User %s not found", userID))
+	}
+	user.SetProxyRecord(userRecord)
 
 	// Remove user from group in proxmox
-	err = removeUserFromGroupInProxmox(user.ProxmoxUsername, "pam", group.Name)
+	err = removeUserFromGroupInProxmox(user.ProxmoxUsername(), user.ProxmoxRealm(), group.Name())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error removing user %s from group %s in proxmox: %v", userID, group.Name, err)})
-		return
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing user %s from group %s in proxmox: %v", userID, group.Name(), err))
 	}
 
 	// Remove user from group
-	result := db.Where("user_id = ? AND group_id = ?", userID, group.ID).Delete(&UserGroupMembership{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error removing user %s from group %s: %v", userID, group.Name, result.Error)})
-		return
+	user.Set("groups-", group.Id)
+	if e.Request.URL.Query().Get("manager") == "true" {
+		group.Set("managers-", user.Id)
+	} else {
+		group.Set("members-", user.Id)
 	}
+	e.App.Save(user)
+	e.App.Save(group)
 
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("User %s is not a member of group %s", userID, group.Name)})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"result": "User removed from group successfully"})
+	return JSONResult(e, http.StatusOK, "User removed from group successfully")
 }
 
 // AddRangeToGroup grants group access to a range (admin only)
-func AddRangeToGroup(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+func AddRangeToGroup(e *core.RequestEvent) error {
+	if !e.Auth.GetBool("isAdmin") {
+		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot add ranges to groups")
 	}
 
-	group, err := getGroupObjectFromRequest(c)
+	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
-		return
+		return err
 	}
 
-	rangeID := c.Param("rangeID")
+	rangeID := e.Request.PathValue("rangeID")
+	if rangeID == "" {
+		return JSONError(e, http.StatusBadRequest, "Range ID is required")
+	}
 
 	// Check if range exists
-	var rangeObj RangeObject
-	if err := db.Where("range_id = ?", rangeID).First(&rangeObj).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeID)})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding range %s: %v", rangeID, err)})
-		}
-		return
+	rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
+	if err != nil && err != sql.ErrNoRows {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding range: %v", err))
 	}
+	if err == sql.ErrNoRows {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found", rangeID))
+	}
+	rangeObj := models.Range{}
+	rangeObj.SetProxyRecord(rangeRecord)
 
 	// Check if group already has access to this range
-	var existingAccess GroupRangeAccess
-	if err := db.Where("group_id = ? AND range_number = ?", group.ID, rangeObj.RangeNumber).First(&existingAccess).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("Group %s already has access to range %s", group.Name, rangeObj.RangeID)})
-		return
+	e.App.ExpandRecord(group.Record, []string{"ranges"}, nil)
+	groupRanges := group.Ranges()
+	for _, groupRange := range groupRanges {
+		if groupRange.Id == rangeObj.Id {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Group %s already has access to range %s", group.Name(), rangeObj.Name()))
+		}
 	}
 
-	// Grant group access to range
-	groupRangeAccess := GroupRangeAccess{
-		GroupID:     uint(group.ID),
-		RangeNumber: int32(rangeObj.RangeNumber),
-	}
+	group.Set("ranges+", rangeObj.Id)
 
 	// Grant group access to range in proxmox
-	err = grantGroupAccessToRangeInProxmox(group.Name, rangeObj.RangeID)
+	err = grantGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error granting group %s access to range %s in proxmox: %v", group.Name, rangeObj.RangeID, err)})
-		return
+		group.Set("ranges-", rangeObj.Id)
+		e.App.Save(group)
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error granting group %s access to range %s in proxmox: %v", group.Name(), rangeObj.RangeId(), err))
 	}
 
-	if err := db.Create(&groupRangeAccess).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error granting group %s access to range %s: %v", group.Name, rangeObj.RangeID, err)})
-		return
-	}
+	e.App.Save(group)
 
-	c.JSON(http.StatusCreated, gin.H{"result": fmt.Sprintf("Group %s access to range %s granted successfully", group.Name, rangeObj.RangeID)})
+	return JSONResult(e, http.StatusCreated, fmt.Sprintf("Group %s access to range %s granted successfully", group.Name(), rangeObj.RangeId()))
 }
 
 // RemoveRangeFromGroup revokes group access from a range (admin only)
-func RemoveRangeFromGroup(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+func RemoveRangeFromGroup(e *core.RequestEvent) error {
+	if !e.Auth.GetBool("isAdmin") {
+		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot remove ranges from groups")
 	}
 
-	group, err := getGroupObjectFromRequest(c)
+	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
-		return
+		return err
 	}
 
-	rangeID := c.Param("rangeID")
-
-	var rangeObj RangeObject
-	if err := db.Where("range_id = ?", rangeID).First(&rangeObj).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeID)})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding range %s: %v", rangeID, err)})
-		}
-		return
+	rangeID := e.Request.PathValue("rangeID")
+	if rangeID == "" {
+		return JSONError(e, http.StatusBadRequest, "Range ID is required")
 	}
+
+	rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
+	if err != nil && err != sql.ErrNoRows {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding range: %v", err))
+	}
+	if err == sql.ErrNoRows {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found", rangeID))
+	}
+	rangeObj := models.Range{}
+	rangeObj.SetProxyRecord(rangeRecord)
 
 	// Remove group access to range in proxmox
-	err = revokeGroupAccessToRangeInProxmox(group.Name, rangeObj.RangeID)
+	err = revokeGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error revoking group %s access to range %s in proxmox: %v", group.Name, rangeObj.RangeID, err)})
-		return
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error revoking group %s access to range %s in proxmox: %v", group.Name(), rangeObj.RangeId(), err))
 	}
 
 	// Remove group access to range
-	result := db.Where("group_id = ? AND range_number = ?", group.ID, rangeObj.RangeNumber).Delete(&GroupRangeAccess{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error revoking group %s access to range %s: %v", group.Name, rangeObj.RangeID, result.Error)})
-		return
-	}
+	group.Set("ranges-", rangeObj.Id)
+	e.App.Save(group)
 
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Group %s does not have access to range %s", group.Name, rangeObj.RangeID)})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"result": "Group access to range revoked successfully"})
+	return JSONResult(e, http.StatusOK, fmt.Sprintf("Group %s access to range %s revoked successfully", group.Name(), rangeObj.RangeId()))
 }
 
 // ListGroupMembers lists users in a group (admin only)
-func ListGroupMembers(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+func ListGroupMembers(e *core.RequestEvent) error {
+	if !e.Auth.GetBool("isAdmin") {
+		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot list group members")
 	}
 
-	group, err := getGroupObjectFromRequest(c)
+	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
-		return
+		return err
 	}
 
 	// Get group members
-	var memberships []UserGroupMembership
-	if err := db.Where("group_id = ?", group.ID).Find(&memberships).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting group members: %v", err)})
-		return
-	}
+	e.App.ExpandRecord(group.Record, []string{"members", "managers"}, nil)
+	groupMembers := group.Members()
+	groupManagers := group.Managers()
+	allGroupUsers := append(groupMembers, groupManagers...)
 
-	// Get user details for each member
-	var users []UserObject
-	for _, membership := range memberships {
-		var user UserObject
-		if err := db.First(&user, "user_id = ?", membership.UserID).Error; err == nil {
-			users = append(users, user)
-		}
+	var users []dto.ListGroupMembersResponseItem
+	for _, user := range allGroupUsers {
+		users = append(users, dto.ListGroupMembersResponseItem{
+			UserID: user.Id,
+			Name:   user.Name(),
+		})
 	}
-
-	c.JSON(http.StatusOK, gin.H{"result": users})
+	response := dto.ListGroupMembersResponse{
+		Result: users,
+	}
+	return e.JSON(http.StatusOK, response)
 }
 
 // ListGroupRanges lists ranges accessible to a group (admin only)
-func ListGroupRanges(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+func ListGroupRanges(e *core.RequestEvent) error {
+	if !e.Auth.GetBool("isAdmin") {
+		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot list group ranges")
 	}
 
-	group, err := getGroupObjectFromRequest(c)
+	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
-		return
+		return err
 	}
 
-	// Get group range access
-	var groupRangeAccesses []GroupRangeAccess
-	if err := db.Where("group_id = ?", group.ID).Find(&groupRangeAccesses).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting group ranges: %v", err)})
-		return
-	}
-
-	// Get range details for each accessible range
-	var ranges []RangeObject
-	for _, access := range groupRangeAccesses {
-		var rangeObj RangeObject
-		if err := db.Where("range_number = ?", access.RangeNumber).First(&rangeObj).Error; err == nil {
-			ranges = append(ranges, rangeObj)
+	e.App.ExpandRecord(group.Record, []string{"ranges"}, nil)
+	groupRanges := group.Ranges()
+	var ranges []dto.ListGroupRangesResponseItem
+	for _, rangeRecord := range groupRanges {
+		e.App.ExpandRecord(rangeRecord.Record, []string{"VMs"}, nil)
+		vms, err := getVMsForRange(rangeRecord.RangeId())
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting VMs for range: %v", err))
 		}
+		var rangeVMs []dto.ListGroupRangesResponseItemVMsItem
+		for _, vm := range vms {
+			rangeVMs = append(rangeVMs, dto.ListGroupRangesResponseItemVMsItem{
+				RangeNumber: int32(rangeRecord.RangeNumber()),
+				Name:        vm.Name(),
+				PoweredOn:   vm.PoweredOn(),
+				Ip:          vm.Ip(),
+				IsRouter:    vm.IsRouter(),
+				ID:          int32(vm.ProxmoxId()),
+				ProxmoxID:   int32(vm.ProxmoxId()),
+			})
+		}
+		ranges = append(ranges, dto.ListGroupRangesResponseItem{
+			NumberOfVMs:    int32(rangeRecord.NumberOfVms()),
+			AllowedIPs:     rangeRecord.AllowedIps(),
+			AllowedDomains: rangeRecord.AllowedDomains(),
+			RangeState:     rangeRecord.RangeState(),
+			RangeNumber:    int32(rangeRecord.RangeNumber()),
+			Description:    rangeRecord.Description(),
+			Purpose:        rangeRecord.Purpose(),
+			LastDeployment: rangeRecord.LastDeployment().Time(),
+			TestingEnabled: rangeRecord.TestingEnabled(),
+			VMs:            rangeVMs,
+			RangeID:        rangeRecord.RangeId(),
+			Name:           rangeRecord.Name(),
+		})
 	}
+	response := dto.ListGroupRangesResponse{
+		Result: ranges,
+	}
+	return e.JSON(http.StatusOK, response)
 
-	c.JSON(http.StatusOK, gin.H{"result": ranges})
 }

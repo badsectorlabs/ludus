@@ -10,13 +10,13 @@ import (
 	"plugin"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 type LudusPlugin interface {
 	Name() string
 	Initialize(server *Server) error
-	RegisterRoutes(router *gin.Engine)
+	RegisterRoutes(app *core.App)
 	GetEmbeddedFSs() []fs.FS
 	Shutdown() error
 	Initialized() bool
@@ -113,11 +113,11 @@ func (s *Server) InitializePlugins() {
 
 }
 
-func (s *Server) RegisterPluginRoutes(router *gin.Engine) {
+func (s *Server) RegisterPluginRoutes(app *core.App) {
 	for _, p := range s.plugins {
 		if !p.RoutesRegistered() {
 			log.Printf("Registering routes for plugin: %s\n", p.Name())
-			p.RegisterRoutes(router)
+			p.RegisterRoutes(app)
 		}
 
 	}

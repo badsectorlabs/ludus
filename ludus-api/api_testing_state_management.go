@@ -2,16 +2,13 @@ package ludusapi
 
 import (
 	"fmt"
+	"ludusapi/dto"
+	"ludusapi/models"
 	"net/http"
 	"slices"
 
-	"github.com/gin-gonic/gin"
+	"github.com/pocketbase/pocketbase/core"
 )
-
-type AllowPayload struct {
-	Domains []string `json:"domains,omitempty"`
-	Ips     []string `json:"ips,omitempty"`
-}
 
 func removeEmptyStrings(s []string) []string {
 	var r []string
@@ -24,57 +21,44 @@ func removeEmptyStrings(s []string) []string {
 }
 
 // Allow - allows the domain and CRL domains and the ips they resolve to
-func Allow(c *gin.Context) {
+func Allow(e *core.RequestEvent) error {
 
-	var thisAllowPayload AllowPayload
+	var thisAllowPayload dto.AllowRequest
 	var returnArray []string
 
-	type errorStruct struct {
-		Item   string `json:"item"`
-		Reason string `json:"reason"`
+	var errorArray []dto.AllowResponseErrorsItem
+
+	usersRange := e.Get("range").(*models.Range)
+
+	if !usersRange.TestingEnabled() {
+		return JSONError(e, http.StatusConflict, "testing not enabled for range "+usersRange.RangeId())
 	}
 
-	var errorArray []errorStruct
-
-	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
-	if err != nil {
-		return // JSON set in CheckRangeAccessAndGetObjects
-	}
-
-	if !usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "testing not enabled for range " + usersRange.RangeID})
-		return
-	}
-
-	err = c.BindJSON(&thisAllowPayload)
-	if err != nil {
-		c.JSON(http.StatusNoContent, gin.H{"error": "improperly formatted allow payload"})
-		return
-	}
+	e.BindBody(&thisAllowPayload)
 
 	allowDomains := removeEmptyStrings(thisAllowPayload.Domains)
 	allowIPs := removeEmptyStrings(thisAllowPayload.Ips)
 	for _, domain := range allowDomains {
 		// First, check if this domain is already allowed
 		// The `+" ("` is to ensure that subdomains aren't matched incorrectly - a.com won't match a.company.com because of the added space and paren
-		if containsSubstring(usersRange.AllowedDomains, domain+" (") {
-			errorArray = append(errorArray, errorStruct{domain, "already allowed"})
+		if containsSubstring(usersRange.AllowedDomains(), domain+" (") {
+			errorArray = append(errorArray, dto.AllowResponseErrorsItem{Item: domain, Reason: "already allowed"})
 		} else {
 			// This is a new domain to allow, so allow it
 			domainIP, err := GetIPFromDomain(domain)
 			if err != nil {
-				errorArray = append(errorArray, errorStruct{domain, err.Error()})
+				errorArray = append(errorArray, dto.AllowResponseErrorsItem{Item: domain, Reason: err.Error()})
 				continue
 			}
 			extraVars := map[string]interface{}{"domain": domain, "domainIP": domainIP}
-			output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-domain", false, "")
+			output, err := server.RunAnsiblePlaybookWithVariables(e, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-domain", false, "")
 			if err != nil {
-				errorArray = append(errorArray, errorStruct{domain, output})
+				errorArray = append(errorArray, dto.AllowResponseErrorsItem{Item: domain, Reason: output})
 				continue
 			}
 			// Save allowed value in the DB for each success - in the event one fails, the DB will reflect the correct state
-			usersRange.AllowedDomains = append(usersRange.AllowedDomains, fmt.Sprintf("%s (%s)", domain, domainIP))
-			db.Save(&usersRange)
+			usersRange.Set("allowedDomains+", fmt.Sprintf("%s (%s)", domain, domainIP))
+			e.App.Save(usersRange)
 			returnArray = append(returnArray, domain)
 
 			// Get all the CRL domains for this domain and allow those too
@@ -82,202 +66,175 @@ func Allow(c *gin.Context) {
 			crlDomains := getCRLDomainsFromDomain(domain)
 			for _, crlDomain := range crlDomains {
 				// The `+" ("` is to ensure that subdomains aren't matched incorrectly - a.com won't match a.company.com because of the added space and paren
-				if containsSubstring(usersRange.AllowedDomains, crlDomain+" (") {
+				if containsSubstring(usersRange.AllowedDomains(), crlDomain+" (") {
 					continue // Don't return the CRL domain in an "error" to the client as they didn't ask for it to be allowed
 				} else {
 					domainIP, err := GetIPFromDomain(crlDomain)
 					if err != nil {
-						errorArray = append(errorArray, errorStruct{crlDomain, err.Error()})
+						errorArray = append(errorArray, dto.AllowResponseErrorsItem{Item: crlDomain, Reason: err.Error()})
 						continue
 					}
 					extraVars := map[string]interface{}{"domain": crlDomain, "domainIP": domainIP}
-					output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-domain", false, "")
+					output, err := server.RunAnsiblePlaybookWithVariables(e, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-domain", false, "")
 					if err != nil {
-						errorArray = append(errorArray, errorStruct{crlDomain, output})
+						errorArray = append(errorArray, dto.AllowResponseErrorsItem{Item: crlDomain, Reason: output})
 						continue
 					}
 					// Save allowed value in the DB for each success - in the event one fails, the DB will reflect the correct state
-					usersRange.AllowedDomains = append(usersRange.AllowedDomains, fmt.Sprintf("%s (%s)", crlDomain, domainIP))
-					db.Save(&usersRange)
+					usersRange.Set("allowedDomains+", fmt.Sprintf("%s (%s)", crlDomain, domainIP))
+					e.App.Save(usersRange)
 					returnArray = append(returnArray, crlDomain)
 				}
 			}
 		}
 	}
 	for _, ip := range allowIPs {
-		if slices.Contains(usersRange.AllowedIPs, ip) {
-			errorArray = append(errorArray, errorStruct{ip, "already allowed"})
+		if slices.Contains(usersRange.AllowedIps(), ip) {
+			errorArray = append(errorArray, dto.AllowResponseErrorsItem{Item: ip, Reason: "already allowed"})
 		} else {
 			extraVars := map[string]interface{}{"action_ip": ip}
-			output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-ip", false, "")
+			output, err := server.RunAnsiblePlaybookWithVariables(e, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "allow-ip", false, "")
 			if err != nil {
-				errorArray = append(errorArray, errorStruct{ip, output})
+				errorArray = append(errorArray, dto.AllowResponseErrorsItem{Item: ip, Reason: output})
 				continue
 			}
 			// Save allowed value in the DB for each success - in the event one fails, the DB will reflect the correct state
-			usersRange.AllowedIPs = append(usersRange.AllowedIPs, ip)
-			db.Save(&usersRange)
+			usersRange.Set("allowedIPs+", ip)
+			e.App.Save(usersRange)
 			returnArray = append(returnArray, ip)
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"allowed": returnArray, "errors": errorArray})
+	response := dto.AllowResponse{
+		Allowed: returnArray,
+		Errors:  errorArray,
+	}
+	return e.JSON(http.StatusOK, response)
+
 }
 
-func Deny(c *gin.Context) {
-	var thisDenyPayload AllowPayload
+func Deny(e *core.RequestEvent) error {
+	var thisDenyPayload dto.DenyRequest
 	var returnArray []string
 
-	type errorStruct struct {
-		Item   string
-		Reason string
+	var errorArray []dto.DenyResponseErrorsItem
+
+	usersRange := e.Get("range").(*models.Range)
+
+	if !usersRange.TestingEnabled() {
+		return JSONError(e, http.StatusConflict, "Testing not enabled for range "+usersRange.RangeId())
 	}
 
-	var errorArray []errorStruct
-
-	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
-	if err != nil {
-		return // JSON set in CheckRangeAccessAndGetObjects
-	}
-
-	if !usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "Testing not enabled for range " + usersRange.RangeID})
-		return
-	}
-
-	err = c.BindJSON(&thisDenyPayload)
-	if err != nil {
-		c.JSON(http.StatusNoContent, gin.H{"error": "Improperly formatted deny payload"})
-		return
-	}
+	e.BindBody(&thisDenyPayload)
 
 	denyDomains := removeEmptyStrings(thisDenyPayload.Domains)
 	denyIPs := removeEmptyStrings(thisDenyPayload.Ips)
 	for _, domain := range denyDomains {
 		// First, check if this domain is currently allowed
-		if !containsSubstring(usersRange.AllowedDomains, domain+" (") {
-			errorArray = append(errorArray, errorStruct{domain, "not allowed"})
+		if !containsSubstring(usersRange.AllowedDomains(), domain+" (") {
+			errorArray = append(errorArray, dto.DenyResponseErrorsItem{Item: domain, Reason: "not allowed"})
 		} else {
 			// Extract the pinned IP from the AllowedDomains string that contains this domain
-			domainIP := getDomainIPString(usersRange.AllowedDomains, domain)
+			domainIP := getDomainIPString(usersRange.AllowedDomains(), domain)
 			extraVars := map[string]interface{}{"domain": domain, "domainIP": domainIP}
-			output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "deny-domain", false, "")
+			output, err := server.RunAnsiblePlaybookWithVariables(e, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "deny-domain", false, "")
 			if err != nil {
-				errorArray = append(errorArray, errorStruct{domain, output})
+				errorArray = append(errorArray, dto.DenyResponseErrorsItem{Item: domain, Reason: output})
 				continue
 			}
 			// Save allowed value in the DB for each success - in the event one fails, the DB will reflect the correct state
 			// The `+" ("` is to ensure that subdomains aren't matched incorrectly - a.com won't match a.company.com because of the added space and paren
-			newAllowedDomains := removeElementThatContainsString(usersRange.AllowedDomains, domain+" (")
-			usersRange.AllowedDomains = newAllowedDomains
-			db.Save(&usersRange)
+			newAllowedDomains := removeElementThatContainsString(usersRange.AllowedDomains(), domain+" (")
+			usersRange.Set("allowedDomains-", newAllowedDomains)
+			e.App.Save(usersRange)
 			returnArray = append(returnArray, domain)
 
 			// We aren't going to deal with CRL domains, as they could be shared between explicitly allowed domains.
 		}
 	}
 	for _, ip := range denyIPs {
-		if !slices.Contains(usersRange.AllowedIPs, ip) {
+		if !slices.Contains(usersRange.AllowedIps(), ip) {
 			returnArray = append(returnArray, fmt.Sprintf("%s NOT denied as it is not allowed", ip))
 		} else {
 			extraVars := map[string]interface{}{"action_ip": ip}
-			output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "deny-ip", false, "")
+			output, err := server.RunAnsiblePlaybookWithVariables(e, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "deny-ip", false, "")
 			if err != nil {
-				errorArray = append(errorArray, errorStruct{ip, output})
+				errorArray = append(errorArray, dto.DenyResponseErrorsItem{Item: ip, Reason: output})
 				continue
 			}
 			// Save allowed value in the DB for each success - in the event one fails, the DB will reflect the correct state
-			newAllowedIPs := removeStringExact(usersRange.AllowedIPs, ip)
-			usersRange.AllowedIPs = newAllowedIPs
-			db.Save(&usersRange)
+			newAllowedIPs := removeStringExact(usersRange.AllowedIps(), ip)
+			usersRange.Set("allowedIPs-", newAllowedIPs)
+			e.App.Save(usersRange)
 			returnArray = append(returnArray, ip)
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"denied": returnArray, "errors": errorArray})
+	response := dto.DenyResponse{
+		Denied: returnArray,
+		Errors: errorArray,
+	}
+	return e.JSON(http.StatusOK, response)
 }
 
 // StartTesting - snapshot and enter testing state
-func StartTesting(c *gin.Context) {
-	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
-	if err != nil {
-		return // JSON set in CheckRangeAccessAndGetObjects
+func StartTesting(e *core.RequestEvent) error {
+	usersRange := e.Get("range").(*models.Range)
+
+	if usersRange.TestingEnabled() {
+		return JSONError(e, http.StatusConflict, "Testing already enabled")
 	}
 
-	if usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"result": "Testing already enabled"})
-		return
-	}
-
-	output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, nil, "start-testing", false, "")
+	output, err := server.RunAnsiblePlaybookWithVariables(e, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, nil, "start-testing", false, "")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
-		return
+		return JSONError(e, http.StatusInternalServerError, output)
 	}
 	// Update the testing state in the DB
-	db.Model(&usersRange).Update("testing_enabled", true)
+	usersRange.SetTestingEnabled(true)
+	e.App.Save(usersRange)
 
-	c.JSON(http.StatusOK, gin.H{"result": "Testing started"})
+	return JSONResult(e, http.StatusOK, "Testing started")
 }
 
 // StopTesting - revert and exit testing state
-func StopTesting(c *gin.Context) {
-	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
-	if err != nil {
-		return // JSON set in CheckRangeAccessAndGetObjects
+func StopTesting(e *core.RequestEvent) error {
+	usersRange := e.Get("range").(*models.Range)
+
+	if !usersRange.TestingEnabled() {
+		return JSONError(e, http.StatusConflict, "Testing not enabled")
 	}
 
-	if !usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "Testing not enabled"})
-		return
-	}
-
-	type StopTestingBody struct {
-		Force bool `json:"force"`
-	}
-	var stopTestingBody StopTestingBody
-	c.Bind(&stopTestingBody) // If this errors Force will have the zero value which is false - which is what we want as a default
+	var stopTestingBody dto.StopTestingRequest
+	e.BindBody(&stopTestingBody) // If this errors Force will have the zero value which is false - which is what we want as a default
 
 	extraVars := map[string]interface{}{"force_stop": stopTestingBody.Force}
-	output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "stop-testing", false, "")
+	output, err := server.RunAnsiblePlaybookWithVariables(e, []string{ludusInstallPath + "/ansible/range-management/testing.yml"}, nil, extraVars, "stop-testing", false, "")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
-		return
+		return JSONError(e, http.StatusInternalServerError, output)
 	}
 	// Update the testing state in the DB as well as allowed domains and ips
-	usersRange.TestingEnabled = false
-	usersRange.AllowedDomains = []string{}
-	usersRange.AllowedIPs = []string{}
-	db.Save(&usersRange)
+	usersRange.SetTestingEnabled(false)
+	usersRange.SetAllowedDomains([]string{})
+	usersRange.SetAllowedIps([]string{})
+	e.App.Save(usersRange)
 
-	c.JSON(http.StatusOK, gin.H{"result": "Testing stopped"})
+	return JSONResult(e, http.StatusOK, "Testing stopped")
 }
 
 // UpdateVMs - update a VM/group of VMs based on a name provided in the POST body
-func UpdateVMs(c *gin.Context) {
-	usersRange, _, err := CheckRangeAccessAndGetObjects(c)
-	if err != nil {
-		return // JSON set in CheckRangeAccessAndGetObjects
+func UpdateVMs(e *core.RequestEvent) error {
+	usersRange := e.Get("range").(*models.Range)
+
+	if usersRange.TestingEnabled() {
+		return JSONError(e, http.StatusConflict, "Testing is enabled; stop testing to update VMs")
 	}
 
-	if usersRange.TestingEnabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "Testing is enabled; stop testing to update VMs"})
-		return
-	}
+	var thisUpdatePayload dto.UpdateRequest
 
-	type UpdatePayload struct {
-		Name string `json:"name"`
-	}
-	var thisUpdatePayload UpdatePayload
-
-	err = c.BindJSON(&thisUpdatePayload)
-	if err != nil {
-		c.JSON(http.StatusNoContent, gin.H{"error": "Improperly formatted update payload"})
-		return
-	}
+	e.BindBody(&thisUpdatePayload)
 
 	extraVars := map[string]interface{}{"update_host": thisUpdatePayload.Name}
-	go server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/update.yml"}, nil, extraVars, "update", false, "")
+	go server.RunAnsiblePlaybookWithVariables(e, []string{ludusInstallPath + "/ansible/range-management/update.yml"}, nil, extraVars, "update", false, "")
 
-	c.JSON(http.StatusOK, gin.H{"result": "Update process started"})
+	return JSONResult(e, http.StatusOK, "Update process started")
 }

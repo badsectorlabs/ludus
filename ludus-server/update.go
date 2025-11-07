@@ -52,6 +52,7 @@ Move the updated binary to a different location and run it with --update to comp
 
 	// Start ludus and ludus-admin
 	Run("systemctl start ludus", false, true)
+	time.Sleep(2 * time.Second) // Wait for ludus to start
 	Run("systemctl start ludus-admin", false, true)
 
 	if !noAnsibleUpdate {

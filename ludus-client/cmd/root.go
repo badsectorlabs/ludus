@@ -25,6 +25,7 @@ const (
 	licenseProductClient = "81af38fe-d304-4d41-8378-d3d568c8fcf7"
 	licenseAccount       = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
 	licensePublicKey     = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
+	APIBasePath          = "/api/v2"
 )
 
 var (

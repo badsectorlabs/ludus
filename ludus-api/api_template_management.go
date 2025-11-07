@@ -3,10 +3,13 @@ package ludusapi
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"ludusapi/dto"
+	"ludusapi/models"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,7 +22,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 type TemplateStatus struct {
@@ -33,12 +36,12 @@ const templateRegex string = `(?m)[^"]*?-template`
 var templateProgressStore sync.Map
 
 // Get all available packer templates from the main packer dir and the user packer dir
-func getAvailableTemplates(user UserObject) ([]string, error) {
+func getAvailableTemplates(user *models.User) ([]string, error) {
 	globalTemplates, err := findFiles(fmt.Sprintf("%s/packer/", ludusInstallPath), "pkr.hcl", "pkr.json")
 	if err != nil {
 		return nil, errors.New("unable to get global packer templates")
 	}
-	userTemplates, err := findFiles(fmt.Sprintf("%s/users/%s/packer/", ludusInstallPath, user.ProxmoxUsername), ".hcl", ".json")
+	userTemplates, err := findFiles(fmt.Sprintf("%s/users/%s/packer/", ludusInstallPath, user.ProxmoxUsername()), ".hcl", ".json")
 	if err != nil {
 		return nil, errors.New("unable to get user packer templates")
 	}
@@ -104,19 +107,27 @@ func Run(command string, workingDir string, outputLog string) error {
 	return nil
 }
 
-func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, packerFile string, verbose bool) {
-
+func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose bool) {
+	proxmoxPassword, err := getProxmoxPasswordForUser(user)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Unable to get proxmox password: %v\n", err))
+	}
+	proxmoxToken, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret())
+	if err != nil {
+		logger.Error(fmt.Sprintf("Unable to decrypt proxmox token secret: %v\n", err))
+	}
 	// Run the longest, grossest packer command you have ever seen...
 	// There should be a better way to do this, but apparently not: https://devops.stackexchange.com/questions/14181/is-it-possible-to-control-packer-from-golang
 
 	workingDir := filepath.Dir(packerFile)
-	packerLogFile := fmt.Sprintf("%s/users/%s/packer.log", ludusInstallPath, user.ProxmoxUsername)
-	packerLogFileDebug := fmt.Sprintf("%s/users/%s/packer-debug.log", ludusInstallPath, user.ProxmoxUsername)
-	usersPackerDir := fmt.Sprintf("%s/users/%s/packer", ludusInstallPath, user.ProxmoxUsername)
-	usersAnsibleDir := fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername)
-	os.MkdirAll(fmt.Sprintf("%s/users/%s/packer/tmp", ludusInstallPath, user.ProxmoxUsername), 0755)
+	packerLogFile := fmt.Sprintf("%s/users/%s/packer.log", ludusInstallPath, user.ProxmoxUsername())
+	packerLogFileDebug := fmt.Sprintf("%s/users/%s/packer-debug.log", ludusInstallPath, user.ProxmoxUsername())
+	usersPackerDir := fmt.Sprintf("%s/users/%s/packer", ludusInstallPath, user.ProxmoxUsername())
+	usersAnsibleDir := fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername())
+	os.MkdirAll(fmt.Sprintf("%s/users/%s/packer/tmp", ludusInstallPath, user.ProxmoxUsername()), 0755)
 
-	tmplStr := `PACKER_PLUGIN_PATH={{.LudusInstallPath}}/resources/packer/plugins PKR_VAR_proxmox_password={{.ProxmoxPassword}} PACKER_CONFIG_DIR={{.UsersPackerDir}} PACKER_CACHE_DIR={{.UsersPackerDir}}/packer_cache ` +
+	tmplStr := `PACKER_PLUGIN_PATH={{.LudusInstallPath}}/resources/packer/plugins PKR_VAR_proxmox_password={{.ProxmoxPassword}} PKR_VAR_proxmox_token={{.ProxmoxToken}} PROXMOX_TOKEN={{ .ProxmoxToken }}` +
+		`PACKER_CONFIG_DIR={{.UsersPackerDir}} PACKER_CACHE_DIR={{.UsersPackerDir}}/packer_cache ` +
 		`CHECKPOINT_DISABLE=1 PACKER_LOG={{.PackerVerbose}} PACKER_LOG_PATH='{{.PackerLogFile}}' TMPDIR='{{.UsersPackerDir}}/tmp' packer build -on-error=cleanup ` +
 		`-var 'proxmox_url={{.ProxmoxURL}}/api2/json' -var 'proxmox_host={{.ProxmoxHost}}' ` +
 		`-var 'proxmox_username={{.ProxmoxUsername}}@pam' -var 'proxmox_skip_tls_verify={{.ProxmoxSkipTLSVerify}}' ` +
@@ -150,6 +161,7 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 	data := struct {
 		LudusInstallPath       string
 		ProxmoxPassword        string
+		ProxmoxToken           string
 		UsersPackerDir         string
 		PackerVerbose          string
 		PackerLogFile          string
@@ -166,12 +178,13 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 	}{
 		ludusInstallPath,
 		proxmoxPassword,
+		proxmoxToken,
 		usersPackerDir,
 		packerVerbose,
 		packerLogFile,
 		ServerConfiguration.ProxmoxURL,
 		ServerConfiguration.ProxmoxNode,
-		user.ProxmoxUsername,
+		user.ProxmoxUsername(),
 		strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert),
 		ServerConfiguration.ProxmoxVMStoragePool,
 		ServerConfiguration.ProxmoxVMStorageFormat,
@@ -224,7 +237,7 @@ func buildVMFromTemplateWithPacker(user UserObject, proxmoxPassword string, pack
 
 }
 
-func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject, proxmoxPassword string, templateNames []string, parallel int, verbose bool) error {
+func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user *models.User, templateNames []string, parallel int, verbose bool) error {
 	// Create a WaitGroup to wait for all goroutines to finish.
 	var wg sync.WaitGroup
 
@@ -234,7 +247,7 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 	// Iterate over the array of template statuses.
 	for _, templateStatus := range templateStatusArray {
 		// Check the canary file before launching a new goroutine.
-		if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername), 10) {
+		if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername()), 10) {
 			log.Println("Canary check failed")
 			break
 		}
@@ -287,7 +300,7 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 			// Have to get a little tricky here, since if two users are building templates and one aborts
 			// we don't want to remove queued templates for the other user
 			// To accomplish this, we store the username of the building user as the value to the key of the template.
-			templateProgressStore.Store(templateStatus.Name, user.ProxmoxUsername)
+			templateProgressStore.Store(templateStatus.Name, user.ProxmoxUsername())
 
 			// Launch a go routine to build the VM.
 			go func(templateStatus TemplateStatus, username string) {
@@ -310,15 +323,15 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 				}()
 
 				// Check the canary file before starting the VM build.
-				if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername), 10) {
-					log.Println("Canary check failed")
+				if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername()), 10) {
+					logger.Error("Canary check failed - not building template " + templateStatus.Name)
 					return
 				}
 
 				// Build the VM from the template.
-				buildVMFromTemplateWithPacker(user, proxmoxPassword, templateStatus.FilePath, verbose)
+				buildVMFromTemplateWithPacker(user, templateStatus.FilePath, verbose)
 
-			}(templateStatus, user.ProxmoxUsername)
+			}(templateStatus, user.ProxmoxUsername())
 
 			// Sleep for 3 seconds so the server isn't flooded with builds all at exactly the same time if the user gives a high number for parallel
 			time.Sleep(3 * time.Second)
@@ -332,44 +345,27 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user UserObject
 	return nil
 }
 
-func getTemplatesStatus(c *gin.Context) ([]TemplateStatus, error) {
-	var user UserObject
+func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
+	user := e.Get("user").(*models.User)
 
-	user, err := GetUserObject(c)
-	if err != nil {
-		return nil, err // JSON set in GetUserObject
-	}
-
-	proxmoxPassword := getProxmoxPasswordForUser(user, c)
-	if proxmoxPassword == "" {
-		return nil, errors.New("error getting proxmox password for user") // JSON set in getProxmoxPasswordForUser
-	}
-
-	proxmoxClient, err := GetProxmoxClientForUser(c)
-	if err != nil {
-		return nil, err // JSON set in getProxmoxClientForUser
-	}
-
-	rawVMs, err := proxmoxClient.GetVmList()
+	proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
 	if err != nil {
 		return nil, err
 	}
 
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+
+	// Get all resources of type "vm" (which includes 'qemu' and 'lxc' types)
+	allVMs, err := getAllVMs(e, ctx, proxmoxClient)
+	if err != nil {
+		return nil, fmt.Errorf("unable to list VMs from cluster: %w", err)
+	}
+
 	var templates []string
 
-	// Loop over the VMs and add them to the templates array
-	vms := rawVMs["data"].([]interface{})
-	for vmCounter := range vms {
-		vm := vms[vmCounter].(map[string]interface{})
-		// Only include VM templates
-		// Make sure the vm object has a template key
-		if _, ok := vm["template"]; ok {
-			if int(vm["template"].(float64)) == 1 {
-				// Make sure the vm object has a name key
-				if _, ok := vm["name"]; ok {
-					templates = append(templates, vm["name"].(string))
-				}
-			}
+	for _, vm := range allVMs {
+		if vm.Type == "qemu" && vm.Template == 1 {
+			templates = append(templates, vm.Name)
 		}
 	}
 
@@ -412,9 +408,9 @@ func getTemplatesStatus(c *gin.Context) ([]TemplateStatus, error) {
 	return templateStatusArray, nil
 }
 
-func getTemplateNameArray(c *gin.Context, onlyBuilt bool) ([]string, error) {
+func getTemplateNameArray(e *core.RequestEvent, onlyBuilt bool) ([]string, error) {
 	// Get a list of all the templates on the system
-	templateStatusArray, err := getTemplatesStatus(c)
+	templateStatusArray, err := getTemplatesStatus(e)
 	if err != nil {
 		return nil, err
 	}
@@ -429,54 +425,44 @@ func getTemplateNameArray(c *gin.Context, onlyBuilt bool) ([]string, error) {
 	return templateSlice, nil
 }
 
-func templateActions(c *gin.Context, buildTemplates bool, templateNames []string, parallel int, verbose bool) {
+func templateActions(e *core.RequestEvent, buildTemplates bool, templateNames []string, parallel int, verbose bool) error {
 
 	if parallel == 0 {
 		parallel = 1
 	}
 
-	templateStatusArray, err := getTemplatesStatus(c)
+	templateStatusArray, err := getTemplatesStatus(e)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Unable to get template status array: "+err.Error())
 	}
 
 	if !buildTemplates {
-		c.JSON(http.StatusOK, templateStatusArray)
-		return
+		return e.JSON(http.StatusOK, templateStatusArray)
 	}
 
-	user, err := GetUserObject(c)
-	if err != nil {
-		return // JSON set in GetUserObject
-	}
+	user := e.Get("user").(*models.User)
 
-	proxmoxPassword := getProxmoxPasswordForUser(user, c)
-	if proxmoxPassword == "" {
-		return // JSON set in getProxmoxPasswordForUser
-	}
+	go buildVMsFromTemplates(templateStatusArray, user, templateNames, parallel, verbose)
 
-	go buildVMsFromTemplates(templateStatusArray, user, proxmoxPassword, templateNames, parallel, verbose)
-
-	c.JSON(http.StatusOK, gin.H{
-		"result": fmt.Sprintf("Template building started - this will take a while. Building %d template(s) at a time.", parallel),
-	})
+	return JSONResult(e, http.StatusOK, fmt.Sprintf("Template building started - this will take a while. Building %d template(s) at a time.", parallel))
 
 }
 
 // GetTemplates - returns a list of VM templates available for use in Ludus
-func GetTemplates(c *gin.Context) {
-	templateActions(c, false, []string{}, 1, false)
+func GetTemplates(e *core.RequestEvent) error {
+	return templateActions(e, false, []string{}, 1, false)
+}
+
+func GetTemplateStatus(e *core.RequestEvent) error {
+	templatesInProgress := findRunningPackerProcesses()
+	return e.JSON(http.StatusOK, templatesInProgress)
 }
 
 // Build all templates
-func BuildTemplates(c *gin.Context) {
-	type TemplateBody struct {
-		Templates []string `json:"templates"`
-		Parallel  int      `json:"parallel"`
-	}
-	var templateBody TemplateBody
-	c.Bind(&templateBody)
+func BuildTemplates(e *core.RequestEvent) error {
+
+	var templateBody dto.BuildTemplatesRequest
+	e.BindBody(&templateBody)
 
 	// Set the default value to 1 if nothing is presented
 	if templateBody.Parallel == 0 {
@@ -490,70 +476,53 @@ func BuildTemplates(c *gin.Context) {
 
 	// Validate that templates array is not empty
 	if len(templateBody.Templates) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "templates array cannot be empty"})
-		return
+		return JSONError(e, http.StatusBadRequest, "templates array cannot be empty")
 	}
 
 	// Validate all templates in the array exist (skip validation for "all")
-	templateArray, _ := getTemplateNameArray(c, false)
+	templateArray, err := getTemplateNameArray(e, false)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to get template name array: "+err.Error())
+	}
+
 	for _, templateName := range templateBody.Templates {
 		if templateName != "all" && !slices.Contains(templateArray, templateName) {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Template '%s' not found", templateName)})
-			return
+			return JSONError(e, http.StatusNotFound, fmt.Sprintf("Template '%s' not found", templateName))
 		}
 	}
 
-	templateActions(c, true, templateBody.Templates, templateBody.Parallel, verbose)
+	return templateActions(e, true, templateBody.Templates, templateBody.Parallel, verbose)
 }
 
 // GetPackerLogs - retrieves the latest packer logs
-func GetPackerLogs(c *gin.Context) {
-	user, err := GetUserObject(c)
-	if err != nil {
-		return // JSON set in GetUserObject
-	}
-	packerLogPath := fmt.Sprintf("%s/users/%s/packer.log", ludusInstallPath, user.ProxmoxUsername)
-	GetLogsFromFile(c, packerLogPath)
+func GetPackerLogs(e *core.RequestEvent) error {
+	user := e.Get("user").(*models.User)
+	packerLogPath := fmt.Sprintf("%s/users/%s/packer.log", ludusInstallPath, user.ProxmoxUsername())
+	return GetLogsFromFile(e, packerLogPath)
 }
 
-func GetTemplateStatus(c *gin.Context) {
-	templatesInProgress := findRunningPackerProcesses()
-	c.JSON(http.StatusOK, templatesInProgress)
-}
-
-func PutTemplateTar(c *gin.Context) {
+func PutTemplateTar(e *core.RequestEvent) error {
 	// Parse the multipart form
-	if err := c.Request.ParseMultipartForm(1073741824); err != nil { // allow 1GB
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if err := e.Request.ParseMultipartForm(1073741824); err != nil { // allow 1GB
+		return JSONError(e, http.StatusBadRequest, err.Error())
 	}
 
 	// Retrieve the 'force' field and convert it to boolean
-	forceStr := c.Request.FormValue("force")
+	forceStr := e.Request.FormValue("force")
 	force, err := strconv.ParseBool(forceStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid boolean value"})
-		return
+		return JSONError(e, http.StatusBadRequest, "Invalid boolean value")
 	}
 
 	// Retrieve the file
-	file, err := c.FormFile("file")
+	file, _, err := e.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File retrieval failed"})
-		return
+		return JSONError(e, http.StatusBadRequest, "File retrieval failed")
 	}
 
-	// Read the uploaded tar into memory for inspection
-	fileHandle, err := file.Open()
+	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to open uploaded file"})
-		return
-	}
-	defer fileHandle.Close()
-	fileBytes, err := io.ReadAll(fileHandle)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to read uploaded file"})
-		return
+		return JSONError(e, http.StatusBadRequest, "Unable to read uploaded file")
 	}
 
 	// Inspect tar contents to ensure a single root directory and capture its name
@@ -567,8 +536,7 @@ func PutTemplateTar(c *gin.Context) {
 			break
 		}
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid tar archive: %v", err)})
-			return
+			return JSONError(e, http.StatusBadRequest, fmt.Sprintf("Invalid tar archive: %v", err))
 		}
 		name := header.Name
 		name = strings.TrimPrefix(name, "./")
@@ -591,8 +559,7 @@ func PutTemplateTar(c *gin.Context) {
 	}
 
 	if len(rootNames) != 1 || (!sawExplicitRootDir && !hasNestedEntries) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Tar must contain a single root directory"})
-		return
+		return JSONError(e, http.StatusBadRequest, "Tar must contain a single root directory")
 	}
 
 	// We have to range over the map since rootNames isn't a slice and we can't use the index of 0 to get the value
@@ -601,50 +568,42 @@ func PutTemplateTar(c *gin.Context) {
 		rootDirName = k
 	}
 
-	user, err := GetUserObject(c)
-	if err != nil {
-		return // JSON set in GetUserObject
-	}
+	user := e.Get("user").(*models.User)
 
 	// Get all the templates on the server before we unpack this one for the name check later
-	currentTemplateNames, err := getTemplateNameArray(c, false)
+	currentTemplateNames, err := getTemplateNameArray(e, false)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting template names: %v", err)})
-		return
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting template names: %v", err))
 	}
 	// Will need this later to check if the potential --force overwrite is allowable
-	templateStatusArray, err := getTemplatesStatus(c)
+	templateStatusArray, err := getTemplatesStatus(e)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting template status array: %v", err)})
-		return
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting template status array: %v", err))
 	}
 
 	// Save the file to the server
-	os.MkdirAll(fmt.Sprintf("%s/users/%s/packer/tmp", ludusInstallPath, user.ProxmoxUsername), 0755)
-	templateTarPath := fmt.Sprintf("%s/users/%s/packer/tmp/%s", ludusInstallPath, user.ProxmoxUsername, rootDirName)
-	templateDirPath := fmt.Sprintf("%s/users/%s/packer/%s", ludusInstallPath, user.ProxmoxUsername, rootDirName)
+	os.MkdirAll(fmt.Sprintf("%s/users/%s/packer/tmp", ludusInstallPath, user.ProxmoxUsername()), 0755)
+	templateTarPath := fmt.Sprintf("%s/users/%s/packer/tmp/%s", ludusInstallPath, user.ProxmoxUsername(), rootDirName)
+	templateDirPath := fmt.Sprintf("%s/users/%s/packer/%s", ludusInstallPath, user.ProxmoxUsername(), rootDirName)
 	if _, err := os.Stat(templateDirPath); errors.Is(err, os.ErrNotExist) {
 		// templateDirPath does not exist
 	} else {
 		if !force {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Template already exists, use --force to overwrite it"})
-			return
+			return JSONError(e, http.StatusBadRequest, "Template already exists, use --force to overwrite it")
 		}
 	}
 	// Save uploaded tar bytes to temporary path
 	err = os.WriteFile(templateTarPath, fileBytes, 0644)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Saving file failed"})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Saving file failed")
 	}
 	// Destroy the existing folder with the same name if it exists when the user specifies "force"
 	if force {
 		os.RemoveAll(templateDirPath)
 	}
-	err = Untar(templateTarPath, fmt.Sprintf("%s/users/%s/packer", ludusInstallPath, user.ProxmoxUsername))
+	err = Untar(templateTarPath, fmt.Sprintf("%s/users/%s/packer", ludusInstallPath, user.ProxmoxUsername()))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error untaring file:" + err.Error()})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Error untaring file:"+err.Error())
 	}
 	os.Remove(templateTarPath)
 
@@ -653,28 +612,22 @@ func PutTemplateTar(c *gin.Context) {
 	if err != nil {
 		removeErr := os.RemoveAll(templateDirPath)
 		if removeErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding *.pkr.hcl or *.pkr.json files in tar AND Error removing '%s': %v", templateDirPath, removeErr)})
-			return
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding *.pkr.hcl or *.pkr.json files in tar AND Error removing '%s': %v", templateDirPath, removeErr))
 		}
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error finding *.pkr.hcl or *.pkr.json files: %v", err)})
-		return
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding *.pkr.hcl or *.pkr.json files: %v", err))
 	}
 	if len(uploadedTemplatePackerFiles) == 0 {
 		removeErr := os.RemoveAll(templateDirPath)
 		if removeErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("No packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr)})
-			return
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("No packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr))
 		}
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "No packer file (*.pkr.hcl or *.pkr.json) found in the tar!"})
-		return
+		return JSONError(e, http.StatusInternalServerError, "No packer file (*.pkr.hcl or *.pkr.json) found in the tar!")
 	} else if len(uploadedTemplatePackerFiles) > 1 {
 		removeErr := os.RemoveAll(templateDirPath)
 		if removeErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr)})
-			return
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr))
 		}
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar!"})
-		return
+		return JSONError(e, http.StatusInternalServerError, "More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar!")
 	} else {
 		// Check the name of this template to see if it is already on the server - templates must have unique names
 		templateStringRegex, _ := regexp.Compile(templateRegex)
@@ -691,134 +644,116 @@ func PutTemplateTar(c *gin.Context) {
 					}
 				}
 				// Path will either be None (other user's template), the install path/packer (built-in templates), or the user's packer dir
-				if !strings.Contains(existingTemplateFilePath, fmt.Sprintf("%s/users/%s/", ludusInstallPath, user.ProxmoxUsername)) {
+				if !strings.Contains(existingTemplateFilePath, fmt.Sprintf("%s/users/%s/", ludusInstallPath, user.ProxmoxUsername())) {
+					var errorString string
 					if existingTemplateFilePath != "None" {
-						c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("'%s' is a template that does not belong to you (path: %s)", thisTemplateName, existingTemplateFilePath)})
+						errorString = fmt.Sprintf("'%s' is a template that does not belong to you (path: %s)", thisTemplateName, existingTemplateFilePath)
 					} else {
-						c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("'%s' is a template that does not belong to you", thisTemplateName)})
+						errorString = fmt.Sprintf("'%s' is a template that does not belong to you", thisTemplateName)
 					}
 					// We need to remove the untar'd template dir now since the template name is either another user's or built-in
 					removeErr := os.RemoveAll(templateDirPath)
 					if removeErr != nil {
-						c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("'%s' is a template that does not belong to you AND Error removing '%s': %v", thisTemplateName, templateDirPath, removeErr)})
-						return
+						errorString = fmt.Sprintf("'%s' is a template that does not belong to you AND Error removing '%s': %v", thisTemplateName, templateDirPath, removeErr)
 					}
-					return
+					return JSONError(e, http.StatusBadRequest, errorString)
 				} else {
-					c.JSON(http.StatusOK, gin.H{"result": "Successfully added template"})
-					return
+					return JSONResult(e, http.StatusOK, "Successfully added template")
 				}
 			} else {
 				// The template name exists on the server and it isn't a template this user previously had (would have hit the 'already exists' error above) so remove it from the file system
 				removeErr := os.RemoveAll(templateDirPath)
 				if removeErr != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("The uploaded template name is already present on the server. Template names must be unique. AND Error removing '%s': %v", templateDirPath, removeErr)})
-					return
+					return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("The uploaded template name is already present on the server. Template names must be unique. AND Error removing '%s': %v", templateDirPath, removeErr))
 				}
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The uploaded template name is already present on the server. Template names must be unique."})
-				return
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("The uploaded template name is already present on the server. Template names must be unique. AND Error removing '%s': %v", templateDirPath, removeErr))
 			}
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"result": "Successfully added template"})
+	return JSONResult(e, http.StatusOK, "Successfully added template")
 }
 
 // Find the packer process(es) for this user and kill them
-func AbortPacker(c *gin.Context) {
-	user, err := GetUserObject(c)
-	if err != nil {
-		return // JSON set in GetUserObject
-	}
+func AbortPacker(e *core.RequestEvent) error {
+	user := e.Get("user").(*models.User)
 	// First touch the canary file to prevent more templates being built (in the case of "all" and not parallel)
 	touch(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername))
 
 	// Empty the sync map (queue) of any templates this user was building
 	templateProgressStore.Range(func(key, value interface{}) bool {
 		// If the value matches this user, delete the key
-		if value == user.ProxmoxUsername {
+		if value == user.ProxmoxUsername() {
 			templateProgressStore.Delete(key)
 		}
 		return true // continue iteration
 	})
 
 	// Then find and kill any running Packer processes
-	packerPids := findPackerPidsForUser(user.ProxmoxUsername)
+	packerPids := findPackerPidsForUser(user.ProxmoxUsername())
 	if len(packerPids) == 0 {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "No packer processes found for user " + user.ProxmoxUsername})
-		return
+		return JSONError(e, http.StatusInternalServerError, "No packer processes found for user "+user.ProxmoxUsername())
 	}
 	for _, pid := range packerPids {
 		killProcessAndChildren(pid)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"result": "Packer process(es) aborted for user " + user.ProxmoxUsername})
+	return JSONResult(e, http.StatusOK, "Packer process(es) aborted for user "+user.ProxmoxUsername())
 
 }
 
 // DeleteTemplate - removes a template folder from the server
-func DeleteTemplate(c *gin.Context) {
+func DeleteTemplate(e *core.RequestEvent) error {
 
-	templateName := c.Param("templateName")
+	templateName := e.Request.PathValue("templateName")
 	if len(templateName) == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Template name not provided"})
-		return
+		return JSONError(e, http.StatusBadRequest, "Template name not provided")
 	}
-	templateStatusArray, err := getTemplatesStatus(c)
+	templateStatusArray, err := getTemplatesStatus(e)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
 
 	// Get the index of the template we want in the array
 	index := slices.IndexFunc(templateStatusArray, func(t TemplateStatus) bool { return t.Name == templateName })
 	if index == -1 {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Template '%s' not found", templateName)})
-		return
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Template '%s' not found", templateName))
 	}
 
 	// Check that this is a user template
-	userObject, err := GetUserObject(c)
-	if err != nil {
-		return
-	}
+	user := e.Get("user").(*models.User)
 	templateDir := filepath.Dir(templateStatusArray[index].FilePath)
-	if !strings.Contains(templateDir, fmt.Sprintf("%s/users/%s/", ludusInstallPath, userObject.ProxmoxUsername)) && !strings.Contains(templateDir, fmt.Sprintf("%s/packer/", ludusInstallPath)) {
-		if !isAdmin(c, false) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("'%s' is a user template that belongs to another user and you are not an Admin (path: %s)", templateName, templateDir)})
-			return
+	if !strings.Contains(templateDir, fmt.Sprintf("%s/users/%s/", ludusInstallPath, user.ProxmoxUsername())) && !strings.Contains(templateDir, fmt.Sprintf("%s/packer/", ludusInstallPath)) {
+		if !e.Auth.GetBool("isAdmin") {
+			return JSONError(e, http.StatusBadRequest, fmt.Sprintf("'%s' is a user template that belongs to another user and you are not an Admin (path: %s)", templateName, templateDir))
 		}
 	}
 
 	// If the template is built, remove it from proxmox
 	if templateStatusArray[index].Built {
-		proxmoxClient, err := GetProxmoxClientForUser(c)
+		proxmoxClient, err := GetProxmoxClientForUserUsingToken(e)
 		if err != nil {
-			return // JSON set in getProxmoxClientForUser
+			return JSONError(e, http.StatusInternalServerError, err.Error())
 		}
 		thisVmRef, err := proxmoxClient.GetVmRefByName(templateName)
 		if err != nil {
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-			return
+			return JSONError(e, http.StatusConflict, err.Error())
 		}
 		_, err = proxmoxClient.DeleteVm(thisVmRef)
 		if err != nil {
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-			return
+			return JSONError(e, http.StatusConflict, err.Error())
 		}
 	}
 
 	if strings.Contains(templateDir, fmt.Sprintf("%s/packer/", ludusInstallPath)) {
-		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Built template removed but template '%s' is a ludus server included template and cannot be deleted", templateName)})
-		return
+		return JSONResult(e, http.StatusOK, fmt.Sprintf("Built template removed but template '%s' is a ludus server included template and cannot be deleted", templateName))
 	}
 
 	// Delete the folder that contains the template file
 	err = os.RemoveAll(templateDir)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error removing '%s' (path: %s): %v", templateName, templateDir, err)})
-		return
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing '%s' (path: %s): %v", templateName, templateDir, err))
 	}
 
-	c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Template '%s' removed", templateName)})
+	return JSONResult(e, http.StatusOK, fmt.Sprintf("Template '%s' removed", templateName))
 }

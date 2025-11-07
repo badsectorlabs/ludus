@@ -123,6 +123,7 @@ source "proxmox-iso" "debian12" {
   node                 = "${var.proxmox_host}"
   os                   = "${var.os}"
   password             = "${var.proxmox_password}"
+  token                = "${var.proxmox_token}"
   proxmox_url          = "${var.proxmox_url}"
   template_description = "${local.template_description}"
   username             = "${var.proxmox_username}"

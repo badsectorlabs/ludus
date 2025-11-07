@@ -14,6 +14,30 @@ import (
 	"gorm.io/gorm"
 )
 
+// Create struct for reading SQLite users (without CreatedAt/UpdatedAt)
+type SQLiteUserObject struct {
+	Name                  string    `json:"name"`
+	UserID                string    `json:"userID"`
+	DateCreated           time.Time `json:"dateCreated"`
+	DateLastActive        time.Time `json:"dateLastActive"`
+	IsAdmin               bool      `json:"isAdmin"`
+	HashedAPIKey          string    `json:"-"`
+	ProxmoxUsername       string    `json:"proxmoxUsername"`
+	PortforwardingEnabled bool      `json:"portforwardingEnabled"`
+}
+
+// Create temporary struct for reading SQLite ranges (with string fields for arrays)
+type SQLiteRangeObject struct {
+	UserID         string    `json:"userID"`
+	RangeNumber    int32     `json:"rangeNumber"`
+	LastDeployment time.Time `json:"lastDeployment"`
+	NumberOfVMs    int32     `json:"numberOfVMs"`
+	TestingEnabled bool      `json:"testingEnabled"`
+	AllowedDomains string    `json:"allowedDomains"` // SQLite stores as string
+	AllowedIPs     string    `json:"allowedIPs"`     // SQLite stores as string
+	RangeState     string    `json:"rangeState"`
+}
+
 // MigrateFromSQLiteToPocketBase migrates data from SQLite to PocketBase if conditions are met
 func MigrateFromSQLiteToPocketBase() error {
 
@@ -146,22 +170,16 @@ func migrateRangeFiles() {
 }
 
 func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
-	// Create struct for reading SQLite users (without CreatedAt/UpdatedAt)
-	type SQLiteUserObject struct {
-		Name                  string    `json:"name"`
-		UserID                string    `json:"userID"`
-		DateCreated           time.Time `json:"dateCreated"`
-		DateLastActive        time.Time `json:"dateLastActive"`
-		IsAdmin               bool      `json:"isAdmin"`
-		HashedAPIKey          string    `json:"-"`
-		ProxmoxUsername       string    `json:"proxmoxUsername"`
-		PortforwardingEnabled bool      `json:"portforwardingEnabled"`
-	}
 
 	// Migrate users
 	var sqliteUsers []SQLiteUserObject
 	if err := sqliteDB.Table("user_objects").Find(&sqliteUsers).Error; err != nil {
 		return fmt.Errorf("error reading users from SQLite: %v", err)
+	}
+
+	collection, err := txApp.FindCollectionByNameOrId("users")
+	if err != nil {
+		logger.Error(fmt.Sprintf("Failed to find collection: %v", err))
 	}
 
 	for _, sqliteUser := range sqliteUsers {
@@ -194,7 +212,7 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 		}
 
 		// Look up the range that has the user_id of the user
-		var rangeObj RangeObject
+		var rangeObj SQLiteRangeObject
 		if err := sqliteDB.Table("range_objects").Where("user_id = ?", sqliteUser.UserID).First(&rangeObj).Error; err != nil {
 			logger.Error(fmt.Sprintf("Error looking up range for user %s: %v", sqliteUser.UserID, err))
 			continue
@@ -226,7 +244,12 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 			continue
 		}
 
-		if userRecord != nil && userRecord.Get("proxmoxTokenID") == "" {
+		if userRecord == nil {
+			logger.Debug(fmt.Sprintf("User %s not found in PocketBase, creating", sqliteUser.UserID))
+			userRecord = core.NewRecord(collection)
+		}
+
+		if userRecord.Get("proxmoxTokenID") == "" {
 			logger.Debug(fmt.Sprintf("Creating proxmox API token for existing PocketBase user %s", sqliteUser.ProxmoxUsername))
 			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(sqliteUser.ProxmoxUsername)
 			if err != nil {
@@ -234,17 +257,14 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 				continue
 			}
 			userRecord.Set("proxmoxTokenID", tokenID)
-			userRecord.Set("proxmoxTokenSecret", tokenSecret)
-		}
-
-		collection, err := txApp.FindCollectionByNameOrId("users")
-		if err != nil {
-			logger.Error(fmt.Sprintf("Failed to find collection: %v", err))
-		}
-
-		if userRecord == nil {
-			logger.Debug(fmt.Sprintf("User %s not found in PocketBase, creating", sqliteUser.UserID))
-			userRecord = core.NewRecord(collection)
+			encryptedTokenSecret, err := EncryptStringForDatabase(tokenSecret)
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error encrypting proxmox token secret for user %s: %v", sqliteUser.ProxmoxUsername, err))
+				continue
+			}
+			userRecord.Set("proxmoxTokenSecret", encryptedTokenSecret)
+		} else {
+			logger.Debug(fmt.Sprintf("User %s has a proxmox API token: %s with secret: %s", sqliteUser.UserID, userRecord.Get("proxmoxTokenID"), userRecord.Get("proxmoxTokenSecret")))
 		}
 
 		logger.Debug(fmt.Sprintf("Creating user %s in PocketBase", sqliteUser.ProxmoxUsername))
@@ -258,6 +278,7 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 		userRecord.Set("proxmoxRealm", "pam") // Ludus 1.x only supported PAM authentication
 		userRecord.Set("hashedAPIKey", sqliteUser.HashedAPIKey)
 		userRecord.Set("lastActive", sqliteUser.DateLastActive)
+		userRecord.Set("defaultRangeID", rangeObj.UserID)
 
 		if err := txApp.Save(userRecord); err != nil {
 			logger.Error(fmt.Sprintf("Failed to create user: %v", err))
@@ -271,17 +292,6 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 }
 
 func migrateRangesToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
-	// Create temporary struct for reading SQLite ranges (with string fields for arrays)
-	type SQLiteRangeObject struct {
-		UserID         string    `json:"userID"`
-		RangeNumber    int32     `json:"rangeNumber"`
-		LastDeployment time.Time `json:"lastDeployment"`
-		NumberOfVMs    int32     `json:"numberOfVMs"`
-		TestingEnabled bool      `json:"testingEnabled"`
-		AllowedDomains string    `json:"allowedDomains"` // SQLite stores as string
-		AllowedIPs     string    `json:"allowedIPs"`     // SQLite stores as string
-		RangeState     string    `json:"rangeState"`
-	}
 
 	// Migrate ranges (excluding ROOT's range which already exists)
 	var sqliteRanges []SQLiteRangeObject
@@ -315,6 +325,7 @@ func migrateRangesToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 				rootRecord.Set("email", "root@ludus.internal")
 				rootRecord.Set("password", security.RandomString(25)) // Will never be used, but needed to create the record
 				rootRecord.Set("proxmoxUsername", "root")
+				rootRecord.Set("proxmoxRealm", "pam")
 				rootRecord.Set("userNumber", 1)
 				rootRecord.Set("isAdmin", true)
 				rootAPIKey, err := os.ReadFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath))

@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
+	"ludusapi/models"
 	"os"
 	"os/exec"
 	"regexp"
@@ -20,13 +20,13 @@ import (
 	"github.com/apenella/go-ansible/pkg/execute"
 	"github.com/apenella/go-ansible/pkg/options"
 	"github.com/apenella/go-ansible/pkg/playbook"
-	"github.com/gin-gonic/gin"
+	"github.com/pocketbase/pocketbase/core"
 	"golang.org/x/exp/maps"
 )
 
 // Runs an ansible playbook with an arbitrary amount of extraVars
 // Returns a tuple of the playbook output and an error
-func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
+func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
 
 	buff := new(bytes.Buffer)
 
@@ -39,20 +39,18 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 		Connection: "local",
 	}
 
-	usersRange, user, err := CheckRangeAccessAndGetObjects(c)
-	if err != nil {
-		return "Could not get range", errors.New("could not get range") // JSON set in getRangeObject
-	}
+	user := e.Get("user").(*models.User)
+	usersRange := e.Get("range").(*models.Range)
 
-	accessGrantsArray := getAccessGrantsForUser(user.UserID)
+	accessGrantsArray := getAccessGrantsForUser(e, user.UserId())
 	userVars := map[string]interface{}{
-		"username":           user.ProxmoxUsername,
-		"range_id":           usersRange.RangeID,
-		"range_second_octet": usersRange.RangeNumber,
+		"username":           user.ProxmoxUsername(),
+		"range_id":           usersRange.RangeId(),
+		"range_second_octet": usersRange.RangeNumber(),
 		// We have to send this in the event this deploy is a fresh deploy AFTER a user has been granted access to this
 		// range, which means there is a fresh router deployed with no knowledge of the access grants
 		"access_grants_array":   accessGrantsArray,
-		"ludus_testing_enabled": usersRange.TestingEnabled,
+		"ludus_testing_enabled": usersRange.TestingEnabled(),
 		// Tell ansible if we have an enterprise license
 		"ludus_enterprise_license": server.LicenseType == "enterprise" && server.LicenseValid,
 	}
@@ -61,11 +59,11 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	maps.Copy(userVars, extraVars)
 
 	// Always include the ludus, server, and user configs
-	rangeDir := fmt.Sprintf("@%s/ranges/%s/", ludusInstallPath, usersRange.RangeID)
+	rangeDir := fmt.Sprintf("@%s/ranges/%s/", ludusInstallPath, usersRange.RangeId())
 	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeDir + "range-config.yml"}
 	// root has no range config and cannot use the dynamic inventory
 	var inventory string
-	if user.UserID == "ROOT" {
+	if user.UserId() == "ROOT" {
 		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
 		inventory = "127.0.0.1"
 	} else {
@@ -92,8 +90,8 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	// Open a file for saving the ansible log, TRUNC will overwrite
 	// TODO, figure out a way to keep the last 10(?) logs?
 	var ansibleLogFilePath string
-	if user.UserID != "ROOT" {
-		ansibleLogFilePath = fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeID)
+	if user.UserId() != "ROOT" {
+		ansibleLogFilePath = fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeId())
 	} else {
 		ansibleLogFilePath = fmt.Sprintf("%s/install/ansible.log", ludusInstallPath)
 	}
@@ -111,10 +109,9 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	// defer is last in, first out, so this will close the file and then chown it
 	defer ansibleLogFile.Close()
 
-	proxmoxTokenSecret, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret)
+	proxmoxTokenSecret, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Could not decrypt proxmox token secret: %s", err)})
-		return "", errors.New("could not decrypt proxmox token secret")
+		return "", fmt.Errorf("could not decrypt proxmox token secret: %w", err)
 	}
 
 	// If this is an access grant or revoke, we need to set the LUDUS_RETURN_ALL_RANGES environment variable to true so ansible can modify the target router
@@ -131,22 +128,22 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 		// Disable color
 		execute.WithEnvVar("ANSIBLE_NOCOLOR", "true"),
 		// Set the ansible home to the user's ansible directory
-		execute.WithEnvVar("ANSIBLE_HOME", fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername)),
-		execute.WithEnvVar("ANSIBLE_SSH_CONTROL_PATH_DIR", fmt.Sprintf("%s/users/%s/.ansible/cp", ludusInstallPath, user.ProxmoxUsername)),
-		execute.WithEnvVar("ANSIBLE_ROLES_PATH", fmt.Sprintf("%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername, ludusInstallPath)),
+		execute.WithEnvVar("ANSIBLE_HOME", fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername())),
+		execute.WithEnvVar("ANSIBLE_SSH_CONTROL_PATH_DIR", fmt.Sprintf("%s/users/%s/.ansible/cp", ludusInstallPath, user.ProxmoxUsername())),
+		execute.WithEnvVar("ANSIBLE_ROLES_PATH", fmt.Sprintf("%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath)),
 		// Inject vars for the proxmox.py dynamic inventory script
 		execute.WithEnvVar("PROXMOX_NODE", ServerConfiguration.ProxmoxNode),
 		execute.WithEnvVar("PROXMOX_INVALID_CERT", strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert)),
 		execute.WithEnvVar("PROXMOX_URL", ServerConfiguration.ProxmoxURL),
 		execute.WithEnvVar("PROXMOX_HOSTNAME", ServerConfiguration.ProxmoxHostname),
 		// Inject creds for the proxmox.py dynamic inventory script
-		execute.WithEnvVar("PROXMOX_USERNAME", user.ProxmoxUsername+"@pam"),
-		execute.WithEnvVar("PROXMOX_TOKEN", user.ProxmoxTokenID),
+		execute.WithEnvVar("PROXMOX_USERNAME", user.ProxmoxUsername()+"@"+user.ProxmoxRealm()),
+		execute.WithEnvVar("PROXMOX_TOKEN", user.ProxmoxTokenId()),
 		execute.WithEnvVar("PROXMOX_SECRET", proxmoxTokenSecret),
-		execute.WithEnvVar("LUDUS_RANGE_CONFIG", fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeID)),
-		execute.WithEnvVar("LUDUS_RANGE_NUMBER", strconv.Itoa(int(usersRange.RangeNumber))),
-		execute.WithEnvVar("LUDUS_RANGE_ID", usersRange.RangeID),
-		execute.WithEnvVar("LUDUS_USER_IS_ADMIN", strconv.FormatBool(user.IsAdmin)),
+		execute.WithEnvVar("LUDUS_RANGE_CONFIG", fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId())),
+		execute.WithEnvVar("LUDUS_RANGE_NUMBER", strconv.Itoa(int(usersRange.RangeNumber()))),
+		execute.WithEnvVar("LUDUS_RANGE_ID", usersRange.RangeId()),
+		execute.WithEnvVar("LUDUS_USER_IS_ADMIN", strconv.FormatBool(user.IsAdmin())),
 		execute.WithEnvVar("LUDUS_RETURN_ALL_RANGES", strconv.FormatBool(returnAllRanges)),
 	)
 
@@ -159,7 +156,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 	}
 
 	// Check for a user-defined-roles playbook (included in ludus) and create a placeholder if it doesn't exist
-	userDefinedRolePath := fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, usersRange.RangeID)
+	userDefinedRolePath := fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, usersRange.RangeId())
 	if !FileExists(userDefinedRolePath) {
 		logToFile(userDefinedRolePath,
 			`- name: Run debug task on localhost
@@ -184,9 +181,9 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 		err = playbook.Run(context.TODO())
 		duration := time.Since(startTime)
 		// Notify the user of the result of the playbook
-		payload := NewPayload(err == nil, usersRange.RangeID, buff.String(), false, duration)
+		payload := NewPayload(err == nil, usersRange.RangeId(), buff.String(), false, duration)
 		notifier := Notify{
-			ConfigFilePath: fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeID),
+			ConfigFilePath: fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId()),
 			Payload:        payload,
 		}
 		notifier.Send()
@@ -205,84 +202,75 @@ func (s *Server) RunAnsiblePlaybookWithVariables(c *gin.Context, playbookPathArr
 }
 
 // A helper to keep function calls clean
-func RunRangeManagementAnsibleWithTag(c *gin.Context, tag string, verbose bool, onlyRoles []string, limit string) (string, error) {
-	usersRange, err := GetRangeObject(c)
-	if err != nil {
-		return "", errors.New("unable to get users range") // JSON error is set in getRangeObject
-	}
+func RunRangeManagementAnsibleWithTag(e *core.RequestEvent, tag string, verbose bool, onlyRoles []string, limit string) (string, error) {
+	usersRange := e.Get("range").(*models.Range)
 
 	onlyRolesArray := removeEmptyStrings(onlyRoles)
 	extraVars := map[string]interface{}{"only_roles": onlyRolesArray}
 
 	// Run the deploy
-	output, err := server.RunAnsiblePlaybookWithVariables(c, nil, nil, extraVars, tag, verbose, limit)
+	output, err := server.RunAnsiblePlaybookWithVariables(e, nil, nil, extraVars, tag, verbose, limit)
 
 	if err != nil {
-		db.Model(&usersRange).Update("range_state", "ERROR")
+		usersRange.SetRangeState("ERROR")
+		if saveErr := e.App.Save(usersRange); saveErr != nil {
+			return "", fmt.Errorf("error saving range: %w", saveErr)
+		}
 	} else {
-		db.Model(&usersRange).Update("range_state", "SUCCESS")
+		usersRange.SetRangeState("SUCCESS")
+		if saveErr := e.App.Save(usersRange); saveErr != nil {
+			return "", fmt.Errorf("error saving range: %w", saveErr)
+		}
 	}
 	return output, err
 }
 
 // A helper to keep function calls clean
-func RunPlaybookWithTag(c *gin.Context, playbook string, tag string, verbose bool) (string, error) {
+func RunPlaybookWithTag(e *core.RequestEvent, playbook string, tag string, verbose bool) (string, error) {
 	playbookPathArray := []string{fmt.Sprintf("%s/ansible/range-management/%s", ludusInstallPath, playbook)}
-	return server.RunAnsiblePlaybookWithVariables(c, playbookPathArray, nil, nil, tag, verbose, "")
+	return server.RunAnsiblePlaybookWithVariables(e, playbookPathArray, nil, nil, tag, verbose, "")
 }
 
 // A helper to expose RunAnsiblePlaybookWithVariables to plugins
-func RunAnsiblePlaybookWithVariables(c *gin.Context, playbook string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
+func RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbook string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
 	playbookPathArray := []string{fmt.Sprintf("%s/ansible/range-management/%s", ludusInstallPath, playbook)}
-	return server.RunAnsiblePlaybookWithVariables(c, playbookPathArray, extraVarsFiles, extraVars, tags, verbose, limit)
+	return server.RunAnsiblePlaybookWithVariables(e, playbookPathArray, extraVarsFiles, extraVars, tags, verbose, limit)
 }
 
 type AccessGrantStruct struct {
-	SecondOctet int32  `json:"second_octet"`
+	SecondOctet int    `json:"second_octet"`
 	Username    string `json:"username"`
 }
 
 // Get the access grants for the provided user ID and return an array of {second_octet, username} objects
-func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
+func getAccessGrantsForUser(e *core.RequestEvent, targetUserId string) []AccessGrantStruct {
 	var returnArray []AccessGrantStruct
 
 	// Get direct user-to-range assignments for the target user
-	var userRangeAccesses []UserRangeAccess
-	db.Where("user_id = ?", targetUserId).Find(&userRangeAccesses)
-
-	var userObject UserObject
-	if err := db.Where("user_id = ?", targetUserId).First(&userObject).Error; err != nil {
-		logger.Error("Error getting user object for user ID " + targetUserId + ": " + err.Error())
-		return returnArray
-	}
-
-	for _, access := range userRangeAccesses {
-		var rangeObject RangeObject
-		if err := db.Where("range_number = ?", access.RangeNumber).First(&rangeObject).Error; err == nil {
-			returnArray = append(returnArray, AccessGrantStruct{rangeObject.RangeNumber, userObject.ProxmoxUsername})
-		}
+	user := e.Get("user").(*models.User)
+	ranges := user.Ranges()
+	for _, rangeRecord := range ranges {
+		returnArray = append(returnArray, AccessGrantStruct{rangeRecord.RangeNumber(), user.ProxmoxUsername()})
 	}
 
 	// Get group-based access
-	var userGroupMemberships []UserGroupMembership
-	db.Where("user_id = ?", targetUserId).Find(&userGroupMemberships)
+	groups := user.Groups()
 
 	// For every group the user is a member of, get the ranges that group has access to
-	for _, membership := range userGroupMemberships {
-		var groupRangeAccesses []GroupRangeAccess
-		db.Where("group_id = ?", membership.GroupID).Find(&groupRangeAccesses)
+	for _, groupRecord := range groups {
+		expandedGroupRecord := groupRecord.ExpandedOne("ranges")
+		expandedGroupModel := &models.Group{}
+		expandedGroupModel.SetProxyRecord(expandedGroupRecord)
+		groupRanges := expandedGroupModel.Ranges()
 
-		for _, groupAccess := range groupRangeAccesses {
+		for _, groupAccess := range groupRanges {
 			// Only add the access grant if it is not already in the returnArray
 			if slices.ContainsFunc(returnArray, func(entry AccessGrantStruct) bool {
-				return entry.SecondOctet == groupAccess.RangeNumber
+				return entry.SecondOctet == groupAccess.RangeNumber()
 			}) {
 				continue
 			}
-			var rangeObj RangeObject
-			if err := db.Where("range_number = ?", groupAccess.RangeNumber).First(&rangeObj).Error; err == nil {
-				returnArray = append(returnArray, AccessGrantStruct{groupAccess.RangeNumber, userObject.ProxmoxUsername})
-			}
+			returnArray = append(returnArray, AccessGrantStruct{groupAccess.RangeNumber(), user.ProxmoxUsername()})
 		}
 	}
 
@@ -292,7 +280,7 @@ func getAccessGrantsForUser(targetUserId string) []AccessGrantStruct {
 }
 
 // Return true if the role exists for the user, or false if it doesn't
-func checkRoleExists(c *gin.Context, roleName string) (bool, error) {
+func checkRoleExists(e *core.RequestEvent, roleName string) (bool, error) {
 
 	// If there are two `.` characters in the role name, it is part of a collection, so check that the first two segments of the role name
 	// exist in the collection listing, and if so, assume the role exists
@@ -304,19 +292,17 @@ func checkRoleExists(c *gin.Context, roleName string) (bool, error) {
 		collectionName := strings.Join(roleParts[:2], ".")
 
 		// Check if collections are already cached in the context
-		if cachedCollections, exists := c.Get("ansible_collections"); exists {
+		cachedCollections := e.Get("ansible_collections")
+		if cachedCollections != nil {
 			return slices.Contains(cachedCollections.([]string), collectionName), nil
 		}
 
-		user, err := GetUserObject(c)
-		if err != nil {
-			return false, err
-		}
+		user := e.Get("user").(*models.User)
 
 		// Collections
 		collectionCmd := exec.Command("ansible-galaxy", "collection", "list", "--format", "json")
 		collectionCmd.Env = os.Environ()
-		collectionCmd.Env = append(collectionCmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
+		collectionCmd.Env = append(collectionCmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 
 		collectionOutput, err := collectionCmd.CombinedOutput()
 		if err != nil {
@@ -341,25 +327,24 @@ func checkRoleExists(c *gin.Context, roleName string) (bool, error) {
 		}
 
 		// Cache the collections in the context
-		c.Set("ansible_collections", collections)
+		e.Set("ansible_collections", collections)
 
 		return slices.Contains(collections, collectionName), nil
 
 	}
 
 	// Check if roles are already cached in the context
-	if roles, exists := c.Get("ansible_roles"); exists {
+	roles := e.Get("ansible_roles")
+	if roles != nil {
 		return slices.Contains(roles.([]string), roleName), nil
 	}
 
-	user, err := GetUserObject(c)
-	if err != nil {
-		return false, err
-	}
+	user := e.Get("user").(*models.User)
+
 	cmd := exec.Command("ansible-galaxy", "role", "list") // no --format json for roles...
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_ROLES_PATH=%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername, ludusInstallPath))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_ROLES_PATH=%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath))
 	roleOutput, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("unable to get the ansible roles: %w", err)
@@ -392,46 +377,40 @@ func checkRoleExists(c *gin.Context, roleName string) (bool, error) {
 	}
 
 	// Cache the roles in the context
-	c.Set("ansible_roles", availableAnsibleRoles)
+	e.Set("ansible_roles", availableAnsibleRoles)
 
 	return slices.Contains(availableAnsibleRoles, roleName), nil
 
 }
 
 // Run a simple local ansible playbook that doesn't require any extra vars and doesn't log
-func RunLocalAnsiblePlaybookOnTmpRangeConfig(c *gin.Context, playbookPathArray []string) (string, error) {
+func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathArray []string) (string, error) {
 
 	buff := new(bytes.Buffer)
 
 	ansiblePlaybookConnectionOptions := &options.AnsibleConnectionOptions{
 		Connection: "local",
 	}
-	user, err := GetUserObject(c)
-	if err != nil {
-		return "Could not get user", err // JSON set in GetUserObject
-	}
-	usersRange, err := GetRangeObject(c)
-	if err != nil {
-		return "Could not get range", errors.New("could not get range") // JSON set in getRangeObject
-	}
+	user := e.Get("user").(*models.User)
+	usersRange := e.Get("range").(*models.Range)
 
-	accessGrantsArray := getAccessGrantsForUser(user.UserID)
+	accessGrantsArray := getAccessGrantsForUser(e, user.UserId())
 	userVars := map[string]interface{}{
-		"username":           user.ProxmoxUsername,
-		"range_id":           user.UserID,
-		"range_second_octet": usersRange.RangeNumber,
+		"username":           user.ProxmoxUsername(),
+		"range_id":           usersRange.RangeId(),
+		"range_second_octet": usersRange.RangeNumber(),
 		// We have to send this in the event this deploy is a fresh deploy AFTER a user has been granted access to this
 		// range, which means there is a fresh router deployed with no knowledge of the access grants
 		"access_grants_array":   accessGrantsArray,
-		"ludus_testing_enabled": usersRange.TestingEnabled,
+		"ludus_testing_enabled": usersRange.TestingEnabled(),
 	}
 
 	// Always include the ludus, server, and user configs
-	rangeDir := fmt.Sprintf("@%s/ranges/%s/", ludusInstallPath, usersRange.RangeID)
+	rangeDir := fmt.Sprintf("@%s/ranges/%s/", ludusInstallPath, usersRange.RangeId())
 	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeDir + "range-config.yml"}
 	inventory := "127.0.0.1"
 
-	execute := execute.NewDefaultExecute(
+	ansibleExecute := execute.NewDefaultExecute(
 		// Use a multiwrtier that saves the output to a buffer and a file
 		execute.WithWrite(buff),
 		// Also log stderr to the log file and the buff vs stderr (journalctl logs)
@@ -439,9 +418,22 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(c *gin.Context, playbookPathArray [
 		// Disable color
 		execute.WithEnvVar("ANSIBLE_NOCOLOR", "true"),
 		// Set the ansible home to the user's ansible directory
-		execute.WithEnvVar("ANSIBLE_HOME", fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername)),
-		execute.WithEnvVar("ANSIBLE_SSH_CONTROL_PATH_DIR", fmt.Sprintf("%s/users/%s/.ansible/cp", ludusInstallPath, user.ProxmoxUsername)),
+		execute.WithEnvVar("ANSIBLE_HOME", fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername())),
+		execute.WithEnvVar("ANSIBLE_SSH_CONTROL_PATH_DIR", fmt.Sprintf("%s/users/%s/.ansible/cp", ludusInstallPath, user.ProxmoxUsername())),
 	)
+
+	// Loop over the environment and add any that start with LUDUS_SECRET_ to the execute object
+	for _, envVar := range os.Environ() {
+		envVarParts := strings.SplitN(envVar, "=", 2)
+		if len(envVarParts) != 2 {
+			continue
+		}
+		envVarKey := envVarParts[0]
+		envVarValue := envVarParts[1]
+		if strings.HasPrefix(envVarKey, "LUDUS_SECRET_") {
+			ansibleExecute.EnvVars[envVarKey] = envVarValue
+		}
+	}
 
 	ansiblePlaybookOptions := &playbook.AnsiblePlaybookOptions{
 		Inventory:     inventory,
@@ -451,15 +443,15 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(c *gin.Context, playbookPathArray [
 
 	playbook := &playbook.AnsiblePlaybookCmd{
 		Playbooks:         playbookPathArray,
-		Exec:              execute,
+		Exec:              ansibleExecute,
 		ConnectionOptions: ansiblePlaybookConnectionOptions,
 		Options:           ansiblePlaybookOptions,
 		StdoutCallback:    "default",
 	}
 
-	err = playbook.Run(context.TODO())
+	err := playbook.Run(context.TODO())
 	if err != nil {
-		return buff.String(), err
+		return buff.String(), fmt.Errorf("error running ansible playbook: %w", err)
 	}
 
 	return buff.String(), nil

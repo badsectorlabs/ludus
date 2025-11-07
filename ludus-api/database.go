@@ -1,133 +1,70 @@
 package ludusapi
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"log/slog"
 	"os"
-	"sync"
-	"time"
 
 	"github.com/pocketbase/pocketbase/core"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-
-	gormlogger "gorm.io/gorm/logger"
 
 	_ "ludusapi/migrations"
+	"ludusapi/models"
 )
 
-var (
-	once     sync.Once
-	db       *gorm.DB
-	database string = fmt.Sprintf("%s/db/data.db?cache=shared&_journal_mode=WAL", ludusInstallPath)
-)
+func InitDb() {
 
-func InitDb() *gorm.DB {
-	// Only initialize and open the DB once per run
-	once.Do(func() {
-		var err error
-
-		newLogger := gormlogger.New(
-			log.New(os.Stdout, "[DATABASE] ", log.LstdFlags),
-			gormlogger.Config{
-				SlowThreshold:             time.Second,
-				LogLevel:                  gormlogger.Warn,
-				IgnoreRecordNotFoundError: true,
-				Colorful:                  true,
-			},
-		)
-
-		db, err = gorm.Open(sqlite.Open(database), &gorm.Config{
-			SkipDefaultTransaction: true,
-			Logger:                 newLogger,
-		})
-		if err != nil {
-			// Check if there was a previous sqlite db, and if so, run the migrations
-			if FileExists(fmt.Sprintf("%s/ludus.db", ludusInstallPath)) && !FileExists(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath)) {
-				slog.Info("SQLite database found, running migrations")
-				if err := MigrateFromSQLiteToPocketBase(); err != nil {
-					logger.Error("SQLite migration failed: %v", err)
-					os.Exit(2)
-				}
-				// Open the database connection again
-				db, err = gorm.Open(sqlite.Open(database), &gorm.Config{
-					SkipDefaultTransaction: true,
-					Logger:                 newLogger,
-				})
-				if err != nil {
-					logger.Error("Error opening db after db migration: %v", err)
-					os.Exit(2)
-				}
-			} else {
-				logger.Error("Error opening db: %v", err)
+	if os.Geteuid() == 0 {
+		// If a root-api-key file doesn't exist, recreate the root user in the database
+		if !FileExists(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath)) {
+			logger.Info("Recreating root user in database")
+			createRootUserInDatabase()
+		}
+		// Check if there was a previous sqlite db, and if so, run the migrations
+		if FileExists(fmt.Sprintf("%s/ludus.db", ludusInstallPath)) && !FileExists(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath)) {
+			slog.Info("SQLite database found, running migrations")
+			if err := MigrateFromSQLiteToPocketBase(); err != nil {
+				logger.Error(fmt.Sprintf("SQLite migration failed: %v", err))
 				os.Exit(2)
 			}
 		}
-
-		// Create the tables if they don't exist and we are root
-		if !db.Migrator().HasTable(&UserObject{}) && os.Geteuid() == 0 {
-
-			logger.Info("Creating tables in SQLite")
-
-			db.Migrator().CreateTable(&UserObject{})
-			db.Migrator().CreateTable(&RangeObject{})
-			db.Migrator().CreateTable(&VmObject{})
-			db.Migrator().CreateTable(&GroupObject{})
-			db.Migrator().CreateTable(&UserRangeAccess{})
-			db.Migrator().CreateTable(&UserGroupMembership{})
-			db.Migrator().CreateTable(&GroupRangeAccess{})
-
-			logger.Info("Creating root user in database")
-			createRootUserInDatabase()
-		}
-		// Only do migrations as ludus-admin service to prevent a race condition when starting services
-		// that leads to the ludus service creating the tables via migration before the root api key
-		// has been written
-		if os.Geteuid() == 0 {
-			// Migrate any updates from the models to an existing DB
-			err := db.AutoMigrate(&UserObject{}, &RangeObject{}, &VmObject{},
-				&GroupObject{}, &UserRangeAccess{}, &UserGroupMembership{}, &GroupRangeAccess{})
-			if err != nil {
-				log.Fatalf("error migrating database: %v", err)
-			}
-
-			// Attempt to migrate from SQLite if conditions are met
-			if err := MigrateFromSQLiteToPocketBase(); err != nil {
-				log.Printf("Warning: SQLite migration failed: %v", err)
-			}
-
-			// If a root-api-key file doesn't exist, recreate the root user in the database
-			if !FileExists(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath)) {
-				logger.Info("Recreating root user in database")
-				createRootUserInDatabase()
-			}
-		}
-	})
-
-	return db
+	}
 }
 
 func createRootUserInDatabase() {
 
 	// Check if the root user already exists in the database
-	var rootUser UserObject
-	db.First(&rootUser, "user_id = ?", "ROOT")
-	if rootUser.UserID != "" {
+	rootUserRecord, err := app.FindFirstRecordByData("users", "userID", "ROOT")
+	if err != nil && err != sql.ErrNoRows {
+		logger.Error(fmt.Sprintf("Error finding root user in database: %v", err))
+		os.Exit(2)
+	}
+	if rootUserRecord != nil {
 		logger.Info("Root user already exists in database, removing it")
-		db.Delete(&rootUser)
+		err = app.Delete(rootUserRecord)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error deleting root user in database: %v", err))
+			os.Exit(2)
+		}
 	}
 
 	// Create a root user
-	var user UserObject
-	user.Name = "root"
-	user.ProxmoxUsername = "root"
-	user.UserID = "ROOT"
-	user.DateCreated = time.Now()
-	user.DateLastActive = time.Now()
-	user.IsAdmin = true
-	apiKey := GenerateAPIKey(&user)
-	err := os.WriteFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), []byte(apiKey), 0400)
+	userCollection, err := app.FindCollectionByNameOrId("users")
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding users collection: %v", err))
+		os.Exit(2)
+	}
+	userRecord := core.NewRecord(userCollection)
+	user := &models.User{}
+	user.SetProxyRecord(userRecord)
+	user.SetName("root")
+	user.SetProxmoxUsername("root")
+	user.SetUserId("ROOT")
+	user.SetUserNumber(1)
+	user.SetIsAdmin(true)
+	apiKey := GenerateAPIKey(user.UserId())
+	err = os.WriteFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), []byte(apiKey), 0400)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -142,16 +79,18 @@ func createRootUserInDatabase() {
 		log.Fatal("error encrypting Root API Token secret")
 	}
 
-	user.ProxmoxTokenID = tokenID
-	user.ProxmoxTokenSecret = encryptedTokenSecret
+	user.SetProxmoxTokenId(tokenID)
+	user.SetProxmoxTokenSecret(encryptedTokenSecret)
 
 	os.MkdirAll(fmt.Sprintf("%s/users/root", ludusInstallPath), 0700)
 
-	user.HashedAPIKey, err = HashString(apiKey)
+	user.SetHashedApikey(apiKey)
+	err = app.Save(userRecord)
 	if err != nil {
-		log.Fatal("error hashing API Key for root user")
+		logger.Error(fmt.Sprintf("Error saving root user in database: %v", err))
+		os.Exit(2)
 	}
-	db.Create(&user)
+	logger.Info("Successfully created root user in database")
 }
 
 // findNextAvailableRangeNumber finds the smallest positive integer that is not
@@ -160,54 +99,23 @@ func createRootUserInDatabase() {
 // be gaps or non-sequential values in the column. It will also skip any values
 // in the reserved_range_numbers array in the config.
 //
-// The function takes a *gorm.DB as an argument, which should be a valid GORM
-// database connection.
-//
 // Returns:
 //
-//	int32 - The smallest positive integer that is not present in the
+//	int - The smallest positive integer that is not present in the
 //	        RangeNumber column of the RangeObject table.
-func findNextAvailableRangeNumber(db *gorm.DB, reservedRangeNumbers []int32) int32 {
-	var rangeNumbers []int32
-	db.Model(&RangeObject{}).Select("range_number").Order("range_number").Scan(&rangeNumbers)
-
-	for i := int32(1); ; i++ {
-		found := false
-		for _, num := range rangeNumbers {
-			if num == i {
-				found = true
-				break
-			}
-		}
-		if !found {
-			// Check if this is a reserved range number
-			for _, num := range reservedRangeNumbers {
-				if num == i {
-					found = true
-					break
-				}
-			}
-			// The number is not in the DB and not reserved, return it
-			if !found {
-				return i
-			}
-		}
-	}
-}
-
-func findNextAvailableRangeNumberPB(txApp core.App) int {
+func findNextAvailableRangeNumber(txApp core.App) int {
 
 	type RangeResult struct {
-		RangeNumber int `db:"range_number" json:"range_number"`
+		RangeNumber int `db:"rangeNumber" json:"rangeNumber"`
 	}
 
 	var queryResult []RangeResult
 	var rangeNumbers []int
 
 	err := txApp.DB().
-		Select("range_number").
+		Select("rangeNumber").
 		From("ranges").
-		OrderBy("range_number").
+		OrderBy("rangeNumber").
 		All(&queryResult)
 	if err != nil {
 		return -1
@@ -246,45 +154,23 @@ func findNextAvailableRangeNumberPB(txApp core.App) int {
 // assumes that the UserNumber values are positive integers and that there can
 // be gaps or non-sequential values in the column.
 //
-// The function takes a *gorm.DB as an argument, which should be a valid GORM
-// database connection.
-//
 // Returns:
 //
-//	int32 - The smallest positive integer that is not present in the
+//	int - The smallest positive integer that is not present in the
 //	        UserNumber column of the UserObject table.
-func findNextAvailableUserNumber(db *gorm.DB) int32 {
-	var userNumbers []int32
-	db.Model(&UserObject{}).Select("user_number").Order("user_number").Scan(&userNumbers)
-
-	// Start at 2 since 1 is reserved for the root user (198.51.100.1 is reserved for the server)
-	for i := int32(2); ; i++ {
-		found := false
-		for _, num := range userNumbers {
-			if num == i {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return i
-		}
-	}
-}
-
-func findNextAvailableUserNumberPB(txApp core.App) int {
+func findNextAvailableUserNumber(txApp core.App) int {
 	var userNumbers []int
 
 	type UserResult struct {
-		UserNumber int `db:"user_number" json:"user_number"`
+		UserNumber int `db:"userNumber" json:"userNumber"`
 	}
 
 	var queryResult []UserResult
 
 	err := txApp.DB().
-		Select("user_number").
+		Select("userNumber").
 		From("users").
-		OrderBy("user_number").
+		OrderBy("userNumber").
 		All(&userNumbers)
 	if err != nil {
 		return -1

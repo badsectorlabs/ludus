@@ -7,76 +7,93 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"ludusapi/models"
 	"net/http"
 	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/goforj/godump"
 	goproxmox "github.com/luthermonson/go-proxmox"
+	"github.com/pocketbase/pocketbase/core"
 
 	"github.com/Telmate/proxmox-api-go/proxmox"
-	"github.com/gin-gonic/gin"
 )
 
-func GetProxmoxClientForUser(c *gin.Context) (*proxmox.Client, error) {
-	user, err := GetUserObject(c)
-	if err != nil {
-		return nil, errors.New("unable to get user object") // JSON error is set in GetUserObject
-	}
+func GetProxmoxClientForUser(e *core.RequestEvent) (*proxmox.Client, error) {
+	user := e.Get("user").(*models.User)
 
-	proxmoxPassword := getProxmoxPasswordForUser(user, c)
+	proxmoxPassword, err := getProxmoxPasswordForUser(user)
+	if err != nil {
+		return nil, errors.New("unable to get proxmox password for user: " + err.Error())
+	}
 	if proxmoxPassword == "" {
-		return nil, errors.New("could not get proxmox password for user") // JSON set in getProxmoxPasswordForUser
+		return nil, errors.New("could not get proxmox password for user")
 	}
 
 	// func NewClient(apiUrl string, hclient *http.Client, http_headers string, tls *tls.Config, proxyString string, taskTimeout int) (client *Client, err error) {
 	proxmoxClient, err := proxmox.NewClient(ServerConfiguration.ProxmoxURL+"/api2/json", nil, "", &tls.Config{InsecureSkipVerify: ServerConfiguration.ProxmoxInvalidCert}, "", 300)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "unable to create proxmox client"})
-		return nil, errors.New("unable to create proxmox client")
+		return nil, errors.New("unable to create proxmox client: " + err.Error())
 	}
-	err = proxmoxClient.Login(user.ProxmoxUsername+"@pam", proxmoxPassword, "")
+	err = proxmoxClient.Login(user.ProxmoxUsername()+"@"+user.ProxmoxRealm(), proxmoxPassword, "")
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "unable to login to proxmox: " + err.Error()})
-		return nil, errors.New("unable to login to proxmox")
+		return nil, errors.New("unable to login to proxmox: " + err.Error())
 	}
 	return proxmoxClient, nil
 }
 
-// Get the proxmox password for a user
-// Sets the context JSON error and returns an empty string on error
-func getProxmoxPasswordForUser(user UserObject, c *gin.Context) string {
-	if user.ProxmoxUsername == "root" {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "The ROOT API key should only be used to create other admin users. Use the command: ludus users add --admin --name 'first last' --userid FL"})
-		return ""
-	}
-	proxmoxPassword, err := GetFileContents(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, user.ProxmoxUsername))
+func GetProxmoxClientForUserUsingToken(e *core.RequestEvent) (*proxmox.Client, error) {
+	user := e.Get("user").(*models.User)
 
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return ""
+	if user.Name() == "ROOT" {
+		return nil, errors.New("ROOT user should not be used for this action")
 	}
-	return strings.TrimSuffix(proxmoxPassword, "\n")
+
+	tokenSecret, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret())
+	if err != nil {
+		return nil, errors.New("unable to decrypt proxmox token secret")
+	}
+
+	proxmoxClient, err := proxmox.NewClient(ServerConfiguration.ProxmoxURL+"/api2/json", nil, "", &tls.Config{InsecureSkipVerify: ServerConfiguration.ProxmoxInvalidCert}, "", 300)
+	if err != nil {
+		return nil, errors.New("unable to create proxmox client: " + err.Error())
+	}
+	proxmoxClient.SetAPIToken(user.ProxmoxTokenId(), tokenSecret)
+	return proxmoxClient, nil
+}
+
+// Get the proxmox password for a user
+func getProxmoxPasswordForUser(user *models.User) (string, error) {
+	if user.ProxmoxUsername() == "root" {
+		return "", errors.New("The ROOT API key should only be used to create other admin users. Use the command: ludus users add --admin --name 'first last' --userid FL")
+	}
+	proxmoxPassword, err := GetFileContents(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, user.ProxmoxUsername()))
+	if err != nil {
+		return "", errors.New("unable to get proxmox password for user: " + err.Error())
+	}
+	return strings.TrimSuffix(proxmoxPassword, "\n"), nil
 }
 
 // This newer proxmox library is not quite ready for use yet, although we do like it as it has types for everything
 // One example where it falls short is that is can't set a description on a snapshot and requires permissions on each node.
 // So we use the Telmate library for now.
 
-func GetGoProxmoxClientForUser(c *gin.Context) (*goproxmox.Client, error) {
-	user, err := GetUserObject(c)
-	if err != nil {
-		return nil, errors.New("unable to get user object") // JSON error is set in GetUserObject
-	}
+func GetGoProxmoxClientForUser(e *core.RequestEvent) (*goproxmox.Client, error) {
+	user := e.Get("user").(*models.User)
 
-	proxmoxPassword := getProxmoxPasswordForUser(user, c)
+	proxmoxPassword, err := getProxmoxPasswordForUser(user)
+	if err != nil {
+		return nil, errors.New("unable to get proxmox password for user: " + err.Error())
+	}
 	if proxmoxPassword == "" {
 		return nil, errors.New("could not get proxmox password for user") // JSON set in getProxmoxPasswordForUser
 	}
 	credentials := goproxmox.Credentials{
-		Username: user.ProxmoxUsername + "@pam",
+		Username: user.ProxmoxUsername() + "@" + user.ProxmoxRealm(),
 		Password: proxmoxPassword,
 	}
 	insecureHTTPClient := http.Client{
@@ -94,18 +111,15 @@ func GetGoProxmoxClientForUser(c *gin.Context) (*goproxmox.Client, error) {
 	return client, nil
 }
 
-func GetGoProxmoxClientForUserUsingToken(c *gin.Context) (*goproxmox.Client, error) {
-	user, err := GetUserObject(c)
-	if err != nil {
-		return nil, errors.New("unable to get user object") // JSON error is set in GetUserObject
-	}
+func GetGoProxmoxClientForUserUsingToken(e *core.RequestEvent) (*goproxmox.Client, error) {
+	user := e.Get("user").(*models.User)
 
-	if user.Name == "ROOT" {
+	if user.Name() == "ROOT" {
 		return nil, errors.New("ROOT user should not be used for this action")
 	}
 
-	tokenID := user.ProxmoxTokenID
-	tokenSecret, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret)
+	tokenID := user.ProxmoxTokenId()
+	tokenSecret, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret())
 	if err != nil {
 		return nil, errors.New("unable to decrypt proxmox token secret")
 	}
@@ -130,11 +144,14 @@ func GetGoProxmoxClientForUserUsingToken(c *gin.Context) (*goproxmox.Client, err
 }
 
 func getRootGoProxmoxClient() (*goproxmox.Client, error) {
-	var rootUserObject UserObject
-	db.First(&rootUserObject, "user_id = ?", "ROOT")
-
-	tokenID := rootUserObject.ProxmoxTokenID
-	tokenSecret, err := DecryptStringFromDatabase(rootUserObject.ProxmoxTokenSecret)
+	rootUserRecord, err := app.FindFirstRecordByData("users", "userID", "ROOT")
+	if err != nil {
+		return nil, errors.New("unable to get root user object: " + err.Error())
+	}
+	rootUserObject := models.User{}
+	rootUserObject.SetProxyRecord(rootUserRecord)
+	tokenID := rootUserObject.ProxmoxTokenId()
+	tokenSecret, err := DecryptStringFromDatabase(rootUserObject.ProxmoxTokenSecret())
 	if err != nil {
 		return nil, errors.New("unable to decrypt proxmox token secret for root user: " + err.Error())
 	}
@@ -476,4 +493,150 @@ func removeUserFromProxmox(username string, realm string) error {
 		return errors.New("unable to delete user: " + err.Error())
 	}
 	return nil
+}
+
+// PowerOffVMs powers off a list of virtual machines identified by their VMIDs.
+// It finds which node each VM belongs to, and if the VM is running, issues a stop command.
+// Operations are performed in parallel for efficiency.
+//
+// ctx: The context for the operation.
+// client: An initialized go-proxmox client.
+// vmids: A slice of integers representing the VMIDs to be powered off.
+// returns: A slice of errors encountered during the process. If the slice is empty, all operations were successful.
+func PowerOffVMs(ctx context.Context, client *goproxmox.Client, vmids []int) []error {
+	return PowerActionVMs(ctx, client, vmids, "off")
+}
+
+func PowerOnVMs(ctx context.Context, client *goproxmox.Client, vmids []int) []error {
+	return PowerActionVMs(ctx, client, vmids, "on")
+}
+
+func PowerActionVMs(ctx context.Context, client *goproxmox.Client, vmids []int, action string) []error {
+
+	// 1. Get a client for the Proxmox cluster.
+	cluster, err := client.Cluster(ctx)
+	if err != nil {
+		return []error{fmt.Errorf("failed to get cluster client: %w", err)}
+	}
+
+	// 2. To find which node a VM is on, we first list all VMs in the cluster.
+	resources, err := cluster.Resources(ctx, "vm")
+	if err != nil {
+		return []error{fmt.Errorf("failed to list VMs in the cluster: %w", err)}
+	}
+
+	// 3. Create a map for quick lookup of a VMID to its node name.
+	vmNodeMap := make(map[int]string)
+	for _, res := range resources {
+		if res.Type == "qemu" { // Assuming we are targeting QEMU VMs
+			vmNodeMap[int(res.VMID)] = res.Node
+		}
+	}
+
+	var wg sync.WaitGroup
+	// Use a buffered channel to collect errors from goroutines.
+	errChan := make(chan error, len(vmids))
+
+	// 4. Iterate over the requested VMIDs and process them in parallel.
+	for _, vmid := range vmids {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+
+			// 5. Find the node for the current VMID.
+			nodeName, found := vmNodeMap[id]
+			if !found {
+				errChan <- fmt.Errorf("VMID %d not found in the cluster", id)
+				return
+			}
+
+			// 6. Get the specific node object.
+			node, err := client.Node(ctx, nodeName)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to get node %s for VMID %d: %w", nodeName, id, err)
+				return
+			}
+
+			// 7. Get the virtual machine object.
+			vm, err := node.VirtualMachine(ctx, id)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to get VM object for VMID %d: %w", id, err)
+				return
+			}
+
+			var task *goproxmox.Task
+			if action == "off" {
+				// 8. Check if the VM is running before attempting to stop it.
+				if !vm.IsRunning() {
+					logger.Debug(fmt.Sprintf("VM %d on node %s is already stopped. Skipping.\n", id, nodeName))
+					return
+				}
+
+				// 9. Issue the stop command. This returns a task.
+				logger.Debug(fmt.Sprintf("Initiating power off for VM %d on node %s...\n", id, nodeName))
+				var err error
+				task, err = vm.Stop(ctx)
+				if err != nil {
+					errChan <- fmt.Errorf("failed to initiate stop for VMID %d: %w", id, err)
+					return
+				}
+			} else if action == "on" {
+				if vm.IsRunning() {
+					logger.Debug(fmt.Sprintf("VM %d on node %s is already running. Skipping.\n", id, nodeName))
+					return
+				}
+				var err error
+				task, err = vm.Start(ctx)
+				if err != nil {
+					errChan <- fmt.Errorf("failed to initiate start for VMID %d: %w", id, err)
+					return
+				}
+			} else {
+				errChan <- fmt.Errorf("invalid action: %s", action)
+				return
+			}
+
+			// 10. Wait for the power-off task to complete.
+			// A timeout is used to prevent the function from hanging indefinitely.
+			err = task.Wait(ctx, 2*time.Second, 3*time.Minute) // Poll every 2s, timeout after 3m
+			if err != nil {
+				errChan <- fmt.Errorf("error while waiting for VMID %d to stop: %w", id, err)
+			} else {
+				logger.Debug(fmt.Sprintf("Successfully powered off VM %d.\n", id))
+			}
+		}(vmid)
+	}
+
+	// Wait for all goroutines to finish.
+	wg.Wait()
+	close(errChan)
+
+	// Collect any errors that occurred.
+	var allErrors []error
+	for err := range errChan {
+		allErrors = append(allErrors, err)
+	}
+
+	return allErrors
+}
+
+func getAllVMs(e *core.RequestEvent, ctx context.Context, client *goproxmox.Client) (goproxmox.ClusterResources, error) {
+
+	cachedAllVMs := e.Get("allVMs")
+	if cachedAllVMs != nil {
+		return cachedAllVMs.(goproxmox.ClusterResources), nil
+	}
+
+	cluster, err := client.Cluster(ctx)
+	if err != nil {
+		return nil, errors.New("unable to get cluster info: " + err.Error())
+	}
+
+	// Get all resources of type "vm" (which includes 'qemu' and 'lxc' types)
+	allVMs, err := cluster.Resources(ctx, "vm")
+	if err != nil {
+		return nil, errors.New("unable to list VMs from cluster: " + err.Error())
+	}
+	e.Set("allVMs", allVMs)
+	return allVMs, nil
 }

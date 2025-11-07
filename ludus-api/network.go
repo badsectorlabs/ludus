@@ -9,7 +9,7 @@ import (
 
 // manageVmbrInterfaceLocally directly edits /etc/network/interfaces
 // This function MUST be run as root on the Proxmox host.
-func manageVmbrInterfaceLocally(rangeNumber int32, present bool) error {
+func manageVmbrInterfaceLocally(rangeNumber int, present bool) error {
 	interfacesPath := "/etc/network/interfaces"
 	ifaceName := fmt.Sprintf("vmbr1%03d", rangeNumber)
 

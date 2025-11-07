@@ -1,6 +1,7 @@
 package ludusapi
 
 import (
+	"context"
 	crypto_rand "crypto/rand"
 	"errors"
 	"fmt"
@@ -8,19 +9,18 @@ import (
 	"ludusapi/models"
 	"math/rand"
 	"net"
-	"net/http"
 	"os/exec"
 	"os/user"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/Telmate/proxmox-api-go/proxmox"
-	"github.com/gin-gonic/gin"
-	"github.com/goforj/godump"
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
+
+	goproxmox "github.com/luthermonson/go-proxmox"
 )
 
 // checkEmbeddedDocs checks if the embeddedDocs variable is populated
@@ -70,28 +70,7 @@ func CheckHash(password, hash string) bool {
 	return err == nil
 }
 
-func GenerateAPIKey(user *UserObject) string {
-	var bytes [8]byte
-	_, err := crypto_rand.Read(bytes[:])
-	if err != nil {
-		panic("cannot seed math/rand package with cryptographically secure random number generator")
-	}
-	chars := []rune("ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
-		"abcdefghijklmnopqrstuvwxyz" +
-		"0123456789" +
-		"@%-_+=") // Should be shell safe for setting the api key in an env var without single quotes
-	length := 40
-	var stringBuilder strings.Builder
-	// Add the userID to the front of the API Key
-	stringBuilder.WriteString(user.UserID)
-	stringBuilder.WriteRune('.')
-	for i := 0; i < length; i++ {
-		stringBuilder.WriteRune(chars[rand.Intn(len(chars))])
-	}
-	return stringBuilder.String()
-}
-
-func GenerateAPIKeyPB(userID string) string {
+func GenerateAPIKey(userID string) string {
 	var bytes [8]byte
 	_, err := crypto_rand.Read(bytes[:])
 	if err != nil {
@@ -110,27 +89,6 @@ func GenerateAPIKeyPB(userID string) string {
 		stringBuilder.WriteRune(chars[rand.Intn(len(chars))])
 	}
 	return stringBuilder.String()
-}
-
-// Return the userID, either from API key context
-// or from the query string - only if the user is an Admin
-func getUserID(c *gin.Context) (string, bool) {
-
-	userID, userIDInQueryString := c.GetQuery("userID")
-	if !userIDInQueryString || userID == "" {
-		userID = c.GetString("userID")
-	} else {
-		// If the userID was provided and is different from the API key value, make sure the request came from an admin
-		if userID != c.GetString("userID") && !isAdmin(c, true) {
-			return "", false // JSON set in isAdmin
-		}
-	}
-	if UserIDRegex.MatchString(userID) {
-		return userID, true
-	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "provided userID does not match ^[A-Za-z0-9]{1,20}$"})
-		return "", false
-	}
 }
 
 type IP struct {
@@ -166,184 +124,111 @@ func containsSubstring(slice []string, target string) bool {
 	return false
 }
 
-// Gets a user object from the query string (if the user is an admin) or from
-// API key context. Sets the return status and message when returning an error
-func GetUserObject(c *gin.Context) (UserObject, error) {
-	var user UserObject
+// updates the VM and range data for the provided range using the provided proxmox client
+func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxClient *goproxmox.Client) error {
 
-	userID, success := getUserID(c)
-	if !success {
-		return user, errors.New("could not get userID from request content") // Status and JSON set in getUserID
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	result := db.First(&user, "user_id = ?", userID)
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		// Must check if the header status has already been written for this request before writing to avoid a panic
-		if !c.Writer.Written() {
-			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		}
-		return user, gorm.ErrRecordNotFound
-	}
-	return user, nil
-}
-
-// Gets a range object for the user from the query string (if the user is an admin) or from
-// API key context. Sets the return status and message when returning and error
-func GetRangeObject(c *gin.Context) (RangeObject, error) {
-	var usersRange RangeObject
-
-	// If we have already stored the range object for this context, just return it
-	usersRangeFromContext, usersRangeExists := c.Get("rangeObject")
-	if usersRangeExists {
-		return usersRangeFromContext.(RangeObject), nil // Type assert the "any" returned from c.Get to RangeObject
-	}
-
-	userID, success := getUserID(c)
-	if !success {
-		return usersRange, gorm.ErrRecordNotFound // Status and JSON set in getUserID
-	}
-
-	var rangeIDStr string
-	var hasRangeID bool
-	// Check the URL for a range ID, it takes priority
-	rangeID := c.Param("rangeID")
-	if rangeID != "" {
-		rangeIDStr = rangeID
-		hasRangeID = true
-	} else {
-		// Check if a specific range ID was provided in the query
-		rangeIDStr, hasRangeID = c.GetQuery("rangeID")
-	}
-
-	if hasRangeID {
-		logger.Debug(fmt.Sprintf("Getting range for: %s", rangeIDStr))
-		rangeNumber, err := GetRangeNumberFromRangeID(db, rangeIDStr)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
-			return usersRange, err
-		}
-		logger.Debug(fmt.Sprintf("Getting range access for range %s for user %s", rangeIDStr, userID))
-		// Verify user has access to this range, admins have access to all ranges
-		if !HasRangeAccess(db, userID, int32(rangeNumber)) && !isAdmin(c, false) {
-			logger.Debug(fmt.Sprintf("User %s does not have access to range %s and is not an admin", userID, rangeIDStr))
-			c.JSON(http.StatusForbidden, gin.H{"error": "User does not have access to this range"})
-			return usersRange, errors.New("access denied")
-		}
-
-		var rangeErr error
-		logger.Debug("Getting range object by number: " + strconv.Itoa(int(rangeNumber)))
-		usersRange, rangeErr = GetRangeObjectByNumber(db, int32(rangeNumber))
-		if rangeErr != nil {
-			logger.Debug(fmt.Sprintf("Range not found: %s", rangeErr.Error()))
-			c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
-			return usersRange, rangeErr
-		}
-		logger.Debug(fmt.Sprintf("Range found: %d", rangeNumber))
-		logger.Debug(fmt.Sprintf("Range object: %+v", godump.DumpStr(usersRange)))
-	} else {
-		logger.Debug(fmt.Sprintf("Getting default range for user %s", userID))
-		// Get user's default range (first accessible range)
-		var defaultErr error
-		usersRange, defaultErr = GetUserDefaultRange(db, userID)
-		if defaultErr != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "UserID " + userID + " has no accessible ranges"})
-			return usersRange, defaultErr
-		}
-	}
-
-	// Set the "rangeObject" key in the gin context to avoid repeated look ups
-	c.Set("rangeObject", usersRange)
-
-	return usersRange, nil
-}
-
-// updates the VM and range data for a user extracted from the context
-func updateUsersRangeVMData(c *gin.Context) error {
-	targetRange, err := GetRangeObject(c)
+	// Get all resources of type "vm" (which includes 'qemu' and 'lxc' types)
+	allVMs, err := getAllVMs(e, ctx, proxmoxClient)
 	if err != nil {
-		return errors.New("unable to get users range") // JSON error is set in getRangeObject
-	}
-
-	proxmoxClient, err := GetProxmoxClientForUser(c)
-	if err != nil {
-		return errors.New("unable to get proxmox client")
-	}
-
-	rawVMs, err := proxmoxClient.GetVmList()
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "unable to list VMs"})
-		return errors.New("unable to login to list VMs")
+		return errors.New("unable to list VMs from cluster")
 	}
 
 	// Clear the DB of any previous VMs for this range
-	logger.Debug(fmt.Sprintf("Clearing VMs for range %s with range number %d", targetRange.RangeID, targetRange.RangeNumber))
-	db.Where("range_number = ?", targetRange.RangeNumber).Delete(&VmObject{})
-
-	var rangeVMCount = 0
+	logger.Debug(fmt.Sprintf("Clearing VMs for range %s with range number %d", targetRange.RangeId(), targetRange.RangeNumber()))
+	app.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").
+		Bind(dbx.Params{
+			"range_id": targetRange.Id,
+		}).Execute()
+	if err != nil {
+		return errors.New("unable to clear VMs for range: " + err.Error())
+	}
 
 	// Get the router VM name for this range
-	routerVMName, err := GetRouterVMName(c)
+	routerVMName, err := GetRouterVMName(targetRange)
 	logger.Debug("routerVMName is: " + routerVMName)
 	if err != nil {
 		// If we can't get the router name, continue without router identification
 		routerVMName = ""
 	}
 
-	// Loop over the VMs and add them to the DB
-	// Save the network for this user to compare IPs against
-	_, network, _ := net.ParseCIDR(fmt.Sprintf("10.%d.0.0/16", targetRange.RangeNumber))
-	vms := rawVMs["data"].([]interface{})
-	for vmCounter := range vms {
-		vm := vms[vmCounter].(map[string]interface{})
-		// Skip shared templates
-		if vm["pool"] == nil || vm["name"] == nil || vm["template"] == nil {
-			continue // A vm with these values as nil will cause the conversions to panic
-		}
-		if vm["pool"].(string) != targetRange.RangeID ||
-			strings.HasSuffix(vm["name"].(string), "-template") ||
-			int(vm["template"].(float64)) == 1 {
+	// Create a network object from the range's CIDR to check if a VM's IP belongs to it
+	_, network, _ := net.ParseCIDR(fmt.Sprintf("10.%d.0.0/16", targetRange.RangeNumber()))
+
+	var rangeVMCount = 0
+	vmCollection, err := app.FindCollectionByNameOrId("vms")
+	if err != nil {
+		return errors.New("unable to find vms collection: " + err.Error())
+	}
+
+	for _, vmResource := range allVMs {
+		// We are only interested in QEMU VMs that belong to the range's pool and are not templates.
+		if vmResource.Type != "qemu" || vmResource.Pool != targetRange.RangeId() || vmResource.Template == 1 || strings.HasSuffix(vmResource.Name, "-template") {
 			continue
 		}
-		var thisVM VmObject
-		thisVM.ProxmoxID = int32(vm["vmid"].(float64))
 
-		// Get IP
-		thisVM.IP = "null"
-		vmr := proxmox.NewVmRef(int(thisVM.ProxmoxID))
-		interfaces, err := proxmoxClient.GetVmAgentNetworkInterfaces(vmr)
-		if err == nil {
-		interfaceLoop:
-			for _, thisInterface := range interfaces {
-				for _, ip := range thisInterface.IpAddresses {
-					if network.Contains(ip) {
-						thisVM.IP = ip.String()
-						break interfaceLoop
+		rawVM := core.NewRecord(vmCollection)
+		thisVM := &models.VMs{}
+		thisVM.SetProxyRecord(rawVM)
+
+		thisVM.SetProxmoxId(int(vmResource.VMID))
+
+		// Get IP from guest agent if possible
+		thisVM.SetIp("null")
+		node, err := proxmoxClient.Node(ctx, vmResource.Node)
+		if err != nil {
+			logger.Warn(fmt.Sprintf("Could not get node object for %s to fetch IP for VM %s: %s", vmResource.Node, vmResource.Name, err.Error()))
+		} else {
+			vm, err := node.VirtualMachine(ctx, int(vmResource.VMID))
+			if err != nil {
+				logger.Warn(fmt.Sprintf("Could not get VM object for %s to fetch IP: %s", vmResource.Name, err.Error()))
+			} else {
+				interfaces, err := vm.AgentGetNetworkIFaces(ctx)
+				if err == nil {
+				interfaceLoop:
+					for _, thisInterface := range interfaces {
+						for _, ipInfo := range thisInterface.IPAddresses {
+							ipAddr := net.ParseIP(ipInfo.IPAddress)
+							if ipAddr != nil && network.Contains(ipAddr) {
+								thisVM.SetIp(ipAddr.String())
+								break interfaceLoop // IP found, no need to check other interfaces/addresses
+							}
+						}
 					}
+				} else {
+					logger.Debug(fmt.Sprintf("Could not get agent network interfaces for VM %s: %s", vmResource.Name, err.Error()))
 				}
 			}
 		}
-		if thisVM.IP == "null" {
-			// Fetch the IP address from the user's range config if the VM is set to use force_ip
-			thisVM.IP = GetIPForVMFromConfig(c, vm["name"].(string))
+
+		if thisVM.Ip() == "null" {
+			// Fallback: Fetch the IP address from the user's range config if the VM is set to use force_ip
+			thisVM.SetIp(GetIPForVMFromConfig(targetRange, vmResource.Name))
 		}
 
-		thisVM.RangeNumber = targetRange.RangeNumber
-		thisVM.Name = vm["name"].(string)
-		logger.Debug(fmt.Sprintf("Adding VM %s to range %s with range number %d", thisVM.Name, targetRange.RangeID, targetRange.RangeNumber))
-		if vm["status"].(string) == "running" {
-			thisVM.PoweredOn = true
+		thisVM.SetRange(targetRange)
+		thisVM.SetName(vmResource.Name)
+		thisVM.SetPoweredOn(vmResource.Status == goproxmox.StatusVirtualMachineRunning)
+		thisVM.SetIsRouter(vmResource.Name == routerVMName)
+
+		logger.Debug(fmt.Sprintf("Adding VM %s to range %s with range number %d", thisVM.Name(), targetRange.RangeId(), thisVM.Range().RangeNumber()))
+		err = app.Save(thisVM)
+		if err == nil {
+			rangeVMCount++
 		} else {
-			thisVM.PoweredOn = false
+			logger.Error(fmt.Sprintf("Unable to add VM %s to database: %s", thisVM.Name(), err.Error()))
 		}
-
-		// Check if this VM is the router
-		thisVM.IsRouter = (vm["name"].(string) == routerVMName)
-
-		db.Create(&thisVM)
-		rangeVMCount += 1
 	}
 
-	db.Model(&targetRange).Update("number_of_vms", rangeVMCount)
+	targetRange.SetNumberOfVms(rangeVMCount)
+	err = app.Save(targetRange)
+	if err != nil {
+		return errors.New("unable to update range: " + err.Error())
+	}
+
+	logger.Debug(fmt.Sprintf("Updated range %s with %d VMs", targetRange.RangeId(), rangeVMCount))
 
 	return nil
 }
@@ -408,24 +293,40 @@ func removeUserFromHostSystem(username string) {
 	}
 }
 
-// New utility functions for group-based access system
-
 // HasRangeAccess checks if a user has access to a range through direct assignment or group membership
-func HasRangeAccess(db *gorm.DB, userID string, rangeNumber int32) bool {
+func HasRangeAccess(userID string, rangeNumber int) bool {
 	// Check direct user-to-range assignment
-	var userRangeAccess UserRangeAccess
-	if err := db.Where("user_id = ? AND range_number = ?", userID, rangeNumber).First(&userRangeAccess).Error; err == nil {
-		return true
+	userRecord, err := app.FindFirstRecordByData("users", "userID", userID)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding user: %s", err.Error()))
+		return false
+	}
+	userRanges := userRecord.ExpandedAll("ranges")
+	for _, rangeRecord := range userRanges {
+		if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
+			return true
+		}
 	}
 
 	// Check group-based access
-	var count int64
-	err := db.Table("user_group_memberships").
-		Joins("JOIN group_range_accesses ON user_group_memberships.group_id = group_range_accesses.group_id").
-		Where("user_group_memberships.user_id = ? AND group_range_accesses.range_number = ?", userID, rangeNumber).
-		Count(&count).Error
+	groupRecords, err := app.FindAllRecords("groups",
+		dbx.NewExp("members ?= {:user_id} OR managers ?= {:user_id}", dbx.Params{
+			"user_id": userID,
+		}),
+	)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
+		return false
+	}
+	for _, groupRecord := range groupRecords {
+		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
+			if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
+				return true
+			}
+		}
+	}
 
-	return err == nil && count > 0
+	return false
 }
 
 type RangesAccessibleByUser struct {
@@ -435,37 +336,45 @@ type RangesAccessibleByUser struct {
 }
 
 // GetUserAccessibleRanges returns all range numbers a user can access
-func GetUserAccessibleRanges(db *gorm.DB, userID string) []RangesAccessibleByUser {
-	var rangeNumbers []int32
-
-	// Get direct range assignments
-	db.Model(&UserRangeAccess{}).
-		Where("user_id = ?", userID).
-		Pluck("range_number", &rangeNumbers)
+func GetUserAccessibleRanges(userID string) []RangesAccessibleByUser {
 
 	var result []RangesAccessibleByUser
-	for _, num := range rangeNumbers {
-		var rangeObj RangeObject
-		if err := db.Where("range_number = ?", num).First(&rangeObj).Error; err == nil {
-			result = append(result, RangesAccessibleByUser{RangeNumber: num, RangeID: rangeObj.RangeID, AccessType: "direct"})
-		} else {
-			result = append(result, RangesAccessibleByUser{RangeNumber: num, RangeID: "ERROR", AccessType: "direct"})
-		}
+
+	// Get direct range assignments
+	userRecord, err := app.FindFirstRecordByData("users", "userID", userID)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding user: %s", err.Error()))
+		return nil
+	}
+	userRanges := userRecord.ExpandedAll("ranges")
+	for _, rangeRecord := range userRanges {
+		rangeNumber := rangeRecord.GetInt("rangeNumber")
+		result = append(result, RangesAccessibleByUser{
+			RangeNumber: int32(rangeNumber),
+			RangeID:     rangeRecord.GetString("rangeID"),
+			AccessType:  "direct",
+		})
 	}
 
 	// Get group-based range access
-	var groupRangeNumbers []int32
-	db.Table("user_group_memberships").
-		Joins("JOIN group_range_accesses ON user_group_memberships.group_id = group_range_accesses.group_id").
-		Where("user_group_memberships.user_id = ?", userID).
-		Pluck("group_range_accesses.range_number", &groupRangeNumbers)
+	groupRecords, err := app.FindAllRecords("groups",
+		dbx.NewExp("members ?= {:user_id} OR managers ?= {:user_id}", dbx.Params{
+			"user_id": userID,
+		}),
+	)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
+		return nil
+	}
 
-	for _, num := range groupRangeNumbers {
-		var rangeObj RangeObject
-		if err := db.Where("range_number = ?", num).First(&rangeObj).Error; err == nil {
-			result = append(result, RangesAccessibleByUser{RangeNumber: num, RangeID: rangeObj.RangeID, AccessType: "group"})
-		} else {
-			result = append(result, RangesAccessibleByUser{RangeNumber: num, RangeID: "ERROR", AccessType: "group"})
+	for _, groupRecord := range groupRecords {
+		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
+			rangeNumber := rangeRecord.GetInt("rangeNumber")
+			result = append(result, RangesAccessibleByUser{
+				RangeNumber: int32(rangeNumber),
+				RangeID:     rangeRecord.GetString("rangeID"),
+				AccessType:  "group",
+			})
 		}
 	}
 
@@ -473,263 +382,175 @@ func GetUserAccessibleRanges(db *gorm.DB, userID string) []RangesAccessibleByUse
 	slices.SortFunc(result, func(a, b RangesAccessibleByUser) int {
 		return int(a.RangeNumber - b.RangeNumber)
 	})
-
 	return result
 }
 
-// GetRangeAccessibleUsers returns all users who can access a specific range
-func GetRangeAccessibleUsers(db *gorm.DB, rangeNumber int32) []string {
+// GetRangeAccessibleUsers returns all userIDs who can access a specific range
+func GetRangeAccessibleUsers(rangeNumber int) []string {
 	var userIDs []string
 
-	// Get direct user assignments
-	db.Model(&UserRangeAccess{}).
-		Where("range_number = ?", rangeNumber).
-		Pluck("user_id", &userIDs)
-
-	// Get group-based user access
-	var groupUserIDs []string
-	db.Table("group_range_accesses").
-		Joins("JOIN user_group_memberships ON group_range_accesses.group_id = user_group_memberships.group_id").
-		Where("group_range_accesses.range_number = ?", rangeNumber).
-		Pluck("user_group_memberships.user_id", &groupUserIDs)
-
-	// Combine and deduplicate
-	userMap := make(map[string]bool)
-	for _, id := range userIDs {
-		userMap[id] = true
-	}
-	for _, id := range groupUserIDs {
-		userMap[id] = true
+	rangeRecord, err := GetRangeObjectByNumber(rangeNumber)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding range: %s", err.Error()))
+		return nil
 	}
 
-	result := make([]string, 0, len(userMap))
-	for id := range userMap {
-		result = append(result, id)
+	// Find all users who have direct access to the range by querying the user table looking for the range.Id in the user's ranges array
+	userRecords, err := app.FindAllRecords("users",
+		dbx.NewExp("ranges ?= {:range_id}", dbx.Params{
+			"range_id": rangeRecord.Id,
+		}),
+	)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding users: %s", err.Error()))
+		return nil
+	}
+	for _, userRecord := range userRecords {
+		userIDs = append(userIDs, userRecord.GetString("userID"))
 	}
 
-	// Sort the result to ensure consistent ordering
-	slices.Sort(result)
-
-	return result
-}
-
-// CreateDefaultUserRange creates a default range for a user and assigns direct access
-func CreateDefaultUserRange(db *gorm.DB, userID string) error {
-	// Find next available range number
-	rangeNumber := findNextAvailableRangeNumber(db, ServerConfiguration.ReservedRangeNumbers)
-
-	// Create the range with default name
-	rangeObj := RangeObject{
-		Name:        fmt.Sprintf("Default Range for %s", userID),
-		Description: "Default range created automatically for user",
-		Purpose:     "General testing and development",
-		RangeID:     userID,
-		RangeNumber: rangeNumber,
-		NumberOfVMs: 0,
-		RangeState:  "NEVER DEPLOYED",
+	// Find all users who are managers or members of a group with access to the range by querying the group table looking for the range.Id in the group's ranges array
+	groupRecords, err := app.FindAllRecords("groups",
+		dbx.NewExp("ranges ?= {:range_id}", dbx.Params{
+			"range_id": rangeRecord.Id,
+		}),
+	)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
+		return nil
 	}
-
-	if err := db.Create(&rangeObj).Error; err != nil {
-		return err
-	}
-
-	// Create direct access record
-	userRangeAccess := UserRangeAccess{
-		UserID:      userID,
-		RangeNumber: rangeNumber,
-	}
-
-	if err := db.Create(&userRangeAccess).Error; err != nil {
-		// if the error is a duplicate key error, continue as the record already exists
-		if !strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
-			db.Delete(&rangeObj)
-			return err
+	for _, groupRecord := range groupRecords {
+		for _, member := range groupRecord.ExpandedAll("members") {
+			userIDs = AppendIfMissing(userIDs, member.GetString("userID"))
+		}
+		for _, manager := range groupRecord.ExpandedAll("managers") {
+			userIDs = AppendIfMissing(userIDs, manager.GetString("userID"))
 		}
 	}
 
-	err := manageVmbrInterfaceLocally(rangeNumber, true)
+	// Sort the result to ensure consistent ordering
+	slices.Sort(userIDs)
+
+	return userIDs
+}
+
+func mustGetUserFromRequest(e *core.RequestEvent) *models.User {
+	rawUser := e.Get("user")
+	if rawUser == nil {
+		panic("User not found in request context")
+	}
+	userRecord := rawUser.(*models.User)
+	return userRecord
+}
+
+func mustGetRangeFromRequest(e *core.RequestEvent) *models.Range {
+	rawRange := e.Get("range")
+	if rawRange == nil {
+		panic("Range not found in request context")
+	}
+	rangeRecord := rawRange.(*models.Range)
+	return rangeRecord
+}
+
+// CreateDefaultUserRange creates a default range for a user and assigns direct access
+func CreateDefaultUserRange(txApp core.App, userID string) error {
+	// Find next available range number
+	rangeNumber := findNextAvailableRangeNumber(txApp)
+
+	rangeCollection, err := txApp.FindCollectionByNameOrId("ranges")
 	if err != nil {
-		db.Delete(&rangeObj)
-		db.Delete(&userRangeAccess)
+		return err
+	}
+	rawRangeRecord := core.NewRecord(rangeCollection)
+	rangeRecord := models.Range{}
+	rangeRecord.SetProxyRecord(rawRangeRecord)
+	rangeRecord.SetRangeNumber(rangeNumber)
+	rangeRecord.SetRangeId(userID)
+	rangeRecord.SetName(fmt.Sprintf("Default Range for %s", userID))
+	rangeRecord.SetDescription("Default range created automatically for user")
+	rangeRecord.SetPurpose("General testing and development")
+	rangeRecord.SetNumberOfVms(0)
+	rangeRecord.SetRangeState("NEVER DEPLOYED")
+	if err := txApp.Save(rangeRecord); err != nil {
+		return err
+	}
+
+	userRecord, err := txApp.FindFirstRecordByData("users", "userID", userID)
+	if err != nil {
+		return err
+	}
+	userRecord.Set("defaultRangeID", rangeRecord.Id)
+	if err := txApp.Save(userRecord); err != nil {
+		return err
+	}
+	userRecord.Set("ranges+", rangeRecord.Id)
+
+	err = txApp.Save(userRecord)
+	if err != nil {
+		return err
+	}
+
+	err = manageVmbrInterfaceLocally(rangeNumber, true)
+	if err != nil {
+		txApp.Delete(rangeRecord)
+		txApp.Delete(userRecord)
 		return err
 	}
 
 	err = createPool(userID)
 	if err != nil {
-		db.Delete(&rangeObj)
-		db.Delete(&userRangeAccess)
+		txApp.Delete(rangeRecord)
+		txApp.Delete(userRecord)
 		manageVmbrInterfaceLocally(rangeNumber, false)
 		return err
 	}
 	return err
 }
 
-func CreateDefaultUserRangePB(txApp core.App, userID string) error {
-	// Find next available range number
-	rangeNumber := findNextAvailableRangeNumberPB(txApp)
-
-	rangeRecord := models.Ranges{}
-	rangeRecord.SetRangeNumber(rangeNumber)
-	rangeRecord.SetRangeId(userID)
-	rangeRecord.SetName(fmt.Sprintf("Default Range for %s", userID))
-	rangeRecord.SetDescription("Default range created automatically for user")
-	rangeRecord.SetPurpose("General testing and development")
-	if err := txApp.Save(rangeRecord); err != nil {
-		return err
-	}
-
-	// Make sure the user can access their range
-	userRecord, err := txApp.FindFirstRecordByData("users", "userID", userID)
-	if err != nil {
-		return err
-	}
-
-	rangeRecordWithId, err := txApp.FindFirstRecordByData("ranges", "rangeNumber", rangeNumber)
-	if err != nil {
-		return err
-	}
-
-	// Add the range to the user's ranges array
-	userRecord.Set("ranges+", rangeRecordWithId.Id)
-	if err := txApp.Save(userRecord); err != nil {
-		return err
-	}
-	return nil
-}
-
 // GetRangeObjectByNumber gets a range object by range number (for multi-range support)
-func GetRangeObjectByNumber(db *gorm.DB, rangeNumber int32) (RangeObject, error) {
-	var rangeObj RangeObject
-	err := db.Where("range_number = ?", rangeNumber).First(&rangeObj).Error
-	return rangeObj, err
-}
-
-func GetRangeNumberFromRangeID(db *gorm.DB, rangeID string) (int32, error) {
-	var rangeObj RangeObject
-	err := db.Where("range_id = ?", rangeID).First(&rangeObj).Error
-	return rangeObj.RangeNumber, err
+func GetRangeObjectByNumber(rangeNumber int) (*models.Range, error) {
+	rawRangeRecord, err := app.FindFirstRecordByData("ranges", "rangeNumber", rangeNumber)
+	if err != nil {
+		return nil, fmt.Errorf("error finding range: %w", err)
+	}
+	rangeRecord := models.Range{}
+	rangeRecord.SetProxyRecord(rawRangeRecord)
+	return &rangeRecord, nil
 }
 
 // GetUserDefaultRange gets the default range for a user (range where user_id matches the user's ID)
-func GetUserDefaultRange(db *gorm.DB, userID string) (RangeObject, error) {
-	var rangeObj RangeObject
-
-	// First try to get a range where the range_id field matches the current user's ID
-	err := db.Where("range_id = ?", userID).First(&rangeObj).Error
-	if err == nil {
-		return rangeObj, nil
+func GetUserDefaultRange(userID string) (*models.Range, error) {
+	userRecord, err := app.FindFirstRecordByData("users", "userID", userID)
+	if err != nil {
+		return nil, fmt.Errorf("error finding user: %w", err)
 	}
-
-	// If no range with matching user_id is found, fall back to the first accessible range
-	accessibleRanges := GetUserAccessibleRanges(db, userID)
-	if len(accessibleRanges) == 0 {
-		return rangeObj, gorm.ErrRecordNotFound
+	defaultRangeID := userRecord.GetString("defaultRangeID")
+	if defaultRangeID == "" {
+		return nil, fmt.Errorf("user %s has no default range", userID)
 	}
-
-	err = db.Where("range_number = ?", accessibleRanges[0].RangeNumber).First(&rangeObj).Error
-	return rangeObj, err
+	rawRangeRecord, err := app.FindFirstRecordByData("ranges", "rangeId", defaultRangeID)
+	if err != nil {
+		return nil, fmt.Errorf("error finding default range: %w", err)
+	}
+	rangeRecord := models.Range{}
+	rangeRecord.SetProxyRecord(rawRangeRecord)
+	return &rangeRecord, nil
 }
 
-// CheckRangeAccessAndGetObjects validates access permissions and returns the appropriate range and user objects
-// This function handles the following scenarios:
-// 1. rangeID/rangeNumber provided, no userID: Check if current user has access to the specified range
-// 2. rangeID/rangeNumber and userID provided: Check if current user is admin, then check if specified user has access to range
-// 3. Neither provided: Get current user's default range
-func CheckRangeAccessAndGetObjects(c *gin.Context) (RangeObject, UserObject, error) {
-	var usersRange RangeObject
-	var targetUser UserObject
-
-	// If we have already stored the range object and user object for this context, just return it
-	usersRangeFromContext, usersRangeExists := c.Get("rangeObject")
-	userObjectFromContext, userObjectFromContextExists := c.Get("userObject")
-	if usersRangeExists && userObjectFromContextExists {
-		logger.Debug("Returning cached range object and user object for context")
-		return usersRangeFromContext.(RangeObject), userObjectFromContext.(UserObject), nil // Type assert the "any" returned from c.Get to RangeObject/UserObject
+// AppendIfMissing appends an element to a slice only if it's not already present.
+func AppendIfMissing(slice []string, elem string) []string {
+	for _, v := range slice {
+		if v == elem {
+			return slice // Element already exists, return the original slice
+		}
 	}
+	return append(slice, elem) // Element not found, append it
+}
 
-	// Get current user from query string or API key/JWT context
-	targetUser, err := GetUserObject(c)
+func GetRangeNumberFromRangeID(rangeID string) (int, error) {
+	rangeRecord, err := app.FindFirstRecordByData("ranges", "rangeId", rangeID)
 	if err != nil {
-		return usersRange, targetUser, err
+		return 0, fmt.Errorf("error finding range: %w", err)
 	}
-	targetUserID := targetUser.UserID
-
-	// Check if rangeID parameter was provided
-	var rangeIDStr string
-	var hasRangeID bool
-	// Check the URL for a range ID, it takes priority
-	rangeID := c.Param("rangeID")
-	if rangeID != "" {
-		rangeIDStr = rangeID
-		hasRangeID = true
-	} else {
-		// Check if a specific range ID was provided in the query
-		rangeIDStr, hasRangeID = c.GetQuery("rangeID")
-	}
-	rangeNumberStr, hasRangeNumber := c.GetQuery("rangeNumber")
-
-	if hasRangeNumber && hasRangeID {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot provide both a rangeID and rangeNumber"})
-		return usersRange, targetUser, errors.New("cannot provide both a rangeID and rangeNumber")
-	}
-
-	var rangeNumber int32 = -1
-
-	if hasRangeID {
-		logger.Debug(fmt.Sprintf("RangeID provided, looking up range for rangeID: %s", rangeIDStr))
-		// Look up the range number for the rangeID
-		var rangeObj RangeObject
-		db.First(&rangeObj, "range_id = ?", rangeIDStr)
-		if rangeObj.RangeNumber == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Range %s not found", rangeIDStr)})
-			return usersRange, targetUser, fmt.Errorf("range %s not found", rangeIDStr)
-		}
-		logger.Debug(fmt.Sprintf("Range found for rangeID: %s, range number: %d", rangeIDStr, rangeObj.RangeNumber))
-		rangeNumber = rangeObj.RangeNumber
-	}
-
-	if hasRangeNumber {
-		rangeNumberInt64, parseErr := strconv.ParseInt(rangeNumberStr, 10, 32)
-		if parseErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rangeNumber"})
-			return usersRange, targetUser, errors.New("invalid rangeNumber")
-		}
-		rangeNumber = int32(rangeNumberInt64)
-	}
-
-	// Get the range object
-	if hasRangeID || hasRangeNumber {
-		// Range was specified, get that specific range
-		usersRange, err = GetRangeObjectByNumber(db, rangeNumber)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Range not found"})
-			} else {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error retrieving range"})
-			}
-			return usersRange, targetUser, err
-		}
-
-		// Check if the target user has access to this range
-		if !HasRangeAccess(db, targetUserID, rangeNumber) && !isAdmin(c, false) {
-			c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("User %s does not have access to range %d", targetUserID, rangeNumber)})
-			return usersRange, targetUser, errors.New("access denied")
-		}
-	} else {
-		// No rangeID specified, get the target user's default range
-		usersRange, err = GetUserDefaultRange(db, targetUserID)
-		if err != nil && targetUserID != "ROOT" {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("No accessible ranges found for user %s", targetUserID)})
-			return usersRange, targetUser, err
-		} else if err != nil && targetUserID == "ROOT" {
-			// If the target user is ROOT and there is an error, allow it to continue as the root user is being used to create a user
-			return RangeObject{}, targetUser, nil
-		}
-	}
-
-	// Save the range object and user object to the context
-	c.Set("rangeObject", usersRange)
-	c.Set("userObject", targetUser)
-
-	return usersRange, targetUser, nil
+	return rangeRecord.GetInt("rangeNumber"), nil
 }

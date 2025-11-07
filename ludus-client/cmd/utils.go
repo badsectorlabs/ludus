@@ -347,7 +347,7 @@ func printTaskOutputFromString(logs string, taskName string) {
 // - both: adds ?rangeID=<rangeID>&userID=<userID>
 func buildURLWithRangeAndUserID(baseURL string) string {
 	if rangeID == "" && userID == "" {
-		return baseURL
+		return APIBasePath + baseURL
 	}
 
 	var params []string
@@ -359,5 +359,5 @@ func buildURLWithRangeAndUserID(baseURL string) string {
 	}
 
 	queryString := strings.Join(params, "&")
-	return fmt.Sprintf("%s?%s", baseURL, queryString)
+	return fmt.Sprintf("%s%s?%s", APIBasePath, baseURL, queryString)
 }

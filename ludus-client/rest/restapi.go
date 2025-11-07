@@ -19,6 +19,8 @@ type ErrorStruct struct {
 	Error string `json:"error"`
 }
 
+const APIBasePath = "/api/v2"
+
 var user string
 
 func InitClient(url string, apiKey string, proxy string, verify bool, debug bool, versionString string) *resty.Client {
@@ -138,6 +140,10 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 }
 
 func GenericGet(client *resty.Client, apiPath string) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
+
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -150,6 +156,9 @@ func GenericGet(client *resty.Client, apiPath string) ([]byte, bool) {
 }
 
 func GenericJSONPost(client *resty.Client, apiPath string, data any) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -166,6 +175,9 @@ func GenericJSONPost(client *resty.Client, apiPath string, data any) ([]byte, bo
 }
 
 func GenericDelete(client *resty.Client, apiPath string) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -179,6 +191,9 @@ func GenericDelete(client *resty.Client, apiPath string) ([]byte, bool) {
 }
 
 func GenericPutFile(client *resty.Client, apiPath string, data []byte) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -193,6 +208,9 @@ func GenericPutFile(client *resty.Client, apiPath string, data []byte) ([]byte, 
 }
 
 func PostFileAndForce(client *resty.Client, apiPath string, data []byte, filename string, force bool) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -210,6 +228,9 @@ func PostFileAndForce(client *resty.Client, apiPath string, data []byte, filenam
 }
 
 func PostFileAndForceAndGlobal(client *resty.Client, apiPath string, data []byte, filename string, force bool, ansibleGlobal bool) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -228,6 +249,9 @@ func PostFileAndForceAndGlobal(client *resty.Client, apiPath string, data []byte
 }
 
 func GenericJSONPut(client *resty.Client, apiPath string, data string) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -244,6 +268,9 @@ func GenericJSONPut(client *resty.Client, apiPath string, data string) ([]byte, 
 }
 
 func FileGet(client *resty.Client, apiPath string, outputPath string) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()

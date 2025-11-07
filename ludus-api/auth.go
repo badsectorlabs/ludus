@@ -2,7 +2,9 @@ package ludusapi
 
 import (
 	"fmt"
+	"ludusapi/models"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -19,7 +21,6 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 
 	parts := strings.Split(apiKey, ".")
 	if len(parts) != 2 {
-		// return e.UnauthorizedError("Malformed API Key provided", nil)
 		return JSONError(e, http.StatusUnauthorized, "Malformed API Key provided")
 	}
 
@@ -27,18 +28,11 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 
 	record, err := e.App.FindFirstRecordByData("users", "userID", userID)
 	if err != nil {
-		// return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
-		// 	"error_data": validation.NewError("user_not_found", fmt.Sprintf("user %s not found", userID)),
-		// })
 		return JSONError(e, http.StatusUnauthorized, fmt.Sprintf("user %s not found", userID))
 	}
 
 	storedHash := record.GetString("hashedAPIKey")
-	logger.Debug(fmt.Sprintf("storedHash: %s", storedHash))
 	if !CheckHash(apiKey, storedHash) {
-		// return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
-		// 	"error_data": validation.NewError("invalid_api_key", "Invalid API key"),
-		// })
 		return JSONError(e, http.StatusUnauthorized, "Invalid API key")
 	}
 
@@ -49,21 +43,81 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 		if record.Get("isAdmin").(bool) {
 			record, err = e.App.FindFirstRecordByData("users", "userID", requestedUserID)
 			if err != nil {
-				// return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
-				// 	"error_data": validation.NewError("user_not_found", fmt.Sprintf("user %s not found", requestedUserID)),
-				// })
 				return JSONError(e, http.StatusUnauthorized, fmt.Sprintf("user %s not found", requestedUserID))
 			}
 		} else {
-			// return e.UnauthorizedError("Authentication failed", map[string]validation.Error{
-			// 	"error_data": validation.NewError("not_admin", "You are not an admin and cannot impersonate other users"),
-			// })
 			return JSONError(e, http.StatusUnauthorized, "You are not an admin and cannot impersonate other users")
 		}
 	}
 
+	// Expand the user record so the relationships are loaded
+	errs := app.ExpandRecord(record, []string{"ranges", "groups"}, nil)
+	if len(errs) > 0 {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error expanding user record: %v", errs))
+	}
+
 	// Set this request as authenticated
 	e.Auth = record
+
+	return e.Next()
+}
+
+func UserAndRangesLookupMiddleware(e *core.RequestEvent) error {
+	// If the user is not authenticated, pass the request to the next handler, don't try to populate the user and ranges context
+	if e.Auth == nil || e.Auth.IsSuperuser() {
+		return e.Next()
+	}
+
+	// If we're running as the root user, don't try to populate the user and ranges context as it has already been populated the first time this middleware ran
+	if os.Geteuid() == 0 {
+		return e.Next()
+	}
+
+	// Load and store the user's ranges as proxy records
+	var userRanges []*models.Range
+	userRangesRecords := e.Auth.ExpandedAll("ranges")
+	for _, r := range userRangesRecords {
+		thisRange := &models.Range{}
+		thisRange.SetProxyRecord(r)
+		userRanges = append(userRanges, thisRange)
+	}
+	// Save the user's ranges to the context
+	e.Set("ranges", userRanges)
+
+	// Check if the user is requesting a specific range
+	rangeID := e.Request.URL.Query().Get("rangeID")
+	if rangeID != "" {
+		// Check if the user has access to this range by looking up the rangeID in the array of ranges in the user record
+		hasAccess := false
+		for _, r := range userRanges {
+			if r.RangeId() == rangeID {
+				hasAccess = true
+				break
+			}
+		}
+		if !hasAccess {
+			return JSONError(e, http.StatusForbidden, fmt.Sprintf("User %s does not have access to range %s", e.Auth.GetString("userID"), rangeID))
+		}
+	} else {
+		rangeID = e.Auth.GetString("defaultRangeID")
+		if rangeID == "" {
+			return JSONError(e, http.StatusNotFound, "User has no default range and no rangeID was provided in the request")
+		}
+	}
+
+	// Get the range object to use for the remainder of the request
+	rawRangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
+	if err != nil {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found", rangeID))
+	}
+	rangeRecord := &models.Range{}
+	rangeRecord.SetProxyRecord(rawRangeRecord)
+	e.Set("range", rangeRecord)
+
+	// Create a User proxy record and save it to the context
+	user := &models.User{}
+	user.SetProxyRecord(e.Auth)
+	e.Set("user", user)
 
 	return e.Next()
 }

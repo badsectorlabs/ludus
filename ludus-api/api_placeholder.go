@@ -5,69 +5,69 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/gin-gonic/gin"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 // HandlerManager holds the registered plugin handlers.
 type HandlerManager struct {
 	mu       sync.RWMutex
-	handlers map[string]gin.HandlerFunc
+	handlers map[string]func(*core.RequestEvent) error
 }
 
 // NewHandlerManager creates a new HandlerManager.
 func NewHandlerManager() *HandlerManager {
 	return &HandlerManager{
-		handlers: make(map[string]gin.HandlerFunc),
+		handlers: make(map[string]func(*core.RequestEvent) error),
 	}
 }
 
 // RegisterHandler allows a plugin to register its handler for a specific route.
-func (hm *HandlerManager) RegisterHandler(path string, handler gin.HandlerFunc) {
+func (hm *HandlerManager) RegisterHandler(path string, handler func(*core.RequestEvent) error) {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 	hm.handlers[path] = handler
 }
 
 // GetHandler retrieves the handler for a specific route.
-func (hm *HandlerManager) GetHandler(path string) (gin.HandlerFunc, bool) {
+func (hm *HandlerManager) GetHandler(path string) (func(*core.RequestEvent) error, bool) {
 	hm.mu.RLock()
 	defer hm.mu.RUnlock()
 	handler, exists := hm.handlers[path]
 	return handler, exists
 }
 
-func PlaceholderHandler(c *gin.Context) {
-	handler, exists := LudusPluginHandlerManager.GetHandler(c.FullPath())
+func PlaceholderHandler(e *core.RequestEvent) error {
+	handler, exists := LudusPluginHandlerManager.GetHandler(e.Request.URL.Path)
 	if exists {
-		handler(c)
+		return handler(e)
 	} else {
-		c.JSON(http.StatusNotFound, gin.H{"error": "This endpoint is implemented in a plugin that is not loaded"})
+		return JSONError(e, http.StatusNotFound, "This endpoint is implemented in a plugin that is not loaded")
 	}
 }
 
-func RegisterPluginPlaceholderRoutes(router *gin.Engine) {
+func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 
 	// We hard-code the PlaceholderHandler for plugin routes, and the plugin will register its own handler for the route
-	var pluginRoutes = Routes{
-		Route{
+	var pluginRoutes = PocketBaseRoutes{
+		PocketBaseRoute{
 			Name:        "EnableAntiSandboxForVM",
 			Method:      http.MethodPost,
 			Pattern:     "/antisandbox/enable",
 			HandlerFunc: PlaceholderHandler,
 		},
-		Route{
+		PocketBaseRoute{
 			Name:        "InstallAntiSandboxDebs",
 			Method:      http.MethodPost,
 			Pattern:     "/antisandbox/install-custom",
 			HandlerFunc: PlaceholderHandler,
 		},
-		Route{
+		PocketBaseRoute{
 			Name:        "InstallStandardDebs",
 			Method:      http.MethodPost,
 			Pattern:     "/antisandbox/install-standard",
 			HandlerFunc: PlaceholderHandler,
 		},
-		Route{
+		PocketBaseRoute{
 			Name:        "GetAntisandboxStatus",
 			Method:      http.MethodGet,
 			Pattern:     "/antisandbox/status",
@@ -75,21 +75,7 @@ func RegisterPluginPlaceholderRoutes(router *gin.Engine) {
 		},
 	}
 
-	for _, route := range pluginRoutes {
-		logger.Debug(fmt.Sprintf("Registering placeholder route for plugin: %s %s", route.Method, route.Pattern))
-		switch route.Method {
-		case http.MethodGet:
-			router.GET(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
-		case http.MethodPost:
-			router.POST(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
-		case http.MethodPut:
-			router.PUT(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
-		case http.MethodPatch:
-			router.PATCH(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
-		case http.MethodDelete:
-			router.DELETE(route.Pattern, authenticationMiddleware, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
-		}
-	}
+	RegisterRoutesWithPocketBase(se, pluginRoutes)
 }
 
 func RegisterPluginActualRoutes(routes Routes) {

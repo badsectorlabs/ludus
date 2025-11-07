@@ -4,11 +4,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 // GetLicense returns the current license information
-func GetLicense(c *gin.Context) {
+func GetLicense(e *core.RequestEvent) error {
 	response := map[string]interface{}{
 		"edition":     server.LicenseType,
 		"licensed_to": server.LicenseName,
@@ -17,10 +17,10 @@ func GetLicense(c *gin.Context) {
 	}
 
 	if server.LicenseExpiry != nil {
-		response["expires_at"] = server.LicenseExpiry.Format(time.RFC3339Nano)
+		response["expires_at"] = server.LicenseExpiry.Format(time.RFC3339)
 	} else {
 		response["expires_at"] = nil
 	}
 
-	c.JSON(http.StatusOK, response)
+	return e.JSON(http.StatusOK, response)
 }

@@ -3130,7 +3130,7 @@ components:
         - testingEnabled
         - VMs
       properties:
-        userID:
+        rangeID:
           $ref: "#/components/schemas/userID"
         rangeNumber:
           type: integer

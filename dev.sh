@@ -4,7 +4,7 @@
 # It assumes you are on a macOS or Linux host and have root SSH access to the target machine
 
 # Parse command line arguments
-while getopts "hlap:t:n:cdw" opt; do
+while getopts "hlap:t:n:cdws" opt; do
   case $opt in
     h)
       echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c]"
@@ -17,6 +17,7 @@ while getopts "hlap:t:n:cdw" opt; do
       echo "  -d  Build and install debug mode"
       echo "  -p  Port to use for SSH/rsync"
       echo "  -w  Build and install web UI"
+      echo "  -s  Skip plugins"
       exit 0
       ;;
     l)
@@ -42,6 +43,9 @@ while getopts "hlap:t:n:cdw" opt; do
       ;;
     w)
       BUILD_WEB_UI=true
+      ;;
+    s)
+      SKIP_PLUGINS=true
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -84,12 +88,12 @@ rsync -av --progress \
     . "$DEVELOPMENT_HOSTNAME":~/ludus-dev
 
 # If the enterprise plugin exists, build it first
-if [ -d "./ludus-enterprise-plugin" ]; then
+if [ -d "./ludus-enterprise-plugin" ] && [ "$SKIP_PLUGINS" != true ]; then
     ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-enterprise-plugin && ./dev.sh"
 fi
 
 # If the anti-sandbox plugin exists, build it before the Ludus server
-if [ -d "./ludus-antisandbox-plugin" ]; then
+if [ -d "./ludus-antisandbox-plugin" ] && [ "$SKIP_PLUGINS" != true ]; then
     ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-antisandbox-plugin && ./dev.sh"
 fi
 
