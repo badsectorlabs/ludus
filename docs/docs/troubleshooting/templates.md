@@ -10,13 +10,13 @@ If your Ludus host is unable to download ISOs but your local machine can, you ca
 
 To do this:
 
-1. Download the ISO file locally, then upload it to your Ludus host. You can do this via the GUI or via SCP. The template should end up in a datastore. By default, if using the `local` datastore, the ISO should end up at `/var/lib/vz/template/iso`.
+1. Download the ISO file locally, then upload it to your Ludus host. You can do this via the GUI or via SCP. The template should end up in a data pool. By default, if using the `local` pool, the ISO should end up at `/var/lib/vz/template/iso`.
 
 !['ISO Upload'](/img/templates/iso-upload.png)
 
 2. Locate the template packer file. Built-in template are at `/opt/ludus/packer/<template>/<template>.pkr.hcl`, user added templates are at `/opt/ludus/users/<username>/packer/<template>/<template>.pkr.hcl`
 
-3. Edit the template packer file and change the `iso_url` value to `iso_file`. The format for pool is `<datastore>:iso/<isoname>.iso`. For example:
+3. Edit the template packer file and change the `iso_url` value to `iso_file`. The format for pool is `<poolname>:iso/<isoname>.iso`. For example:
 
 Change
 
