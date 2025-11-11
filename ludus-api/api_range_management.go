@@ -442,7 +442,7 @@ func PutConfig(e *core.RequestEvent) error {
 
 	// Check the roles and dependencies
 	userHasRoles := e.Get("userHasRoles")
-	if userHasRoles.(bool) {
+	if userHasRoles != nil && userHasRoles.(bool) {
 		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), "Resolving dependencies for user-defined roles..\n", false)
 		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(e, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
 		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), rolesOutput, true)
