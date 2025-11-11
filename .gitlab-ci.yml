@@ -36,6 +36,7 @@ cache:
   paths:
     - ludus-gui/node_modules/
     - ludus-gui/.next/cache/
+    - docs/node_modules/
 
 ################
 # YAML ANCHORS #
@@ -349,8 +350,8 @@ build all:
     - echo "Getting web UI code..."
     - git clone https://ludus-webui:${LUDUS_WEBUI_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-gui.git
     - cd ludus-gui
-    - bun next telemetry disable
     - bun install
+    - bun next telemetry disable
     - NODE_ENV=production bun run build
     - mv out ../ludus-api/webUI
     - cd ..
