@@ -4,10 +4,10 @@
 # It assumes you are on a macOS or Linux host and have root SSH access to the target machine
 
 # Parse command line arguments
-while getopts "hlap:t:n:cdws" opt; do
+while getopts "hlap:t:n:cdwsDC" opt; do
   case $opt in
     h)
-      echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c]"
+      echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c] [-d] [-p] [-w] [-s] [-D] [-C]"
       echo "  -h  Show this help message"
       echo "  -l  Show Ludus service logs (default 100 lines)"
       echo "  -a  Show Ludus admin service logs (requires -l)"
@@ -18,6 +18,8 @@ while getopts "hlap:t:n:cdws" opt; do
       echo "  -p  Port to use for SSH/rsync"
       echo "  -w  Build and install web UI"
       echo "  -s  Skip plugins"
+      echo "  -D  Enable debug mode for database"
+      echo "  -C  Build and install client remotely"
       exit 0
       ;;
     l)
@@ -46,6 +48,12 @@ while getopts "hlap:t:n:cdws" opt; do
       ;;
     s)
       SKIP_PLUGINS=true
+      ;;
+    D)
+      DEBUG_DATABASE=true
+      ;;
+    C)
+      BUILD_CLIENT_REMOTELY=true
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -104,11 +112,20 @@ fi
 
 # SSH into the target machine and build the ludus server binary\
 if [ "$DEBUG_MODE" = true ]; then
-    echo "[+] Building ludus server with LUDUS_DEBUG=1"
-    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh -d"
+    DEBUG_FLAGS="-d"
 else
-    echo "[-] Building ludus server with LUDUS_DEBUG=0"
-    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh"
+    DEBUG_FLAGS=""
+fi
+
+if [ "$DEBUG_DATABASE" = true ]; then
+    DEBUG_FLAGS="${DEBUG_FLAGS} -D"
+fi
+
+ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh $DEBUG_FLAGS"
+
+# Build the client remotely if requested
+if [ "$BUILD_CLIENT_REMOTELY" = true ]; then
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-client && ./dev.sh"
 fi
 
 # Build the client locally if requested

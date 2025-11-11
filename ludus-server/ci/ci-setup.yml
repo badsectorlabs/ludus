@@ -362,7 +362,10 @@
 
     - name: Install yarn
       ansible.builtin.shell: npm install --global yarn
-
+      
+    - name: Install bun
+      ansible.builtin.shell: npm install --global bun
+      
 - name: Add gitlab-runner to proxmox and convert the VM to a template
   hosts: localhost
   roles:

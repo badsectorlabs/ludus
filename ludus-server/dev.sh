@@ -1,5 +1,27 @@
 #!/bin/bash
 
+# Parse command line arguments
+while getopts "hDd" opt; do
+  case $opt in
+    h)
+      echo "Usage: $0 [-h] [-d] [-D]"
+      echo "  -d  Enable debug logging for Ludus"
+      echo "  -D  Enable debug logging for the database"
+      exit 0
+      ;;
+    d)
+      DEBUG_MODE=true
+      ;;
+    D)
+      DEBUG_DATABASE=true
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      exit 1
+      ;;
+  esac
+done
+
 pushd .
 
 # cd to the directory of the script
@@ -54,12 +76,20 @@ if [ "$HOSTNAME" == "m1" ]; then
     scp ludus-server lkdev2: && ssh lkdev2 "./ludus-server --update"
 fi
 
-if [ "$1" == "-d" ]; then
+if [ "$DEBUG_MODE" = true ]; then
     echo "[+] Setting LUDUS_DEBUG=1"
     systemctl set-environment LUDUS_DEBUG=1
 else
     echo "[-] Unsetting LUDUS_DEBUG"
     systemctl unset-environment LUDUS_DEBUG
+fi
+
+if [ "$DEBUG_DATABASE" = true ]; then
+    echo "[+] Setting LUDUS_DEBUG_DATABASE=1"
+    systemctl set-environment LUDUS_DEBUG_DATABASE=1
+else
+    echo "[-] Unsetting LUDUS_DEBUG_DATABASE"
+    systemctl unset-environment LUDUS_DEBUG_DATABASE
 fi
 
 ./ludus-server --update --no-dep-update

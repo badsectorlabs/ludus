@@ -120,7 +120,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		returnAllRanges = true
 	}
 
-	execute := execute.NewDefaultExecute(
+	ansibleExecute := execute.NewDefaultExecute(
 		// Use a multiwrtier that saves the output to a buffer and a file
 		execute.WithWrite(io.MultiWriter(buff, ansibleLogFile)),
 		// Also log stderr to the log file and the buff vs stderr (journalctl logs)
@@ -147,12 +147,30 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		execute.WithEnvVar("LUDUS_RETURN_ALL_RANGES", strconv.FormatBool(returnAllRanges)),
 	)
 
+	// Loop over the environment and add any that start with LUDUS_SECRET_ to the execute object
+	for _, envVar := range os.Environ() {
+		envVarParts := strings.SplitN(envVar, "=", 2)
+		if len(envVarParts) != 2 {
+			continue
+		}
+		envVarKey := envVarParts[0]
+		envVarValue := envVarParts[1]
+		if strings.HasPrefix(envVarKey, "LUDUS_SECRET_") {
+			ansibleExecute.EnvVars[envVarKey] = envVarValue
+		}
+	}
+
 	playbook := &playbook.AnsiblePlaybookCmd{
 		Playbooks:         playbookPathArray,
-		Exec:              execute,
+		Exec:              ansibleExecute,
 		ConnectionOptions: ansiblePlaybookConnectionOptions,
 		Options:           ansiblePlaybookOptions,
 		StdoutCallback:    "default",
+	}
+
+	// Set the ansible binary from the environment if it exists
+	if ansibleBinary, ok := os.LookupEnv("LUDUS_ANSIBLE_BINARY"); ok {
+		playbook.Binary = ansibleBinary
 	}
 
 	// Check for a user-defined-roles playbook (included in ludus) and create a placeholder if it doesn't exist
@@ -447,6 +465,11 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 		ConnectionOptions: ansiblePlaybookConnectionOptions,
 		Options:           ansiblePlaybookOptions,
 		StdoutCallback:    "default",
+	}
+
+	// Set the ansible binary from the environment if it exists
+	if ansibleBinary, ok := os.LookupEnv("LUDUS_ANSIBLE_BINARY"); ok {
+		playbook.Binary = ansibleBinary
 	}
 
 	err := playbook.Run(context.TODO())

@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
@@ -51,13 +53,37 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 	}
 
 	// Set this request as authenticated
-	// Note: The user record will be expanded in UserAndRangesLookupMiddleware
+	// Note: The user record will be expanded in userAndRangesLookupMiddleware
 	e.Auth = record
 
 	return e.Next()
 }
 
-func UserAndRangesLookupMiddleware(e *core.RequestEvent) error {
+// Updates the date_last_active column in the database for the user making the API call
+// Also logs the API action to a file
+func updateLastActiveTimeAndLog(e *core.RequestEvent) error {
+	// Prevent locking issues with proxied requests, don't log the last active time for ludus-admin requests
+	// as they are already logged by the regular ludus service proxy
+	if os.Geteuid() == 0 || e.Auth == nil || e.Get("user") == nil || e.Auth.IsSuperuser() {
+		return e.Next()
+	}
+
+	user := e.Get("user").(*models.User)
+	now, err := types.ParseDateTime(time.Now().UTC().Round(time.Duration(time.Millisecond)))
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error parsing now: %v", err))
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error parsing now: %v", err))
+	}
+	user.SetLastActive(now)
+	err = e.App.Save(user)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error saving user: %v", err))
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving user: %v", err))
+	}
+	return e.Next()
+}
+
+func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	// If the user is not authenticated, pass the request to the next handler, don't try to populate the user and ranges context
 	if e.Auth == nil || e.Auth.IsSuperuser() {
 		return e.Next()
@@ -121,4 +147,30 @@ func UserAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	e.Set("user", user)
 
 	return e.Next()
+}
+
+// This function makes sure the request is to a user endpoint if the server is running as root (i.e. :8081)
+func limitRootEndpoints(e *core.RequestEvent) error {
+	logger.Debug(fmt.Sprintf("Request URL: %s", e.Request.URL.Path))
+	if os.Geteuid() == 0 &&
+		!strings.HasPrefix(e.Request.URL.Path, "/user") &&
+		!strings.HasPrefix(e.Request.URL.Path, "/antisandbox/") &&
+		!strings.HasPrefix(e.Request.URL.Path, "/ranges/create") &&
+		!(strings.HasPrefix(e.Request.URL.Path, "/range") && e.Request.Method == http.MethodDelete) {
+		return JSONError(e, http.StatusInternalServerError, "The :8081 endpoint can only be used for user, range creation/deletion, and anti-sandbox actions. Use the :8080 endpoint for all other actions.")
+	} else if os.Geteuid() != 0 &&
+		(strings.HasPrefix(e.Request.URL.Path, "/user") ||
+			strings.HasPrefix(e.Request.URL.Path, "/antisandbox/") ||
+			strings.HasPrefix(e.Request.URL.Path, "/ranges/create") ||
+			(strings.HasPrefix(e.Request.URL.Path, "/range") && e.Request.Method == http.MethodDelete)) {
+		// Reverse proxy to the admin API
+		adminProxy.ServeHTTP(e.Response, e.Request)
+
+		// Abort the middleware chain to prevent the user-facing server
+		// from also handling the request and writing a second response.
+		return nil
+	}
+
+	return e.Next()
+
 }

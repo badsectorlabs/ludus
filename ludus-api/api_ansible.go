@@ -126,11 +126,7 @@ func GetRolesAndCollections(e *core.RequestEvent) error {
 		})
 	}
 
-	response := dto.GetRolesAndCollectionsResponse{
-		Result: ansibleResponseItems,
-	}
-
-	return e.JSON(http.StatusOK, response)
+	return e.JSON(http.StatusOK, ansibleResponseItems)
 }
 
 // ActionRoleFromInternet - installs an ansible role from ansible galaxy or publicly available source control

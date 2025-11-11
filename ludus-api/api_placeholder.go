@@ -78,7 +78,7 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 	RegisterRoutesWithPocketBase(se, pluginRoutes)
 }
 
-func RegisterPluginActualRoutes(routes Routes) {
+func RegisterPluginActualRoutes(routes PocketBaseRoutes) {
 	for _, route := range routes {
 		logger.Debug(fmt.Sprintf("Registering actual route for plugin: %s %s", route.Method, route.Pattern))
 		LudusPluginHandlerManager.RegisterHandler(route.Pattern, route.HandlerFunc)

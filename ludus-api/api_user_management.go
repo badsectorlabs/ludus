@@ -310,16 +310,14 @@ func ListAllUsers(e *core.RequestEvent) error {
 		users[i] = dto.ListAllUsersResponseItem{
 			Name:            userModel.Name(),
 			UserID:          userModel.UserId(),
+			UserNumber:      userModel.UserNumber(),
 			DateCreated:     userModel.Created().Time(),
-			DateLastActive:  userModel.Updated().Time(),
+			DateLastActive:  userModel.LastActive().Time(),
 			IsAdmin:         userModel.IsAdmin(),
 			ProxmoxUsername: userModel.ProxmoxUsername(),
 		}
 	}
-	response := dto.ListAllUsersResponse{
-		Value: users,
-	}
-	return e.JSON(http.StatusOK, response)
+	return e.JSON(http.StatusOK, users)
 }
 
 // ListUser - lists user details
@@ -330,13 +328,12 @@ func ListUser(e *core.RequestEvent) error {
 		Name:            userModel.Name(),
 		UserID:          userModel.UserId(),
 		DateCreated:     userModel.Created().Time(),
-		DateLastActive:  userModel.Updated().Time(),
+		DateLastActive:  userModel.LastActive().Time(),
 		IsAdmin:         userModel.IsAdmin(),
 		ProxmoxUsername: userModel.ProxmoxUsername(),
+		UserNumber:      userModel.UserNumber(),
 	}
-	response := dto.ListUserResponse{
-		Value: []dto.ListUserResponseItem{user},
-	}
+	response := []dto.ListUserResponseItem{user}
 	return e.JSON(http.StatusOK, response)
 }
 

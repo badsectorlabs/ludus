@@ -123,6 +123,7 @@ apt install gitlab-runner git git-lfs build-essential vim tmux htop jq python3-d
 # Install node/yarn for documentation building
 curl -fsSL https://deb.nodesource.com/setup_21.x | bash - && apt-get install -y nodejs
 npm install --global yarn
+npm install --global bun
 
 # Helpful to auto-load the key on login for troubleshooting
 echo 'if [ -f /opt/ludus/ci/.apikey-admin ]; then export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin); fi' >> /home/gitlab-runner/.bashrc
@@ -152,4 +153,14 @@ GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w"
 cd ../docs
 yarn install
 yarn build
+
+cd ..
+bun next telemetry disable
+
+# If you have access to the Web UI, warm those caches too
+git clone https://gitlab.com/badsectorlabs/ludus-gui
+cd ludus-gui
+bun install
+NODE_ENV=production bun run build
+
 ```

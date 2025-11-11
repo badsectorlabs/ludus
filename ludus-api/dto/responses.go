@@ -203,9 +203,7 @@ type KmsLicenseResponseErrorsItem struct {
 	Item   string `json:"item,omitempty"`
 	Reason string `json:"reason,omitempty"`
 }
-type ListAllRangeResponse struct {
-	Value []ListAllRangeResponseItem `json:"-"`
-}
+
 type ListAllRangeResponseItem struct {
 	VMs            []ListAllRangeResponseItemVMsItem `json:"VMs"`
 	RangeID        string                            `json:"rangeID,omitempty"`
@@ -229,12 +227,11 @@ type ListAllRangeResponseItemVMsItem struct {
 	Name        string `json:"name"`
 	PoweredOn   bool   `json:"poweredOn"`
 }
-type ListAllUsersResponse struct {
-	Value []ListAllUsersResponseItem `json:"-"`
-}
+
 type ListAllUsersResponseItem struct {
 	Name            string    `json:"name"`
 	UserID          string    `json:"userID"`
+	UserNumber      int       `json:"userNumber,omitempty"`
 	DateCreated     time.Time `json:"dateCreated,omitempty"`
 	DateLastActive  time.Time `json:"dateLastActive,omitempty"`
 	IsAdmin         bool      `json:"isAdmin"`
@@ -329,6 +326,7 @@ type ListUserResponse struct {
 type ListUserResponseItem struct {
 	Name            string    `json:"name"`
 	UserID          string    `json:"userID"`
+	UserNumber      int       `json:"userNumber,omitempty"`
 	DateCreated     time.Time `json:"dateCreated,omitempty"`
 	DateLastActive  time.Time `json:"dateLastActive,omitempty"`
 	IsAdmin         bool      `json:"isAdmin"`
