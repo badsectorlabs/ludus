@@ -237,9 +237,6 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Unable to save the file: "+err.Error())
 	}
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, "Saving file failed")
-	}
 	defer os.Remove(roleTarPath)
 
 	var cmd *exec.Cmd

@@ -69,7 +69,7 @@ func GetProxmoxClientForUserUsingToken(e *core.RequestEvent) (*proxmox.Client, e
 // Get the proxmox password for a user
 func getProxmoxPasswordForUser(user *models.User) (string, error) {
 	if user.ProxmoxUsername() == "root" {
-		return "", errors.New("The ROOT API key should only be used to create other admin users. Use the command: ludus users add --admin --name 'first last' --userid FL")
+		return "", errors.New("the ROOT API key should only be used to create other admin users. Use the command: ludus users add --admin --name 'first last' --userid FL")
 	}
 	proxmoxPassword, err := GetFileContents(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, user.ProxmoxUsername()))
 	if err != nil {

@@ -353,7 +353,8 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 		return nil, err
 	}
 
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	// Get all resources of type "vm" (which includes 'qemu' and 'lxc' types)
 	allVMs, err := getAllVMs(e, ctx, proxmoxClient)
@@ -678,7 +679,7 @@ func PutTemplateTar(e *core.RequestEvent) error {
 func AbortPacker(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
 	// First touch the canary file to prevent more templates being built (in the case of "all" and not parallel)
-	touch(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername))
+	touch(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername()))
 
 	// Empty the sync map (queue) of any templates this user was building
 	templateProgressStore.Range(func(key, value interface{}) bool {

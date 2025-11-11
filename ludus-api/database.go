@@ -161,12 +161,6 @@ func findNextAvailableRangeNumber(txApp core.App) int {
 func findNextAvailableUserNumber(txApp core.App) int {
 	var userNumbers []int
 
-	type UserResult struct {
-		UserNumber int `db:"userNumber" json:"userNumber"`
-	}
-
-	var queryResult []UserResult
-
 	err := txApp.DB().
 		Select("userNumber").
 		From("users").
@@ -174,10 +168,6 @@ func findNextAvailableUserNumber(txApp core.App) int {
 		All(&userNumbers)
 	if err != nil {
 		return -1
-	}
-
-	for _, item := range queryResult {
-		userNumbers = append(userNumbers, item.UserNumber)
 	}
 
 	// Start at 2 since 1 is reserved for the root user (198.51.100.1 is reserved for the server)

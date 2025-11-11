@@ -138,7 +138,7 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 
 	// Clear the DB of any previous VMs for this range
 	logger.Debug(fmt.Sprintf("Clearing VMs for range %s with range number %d", targetRange.RangeId(), targetRange.RangeNumber()))
-	app.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").
+	_, err = app.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").
 		Bind(dbx.Params{
 			"range_id": targetRange.Id,
 		}).Execute()

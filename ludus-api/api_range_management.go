@@ -557,7 +557,7 @@ func CreateRange(e *core.RequestEvent) error {
 	if payload.UserID != "" {
 		_, err := e.App.FindFirstRecordByData("users", "userID", payload.UserID)
 		if err != nil {
-			return JSONError(e, http.StatusNotFound, fmt.Sprintf("User not found: %w", err))
+			return JSONError(e, http.StatusNotFound, fmt.Sprintf("User not found: %v", err))
 		}
 	}
 
@@ -571,7 +571,7 @@ func CreateRange(e *core.RequestEvent) error {
 		// Check if range number is already in use
 		rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeNumber", payload.RangeNumber)
 		if err != nil && err != sql.ErrNoRows {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking if range number %d is already in use: %w", payload.RangeNumber, err))
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking if range number %d is already in use: %v", payload.RangeNumber, err))
 		}
 		if rangeRecord != nil {
 			return JSONError(e, http.StatusConflict, fmt.Sprintf("Range number %d already in use", payload.RangeNumber))
@@ -589,7 +589,7 @@ func CreateRange(e *core.RequestEvent) error {
 	// Check if name is already in use
 	existingRange, err := e.App.FindFirstRecordByData("ranges", "rangeID", payload.RangeID)
 	if err != nil && err != sql.ErrNoRows {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking if range ID %s is already in use: %w", payload.RangeID, err))
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking if range ID %s is already in use: %v", payload.RangeID, err))
 	}
 	if existingRange != nil {
 		return JSONError(e, http.StatusConflict, fmt.Sprintf("Range ID %s already in use", payload.RangeID))
@@ -639,7 +639,7 @@ func CreateRange(e *core.RequestEvent) error {
 	if payload.UserID != "" {
 		userRecord, err := e.App.FindFirstRecordByData("users", "userID", payload.UserID)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user: %w", err))
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user: %v", err))
 		}
 		userRecord.Set("ranges+", rangeRecord.Id)
 		err = e.App.Save(userRecord)
@@ -665,7 +665,7 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 	rangeID := e.Request.URL.Query().Get("rangeID")
 	rangeNumber, err := GetRangeNumberFromRangeID(rangeID)
 	if err != nil {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %w", rangeID, err))
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", rangeID, err))
 	}
 
 	userID := e.Request.URL.Query().Get("userID")
@@ -734,9 +734,9 @@ WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`)
 		err = giveUserAccessToPool(sourceUserObject.ProxmoxUsername(), "pam", targetRange.RangeId())
 		if err != nil {
 			sourceUserObject.Set("ranges-", targetRange.Id)
-			err = e.App.Save(sourceUserObject)
-			if err != nil {
-				return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+err.Error())
+			saveErr := e.App.Save(sourceUserObject)
+			if saveErr != nil {
+				return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+saveErr.Error())
 			}
 			return JSONError(e, http.StatusInternalServerError, "Unable to give user access to pool: "+err.Error())
 		}
@@ -756,9 +756,9 @@ WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`)
 		err := removeUserAccessFromPool(sourceUserObject.ProxmoxUsername(), "pam", targetRange.RangeId())
 		if err != nil {
 			sourceUserObject.Set("ranges+", targetRange.Id)
-			err = e.App.Save(sourceUserObject)
-			if err != nil {
-				return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+err.Error())
+			saveErr := e.App.Save(sourceUserObject)
+			if saveErr != nil {
+				return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+saveErr.Error())
 			}
 			return JSONError(e, http.StatusInternalServerError, "Unable to remove user access from pool: "+err.Error())
 		}
@@ -797,7 +797,7 @@ func ListRangeUsers(e *core.RequestEvent) error {
 	rangeID := e.Request.URL.Query().Get("rangeID")
 	rangeNumber, err := GetRangeNumberFromRangeID(rangeID)
 	if err != nil {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %w", rangeID, err))
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", rangeID, err))
 	}
 
 	// Get all users with access to this range
