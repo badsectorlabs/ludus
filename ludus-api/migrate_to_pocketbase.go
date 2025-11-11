@@ -76,11 +76,12 @@ func MigrateFromSQLiteToPocketBase() error {
 
 	// Begin transaction for migration
 	err = app.RunInTransaction(func(txApp core.App) error {
-		err := migrateUsersToPocketBase(txApp, sqliteDB)
+		// Migrate ranges BEFORE users so the range records exist when we set defaultRangeID
+		err := migrateRangesToPocketBase(txApp, sqliteDB)
 		if err != nil {
 			return err
 		}
-		err = migrateRangesToPocketBase(txApp, sqliteDB)
+		err = migrateUsersToPocketBase(txApp, sqliteDB)
 		if err != nil {
 			return err
 		}
@@ -279,6 +280,15 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 		userRecord.Set("hashedAPIKey", sqliteUser.HashedAPIKey)
 		userRecord.Set("lastActive", sqliteUser.DateLastActive)
 		userRecord.Set("defaultRangeID", rangeObj.UserID)
+
+		// Look up the user's default range record so we can add it to their ranges relationship
+		defaultRangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeID", rangeObj.UserID)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error looking up default range for user %s: %v", sqliteUser.UserID, err))
+		} else {
+			// Add the default range to the user's ranges relationship (using the PocketBase record ID)
+			userRecord.Set("ranges", []string{defaultRangeRecord.Id})
+		}
 
 		if err := txApp.Save(userRecord); err != nil {
 			logger.Error(fmt.Sprintf("Failed to create user: %v", err))

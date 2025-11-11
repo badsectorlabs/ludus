@@ -50,13 +50,8 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 		}
 	}
 
-	// Expand the user record so the relationships are loaded
-	errs := app.ExpandRecord(record, []string{"ranges", "groups"}, nil)
-	if len(errs) > 0 {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error expanding user record: %v", errs))
-	}
-
 	// Set this request as authenticated
+	// Note: The user record will be expanded in UserAndRangesLookupMiddleware
 	e.Auth = record
 
 	return e.Next()
@@ -71,6 +66,12 @@ func UserAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	// If we're running as the root user, don't try to populate the user and ranges context as it has already been populated the first time this middleware ran
 	if os.Geteuid() == 0 {
 		return e.Next()
+	}
+
+	// Expand the user record to load relationships (works for both API key and JWT/session auth)
+	errs := e.App.ExpandRecord(e.Auth, []string{"ranges", "groups"}, nil)
+	if len(errs) > 0 {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error expanding user record: %v", errs))
 	}
 
 	// Load and store the user's ranges as proxy records
