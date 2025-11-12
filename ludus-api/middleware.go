@@ -111,6 +111,11 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	// Save the user's ranges to the context
 	e.Set("ranges", userRanges)
 
+	// Create a User proxy record and save it to the context
+	user := &models.User{}
+	user.SetProxyRecord(e.Auth)
+	e.Set("user", user)
+
 	// Check if the user is requesting a specific range
 	rangeID := e.Request.URL.Query().Get("rangeID")
 	if rangeID != "" {
@@ -130,6 +135,10 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		// Allow ROOT to bypass the default range check
 		if rangeID == "" && e.Auth.GetString("userID") != "ROOT" {
 			return JSONError(e, http.StatusNotFound, "User has no default range and no rangeID was provided in the request")
+		} else if rangeID == "" && e.Auth.GetString("userID") == "ROOT" {
+			rangeID = "ROOT"
+			e.Set("range", &models.Range{})
+			return e.Next()
 		}
 	}
 
@@ -141,11 +150,6 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	rangeRecord := &models.Range{}
 	rangeRecord.SetProxyRecord(rawRangeRecord)
 	e.Set("range", rangeRecord)
-
-	// Create a User proxy record and save it to the context
-	user := &models.User{}
-	user.SetProxyRecord(e.Auth)
-	e.Set("user", user)
 
 	return e.Next()
 }
