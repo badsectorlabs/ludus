@@ -185,30 +185,10 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 
 	for _, sqliteUser := range sqliteUsers {
 		if sqliteUser.UserID == "ROOT" {
-			logger.Info("Making root user a superuser in PocketBase - Password is the ROOT API key")
-			adminCollection, err := txApp.FindCollectionByNameOrId(core.CollectionNameSuperusers)
+			err = createRootUserAsSuperuserInPocketBase(txApp)
 			if err != nil {
-				logger.Error(fmt.Sprintf("'_superusers' collection not found: %v", err))
-				continue
+				return fmt.Errorf("error creating root user as superuser in PocketBase: %v", err)
 			}
-
-			newAdmin := core.NewRecord(adminCollection)
-
-			newAdmin.SetEmail("root@ludus.internal")
-
-			// The password for the new superuser is the ROOT API key
-			rootAPIKey, err := os.ReadFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath))
-			if err != nil {
-				logger.Error(fmt.Sprintf("Error reading root API key: %v", err))
-				continue
-			}
-			rootAPIKeyString := strings.Trim(string(rootAPIKey), "\n")
-			newAdmin.SetPassword(rootAPIKeyString)
-
-			if err := txApp.Save(newAdmin); err != nil {
-				logger.Error(fmt.Sprintf("failed to save new superuser: %v", err))
-			}
-			logger.Debug("Successfully made root@ludus.internal a superuser in PocketBase")
 			continue
 		}
 

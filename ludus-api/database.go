@@ -6,8 +6,10 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/security"
 
 	_ "ludusapi/migrations"
 	"ludusapi/models"
@@ -18,7 +20,7 @@ func InitDb() {
 	if os.Geteuid() == 0 {
 		// If a root-api-key file doesn't exist, recreate the root user in the database
 		if !FileExists(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath)) {
-			logger.Info("Recreating root user in database")
+			logger.Info("Creating root user in database")
 			createRootUserInDatabase()
 		}
 		// Check if there was a previous sqlite db, and if so, run the migrations
@@ -60,9 +62,12 @@ func createRootUserInDatabase() {
 	user.SetProxyRecord(userRecord)
 	user.SetName("root")
 	user.SetProxmoxUsername("root")
+	user.SetProxmoxRealm("pam")
 	user.SetUserId("ROOT")
 	user.SetUserNumber(1)
 	user.SetIsAdmin(true)
+	user.SetEmail("root@ludus.internal")
+	user.SetPassword(security.RandomString(25)) // Will never be used, but needed to create the record
 	apiKey := GenerateAPIKey(user.UserId())
 	err = os.WriteFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), []byte(apiKey), 0400)
 	if err != nil {
@@ -90,7 +95,41 @@ func createRootUserInDatabase() {
 		logger.Error(fmt.Sprintf("Error saving root user in database: %v", err))
 		os.Exit(2)
 	}
+
+	// Also create the root user as a superuser in PocketBase
+	err = createRootUserAsSuperuserInPocketBase(app)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error creating root user as superuser in PocketBase: %v", err))
+		os.Exit(2)
+	}
+
 	logger.Info("Successfully created root user in database")
+}
+
+func createRootUserAsSuperuserInPocketBase(txApp core.App) error {
+	logger.Info("Making root user a superuser in PocketBase - Password is the ROOT API key")
+	adminCollection, err := txApp.FindCollectionByNameOrId(core.CollectionNameSuperusers)
+	if err != nil {
+		logger.Error(fmt.Sprintf("'_superusers' collection not found: %v", err))
+	}
+
+	newAdmin := core.NewRecord(adminCollection)
+
+	newAdmin.SetEmail("root@ludus.internal")
+
+	// The password for the new superuser is the ROOT API key
+	rootAPIKey, err := os.ReadFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath))
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error reading root API key: %v", err))
+	}
+	rootAPIKeyString := strings.Trim(string(rootAPIKey), "\n")
+	newAdmin.SetPassword(rootAPIKeyString)
+
+	if err := txApp.Save(newAdmin); err != nil {
+		logger.Error(fmt.Sprintf("failed to save new superuser: %v", err))
+	}
+	logger.Debug("Successfully made root@ludus.internal a superuser in PocketBase")
+	return nil
 }
 
 // findNextAvailableRangeNumber finds the smallest positive integer that is not

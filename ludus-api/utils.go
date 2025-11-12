@@ -2,12 +2,10 @@ package ludusapi
 
 import (
 	"context"
-	crypto_rand "crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
 	"ludusapi/models"
-	"math/rand"
 	"net"
 	"os/exec"
 	"os/user"
@@ -18,6 +16,7 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/security"
 	"golang.org/x/crypto/bcrypt"
 
 	goproxmox "github.com/luthermonson/go-proxmox"
@@ -71,24 +70,8 @@ func CheckHash(password, hash string) bool {
 }
 
 func GenerateAPIKey(userID string) string {
-	var bytes [8]byte
-	_, err := crypto_rand.Read(bytes[:])
-	if err != nil {
-		panic("cannot seed math/rand package with cryptographically secure random number generator")
-	}
-	chars := []rune("ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
-		"abcdefghijklmnopqrstuvwxyz" +
-		"0123456789" +
-		"@%-_+=") // Should be shell safe for setting the api key in an env var without single quotes
-	length := 40
-	var stringBuilder strings.Builder
-	// Add the userID to the front of the API Key
-	stringBuilder.WriteString(userID)
-	stringBuilder.WriteRune('.')
-	for i := 0; i < length; i++ {
-		stringBuilder.WriteRune(chars[rand.Intn(len(chars))])
-	}
-	return stringBuilder.String()
+	key := security.RandomString(40)
+	return userID + "." + key
 }
 
 type IP struct {
