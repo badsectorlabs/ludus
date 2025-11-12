@@ -68,6 +68,7 @@ func createRootUserInDatabase() {
 	user.SetIsAdmin(true)
 	user.SetEmail("root@ludus.internal")
 	user.SetPassword(security.RandomString(25)) // Will never be used, but needed to create the record
+
 	apiKey := GenerateAPIKey(user.UserId())
 	err = os.WriteFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), []byte(apiKey), 0400)
 	if err != nil {
@@ -78,6 +79,12 @@ func createRootUserInDatabase() {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
+	hashedAPIKey, err := HashString(apiKey)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error hashing root API key: %v", err))
+		os.Exit(2)
+	}
+	user.SetHashedApikey(hashedAPIKey)
 
 	encryptedTokenSecret, err := EncryptStringForDatabase(tokenSecret)
 	if err != nil {
@@ -89,7 +96,6 @@ func createRootUserInDatabase() {
 
 	os.MkdirAll(fmt.Sprintf("%s/users/root", ludusInstallPath), 0700)
 
-	user.SetHashedApikey(apiKey)
 	err = app.Save(userRecord)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error saving root user in database: %v", err))
