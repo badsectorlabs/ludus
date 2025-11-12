@@ -51,17 +51,6 @@ variable "proxmox_url" {
 variable "proxmox_host" {
   type = string
 }
-variable "proxmox_username" {
-  type = string
-}
-variable "proxmox_password" {
-  type      = string
-  sensitive = true
-}
-variable "proxmox_token" {
-  type      = string
-  sensitive = true
-}
 variable "proxmox_storage_pool" {
   type = string
 }
@@ -169,8 +158,6 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
   }
   node                 = "${var.proxmox_host}"
   os                   = "${var.os}"
-  password             = "${var.proxmox_password}"
-  token                = "${var.proxmox_token}"
   proxmox_url          = "${var.proxmox_url}"
   template_description = "${local.template_description}"
   username             = "${var.proxmox_username}"

@@ -51,17 +51,6 @@ variable "proxmox_url" {
 variable "proxmox_host" {
   type = string
 }
-variable "proxmox_username" {
-  type = string
-}
-variable "proxmox_password" {
-  type      = string
-  sensitive = true
-}
-variable "proxmox_token" {
-  type      = string
-  sensitive = true
-}
 variable "proxmox_storage_pool" {
   type = string
 }
@@ -110,6 +99,16 @@ source "proxmox-iso" "kali" {
   boot_wait         = "15s"
   http_directory    = "./http"
 
+  boot_iso {
+    type              = "ide"
+    iso_checksum      = "${var.iso_checksum}"
+    iso_url           = "${var.iso_url}"
+    iso_storage_pool  = "${var.iso_storage_pool}"
+    iso_download_pve  = true
+    unmount           = true
+    keep_cdrom_device = false
+  }
+
   communicator    = "ssh"
   cores           = "${var.vm_cpu_cores}"
   cpu_type        = "host"
@@ -124,9 +123,6 @@ source "proxmox-iso" "kali" {
   }
   pool                     = "${var.proxmox_pool}"
   insecure_skip_tls_verify = "${var.proxmox_skip_tls_verify}"
-  iso_checksum             = "${var.iso_checksum}"
-  iso_url                  = "${var.iso_url}"
-  iso_storage_pool         = "${var.iso_storage_pool}"
   memory                   = "${var.vm_memory}"
   network_adapters {
     bridge = "${var.ludus_nat_interface}"
@@ -134,16 +130,12 @@ source "proxmox-iso" "kali" {
   }
   node                 = "${var.proxmox_host}"
   os                   = "${var.os}"
-  password             = "${var.proxmox_password}"
-  token                = "${var.proxmox_token}"
   proxmox_url          = "${var.proxmox_url}"
   template_description = "${local.template_description}"
-  username             = "${var.proxmox_username}"
   vm_name              = "${var.vm_name}"
   ssh_password         = "${var.ssh_password}"
   ssh_username         = "${var.ssh_username}"
   ssh_wait_timeout     = "30m"
-  unmount_iso          = true
   task_timeout         = "20m" // On slow disks the imgcopy operation takes > 1m
 }
 

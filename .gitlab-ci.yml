@@ -31,13 +31,6 @@ stages:
   - upload
   - release
 
-cache:
-  key: ${CI_COMMIT_REF_SLUG} # Caches per branch/tag
-  paths:
-    - ludus-gui/node_modules/
-    - ludus-gui/.next/cache/
-    - docs/node_modules/
-
 ################
 # YAML ANCHORS #
 ################

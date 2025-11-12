@@ -51,17 +51,6 @@ variable "proxmox_url" {
 variable "proxmox_host" {
   type = string
 }
-variable "proxmox_username" {
-  type = string
-}
-variable "proxmox_password" {
-  type      = string
-  sensitive = true
-}
-variable "proxmox_token" {
-  type      = string
-  sensitive = true
-}
 variable "proxmox_storage_pool" {
   type = string
 }
@@ -89,7 +78,7 @@ locals {
   template_description = "Debian 11 template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => debian:debian"
 }
 
-source "proxmox-iso" "debian11" {
+source "proxmox-iso" "debian11" { 
   boot_command = [
     "<down><tab><wait>", # non-graphical install
     "preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/debian-11-preseed.cfg ",
@@ -101,6 +90,16 @@ source "proxmox-iso" "debian11" {
   boot_key_interval = "100ms"
   boot_wait = "15s"
   http_directory = "./http"
+
+  boot_iso {
+    type              = "ide"
+    iso_checksum      = "${var.iso_checksum}"
+    iso_url           = "${var.iso_url}"
+    iso_storage_pool  = "${var.iso_storage_pool}"
+    iso_download_pve  = true
+    unmount           = true
+    keep_cdrom_device = false
+  }
 
   communicator    = "ssh"
   cores           = "${var.vm_cpu_cores}"
@@ -116,9 +115,6 @@ source "proxmox-iso" "debian11" {
   }
   pool                     = "${var.proxmox_pool}"
   insecure_skip_tls_verify = "${var.proxmox_skip_tls_verify}"
-  iso_checksum             = "${var.iso_checksum}"
-  iso_url                  = "${var.iso_url}"
-  iso_storage_pool         = "${var.iso_storage_pool}"
   memory                   = "${var.vm_memory}"
   network_adapters {
     bridge = "${var.ludus_nat_interface}"
@@ -126,16 +122,12 @@ source "proxmox-iso" "debian11" {
   }
   node                 = "${var.proxmox_host}"
   os                   = "${var.os}"
-  password             = "${var.proxmox_password}"
-  token                = "${var.proxmox_token}"
   proxmox_url          = "${var.proxmox_url}"
   template_description = "${local.template_description}"
-  username             = "${var.proxmox_username}"
   vm_name              = "${var.vm_name}"
   ssh_password         = "${var.ssh_password}"
   ssh_username         = "${var.ssh_username}"
   ssh_wait_timeout     = "30m"
-  unmount_iso          = true
   task_timeout         = "20m" // On slow disks the imgcopy operation takes > 1m
 }
 

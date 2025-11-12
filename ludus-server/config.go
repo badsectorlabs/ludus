@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/pocketbase/pocketbase/tools/security"
 	"gopkg.in/yaml.v2"
 )
 
@@ -86,6 +87,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					f.WriteString("license_key: community\n")
 					f.WriteString("expose_admin_port: false\n")
 					f.WriteString(fmt.Sprintf("data_directory: %s/db\n", ludusInstallPath))
+					f.WriteString(fmt.Sprintf("database_encryption_key: %s\n", security.RandomString(32)))
 				} else {
 					config.ProxmoxNode = nodeName
 					config.ProxmoxInterface = inter.Name
@@ -103,6 +105,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					config.LicenseKey = "community"
 					config.ExposeAdminPort = false
 					config.DataDirectory = fmt.Sprintf("%s/db", ludusInstallPath)
+					config.DatabaseEncryptionKey = security.RandomString(32)
 				}
 				return
 			}

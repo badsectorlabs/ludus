@@ -11,26 +11,25 @@ const LudusInstallPath = ludusInstallPath // Export the path for use in plugins
 
 // Configurations exported
 type Configuration struct {
-	ProxmoxNode                string  `mapstructure:"proxmox_node" yaml:"proxmox_node"`
-	ProxmoxInterface           string  `mapstructure:"proxmox_interface" yaml:"proxmox_interface"`
-	ProxmoxInvalidCert         bool    `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
-	ProxmoxURL                 string  `mapstructure:"proxmox_url" yaml:"proxmox_url"`
-	ProxmoxHostname            string  `mapstructure:"proxmox_hostname" yaml:"proxmox_hostname"`
-	ProxmoxLocalIP             string  `mapstructure:"proxmox_local_ip" yaml:"proxmox_local_ip"`
-	ProxmoxPublicIP            string  `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"`
-	ProxmoxGateway             string  `mapstructure:"proxmox_gateway" yaml:"proxmox_gateway"`
-	ProxmoxNetmask             string  `mapstructure:"proxmox_netmask" yaml:"proxmox_netmask"`
-	ProxmoxVMStoragePool       string  `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
-	ProxmoxVMStorageFormat     string  `mapstructure:"proxmox_vm_storage_format" yaml:"proxmox_vm_storage_format"`
-	ProxmoxISOStoragePool      string  `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
-	LudusNATInterface          string  `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
-	PreventUserAnsibleAdd      bool    `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
-	LicenseKey                 string  `mapstructure:"license_key" yaml:"license_key"`
-	ExposeAdminPort            bool    `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
-	ReservedRangeNumbers       []int32 `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
-	DataDirectory              string  `mapstructure:"data_directory" yaml:"data_directory"`
-	DatabaseEncryptionPassword string  `mapstructure:"database_encryption_password" yaml:"database_encryption_password"`
-	DatabaseEncryptionSalt     string  `mapstructure:"database_encryption_salt" yaml:"database_encryption_salt"`
+	ProxmoxNode            string  `mapstructure:"proxmox_node" yaml:"proxmox_node"`
+	ProxmoxInterface       string  `mapstructure:"proxmox_interface" yaml:"proxmox_interface"`
+	ProxmoxInvalidCert     bool    `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
+	ProxmoxURL             string  `mapstructure:"proxmox_url" yaml:"proxmox_url"`
+	ProxmoxHostname        string  `mapstructure:"proxmox_hostname" yaml:"proxmox_hostname"`
+	ProxmoxLocalIP         string  `mapstructure:"proxmox_local_ip" yaml:"proxmox_local_ip"`
+	ProxmoxPublicIP        string  `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"`
+	ProxmoxGateway         string  `mapstructure:"proxmox_gateway" yaml:"proxmox_gateway"`
+	ProxmoxNetmask         string  `mapstructure:"proxmox_netmask" yaml:"proxmox_netmask"`
+	ProxmoxVMStoragePool   string  `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
+	ProxmoxVMStorageFormat string  `mapstructure:"proxmox_vm_storage_format" yaml:"proxmox_vm_storage_format"`
+	ProxmoxISOStoragePool  string  `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
+	LudusNATInterface      string  `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
+	PreventUserAnsibleAdd  bool    `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
+	LicenseKey             string  `mapstructure:"license_key" yaml:"license_key"`
+	ExposeAdminPort        bool    `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
+	ReservedRangeNumbers   []int32 `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
+	DataDirectory          string  `mapstructure:"data_directory" yaml:"data_directory"`
+	DatabaseEncryptionKey  string  `mapstructure:"database_encryption_key" yaml:"database_encryption_key"`
 }
 
 var ServerConfiguration Configuration
@@ -57,8 +56,7 @@ func (s *Server) ParseConfig() {
 	viper.SetDefault("ludus_nat_interface", "vmbr1000")
 	viper.SetDefault("prevent_user_ansible_add", false)
 	viper.SetDefault("data_directory", "/opt/ludus/db")
-	viper.SetDefault("database_encryption_password", "hZD6RwYxrcQ7CS4lRxjdKI7thWp3jg48kaVts8DEE8pQrJXAi6s1X2eQp1jxJFBQL3yn")
-	viper.SetDefault("database_encryption_salt", "208bbe5dd02cc23a3d7450816a641fed")
+	viper.SetDefault("database_encryption_key", "hZD6RwYxrcQ7CS4lRxjdKI7thWp3jg48")
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)
 	}
@@ -70,6 +68,10 @@ func (s *Server) ParseConfig() {
 	// By default hostname is the node name, but not always
 	if ServerConfiguration.ProxmoxHostname == "" {
 		ServerConfiguration.ProxmoxHostname = ServerConfiguration.ProxmoxNode
+	}
+	// Make sure the database encryption key is 32 characters long
+	if len(ServerConfiguration.DatabaseEncryptionKey) != 32 {
+		log.Fatalf("Database encryption key must be 32 characters long")
 	}
 	// If there is no license in the config, set it to community
 	if ServerConfiguration.LicenseKey == "" || ServerConfiguration.LicenseKey == "community" {

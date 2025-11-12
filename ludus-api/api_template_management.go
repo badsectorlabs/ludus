@@ -108,10 +108,6 @@ func Run(command string, workingDir string, outputLog string) error {
 }
 
 func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose bool) {
-	proxmoxPassword, err := getProxmoxPasswordForUser(user)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Unable to get proxmox password: %v\n", err))
-	}
 	proxmoxToken, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret())
 	if err != nil {
 		logger.Error(fmt.Sprintf("Unable to decrypt proxmox token secret: %v\n", err))
@@ -126,11 +122,11 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 	usersAnsibleDir := fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername())
 	os.MkdirAll(fmt.Sprintf("%s/users/%s/packer/tmp", ludusInstallPath, user.ProxmoxUsername()), 0755)
 
-	tmplStr := `PACKER_PLUGIN_PATH={{.LudusInstallPath}}/resources/packer/plugins PKR_VAR_proxmox_password={{.ProxmoxPassword}} PKR_VAR_proxmox_token={{.ProxmoxToken}} PROXMOX_TOKEN={{ .ProxmoxToken }}` +
+	tmplStr := `PACKER_PLUGIN_PATH={{.LudusInstallPath}}/resources/packer/plugins PROXMOX_USERNAME='{{ .ProxmoxTokenID }}' PROXMOX_TOKEN={{ .ProxmoxToken }} ` +
 		`PACKER_CONFIG_DIR={{.UsersPackerDir}} PACKER_CACHE_DIR={{.UsersPackerDir}}/packer_cache ` +
 		`CHECKPOINT_DISABLE=1 PACKER_LOG={{.PackerVerbose}} PACKER_LOG_PATH='{{.PackerLogFile}}' TMPDIR='{{.UsersPackerDir}}/tmp' packer build -on-error=cleanup ` +
 		`-var 'proxmox_url={{.ProxmoxURL}}/api2/json' -var 'proxmox_host={{.ProxmoxHost}}' ` +
-		`-var 'proxmox_username={{.ProxmoxUsername}}@pam' -var 'proxmox_skip_tls_verify={{.ProxmoxSkipTLSVerify}}' ` +
+		`-var 'proxmox_skip_tls_verify={{.ProxmoxSkipTLSVerify}}' ` +
 		`-var 'proxmox_pool=SHARED' -var 'proxmox_storage_pool={{.ProxmoxVMStoragePool}}' ` +
 		`-var 'proxmox_storage_format={{.ProxmoxVMStorageFormat}}' -var 'iso_storage_pool={{.ProxmoxISOStoragePool}}' ` +
 		`-var 'ansible_home={{.UsersAnsibleDir}}' -var 'ludus_nat_interface={{.LudusNATInterface}}' {{.PackerFile}}`
@@ -160,14 +156,13 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 
 	data := struct {
 		LudusInstallPath       string
-		ProxmoxPassword        string
+		ProxmoxTokenID         string
 		ProxmoxToken           string
 		UsersPackerDir         string
 		PackerVerbose          string
 		PackerLogFile          string
 		ProxmoxURL             string
 		ProxmoxHost            string
-		ProxmoxUsername        string
 		ProxmoxSkipTLSVerify   string
 		ProxmoxVMStoragePool   string
 		ProxmoxVMStorageFormat string
@@ -177,14 +172,13 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 		LudusNATInterface      string
 	}{
 		ludusInstallPath,
-		proxmoxPassword,
+		user.ProxmoxTokenId(),
 		proxmoxToken,
 		usersPackerDir,
 		packerVerbose,
 		packerLogFile,
 		ServerConfiguration.ProxmoxURL,
 		ServerConfiguration.ProxmoxNode,
-		user.ProxmoxUsername(),
 		strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert),
 		ServerConfiguration.ProxmoxVMStoragePool,
 		ServerConfiguration.ProxmoxVMStorageFormat,
