@@ -204,22 +204,26 @@ func findNextAvailableRangeNumber(txApp core.App) int {
 //	int - The smallest positive integer that is not present in the
 //	        UserNumber column of the UserObject table.
 func findNextAvailableUserNumber(txApp core.App) int {
-	var userNumbers []int
+	type UserRow struct {
+		UserNumber int `db:"userNumber"`
+	}
+	var rows []UserRow
 
 	err := txApp.DB().
 		Select("userNumber").
 		From("users").
 		OrderBy("userNumber").
-		All(&userNumbers)
+		All(&rows)
 	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding next available user number: %v", err))
 		return -1
 	}
 
 	// Start at 2 since 1 is reserved for the root user (198.51.100.1 is reserved for the server)
 	for i := int(2); ; i++ {
 		found := false
-		for _, num := range userNumbers {
-			if num == i {
+		for _, num := range rows {
+			if num.UserNumber == i {
 				found = true
 				break
 			}

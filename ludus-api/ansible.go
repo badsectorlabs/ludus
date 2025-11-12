@@ -59,8 +59,13 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	maps.Copy(userVars, extraVars)
 
 	// Always include the ludus, server, and user configs
-	rangeDir := fmt.Sprintf("@%s/ranges/%s/", ludusInstallPath, usersRange.RangeId())
-	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeDir + "range-config.yml"}
+	var serverAndUserConfigs []string
+	rangeConfigPath := fmt.Sprintf("@%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId())
+	if FileExists(rangeConfigPath) {
+		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeConfigPath}
+	} else {
+		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
+	}
 	// root has no range config and cannot use the dynamic inventory
 	var inventory string
 	if user.UserId() == "ROOT" {
@@ -98,7 +103,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	logger.Debug("Opening ansible log file: " + ansibleLogFilePath)
 	ansibleLogFile, err := os.OpenFile(ansibleLogFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0660)
 	if err != nil {
-		return "Failed to open ansible log file", errors.New("failed to open ansible log file")
+		return "Failed to open ansible log file", errors.New("failed to open ansible log file: " + err.Error())
 	}
 	// If we are running as root, chown this log file to ludus:ludus to prevent potential issues when running future commands as a regular user
 	defer func() {

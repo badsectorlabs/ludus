@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"ludusapi/dto"
+
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
@@ -289,20 +291,8 @@ var usersAddCmd = &cobra.Command{
 			return
 		}
 
-		type Data struct {
-			Result struct {
-				ApiKey          string `json:"apiKey"`
-				DateCreated     string `json:"dateCreated"`
-				DateLastActive  string `json:"dateLastActive"`
-				IsAdmin         bool   `json:"isAdmin"`
-				Name            string `json:"name"`
-				ProxmoxUsername string `json:"proxmoxUsername"`
-				UserID          string `json:"userID"`
-			} `json:"result"`
-		}
-
 		// Unmarshal JSON data
-		var data Data
+		var data dto.AddUserResponse
 		err := json.Unmarshal([]byte(responseJSON), &data)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
@@ -311,10 +301,10 @@ var usersAddCmd = &cobra.Command{
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"UserID", "Proxmox Username", "Admin", "API Key"})
 
-		table.Append([]string{data.Result.UserID,
-			data.Result.ProxmoxUsername,
-			strconv.FormatBool(data.Result.IsAdmin),
-			data.Result.ApiKey,
+		table.Append([]string{data.UserID,
+			data.ProxmoxUsername,
+			strconv.FormatBool(data.IsAdmin),
+			data.ApiKey,
 		})
 
 		table.Render()

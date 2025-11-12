@@ -70,12 +70,19 @@ func AddUser(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, "User with that ID already exists")
 	}
 
-	// Convert to lower-case, and replace spaces with "-"
-	var user models.Users
+	// Get the user collection
+	userCollection, err := app.FindCollectionByNameOrId("users")
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user collection: %v", err))
+	}
+	userRecord := core.NewRecord(userCollection)
+	user := &models.User{}
+	user.SetProxyRecord(userRecord)
 	user.SetName(addUserJSON.Name)
 	user.SetUserId(addUserJSON.UserID)
 	user.SetEmail(addUserJSON.Email)
 	user.SetPassword(addUserJSON.Password)
+	// Convert to lower-case, and replace spaces with "-"
 	user.SetProxmoxUsername(strings.ReplaceAll(strings.ToLower(addUserJSON.Name), " ", "-"))
 
 	matchingUsers, err = app.CountRecords("users", dbx.HashExp{"proxmoxUsername": user.ProxmoxUsername()})
@@ -110,8 +117,9 @@ func AddUser(e *core.RequestEvent) error {
 		}()
 
 		// Create a default range for the user using the new utility function, also creates a UserRangeAccess record
-		err := CreateDefaultUserRange(txApp, user.UserId())
+		err := CreateDefaultUserRange(e, txApp, user)
 		if err != nil {
+			wasError = true
 			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error creating user's default range: %v", err))
 		}
 
@@ -120,6 +128,7 @@ func AddUser(e *core.RequestEvent) error {
 
 		// Refuse to create more than 150 users
 		if user.UserNumber() > 150 {
+			wasError = true
 			return JSONError(e, http.StatusBadRequest, "Cannot create more than 150 users per Ludus due to networking constraints")
 		}
 
@@ -134,6 +143,7 @@ func AddUser(e *core.RequestEvent) error {
 		}
 		output, err := server.RunAnsiblePlaybookWithVariables(e, playbook, []string{}, extraVars, "", false, "")
 		if err != nil {
+			wasError = true
 			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running ansible playbook: %v", output))
 		}
 
@@ -159,6 +169,12 @@ func AddUser(e *core.RequestEvent) error {
 
 		user.SetProxmoxTokenId(tokenID)
 		user.SetProxmoxTokenSecret(encryptedTokenSecret)
+
+		err = txApp.Save(user)
+		if err != nil {
+			wasError = true
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving user record: %v", err))
+		}
 
 		// Add the plaintext API Key to this response only
 
@@ -186,13 +202,13 @@ func DeleteUser(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus users rm command with --url https://127.0.0.1:8081")
 	}
 
-	userID := e.Request.URL.Query().Get("userID")
+	userID := e.Request.PathValue("userID")
 	if len(userID) == 0 {
 		return JSONError(e, http.StatusBadRequest, "userID not provided")
 	}
 
 	// Deleting yourself fails as it removes the ansible home directory before the play ends and thus modules are not available to finish the play
-	if userID == e.Request.URL.Query().Get("userID") {
+	if userID == e.Auth.GetString("userID") {
 		return JSONError(e, http.StatusBadRequest, "You cannot remove yourself")
 	}
 
@@ -218,17 +234,17 @@ func DeleteUser(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running ansible playbook: %v", output))
 	}
 
-	err = app.Delete(userRecord)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error deleting user: %v", err))
-	}
 	err = removeUserFromProxmox(user.ProxmoxUsername(), "pam")
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing user from Proxmox: %v", err))
 	}
-	err = removeUserFromPocketBaseByID(userRecord.Id)
+	err = removePool(user.UserId())
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing user from PocketBase: %v", err))
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing pool from Proxmox: %v", err))
+	}
+	err = app.Delete(userRecord)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error deleting user: %v", err))
 	}
 
 	return JSONResult(e, http.StatusOK, "User deleted")

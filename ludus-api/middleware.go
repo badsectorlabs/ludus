@@ -64,6 +64,7 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 func updateLastActiveTimeAndLog(e *core.RequestEvent) error {
 	// Prevent locking issues with proxied requests, don't log the last active time for ludus-admin requests
 	// as they are already logged by the regular ludus service proxy
+	// Also skip logging for requests to the PocketBase web UI or unauthenticated requests
 	if os.Geteuid() == 0 || e.Auth == nil || e.Get("user") == nil || e.Auth.IsSuperuser() {
 		return e.Next()
 	}
@@ -89,11 +90,6 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		return e.Next()
 	}
 
-	// If we're running as the root user, don't try to populate the user and ranges context as it has already been populated the first time this middleware ran
-	if os.Geteuid() == 0 {
-		return e.Next()
-	}
-
 	// Expand the user record to load relationships (works for both API key and JWT/session auth)
 	errs := e.App.ExpandRecord(e.Auth, []string{"ranges", "groups"}, nil)
 	if len(errs) > 0 {
@@ -115,6 +111,7 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	user := &models.User{}
 	user.SetProxyRecord(e.Auth)
 	e.Set("user", user)
+	logger.Debug(fmt.Sprintf("Set user record to: %s", user.UserId()))
 
 	// Check if the user is requesting a specific range
 	rangeID := e.Request.URL.Query().Get("rangeID")
@@ -158,16 +155,16 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 func limitRootEndpoints(e *core.RequestEvent) error {
 	logger.Debug(fmt.Sprintf("Request URL: %s", e.Request.URL.Path))
 	if os.Geteuid() == 0 &&
-		!strings.HasPrefix(e.Request.URL.Path, "/user") &&
-		!strings.HasPrefix(e.Request.URL.Path, "/antisandbox/") &&
-		!strings.HasPrefix(e.Request.URL.Path, "/ranges/create") &&
-		!(strings.HasPrefix(e.Request.URL.Path, "/range") && e.Request.Method == http.MethodDelete) {
+		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") &&
+		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") &&
+		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") &&
+		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) {
 		return JSONError(e, http.StatusInternalServerError, "The :8081 endpoint can only be used for user, range creation/deletion, and anti-sandbox actions. Use the :8080 endpoint for all other actions.")
 	} else if os.Geteuid() != 0 &&
-		(strings.HasPrefix(e.Request.URL.Path, "/user") ||
-			strings.HasPrefix(e.Request.URL.Path, "/antisandbox/") ||
-			strings.HasPrefix(e.Request.URL.Path, "/ranges/create") ||
-			(strings.HasPrefix(e.Request.URL.Path, "/range") && e.Request.Method == http.MethodDelete)) {
+		(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") ||
+			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") ||
+			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") ||
+			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete)) {
 		// Reverse proxy to the admin API
 		adminProxy.ServeHTTP(e.Response, e.Request)
 

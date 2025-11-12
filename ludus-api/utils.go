@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"ludusapi/models"
 	"net"
+	"os"
 	"os/exec"
 	"os/user"
 	"slices"
@@ -436,7 +437,7 @@ func mustGetRangeFromRequest(e *core.RequestEvent) *models.Range {
 }
 
 // CreateDefaultUserRange creates a default range for a user and assigns direct access
-func CreateDefaultUserRange(txApp core.App, userID string) error {
+func CreateDefaultUserRange(e *core.RequestEvent, txApp core.App, user *models.User) error {
 	// Find next available range number
 	rangeNumber := findNextAvailableRangeNumber(txApp)
 
@@ -445,11 +446,11 @@ func CreateDefaultUserRange(txApp core.App, userID string) error {
 		return err
 	}
 	rawRangeRecord := core.NewRecord(rangeCollection)
-	rangeRecord := models.Range{}
+	rangeRecord := &models.Range{}
 	rangeRecord.SetProxyRecord(rawRangeRecord)
 	rangeRecord.SetRangeNumber(rangeNumber)
-	rangeRecord.SetRangeId(userID)
-	rangeRecord.SetName(fmt.Sprintf("Default Range for %s", userID))
+	rangeRecord.SetRangeId(user.UserId())
+	rangeRecord.SetName(fmt.Sprintf("Default Range for %s", user.Name()))
 	rangeRecord.SetDescription("Default range created automatically for user")
 	rangeRecord.SetPurpose("General testing and development")
 	rangeRecord.SetNumberOfVms(0)
@@ -457,33 +458,24 @@ func CreateDefaultUserRange(txApp core.App, userID string) error {
 	if err := txApp.Save(rangeRecord); err != nil {
 		return err
 	}
+	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), 0755)
+	chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), "ludus")
 
-	userRecord, err := txApp.FindFirstRecordByData("users", "userID", userID)
-	if err != nil {
-		return err
-	}
-	userRecord.Set("defaultRangeID", rangeRecord.Id)
-	if err := txApp.Save(userRecord); err != nil {
-		return err
-	}
-	userRecord.Set("ranges+", rangeRecord.Id)
+	// Add the range to the request context
+	e.Set("range", rangeRecord)
 
-	err = txApp.Save(userRecord)
-	if err != nil {
-		return err
-	}
+	// This will be saved when the user is saved later
+	user.SetDefaultRangeId(rangeRecord.Id)
 
 	err = manageVmbrInterfaceLocally(rangeNumber, true)
 	if err != nil {
 		txApp.Delete(rangeRecord)
-		txApp.Delete(userRecord)
 		return err
 	}
 
-	err = createPool(userID)
+	err = createPool(user.UserId())
 	if err != nil {
 		txApp.Delete(rangeRecord)
-		txApp.Delete(userRecord)
 		manageVmbrInterfaceLocally(rangeNumber, false)
 		return err
 	}

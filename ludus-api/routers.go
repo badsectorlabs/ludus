@@ -131,7 +131,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
 			Id:       "APIKeyAuthenticationMiddleware",
 			Func:     APIKeyAuthenticationMiddleware,
-			Priority: 1000, // This run before any other custom middleware
+			Priority: 1000, // This runs before any other custom middleware, authenticates API keys and sets the user record and range record in the request context
 		})
 		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
 			Id:       "userAndRangesLookupMiddleware",
@@ -275,14 +275,14 @@ var routes = PocketBaseRoutes{
 	{
 		"DeleteRangeVMs",
 		http.MethodDelete,
-		"/range/:rangeID/vms",
+		"/range/{rangeID}/vms",
 		DeleteRangeVMs,
 	},
 
 	{
 		"DeleteTemplate",
 		http.MethodDelete,
-		"/template/:templateName",
+		"/template/{templateName}",
 		DeleteTemplate,
 	},
 
@@ -401,7 +401,7 @@ var routes = PocketBaseRoutes{
 	{
 		"DeleteUser",
 		http.MethodDelete,
-		"/user/:userID",
+		"/user/{userID}",
 		DeleteUser,
 	},
 
@@ -549,7 +549,7 @@ var routes = PocketBaseRoutes{
 	{
 		"DeleteGroup",
 		http.MethodDelete,
-		"/groups/:groupName",
+		"/groups/{groupName}",
 		DeleteGroup,
 	},
 
@@ -563,42 +563,42 @@ var routes = PocketBaseRoutes{
 	{
 		"AddUserToGroup",
 		http.MethodPost,
-		"/groups/:groupName/users/:userID",
+		"/groups/{groupName}/users/{userID}",
 		AddUserToGroup,
 	},
 
 	{
 		"RemoveUserFromGroup",
 		http.MethodDelete,
-		"/groups/:groupName/users/:userID",
+		"/groups/{groupName}/users/{userID}",
 		RemoveUserFromGroup,
 	},
 
 	{
 		"AddRangeToGroup",
 		http.MethodPost,
-		"/groups/:groupName/ranges/:rangeID",
+		"/groups/{groupName}/ranges/{rangeID}",
 		AddRangeToGroup,
 	},
 
 	{
 		"RemoveRangeFromGroup",
 		http.MethodDelete,
-		"/groups/:groupName/ranges/:rangeID",
+		"/groups/{groupName}/ranges/{rangeID}",
 		RemoveRangeFromGroup,
 	},
 
 	{
 		"ListGroupMembers",
 		http.MethodGet,
-		"/groups/:groupName/users",
+		"/groups/{groupName}/users",
 		ListGroupMembers,
 	},
 
 	{
 		"ListGroupRanges",
 		http.MethodGet,
-		"/groups/:groupName/ranges",
+		"/groups/{groupName}/ranges",
 		ListGroupRanges,
 	},
 
@@ -613,21 +613,21 @@ var routes = PocketBaseRoutes{
 	{
 		"AssignRangeToUser",
 		http.MethodPost,
-		"/ranges/assign/:userID/:rangeID",
+		"/ranges/assign/{userID}/{rangeID}",
 		AssignRangeToUser,
 	},
 
 	{
 		"RevokeRangeFromUser",
 		http.MethodDelete,
-		"/ranges/revoke/:userID/:rangeID",
+		"/ranges/revoke/{userID}/{rangeID}",
 		RevokeRangeFromUser,
 	},
 
 	{
 		"ListRangeUsers",
 		http.MethodGet,
-		"/ranges/:rangeID/users",
+		"/ranges/{rangeID}/users",
 		ListRangeUsers,
 	},
 
