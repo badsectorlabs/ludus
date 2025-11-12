@@ -465,7 +465,7 @@ func CreateDefaultUserRange(e *core.RequestEvent, txApp core.App, user *models.U
 	e.Set("range", rangeRecord)
 
 	// This will be saved when the user is saved later
-	user.SetDefaultRangeId(rangeRecord.Id)
+	user.SetDefaultRangeId(rangeRecord.RangeId())
 
 	err = manageVmbrInterfaceLocally(rangeNumber, true)
 	if err != nil {

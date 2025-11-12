@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"ludus/logger"
 	"ludus/rest"
+	"ludusapi/dto"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -85,23 +86,15 @@ var templatesBuildCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		// Validate that at least one template name is provided
+		// If no name is provided, build all templates
 		if len(templateNames) == 0 {
-			fmt.Println("Error: at least one template name must be specified (use 'all' to build all templates)")
-			return
+			templateNames = []string{"all"}
 		}
 
-		// Convert template names array to JSON array string
-		templateNamesJSON, err := json.Marshal(templateNames)
-		if err != nil {
-			fmt.Printf("Error marshaling template names: %v\n", err)
-			return
+		requestBody := dto.BuildTemplatesRequest{
+			Templates: templateNames,
+			Parallel:  templateParallel,
 		}
-
-		requestBody := fmt.Sprintf(`{
-			"templates": %s,
-			"parallel": %d
-		  }`, string(templateNamesJSON), templateParallel)
 
 		if userID != "" {
 			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/templates?userID=%s", userID), requestBody)
