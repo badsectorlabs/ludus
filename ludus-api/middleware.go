@@ -127,7 +127,8 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		}
 	} else {
 		rangeID = e.Auth.GetString("defaultRangeID")
-		if rangeID == "" {
+		// Allow ROOT to bypass the default range check
+		if rangeID == "" && e.Auth.GetString("userID") != "ROOT" {
 			return JSONError(e, http.StatusNotFound, "User has no default range and no rangeID was provided in the request")
 		}
 	}
