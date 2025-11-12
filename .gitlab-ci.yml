@@ -349,12 +349,21 @@ build all:
     - mkdir binaries
     - echo "Getting web UI code..."
     - |
-      if [[ ! -d ludus-gui ]]; then
-        git clone https://ludus-webui:${LUDUS_WEBUI_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-gui.git
+      if [[ -z ${LUDUS_WEBUI_GITLAB_TOKEN+x} ]]; then
+        echo "LUDUS_WEBUI_GITLAB_TOKEN is not set, skipping web UI build"
+        TAGS=""
       else
-        cd ludus-gui
-        git pull
-        cd ..
+        if [[ ! -d ludus-gui ]]; then
+          git clone https://ludus-webui:${LUDUS_WEBUI_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-gui.git
+        else
+          cd ludus-gui
+          git init
+          git remote add origin https://ludus-webui:${LUDUS_WEBUI_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-gui.git
+          git fetch
+          git checkout master
+          cd ..
+        fi
+        TAGS="embedwebui"
       fi
     - cd ludus-gui
     - bun install
@@ -366,10 +375,9 @@ build all:
     - | # If we have docs from the previous stage, embed them, otherwise build without docs
       if [[ -d ../built-docs ]]; then
         mv ../built-docs ../ludus-api/docs
-        CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -tags="embeddocs embedwebui" -o ../binaries/ludus-server
-      else
-        CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -tags="embedwebui" -o ../binaries/ludus-server
+        TAGS="${TAGS} embeddocs"
       fi
+    - CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -tags="${TAGS}" -o ../binaries/ludus-server
     - cd ..
     - echo "Compiling the client code..."
     - cd ludus-client
@@ -395,7 +403,7 @@ build all:
         cd ludus-enterprise-plugin
         git config --global --add safe.directory $PWD
         GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
-        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags="embeddocs embedwebui" -o ../binaries/ludus-enterprise.so
+        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags="${TAGS}" -o ../binaries/ludus-enterprise.so
         cd ..
         # Build the anti-sandbox plugin
         git clone https://ludus-antisandbox:${LUDUS_ANTISANDBOX_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-antisandbox-plugin.git
@@ -403,7 +411,7 @@ build all:
         cd ludus-antisandbox-plugin
         git config --global --add safe.directory $PWD
         GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
-        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags="embeddocs embedwebui" -o ../binaries/ludus-antisandbox.so
+        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags="${TAGS}" -o ../binaries/ludus-antisandbox.so
       fi
     - echo "Compile complete."
 
