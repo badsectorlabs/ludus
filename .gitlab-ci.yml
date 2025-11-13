@@ -16,6 +16,8 @@ stages:
   - post-deploy-admin-power
   - post-deploy-admin-ansible
   - post-deploy-admin-user
+  - post-deploy-admin-groups
+  - post-deploy-admin-ranges
   - post-deploy-admin-templates
   - range-user-deploy
   - range-user-check
@@ -976,7 +978,7 @@ post-deploy user-cmds-as-admin:
     - '! ludus users list all | grep "Test User"'
 
 post-deploy groups-as-admin:
-  stage: post-deploy-admin-user
+  stage: post-deploy-admin-groups
   tags:
     - ludus-proxmox-runner
   dependencies:
@@ -1048,7 +1050,7 @@ post-deploy groups-as-admin:
     - ludus user rm -i GTU
 
 post-deploy ranges-as-admin:
-  stage: post-deploy-admin-user
+  stage: post-deploy-admin-ranges
   tags:
     - ludus-proxmox-runner
   dependencies:

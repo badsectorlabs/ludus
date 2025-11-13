@@ -187,3 +187,10 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 	return e.Next()
 
 }
+
+func requireAuth(e *core.RequestEvent) error {
+	if e.Auth == nil {
+		return JSONError(e, http.StatusUnauthorized, "Authentication failed. Provide a valid API key in the X-API-KEY header or a valid JWT token in the Authorization header.")
+	}
+	return e.Next()
+}

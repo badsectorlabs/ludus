@@ -132,35 +132,45 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		})
 	}
 
-	// Setup API key authentication for the PocketBase API
+	// Register all custom middleware. These will apply to every request.
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		// API key authentication for the PocketBase API
 		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
 			Id:       "APIKeyAuthenticationMiddleware",
 			Func:     APIKeyAuthenticationMiddleware,
 			Priority: 1000, // This runs before any other custom middleware, authenticates API keys and sets the user record and range record in the request context
 		})
+		// Lookup the user and ranges for the request, store them in the request context
 		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
 			Id:       "userAndRangesLookupMiddleware",
 			Func:     userAndRangesLookupMiddleware,
-			Priority: 1001, // This should be the first of the custom middleware to run
+			Priority: 1001,
 		})
+		// Update the last active time for the user and log the API action
 		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
 			Id:       "updateLastActiveTimeAndLog",
 			Func:     updateLastActiveTimeAndLog,
-			Priority: 1002, // This should be the second of the custom middleware to run
+			Priority: 1002,
 		})
+		// Limit the endpoints that can be accessed by the root user, and reverse proxy to the admin API for endpoints that need root access
 		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
 			Id:       "limitRootEndpoints",
 			Func:     limitRootEndpoints,
-			Priority: 1003, // This should be the last middleware to run
+			Priority: 1003,
+		})
+		// Require authentication for all requests
+		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
+			Id:       "requireAuth",
+			Func:     requireAuth,
+			Priority: 1004, // This should be the last middleware to run
 		})
 
 		return se.Next()
 	})
 
-	// Simple whoami
+	// Simple whoami to test authentication
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		se.Router.GET("/whoami", func(e *core.RequestEvent) error {
+		se.Router.GET(APIBasePath+"/whoami", func(e *core.RequestEvent) error {
 			if e.Auth == nil {
 				return e.UnauthorizedError("Authentication failed", "You are not authenticated")
 			}
@@ -646,7 +656,7 @@ var routes = PocketBaseRoutes{
 
 	// Migration routes
 	{
-		"MigrateSQLiteToPostgreSQL",
+		"MigrateSQLiteToPocketBase",
 		http.MethodPost,
 		"/migrate/sqlite",
 		MigrateSQLiteToPocketBaseHandler,
