@@ -133,8 +133,18 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		if rangeID == "" && e.Auth.GetString("userID") != "ROOT" {
 			return JSONError(e, http.StatusNotFound, "User has no default range and no rangeID was provided in the request")
 		} else if rangeID == "" && e.Auth.GetString("userID") == "ROOT" {
-			rangeID = "ROOT"
-			e.Set("range", &models.Range{})
+			rangeCollection, err := e.App.FindCollectionByNameOrId("ranges")
+			if err != nil {
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding ranges collection: %v", err))
+			}
+			dummyRangeRecord := core.NewRecord(rangeCollection)
+			dummyRange := &models.Range{}
+			dummyRange.SetProxyRecord(dummyRangeRecord)
+			dummyRange.SetRangeId("ROOT")
+			dummyRange.SetName("ROOT")
+			dummyRange.SetTestingEnabled(false)
+			dummyRange.SetRangeNumber(1)
+			e.Set("range", dummyRange)
 			return e.Next()
 		}
 	}

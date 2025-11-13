@@ -1,6 +1,7 @@
 package ludusapi
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
@@ -82,8 +83,10 @@ func AddUser(e *core.RequestEvent) error {
 	user.SetUserId(addUserJSON.UserID)
 	user.SetEmail(addUserJSON.Email)
 	user.SetPassword(addUserJSON.Password)
+	user.SetIsAdmin(addUserJSON.IsAdmin)
 	// Convert to lower-case, and replace spaces with "-"
 	user.SetProxmoxUsername(strings.ReplaceAll(strings.ToLower(addUserJSON.Name), " ", "-"))
+	user.SetProxmoxRealm("pam") // For now, always use PAM for user authentication
 
 	matchingUsers, err = app.CountRecords("users", dbx.HashExp{"proxmoxUsername": user.ProxmoxUsername()})
 	if err != nil {
@@ -111,8 +114,14 @@ func AddUser(e *core.RequestEvent) error {
 				// Remove the user from the host system - we validated the user did not exist on the host system before running the playbook, so this is safe to do
 				removeUserFromHostSystem(user.ProxmoxUsername())
 				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
-				removeUserFromPocketBaseByID(user.Id)
 				removePool(user.UserId())
+				// Remove the default range
+				defaultRangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeId", user.DefaultRangeId())
+				if err == nil {
+					txApp.Delete(defaultRangeRecord)
+				}
+				// Remove the user from the database
+				txApp.Delete(user)
 			}
 		}()
 
@@ -214,11 +223,13 @@ func DeleteUser(e *core.RequestEvent) error {
 
 	var user models.User
 	userRecord, err := app.FindFirstRecordByData("users", "userID", userID)
-	if err != nil {
+	if err != nil && err == sql.ErrNoRows {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("User was not found in the Ludus database: %v", err))
+	} else if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user: %v", err))
 	}
 	if userRecord == nil {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("User %s not found", userID))
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("User record for %s is nil", userID))
 	}
 	user.SetProxyRecord(userRecord)
 
@@ -241,6 +252,10 @@ func DeleteUser(e *core.RequestEvent) error {
 	err = removePool(user.UserId())
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing pool from Proxmox: %v", err))
+	}
+	err = removeUserFromHostSystem(user.ProxmoxUsername())
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing user from host system: %v", err))
 	}
 	err = app.Delete(userRecord)
 	if err != nil {

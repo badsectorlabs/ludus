@@ -96,6 +96,27 @@ func prettyPrintError(errorString string) {
 	logger.Logger.Error(parsedError.Error)
 }
 
+type PocketBaseErrorStruct struct {
+	Data    any    `json:"data"`
+	Message string `json:"message"`
+	Code    string `json:"code"`
+}
+
+func prettyPrintPocketBaseError(errorBytes []byte) error {
+	var parsedError PocketBaseErrorStruct
+	err := json.Unmarshal(errorBytes, &parsedError)
+	if err != nil {
+		return fmt.Errorf("failed to parse PocketBase error: %w", err)
+	}
+	if parsedError.Message == "Something went wrong while processing your request." {
+		logger.Logger.Error("Check the PocketBase logs for crash details")
+	} else {
+		logger.Logger.Error(parsedError.Message)
+	}
+
+	return nil
+}
+
 func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 
 	var result []byte
@@ -124,7 +145,10 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 
 	if resp.StatusCode() == 500 {
 		logger.Logger.Error("Error from server!")
-		prettyPrintError(resp.String())
+		err := prettyPrintPocketBaseError(resp.Body())
+		if err != nil {
+			prettyPrintError(resp.String())
+		}
 		error = true
 	}
 

@@ -98,6 +98,7 @@ source "proxmox-iso" "win2022-server-x64" {
     iso_url          = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.229-1/virtio-win-0.1.229.iso"
     iso_storage_pool = "${var.iso_storage_pool}"
     unmount          = true
+    iso_download_pve  = true
   }
   boot_iso {
     type              = "ide"
@@ -131,7 +132,6 @@ source "proxmox-iso" "win2022-server-x64" {
   os                   = "${var.os}"
   proxmox_url          = "${var.proxmox_url}"
   template_description = "${local.template_description}"
-  username             = "${var.proxmox_username}"
   vm_name              = "${var.vm_name}"
   winrm_insecure       = true
   winrm_password       = "${var.winrm_password}"

@@ -269,12 +269,19 @@ func userExistsOnHostSystem(username string) bool {
 }
 
 // removeUserFromHostSystem removes a user from the host system
-func removeUserFromHostSystem(username string) {
+func removeUserFromHostSystem(username string) error {
 	cmd := exec.Command("/usr/sbin/userdel", "-r", username)
 	err := cmd.Run()
 	if err != nil {
-		fmt.Printf("Failed to remove user %s from host system: %s\n", username, err)
+		if err.Error() == "exit status 6" {
+			// User does not exist on the host system, this is not an error for our use case
+			return nil
+		} else {
+			fmt.Printf("Failed to remove user %s from host system: %s\n", username, err)
+			return err
+		}
 	}
+	return nil
 }
 
 // HasRangeAccess checks if a user has access to a range through direct assignment or group membership
@@ -466,6 +473,7 @@ func CreateDefaultUserRange(e *core.RequestEvent, txApp core.App, user *models.U
 
 	// This will be saved when the user is saved later
 	user.SetDefaultRangeId(rangeRecord.RangeId())
+	user.Set("ranges+", rangeRecord.Id)
 
 	err = manageVmbrInterfaceLocally(rangeNumber, true)
 	if err != nil {

@@ -294,6 +294,9 @@ func removePool(poolName string) error {
 	}
 	pool, err := proxmoxClient.Pool(context.Background(), poolName)
 	if err != nil {
+		if strings.Contains(err.Error(), poolName+"' does not exist") {
+			return nil
+		}
 		return errors.New("unable to get pool object: " + err.Error())
 	}
 	err = pool.Delete(context.Background())
@@ -486,7 +489,12 @@ func removeUserFromProxmox(username string, realm string) error {
 	}
 	user, err := proxmoxClient.User(context.Background(), username+"@"+realm)
 	if err != nil {
-		return errors.New("unable to get user object: " + err.Error())
+		if strings.Contains(err.Error(), "no such user") {
+			// User does not exist on the proxmox system, this is not an error for our use case
+			return nil
+		} else {
+			return errors.New("unable to get user object: " + err.Error())
+		}
 	}
 	err = user.Delete(context.Background())
 	if err != nil {
