@@ -60,7 +60,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 
 	// Always include the ludus, server, and user configs
 	var serverAndUserConfigs []string
-	rangeConfigPath := fmt.Sprintf("@%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId())
+	rangeConfigPath := fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId())
 	if FileExists(rangeConfigPath) {
 		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeConfigPath}
 	} else {

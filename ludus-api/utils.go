@@ -466,6 +466,7 @@ func CreateDefaultUserRange(e *core.RequestEvent, txApp core.App, user *models.U
 		return err
 	}
 	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), 0755)
+	copyFileContents(fmt.Sprintf("%s/ansible/user-files/range-config.example.yml", ludusInstallPath), fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, rangeRecord.RangeId()))
 	chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), "ludus")
 
 	// Add the range to the request context

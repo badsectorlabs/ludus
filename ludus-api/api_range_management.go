@@ -149,6 +149,12 @@ func DeleteRange(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
 
+	// Remove the range directory
+	err = os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, targetRange.RangeId()))
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
 	// Delete the range object from the database
 	err = e.App.Delete(targetRange)
 	if err != nil {
@@ -613,6 +619,10 @@ func CreateRange(e *core.RequestEvent) error {
 		removePool(payload.RangeID)
 		return JSONError(e, http.StatusInternalServerError, "Unable to create vmbr interface: "+err.Error())
 	}
+
+	// Create the range config file
+	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), 0755)
+	copyFileContents(fmt.Sprintf("%s/ansible/user-files/range-config.example.yml", ludusInstallPath), fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, payload.RangeID))
 
 	// Create the range
 	rangeCollection, err := e.App.FindCollectionByNameOrId("ranges")
