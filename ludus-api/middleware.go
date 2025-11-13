@@ -167,13 +167,15 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") &&
-		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) {
+		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) &&
+		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) {
 		return JSONError(e, http.StatusInternalServerError, "The :8081 endpoint can only be used for user, range creation/deletion, and anti-sandbox actions. Use the :8080 endpoint for all other actions.")
 	} else if os.Geteuid() != 0 &&
 		(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") ||
-			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete)) {
+			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) ||
+			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost)) {
 		// Reverse proxy to the admin API
 		adminProxy.ServeHTTP(e.Response, e.Request)
 

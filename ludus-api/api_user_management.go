@@ -87,6 +87,11 @@ func AddUser(e *core.RequestEvent) error {
 	// Convert to lower-case, and replace spaces with "-"
 	user.SetProxmoxUsername(strings.ReplaceAll(strings.ToLower(addUserJSON.Name), " ", "-"))
 	user.SetProxmoxRealm("pam") // For now, always use PAM for user authentication
+	encryptedPassword, err := EncryptStringForDatabase(addUserJSON.Password)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error encrypting Proxmox password: %v", err))
+	}
+	user.SetProxmoxPassword(encryptedPassword)
 
 	matchingUsers, err = app.CountRecords("users", dbx.HashExp{"proxmoxUsername": user.ProxmoxUsername()})
 	if err != nil {
@@ -164,7 +169,7 @@ func AddUser(e *core.RequestEvent) error {
 		user.SetHashedApikey(hashedAPIKey)
 
 		// Create a Proxmox API Token for the user
-		tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername())
+		tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm(), addUserJSON.Password)
 		if err != nil {
 			wasError = true
 			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error creating Proxmox API token: %v", err))
@@ -293,13 +298,19 @@ func GetAPIKey(e *core.RequestEvent) error {
 func GetCredentials(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
 
-	proxmoxPassword, err := getProxmoxPasswordForUser(user)
+	proxmoxPassword := user.ProxmoxPassword()
+	if proxmoxPassword == "" {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Ludus does not know the Proxmox password for user %s", user.UserId()))
+	}
+	decryptedPassword, err := DecryptStringFromDatabase(proxmoxPassword)
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting proxmox password for user: %v", err))
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error decrypting Proxmox password: %v", err))
 	}
 	result := dto.GetCredentialsResponseResult{
+		LudusEmail:      user.Email(),
 		ProxmoxUsername: user.ProxmoxUsername(),
-		ProxmoxPassword: proxmoxPassword,
+		ProxmoxRealm:    user.ProxmoxRealm(),
+		ProxmoxPassword: decryptedPassword,
 	}
 	response := dto.GetCredentialsResponse{
 		Result: &result,
@@ -375,23 +386,48 @@ func PasswordReset(e *core.RequestEvent) error {
 
 // PostCredentials - updates the users proxmox password
 func PostCredentials(e *core.RequestEvent) error {
-	user := e.Get("user").(*models.User)
 
 	var credsToUpdate dto.PostCredentialsRequest
 	e.BindBody(&credsToUpdate)
 	if credsToUpdate.ProxmoxPassword == "" {
 		return JSONError(e, http.StatusBadRequest, "Missing proxmoxPassword value")
 	}
-
-	filePath := fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, user.ProxmoxUsername())
-	err := os.WriteFile(filePath, []byte(credsToUpdate.ProxmoxPassword), 0660)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving proxmox password: %v", err))
+	if credsToUpdate.UserID == "" {
+		return JSONError(e, http.StatusBadRequest, "Missing userID value")
 	}
 
-	// File saved successfully. Return proper result+
+	userRecord, err := app.FindFirstRecordByData("users", "userID", credsToUpdate.UserID)
+	if err != nil && err != sql.ErrNoRows {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user: %v", err))
+	}
+	if userRecord == nil {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("User %s not found", credsToUpdate.UserID))
+	}
+	user := &models.User{}
+	user.SetProxyRecord(userRecord)
+
+	err = setProxmoxSystemPassword(user.ProxmoxUsername(), user.ProxmoxRealm(), credsToUpdate.ProxmoxPassword)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error setting Proxmox system password: %v", err))
+	}
+
+	// Encrypt the new password
+	encryptedPassword, err := EncryptStringForDatabase(credsToUpdate.ProxmoxPassword)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error encrypting Proxmox password: %v", err))
+	}
+
+	// Update the user record with the new password
+	user.SetProxmoxPassword(encryptedPassword)
+	user.SetPassword(credsToUpdate.ProxmoxPassword)
+	err = app.Save(user)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving user: %v", err))
+	}
+
+	// File saved successfully. Return proper result
 	response := dto.PostCredentialsResponse{
-		Result: "Your proxmox password has been successfully updated in Ludus. THIS DOES NOT UPDATE THE PROXMOX PASSWORD ON THE HOST SYSTEM. YOU MUST UPDATE THE PROXMOX PASSWORD ON THE HOST SYSTEM MANUALLY TO MATCH THE PASSWORD YOU SET IN LUDUS.",
+		Result: fmt.Sprintf("The Ludus and Proxmox password for %s has been successfully updated", user.UserId()),
 	}
 	return e.JSON(http.StatusOK, response)
 }

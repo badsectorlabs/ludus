@@ -112,15 +112,8 @@ var usersCredsGetsCmd = &cobra.Command{
 			return
 		}
 
-		type Data struct {
-			Result struct {
-				ProxmoxPassword string `json:"proxmoxPassword"`
-				ProxmoxUsername string `json:"proxmoxUsername"`
-			} `json:"result"`
-		}
-
 		// Unmarshal JSON data
-		var data Data
+		var data dto.GetCredentialsResponse
 		err := json.Unmarshal([]byte(responseJSON), &data)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
@@ -133,10 +126,12 @@ var usersCredsGetsCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Proxmox Username", "Proxmox Password"})
+		table.SetHeader([]string{"Ludus Email", "Proxmox Username", "Proxmox Realm", "Proxmox/Ludus Password"})
 
 		// Add data to table
-		table.Append([]string{data.Result.ProxmoxUsername,
+		table.Append([]string{data.Result.LudusEmail,
+			data.Result.ProxmoxUsername,
+			data.Result.ProxmoxRealm,
 			data.Result.ProxmoxPassword,
 		})
 

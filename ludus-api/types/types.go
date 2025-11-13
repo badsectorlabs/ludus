@@ -125,6 +125,7 @@ type Users struct {
 	isAdmin            bool
 	hashedAPIKey       string
 	proxmoxUsername    string
+	proxmoxPassword    string
 	proxmoxRealm       string
 	proxmoxTokenID     string
 	proxmoxTokenSecret string

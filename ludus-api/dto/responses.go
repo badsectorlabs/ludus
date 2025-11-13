@@ -110,7 +110,9 @@ type GetCredentialsResponse struct {
 }
 type GetCredentialsResponseResult struct {
 	ProxmoxUsername string `json:"proxmoxUsername,omitempty"`
+	ProxmoxRealm    string `json:"proxmoxRealm,omitempty"`
 	ProxmoxPassword string `json:"proxmoxPassword,omitempty"`
+	LudusEmail      string `json:"ludusEmail,omitempty"`
 }
 type GetEtcHostsResponse struct {
 	Result string `json:"result,omitempty"`

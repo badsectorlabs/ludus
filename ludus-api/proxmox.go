@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"ludusapi/models"
 	"net/http"
@@ -16,35 +17,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alessio/shellescape"
 	"github.com/goforj/godump"
 	goproxmox "github.com/luthermonson/go-proxmox"
 	"github.com/pocketbase/pocketbase/core"
 
 	"github.com/Telmate/proxmox-api-go/proxmox"
 )
-
-func GetProxmoxClientForUser(e *core.RequestEvent) (*proxmox.Client, error) {
-	user := e.Get("user").(*models.User)
-
-	proxmoxPassword, err := getProxmoxPasswordForUser(user)
-	if err != nil {
-		return nil, errors.New("unable to get proxmox password for user: " + err.Error())
-	}
-	if proxmoxPassword == "" {
-		return nil, errors.New("could not get proxmox password for user")
-	}
-
-	// func NewClient(apiUrl string, hclient *http.Client, http_headers string, tls *tls.Config, proxyString string, taskTimeout int) (client *Client, err error) {
-	proxmoxClient, err := proxmox.NewClient(ServerConfiguration.ProxmoxURL+"/api2/json", nil, "", &tls.Config{InsecureSkipVerify: ServerConfiguration.ProxmoxInvalidCert}, "", 300)
-	if err != nil {
-		return nil, errors.New("unable to create proxmox client: " + err.Error())
-	}
-	err = proxmoxClient.Login(user.ProxmoxUsername()+"@"+user.ProxmoxRealm(), proxmoxPassword, "")
-	if err != nil {
-		return nil, errors.New("unable to login to proxmox: " + err.Error())
-	}
-	return proxmoxClient, nil
-}
 
 func GetProxmoxClientForUserUsingToken(e *core.RequestEvent) (*proxmox.Client, error) {
 	user := e.Get("user").(*models.User)
@@ -66,16 +45,53 @@ func GetProxmoxClientForUserUsingToken(e *core.RequestEvent) (*proxmox.Client, e
 	return proxmoxClient, nil
 }
 
-// Get the proxmox password for a user
-func getProxmoxPasswordForUser(user *models.User) (string, error) {
-	if user.ProxmoxUsername() == "root" {
-		return "", errors.New("the ROOT API key should only be used to create other admin users. Use the command: ludus users add --admin --name 'first last' --userid FL")
+func setProxmoxSystemPassword(username string, realm string, password string) error {
+	// You can't set passwords using API tokens...
+	// https://pve.proxmox.com/pve-docs/api-viewer/#/access/password
+	// "This API endpoint is not available for API tokens."
+
+	// proxmoxClient, err := getRootGoProxmoxClient()
+	// if err != nil {
+	// 	return errors.New("unable to create proxmox client: " + err.Error())
+	// }
+	// err = proxmoxClient.Password(context.TODO(), username+"@"+realm, password)
+	// if err != nil {
+	// 	return errors.New("unable to set proxmox system password: " + err.Error())
+	// }
+	// return nil
+
+	// So we use the shell command instead
+
+	if realm != "pam" {
+		return errors.New("only PAM realm is supported for now")
 	}
-	proxmoxPassword, err := GetFileContents(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, user.ProxmoxUsername()))
+
+	// Make sure the username and password values are escaped
+	shellEscapedUsername := shellescape.Quote(username + "@" + realm)
+	shellEscapedPassword := shellescape.Quote(password)
+
+	cmd := exec.Command("/usr/sbin/pveum", "passwd", shellEscapedUsername)
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return "", errors.New("unable to get proxmox password for user: " + err.Error())
+		return errors.New("unable to set proxmox system password, stdin pipe failure: " + err.Error())
 	}
-	return strings.TrimSuffix(proxmoxPassword, "\n"), nil
+	defer stdin.Close()
+	if err := cmd.Start(); err != nil {
+		return errors.New("unable to set proxmox system password, command start failure: " + err.Error())
+	}
+
+	_, err = io.WriteString(stdin, shellEscapedPassword+"\n")
+	if err != nil {
+		return errors.New("unable to set proxmox system password, stdin write failure: " + err.Error())
+	}
+	_, err = io.WriteString(stdin, shellEscapedPassword+"\n")
+	if err != nil {
+		return errors.New("unable to set proxmox system password, stdin write 2 failure: " + err.Error())
+	}
+	if err := cmd.Wait(); err != nil {
+		return errors.New("unable to set proxmox system password, command wait failure: " + err.Error())
+	}
+	return nil
 }
 
 // This newer proxmox library is not quite ready for use yet, although we do like it as it has types for everything
@@ -139,34 +155,24 @@ func getRootGoProxmoxClient() (*goproxmox.Client, error) {
 		},
 	}
 
+	var customLogger *goproxmox.LeveledLogger
+	if DebugProxmox {
+		customLogger = &goproxmox.LeveledLogger{Level: goproxmox.LevelDebug}
+	} else {
+		customLogger = &goproxmox.LeveledLogger{Level: goproxmox.LevelInfo}
+	}
+
 	client := goproxmox.NewClient(ServerConfiguration.ProxmoxURL+"/api2/json",
 		goproxmox.WithHTTPClient(&insecureHTTPClient),
 		goproxmox.WithAPIToken(tokenID, tokenSecret),
+		goproxmox.WithLogger(customLogger),
 	)
 	return client, nil
 }
 
-// This function creates a new API token for a user. It uses the user's password on disk to create the token.
-// func createProxmoxAPITokenForUserWithContext(c *gin.Context, user UserObject) (string, string, error) {
-// 	// Use the user's password on disk (just created) to create a new API token
-// 	proxmoxClient, err := GetGoProxmoxClientForUser(c)
-// 	if err != nil {
-// 		log.Printf("Error creating proxmox client for user %s: %v", user.ProxmoxUsername, err)
-// 		return "", "", errors.New("could not create proxmox client for user")
-// 	}
-
-// 	return createProxmoxAPITokenForUserWithClient(proxmoxClient, user)
-// }
-
-func createProxmoxAPITokenForUserWithoutContext(username string) (string, string, error) {
-	proxmoxPasswordRaw, err := GetFileContents(fmt.Sprintf("%s/users/%s/proxmox_password", ludusInstallPath, username))
-	proxmoxPassword := strings.TrimSuffix(proxmoxPasswordRaw, "\n")
-
-	if err != nil {
-		return "", "", errors.New("could not get proxmox password for user")
-	}
+func createProxmoxAPITokenForUserWithoutContext(username string, userRealm string, proxmoxPassword string) (string, string, error) {
 	proxmoxCredentials := &goproxmox.Credentials{
-		Username: username + "@pam",
+		Username: username + "@" + userRealm,
 		Password: proxmoxPassword,
 	}
 	insecureHTTPClient := http.Client{
@@ -176,19 +182,27 @@ func createProxmoxAPITokenForUserWithoutContext(username string) (string, string
 			},
 		},
 	}
+
+	var customLogger *goproxmox.LeveledLogger
+	if DebugProxmox {
+		customLogger = &goproxmox.LeveledLogger{Level: goproxmox.LevelDebug}
+	} else {
+		customLogger = &goproxmox.LeveledLogger{Level: goproxmox.LevelInfo}
+	}
 	proxmoxClient := goproxmox.NewClient(ServerConfiguration.ProxmoxURL+"/api2/json",
 		goproxmox.WithHTTPClient(&insecureHTTPClient),
 		goproxmox.WithCredentials(proxmoxCredentials),
+		goproxmox.WithLogger(customLogger),
 	)
 
-	return createProxmoxAPITokenForUserWithClient(proxmoxClient, username)
+	return createProxmoxAPITokenForUserWithClient(proxmoxClient, username, userRealm)
 }
 
-func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, username string) (string, string, error) {
+func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, username string, userRealm string) (string, string, error) {
 	// Get the user object from go-proxmox
 	goProxmoxUserObject, err := proxmoxClient.User(context.Background(), username+"@pam")
 	if err != nil {
-		log.Printf("Failed to retrieve created user %s@pam: %v", username, err)
+		log.Printf("Failed to retrieve created user %s@%s: %v", username, userRealm, err)
 		return "", "", errors.New("failed to retrieve created user")
 	}
 
@@ -203,7 +217,8 @@ func createProxmoxAPITokenForUserWithClient(proxmoxClient *goproxmox.Client, use
 		if strings.Contains(err.Error(), "already exists") {
 			// Remove the token and try again
 			logger.Debug(fmt.Sprintf("API token already exists for user '%s', removing it and recreating", username))
-			_, err = exec.Command("/usr/sbin/pveum", "user", "token", "del", username+"@pam", "ludus-token").CombinedOutput()
+			shellEscapedUsername := shellescape.Quote(username + "@" + userRealm)
+			_, err = exec.Command("/usr/sbin/pveum", "user", "token", "del", shellEscapedUsername, "ludus-token").CombinedOutput()
 			if err != nil {
 				return "", "", errors.New("unable to remove existing API token: " + err.Error())
 			}

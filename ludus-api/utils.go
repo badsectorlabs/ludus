@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alessio/shellescape"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/security"
@@ -264,13 +265,15 @@ func getUIDandGIDFromUsername(username string) (int, int, error) {
 
 // userExistsOnHostSystem checks if a user exists on the host system
 func userExistsOnHostSystem(username string) bool {
-	cmd := exec.Command("/usr/bin/id", username)
+	shellEscapedUsername := shellescape.Quote(username)
+	cmd := exec.Command("/usr/bin/id", shellEscapedUsername)
 	return cmd.Run() == nil
 }
 
 // removeUserFromHostSystem removes a user from the host system
 func removeUserFromHostSystem(username string) error {
-	cmd := exec.Command("/usr/sbin/userdel", "-r", username)
+	shellEscapedUsername := shellescape.Quote(username)
+	cmd := exec.Command("/usr/sbin/userdel", "-r", shellEscapedUsername)
 	err := cmd.Run()
 	if err != nil {
 		if err.Error() == "exit status 6" {

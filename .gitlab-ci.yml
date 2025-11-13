@@ -946,15 +946,12 @@ post-deploy user-cmds-as-admin:
   script:
     - *ci-setup-admin
     # Add an admin user
-    - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
-    - ludus user add -a -n "Test Admin" -i TA 2>&1 | grep "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint"
-    - set -o pipefail
-    - ludus --url https://127.0.0.1:8081 user add -a -n "Test Admin" -i TA
+    - ludus user add -a -n "Test Admin" -i TA -e "ta@ludus.internal" -p "tapassword"
     - ludus users list all | grep "Test Admin"
     # Try to create a user with the same ID or name
     - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
-    - ludus --url https://127.0.0.1:8081 user add -n "Test Admin" -i TA2 2>&1 | grep "User with that name already exists"
-    - ludus --url https://127.0.0.1:8081 user add -n "Test Admin 2" -i TA 2>&1 | grep "User with that ID already exists"
+    - ludus user add -n "Test Admin" -i TA2 -e "ta@ludus.internal" -p "tapassword" 2>&1 | grep "User with that name already exists"
+    - ludus user add -n "Test Admin 2" -i TA -e "ta2@ludus.internal" -p "ta2password" 2>&1 | grep "User with that ID already exists"
     - set -o pipefail
     # Get and set creds
     - ludus user creds get --user TA
@@ -963,13 +960,10 @@ post-deploy user-cmds-as-admin:
     # Get wireguard
     - ludus user wireguard --user TA | grep Endpoint
     # Remove admin user
-    - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
-    - ludus user rm -i TA 2>&1 | grep "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint"
-    - set -o pipefail
-    - ludus --url https://127.0.0.1:8081 user rm -i TA
+    - ludus user rm -i TA
     - '! ludus users list all | grep "Test Admin"'
     # Add a normal user
-    - ludus --url https://127.0.0.1:8081 user add -n "Test User" -i TU
+    - ludus user add -n "Test User" -i TU -e "tu@ludus.internal" -p "tupassword"
     - ludus users list all | grep "Test User"
     # Get and set creds
     - ludus user creds get --user TU
@@ -978,7 +972,7 @@ post-deploy user-cmds-as-admin:
     # Get wireguard
     - ludus user wireguard --user TU | grep Endpoint
     # Remove normal user
-    - ludus --url https://127.0.0.1:8081 user rm -i TU
+    - ludus user rm -i TU
     - '! ludus users list all | grep "Test User"'
 
 post-deploy groups-as-admin:
@@ -1020,9 +1014,9 @@ post-deploy groups-as-admin:
     - *ci-setup-admin
     # Clean up from previous retries if necessary
     - ludus groups delete ci-group-test || true
-    - ludus --url https://127.0.0.1:8081 user rm -i GTU || true
+    - ludus user rm -i GTU || true
     # Ensure a normal user exists for membership tests (creates default range for GTU)
-    - ludus --url https://127.0.0.1:8081 user add -n "Group Test User" -i GTU
+    - ludus user add -n "Group Test User" -i GTU -e "gtu@ludus.internal" -p "gtupassword"
     # Create a group
     - ludus groups create ci-group-test --description "CI Group Test"
     - ludus groups list | grep ci-group-test
@@ -1051,7 +1045,7 @@ post-deploy groups-as-admin:
     # Delete group and cleanup user
     - ludus groups delete ci-group-test
     - '! ludus groups list | grep ci-group-test'
-    - ludus --url https://127.0.0.1:8081 user rm -i GTU
+    - ludus user rm -i GTU
 
 post-deploy ranges-as-admin:
   stage: post-deploy-admin-user
@@ -1091,27 +1085,27 @@ post-deploy ranges-as-admin:
   script:
     - *ci-setup-admin
     # Clean up potential leftovers (ignore errors)
-    - ludus --url https://127.0.0.1:8081 range rm-range -r CIA-extra-1 --no-prompt --force || true
-    - ludus --url https://127.0.0.1:8081 range rm-range -r CIU-extra-1 --no-prompt --force || true
-    - ludus --url https://127.0.0.1:8081 range rm-range -r CIU-extra-2 --no-prompt --force || true
+    - ludus range rm-range -r CIA-extra-1 --no-prompt --force || true
+    - ludus range rm-range -r CIU-extra-1 --no-prompt --force || true
+    - ludus range rm-range -r CIU-extra-2 --no-prompt --force || true
     # Create two additional ranges for CIU (standard user)
-    - ludus --url https://127.0.0.1:8081 range create -n "CIU Extra Range 1" -r CIU-extra-1 --user CIU
-    - ludus --url https://127.0.0.1:8081 range create -n "CIU Extra Range 2" -r CIU-extra-2 --user CIU
+    - ludus range create -n "CIU Extra Range 1" -r CIU-extra-1 --user CIU
+    - ludus range create -n "CIU Extra Range 2" -r CIU-extra-2 --user CIU
     # Verify CIU can access both ranges (admin impersonation)
     - ludus --user CIU range accessible | grep CIU-extra-1
     - ludus --user CIU range accessible | grep CIU-extra-2
     # Verify users list for the new range contains CIU
     - ludus range users CIU-extra-1 | grep CIU
     # Delete first CIU range (no VMs => no --force)
-    - ludus --url https://127.0.0.1:8081 range rm-range -r CIU-extra-1 --no-prompt
+    - ludus range rm-range -r CIU-extra-1 --no-prompt
     - '! ludus --user CIU range accessible | grep CIU-extra-1'
     # Delete second CIU range
-    - ludus --url https://127.0.0.1:8081 range rm-range -r CIU-extra-2 --no-prompt
+    - ludus range rm-range -r CIU-extra-2 --no-prompt
     - '! ludus --user CIU range accessible | grep CIU-extra-2'
     # Create and delete an extra range for CIA (admin)
-    - ludus --url https://127.0.0.1:8081 range create -n "CIA Extra Range" -r CIA-extra-1 --user CIA
+    - ludus range create -n "CIA Extra Range" -r CIA-extra-1 --user CIA
     - ludus --user CIA range accessible | grep CIA-extra-1
-    - ludus --url https://127.0.0.1:8081 range rm-range -r CIA-extra-1 --no-prompt
+    - ludus range rm-range -r CIA-extra-1 --no-prompt
     - '! ludus --user CIA range accessible | grep CIA-extra-1'
 
 post-deploy templates-as-admin:
@@ -1445,14 +1439,13 @@ post-deploy user-cmds-as-user:
     # Try to get other user's wireguard
     - ludus user wireguard --user CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     # Try to add an admin user
-    - ludus user add -a -n "Test Admin" -i TA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
-    - ludus --url https://127.0.0.1:8081 user add -a -n "Test Admin" -i TA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - ludus user add -a -n "Test Admin" -i TA -e "ta@ludus.internal" -p "tapassword" 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     - '! ludus users list all | grep "Test Admin"'
     # Try to add a normal user
-    - ludus --url https://127.0.0.1:8081 user add -n "Test User" -i TA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - ludus user add -n "Test User" -i TA -e "tu@ludus.internal" -p "tupassword" 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     - '! ludus users list all | grep "Test User"'
     # Try to remove a user
-    - ludus --url https://127.0.0.1:8081 user rm -i CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - ludus user rm -i CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     # Try to get an api key for another user
     - ludus user apikey --user CIA --no-prompt 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
     # Get a new API for ourselves

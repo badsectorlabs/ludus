@@ -44,12 +44,6 @@
         group: ludus
         mode: '0600'
 
-    - name: Store proxmox password for user
-      ansible.builtin.copy:
-        content: "{{ proxmox_password }}"
-        dest: "{{ ludus_users_dir }}/{{ username }}/proxmox_password"
-        mode: "0660"
-
     - name: Add the user to the host
       ansible.builtin.user:
         name: "{{ username }}"

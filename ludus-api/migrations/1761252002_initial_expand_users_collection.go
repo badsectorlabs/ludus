@@ -51,6 +51,11 @@ func init() {
 				Required: false,
 			},
 			&core.TextField{
+				Name:     "proxmoxPassword",
+				Required: false,
+				Hidden:   true,
+			},
+			&core.TextField{
 				Name:     "proxmoxRealm",
 				Required: false,
 			},

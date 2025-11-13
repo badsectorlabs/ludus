@@ -614,6 +614,14 @@ func (p *Users) SetProxmoxUsername(proxmoxUsername string) {
 	p.Set("proxmoxUsername", proxmoxUsername)
 }
 
+func (p *Users) ProxmoxPassword() string {
+	return p.GetString("proxmoxPassword")
+}
+
+func (p *Users) SetProxmoxPassword(proxmoxPassword string) {
+	p.Set("proxmoxPassword", proxmoxPassword)
+}
+
 func (p *Users) ProxmoxRealm() string {
 	return p.GetString("proxmoxRealm")
 }

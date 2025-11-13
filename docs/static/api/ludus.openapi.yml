@@ -3108,8 +3108,10 @@ components:
           readOnly: true
     UserCredentialObject:
       example:
+        ludusEmail: john.doe@example.com
         proxmoxPassword: 5cy5@plhik4g&Yk12sG
         proxmoxUsername: john-doe
+        proxmoxRealm: pam
       properties:
         proxmoxUsername:
           example: john-doe
@@ -3117,6 +3119,14 @@ components:
           type: string
         proxmoxPassword:
           example: 5cy5@plhik4g&Yk12sG
+          readOnly: true
+          type: string
+        ludusEmail:
+          example: john.doe@example.com
+          readOnly: true
+          type: string
+        proxmoxRealm:
+          example: pam
           readOnly: true
           type: string
       type: object

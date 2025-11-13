@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alessio/shellescape"
 	"github.com/pocketbase/pocketbase/core"
 	yaml "sigs.k8s.io/yaml"
 )
@@ -156,6 +157,9 @@ func ActionRoleFromInternet(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, "You cannot remove this core Ludus role as it is required for Ludus to function")
 	}
 
+	// Make sure the role string is escaped
+	roleString = shellescape.Quote(roleString)
+
 	var cmd *exec.Cmd
 	if roleBody.Global && roleBody.Force {
 		cmd = exec.Command("ansible-galaxy", roleBody.Action, roleString, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
@@ -238,6 +242,9 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, "Unable to save the file: "+err.Error())
 	}
 	defer os.Remove(roleTarPath)
+
+	// Make sure the file name is escaped
+	fileHeader.Filename = shellescape.Quote(fileHeader.Filename)
 
 	var cmd *exec.Cmd
 	if global && force {
@@ -337,6 +344,9 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 	if collectionBody.Version != "" {
 		collectionString = fmt.Sprintf("%s:==%s", collectionBody.Collection, collectionBody.Version)
 	}
+
+	// Make sure the collection string is escaped
+	collectionString = shellescape.Quote(collectionString)
 
 	var cmd *exec.Cmd
 	if collectionBody.Force {

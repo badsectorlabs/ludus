@@ -232,7 +232,7 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 
 		if userRecord.Get("proxmoxTokenID") == "" {
 			logger.Debug(fmt.Sprintf("Creating proxmox API token for existing PocketBase user %s", sqliteUser.ProxmoxUsername))
-			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(sqliteUser.ProxmoxUsername)
+			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(sqliteUser.ProxmoxUsername, "pam", password)
 			if err != nil {
 				logger.Error(fmt.Sprintf("Error creating proxmox API token for user %s: %v", sqliteUser.ProxmoxUsername, err))
 				continue
@@ -256,6 +256,12 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 		userRecord.Set("userNumber", rangeObj.RangeNumber)
 		userRecord.Set("isAdmin", sqliteUser.IsAdmin)
 		userRecord.Set("proxmoxUsername", sqliteUser.ProxmoxUsername)
+		encryptedPassword, err := EncryptStringForDatabase(password)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error encrypting proxmox password for user %s: %v", sqliteUser.ProxmoxUsername, err))
+			continue
+		}
+		userRecord.Set("proxmoxPassword", encryptedPassword)
 		userRecord.Set("proxmoxRealm", "pam") // Ludus 1.x only supported PAM authentication
 		userRecord.Set("hashedAPIKey", sqliteUser.HashedAPIKey)
 		userRecord.Set("lastActive", sqliteUser.DateLastActive)
