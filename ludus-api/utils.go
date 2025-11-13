@@ -2,9 +2,11 @@ package ludusapi
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
+	"ludusapi/dto"
 	"ludusapi/models"
 	"net"
 	"os"
@@ -295,6 +297,7 @@ func HasRangeAccess(userID string, rangeNumber int) bool {
 		logger.Error(fmt.Sprintf("Error finding user: %s", err.Error()))
 		return false
 	}
+	app.ExpandRecord(userRecord, []string{"ranges"}, nil)
 	userRanges := userRecord.ExpandedAll("ranges")
 	for _, rangeRecord := range userRanges {
 		if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
@@ -303,15 +306,21 @@ func HasRangeAccess(userID string, rangeNumber int) bool {
 	}
 
 	// Check group-based access
-	groupRecords, err := app.FindAllRecords("groups",
-		dbx.NewExp("members ?= {:user_id} OR managers ?= {:user_id}", dbx.Params{
-			"user_id": userID,
-		}),
+	groupRecords, err := app.FindRecordsByFilter(
+		"groups", // collection name
+		"members.id ?= {:user_id} || managers.id ?= {:user_id}", // filter
+		"-created", // sort
+		0,          // limit
+		0,          // offset
+		dbx.Params{
+			"user_id": userRecord.Id,
+		},
 	)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
 		return false
 	}
+	logger.Debug(fmt.Sprintf("Found %d groups for user %s", len(groupRecords), userRecord.GetString("userID")))
 	for _, groupRecord := range groupRecords {
 		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
 			if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
@@ -380,8 +389,8 @@ func GetUserAccessibleRanges(userID string) []RangesAccessibleByUser {
 }
 
 // GetRangeAccessibleUsers returns all userIDs who can access a specific range
-func GetRangeAccessibleUsers(rangeNumber int) []string {
-	var userIDs []string
+func GetRangeAccessibleUsers(rangeNumber int) []dto.ListRangeUsersResponseItem {
+	var result []dto.ListRangeUsersResponseItem
 
 	rangeRecord, err := GetRangeObjectByNumber(rangeNumber)
 	if err != nil {
@@ -390,42 +399,67 @@ func GetRangeAccessibleUsers(rangeNumber int) []string {
 	}
 
 	// Find all users who have direct access to the range by querying the user table looking for the range.Id in the user's ranges array
-	userRecords, err := app.FindAllRecords("users",
-		dbx.NewExp("ranges ?= {:range_id}", dbx.Params{
+	userRecords, err := app.FindRecordsByFilter(
+		"users",                    // collection name
+		"ranges.id ?= {:range_id}", // filter
+		"-created",                 // sort
+		0,                          // limit
+		0,                          // offset
+		dbx.Params{
 			"range_id": rangeRecord.Id,
-		}),
+		},
 	)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error finding users: %s", err.Error()))
 		return nil
 	}
 	for _, userRecord := range userRecords {
-		userIDs = append(userIDs, userRecord.GetString("userID"))
+		result = append(result, dto.ListRangeUsersResponseItem{
+			UserID:     userRecord.GetString("userID"),
+			Name:       userRecord.GetString("name"),
+			AccessType: "Direct",
+		})
 	}
 
 	// Find all users who are managers or members of a group with access to the range by querying the group table looking for the range.Id in the group's ranges array
-	groupRecords, err := app.FindAllRecords("groups",
-		dbx.NewExp("ranges ?= {:range_id}", dbx.Params{
+	groupRecords, err := app.FindRecordsByFilter(
+		"groups",                   // collection name
+		"ranges.id ?= {:range_id}", // filter
+		"-created",                 // sort
+		0,                          // limit
+		0,                          // offset
+		dbx.Params{
 			"range_id": rangeRecord.Id,
-		}),
+		},
 	)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
 		return nil
 	}
 	for _, groupRecord := range groupRecords {
+		app.ExpandRecord(groupRecord, []string{"members", "managers"}, nil)
 		for _, member := range groupRecord.ExpandedAll("members") {
-			userIDs = AppendIfMissing(userIDs, member.GetString("userID"))
+			result = append(result, dto.ListRangeUsersResponseItem{
+				UserID:     member.GetString("userID"),
+				Name:       member.GetString("name"),
+				AccessType: "Group Member",
+			})
 		}
 		for _, manager := range groupRecord.ExpandedAll("managers") {
-			userIDs = AppendIfMissing(userIDs, manager.GetString("userID"))
+			result = append(result, dto.ListRangeUsersResponseItem{
+				UserID:     manager.GetString("userID"),
+				Name:       manager.GetString("name"),
+				AccessType: "Group Manager",
+			})
 		}
 	}
 
 	// Sort the result to ensure consistent ordering
-	slices.Sort(userIDs)
+	slices.SortFunc(result, func(a, b dto.ListRangeUsersResponseItem) int {
+		return strings.Compare(a.UserID, b.UserID)
+	})
 
-	return userIDs
+	return result
 }
 
 func mustGetUserFromRequest(e *core.RequestEvent) *models.User {
@@ -536,7 +570,9 @@ func AppendIfMissing(slice []string, elem string) []string {
 
 func GetRangeNumberFromRangeID(rangeID string) (int, error) {
 	rangeRecord, err := app.FindFirstRecordByData("ranges", "rangeId", rangeID)
-	if err != nil {
+	if err != nil && err != sql.ErrNoRows {
+		return 0, fmt.Errorf("not in database")
+	} else if err != nil {
 		return 0, fmt.Errorf("error finding range: %w", err)
 	}
 	return rangeRecord.GetInt("rangeNumber"), nil

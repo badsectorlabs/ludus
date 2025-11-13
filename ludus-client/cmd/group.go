@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"ludus/logger"
 	"ludus/rest"
+	"ludusapi/dto"
 	"os"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
+
+var manager bool
 
 // groupsCmd represents the groups command
 var groupsCmd = &cobra.Command{
@@ -34,15 +37,7 @@ var groupsListCmd = &cobra.Command{
 			return
 		}
 
-		type Data struct {
-			Result []struct {
-				ID          int    `json:"id"`
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			} `json:"result"`
-		}
-
-		var data Data
+		var data []dto.ListGroupsResponseItem
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
@@ -55,14 +50,16 @@ var groupsListCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"ID", "Name", "Description"})
+		table.SetHeader([]string{"Name", "Description", "Managers", "Members", "Ranges"})
 
 		// Add data to table
-		for _, group := range data.Result {
+		for _, group := range data {
 			table.Append([]string{
-				fmt.Sprintf("%d", group.ID),
 				group.Name,
 				group.Description,
+				fmt.Sprintf("%d", group.NumManagers),
+				fmt.Sprintf("%d", group.NumMembers),
+				fmt.Sprintf("%d", group.NumRanges),
 			})
 		}
 
@@ -96,7 +93,7 @@ var groupsCreateCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("Group '%s' created successfully\n", args[0])
+			logger.Logger.Info(fmt.Sprintf("Group '%s' created successfully", args[0]))
 		}
 	},
 }
@@ -121,7 +118,7 @@ var groupsDeleteCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("Group %s deleted successfully\n", groupName)
+			logger.Logger.Info(fmt.Sprintf("Group %s deleted successfully", groupName))
 		}
 	},
 }
@@ -146,7 +143,7 @@ var groupsAddUserCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/groups/%s/users/%s", groupName, userID), nil)
+		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/groups/%s/users/%s?manager=%t", groupName, userID, manager), nil)
 		if !success {
 			return
 		}
@@ -154,9 +151,13 @@ var groupsAddUserCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("User %s added to group %s successfully\n", userID, groupName)
+			logger.Logger.Info(fmt.Sprintf("User %s added to group %s successfully", userID, groupName))
 		}
 	},
+}
+
+func setupGroupsAddUserCmd(command *cobra.Command) {
+	command.Flags().BoolVarP(&manager, "manager", "m", false, "whether the user should be a manager of the group")
 }
 
 var groupsAddRangeCmd = &cobra.Command{
@@ -180,7 +181,7 @@ var groupsAddRangeCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("Group %s granted access to range %s successfully\n", groupName, rangeID)
+			logger.Logger.Info(fmt.Sprintf("Group %s granted access to range %s successfully", groupName, rangeID))
 		}
 	},
 }
@@ -213,7 +214,7 @@ var groupsRemoveUserCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("User %s removed from group %s successfully\n", userID, groupName)
+			logger.Logger.Info(fmt.Sprintf("User %s removed from group %s successfully", userID, groupName))
 		}
 	},
 }
@@ -243,7 +244,7 @@ var groupsRemoveRangeCmd = &cobra.Command{
 		if jsonFormat {
 			fmt.Printf("%s\n", responseJSON)
 		} else {
-			fmt.Printf("Group %s access to range %s revoked successfully\n", groupName, rangeID)
+			logger.Logger.Info(fmt.Sprintf("Group %s access to range %s revoked successfully", groupName, rangeID))
 		}
 	},
 }
@@ -251,7 +252,7 @@ var groupsRemoveRangeCmd = &cobra.Command{
 var groupsMembersCmd = &cobra.Command{
 	Use:   "members [groupName]",
 	Short: "List group members",
-	Long:  `List all users who are members of the specified group.`,
+	Long:  `List all users who are members and managers of the specified group.`,
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
@@ -265,14 +266,7 @@ var groupsMembersCmd = &cobra.Command{
 			return
 		}
 
-		type Data struct {
-			Result []struct {
-				UserID string `json:"userID"`
-				Name   string `json:"name"`
-			} `json:"result"`
-		}
-
-		var data Data
+		var data dto.ListGroupMembersResponse
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
@@ -285,11 +279,11 @@ var groupsMembersCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"UserID", "Name"})
+		table.SetHeader([]string{"UserID", "Name", "Role"})
 
 		// Add data to table
 		for _, user := range data.Result {
-			table.Append([]string{user.UserID, user.Name})
+			table.Append([]string{user.UserID, user.Name, user.Role})
 		}
 
 		// Print table
@@ -314,15 +308,7 @@ var groupsRangesCmd = &cobra.Command{
 			return
 		}
 
-		type Data struct {
-			Result []struct {
-				RangeNumber int32  `json:"rangeNumber"`
-				RangeID     string `json:"rangeID"`
-				RangeState  string `json:"rangeState"`
-			} `json:"result"`
-		}
-
-		var data Data
+		var data dto.ListGroupRangesResponse
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
@@ -335,13 +321,16 @@ var groupsRangesCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Range Number", "Range ID"})
+		table.SetHeader([]string{"Range Number", "Range ID", "Name", "Number of VMs", "Testing Enabled"})
 
 		// Add data to table
 		for _, rangeObj := range data.Result {
 			table.Append([]string{
 				fmt.Sprintf("%d", rangeObj.RangeNumber),
 				rangeObj.RangeID,
+				rangeObj.Name,
+				fmt.Sprintf("%d", rangeObj.NumberOfVMs),
+				fmt.Sprintf("%t", rangeObj.TestingEnabled),
 			})
 		}
 
@@ -355,6 +344,7 @@ func init() {
 	groupsCreateCmd.Flags().String("description", "", "Description of the group")
 
 	// Add subcommands to parent add command
+	setupGroupsAddUserCmd(groupsAddUserCmd)
 	groupsAddCmd.AddCommand(groupsAddUserCmd)
 	groupsAddCmd.AddCommand(groupsAddRangeCmd)
 

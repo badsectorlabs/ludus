@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"ludus/logger"
 	"ludus/rest"
+	"ludusapi/dto"
 	"os"
 	"strconv"
 	"strings"
@@ -791,20 +792,15 @@ var rangeUsersCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ranges/%s/users", rangeID))
+
+		rangesUsersURL := buildURLWithRangeAndUserID(fmt.Sprintf("/ranges/%s/users", rangeID))
+
+		responseJSON, success = rest.GenericGet(client, rangesUsersURL)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
-		type Data struct {
-			Result []struct {
-				UserID string `json:"userID"`
-				Name   string `json:"name"`
-				Type   string `json:"type"`
-			} `json:"result"`
-		}
-
-		var data Data
+		var data []dto.ListRangeUsersResponseItem
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
@@ -815,8 +811,8 @@ var rangeUsersCmd = &cobra.Command{
 		table.SetHeader([]string{"UserID", "Name", "Access Type"})
 
 		// Add data to table
-		for _, user := range data.Result {
-			table.Append([]string{user.UserID, user.Name, user.Type})
+		for _, user := range data {
+			table.Append([]string{user.UserID, user.Name, user.AccessType})
 		}
 
 		// Print table

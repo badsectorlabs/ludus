@@ -2712,7 +2712,7 @@ paths:
         - Group Management
       summary: List all groups
       operationId: listGroups
-      description: Returns a list of all groups in Ludus.
+      description: Returns a list of all groups in Ludus the user has access to.
       responses:
         "200":
           description: List of groups
@@ -2723,12 +2723,16 @@ paths:
                 items:
                   type: object
                   properties:
-                    id:
-                      type: integer
                     name:
                       type: string
                     description:
                       type: string
+                    numMembers:
+                      type: integer
+                    numManagers:
+                      type: integer
+                    numRanges:
+                      type: integer
   /groups/{groupName}:
     delete:
       tags:
@@ -2765,6 +2769,12 @@ paths:
           required: true
           schema:
             type: string
+        - name: manager
+          in: query
+          required: false
+          description: Whether the user should be a manager of the group
+          schema:
+            type: boolean
       responses:
         "200":
           description: User added to group
@@ -2864,6 +2874,11 @@ paths:
                       type: string
                     name:
                       type: string
+                    role:
+                      type: string
+                      enum:
+                        - member
+                        - manager
   /groups/{groupName}/ranges:
     get:
       tags:
@@ -2984,7 +2999,7 @@ paths:
           description: Range revoked from user
         "404":
           description: Range or user not found
-  /ranges/users/{rangeID}:
+  /ranges/{rangeID}/users:
     get:
       tags:
         - Range Management
@@ -3011,8 +3026,12 @@ paths:
                       type: string
                     name:
                       type: string
-                    type:
-                      type: string
+                    accessType:
+                      type: enum
+                      enum:
+                        - Direct
+                        - Group Member
+                        - Group Manager
   /ranges/accessible:
     get:
       tags:

@@ -13,13 +13,17 @@ import (
 func getGroupObjectFromRequest(e *core.RequestEvent) (*models.Group, error) {
 	groupName := e.Request.PathValue("groupName")
 
+	if groupName == "" {
+		return nil, JSONError(e, http.StatusBadRequest, "Group name is required and not found in the request path")
+	}
+
 	groupRecord, err := e.App.FindFirstRecordByData("groups", "name", groupName)
 	if err != nil {
 		return nil, JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding group: %v", err))
 	}
-	group := models.Group{}
+	group := &models.Group{}
 	group.SetProxyRecord(groupRecord)
-	return &group, nil
+	return group, nil
 }
 
 // CreateGroup creates a new group (admin only)
@@ -51,9 +55,10 @@ func CreateGroup(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding group collection: %v", err))
 	}
 	groupRecord := core.NewRecord(groupCollection)
-	group := models.Groups{}
+	group := &models.Groups{}
 	group.SetProxyRecord(groupRecord)
 	group.SetName(payload.Name)
+	group.SetDescription(payload.Description)
 
 	if err := e.App.Save(group); err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error creating group: %v", err))
@@ -96,41 +101,61 @@ func DeleteGroup(e *core.RequestEvent) error {
 
 // ListGroups lists all groups (admin only)
 func ListGroups(e *core.RequestEvent) error {
-	if !e.Auth.GetBool("isAdmin") {
-		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot list groups")
-	}
-
 	var groups []dto.ListGroupsResponseItem
-	groupsRecords, err := e.App.FindAllRecords("groups")
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error listing groups: %v", err))
-	}
+	user := e.Get("user").(*models.User)
 
-	for _, groupRecord := range groupsRecords {
-		group := &models.Group{}
-		group.SetProxyRecord(groupRecord)
-		groupItem := dto.ListGroupsResponseItem{
-			Id:          group.Id,
-			Name:        group.Name(),
-			Description: group.Description(),
+	if e.Auth.GetBool("isAdmin") {
+		groupsRecords, err := e.App.FindAllRecords("groups")
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error listing groups: %v", err))
 		}
-		groups = append(groups, groupItem)
+		for _, groupRecord := range groupsRecords {
+			group := &models.Group{}
+			group.SetProxyRecord(groupRecord)
+			e.App.ExpandRecord(groupRecord, []string{"members", "managers", "ranges"}, nil)
+			groupMembers := group.Members()
+			groupManagers := group.Managers()
+			groupRanges := group.Ranges()
+			groupItem := dto.ListGroupsResponseItem{
+				Name:        group.Name(),
+				Description: group.Description(),
+				NumMembers:  len(groupMembers),
+				NumManagers: len(groupManagers),
+				NumRanges:   len(groupRanges),
+			}
+			groups = append(groups, groupItem)
+		}
+	} else {
+		groupsRecords := user.Groups()
+		for _, group := range groupsRecords {
+			e.App.ExpandRecord(group.Record, []string{"members", "managers", "ranges"}, nil)
+			groupMembers := group.Members()
+			groupManagers := group.Managers()
+			groupRanges := group.Ranges()
+			groupItem := dto.ListGroupsResponseItem{
+				Name:        group.Name(),
+				Description: group.Description(),
+				NumMembers:  len(groupMembers),
+				NumManagers: len(groupManagers),
+				NumRanges:   len(groupRanges),
+			}
+			groups = append(groups, groupItem)
+		}
 	}
-	response := dto.ListGroupsResponse{
-		Value: groups,
-	}
-	return e.JSON(http.StatusOK, response)
+	return e.JSON(http.StatusOK, groups)
 }
 
 // AddUserToGroup adds a user to a group (admin only)
 func AddUserToGroup(e *core.RequestEvent) error {
-	if !e.Auth.GetBool("isAdmin") {
-		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot add users to groups")
-	}
 
 	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
 		return err
+	}
+
+	actingUser := e.Get("user").(*models.User)
+	if !userIsManagerOfGroup(actingUser, group) && !actingUser.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "You are not a manager of this group and cannot add users to it")
 	}
 
 	userID := e.Request.PathValue("userID")
@@ -339,17 +364,24 @@ func ListGroupMembers(e *core.RequestEvent) error {
 	e.App.ExpandRecord(group.Record, []string{"members", "managers"}, nil)
 	groupMembers := group.Members()
 	groupManagers := group.Managers()
-	allGroupUsers := append(groupMembers, groupManagers...)
 
-	var users []dto.ListGroupMembersResponseItem
-	for _, user := range allGroupUsers {
-		users = append(users, dto.ListGroupMembersResponseItem{
+	var membersAndManagersArray []dto.ListGroupMembersResponseItem
+	for _, user := range groupMembers {
+		membersAndManagersArray = append(membersAndManagersArray, dto.ListGroupMembersResponseItem{
 			UserID: user.Id,
 			Name:   user.Name(),
+			Role:   "member",
+		})
+	}
+	for _, user := range groupManagers {
+		membersAndManagersArray = append(membersAndManagersArray, dto.ListGroupMembersResponseItem{
+			UserID: user.Id,
+			Name:   user.Name(),
+			Role:   "manager",
 		})
 	}
 	response := dto.ListGroupMembersResponse{
-		Result: users,
+		Result: membersAndManagersArray,
 	}
 	return e.JSON(http.StatusOK, response)
 }

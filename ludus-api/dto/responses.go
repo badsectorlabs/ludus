@@ -245,6 +245,7 @@ type ListGroupMembersResponse struct {
 type ListGroupMembersResponseItem struct {
 	Name   string `json:"name,omitempty"`
 	UserID string `json:"userID,omitempty"`
+	Role   string `json:"role,omitempty"`
 }
 type ListGroupRangesResponse struct {
 	Result []ListGroupRangesResponseItem `json:"result,omitempty"`
@@ -272,13 +273,12 @@ type ListGroupRangesResponseItemVMsItem struct {
 	ID          int32  `json:"ID"`
 	ProxmoxID   int32  `json:"proxmoxID"`
 }
-type ListGroupsResponse struct {
-	Value []ListGroupsResponseItem `json:"-"`
-}
 type ListGroupsResponseItem struct {
-	Id          string `json:"id,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	NumMembers  int    `json:"numMembers"`
+	NumManagers int    `json:"numManagers"`
+	NumRanges   int    `json:"numRanges"`
 }
 type ListRangeResponse struct {
 	RangeState     string                     `json:"rangeState,omitempty"`
@@ -306,13 +306,10 @@ type ListRangeResponseVMsItem struct {
 type ListRangeTagsResponse struct {
 	Value string `json:"-"`
 }
-type ListRangeUsersResponse struct {
-	Value []ListRangeUsersResponseItem `json:"-"`
-}
 type ListRangeUsersResponseItem struct {
-	UserID string `json:"userID,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Type   string `json:"type,omitempty"`
+	UserID     string `json:"userID,omitempty"`
+	Name       string `json:"name,omitempty"`
+	AccessType string `json:"accessType,omitempty"`
 }
 type ListUserAccessibleRangesResponse struct {
 	Value []ListUserAccessibleRangesResponseItem `json:"-"`

@@ -798,37 +798,26 @@ func RevokeRangeFromUser(e *core.RequestEvent) error {
 	return AssignOrRevokeRangeAccess(e, "revoke", force)
 }
 
-// ListRangeUsers lists all users with access to a range (admin only)
+// ListRangeUsers lists all users with access to a range (admins and users with access to the range only)
 func ListRangeUsers(e *core.RequestEvent) error {
-	if !e.Auth.GetBool("isAdmin") {
-		return JSONError(e, http.StatusForbidden, "You must be an admin to use this endpoint")
-	}
 
-	rangeID := e.Request.URL.Query().Get("rangeID")
+	rangeID := e.Request.PathValue("rangeID")
+	if rangeID == "" {
+		return JSONError(e, http.StatusBadRequest, "Range ID is required")
+	}
 	rangeNumber, err := GetRangeNumberFromRangeID(rangeID)
 	if err != nil {
 		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", rangeID, err))
 	}
 
-	// Get all users with access to this range
-	accessibleUsers := GetRangeAccessibleUsers(rangeNumber)
-
-	// Get user details for each accessible user
-	var result dto.ListRangeUsersResponse
-	result.Value = make([]dto.ListRangeUsersResponseItem, 0)
-	for _, userID := range accessibleUsers {
-		userRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
-		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting user object: %v", err))
-		}
-		userObject := models.User{}
-		userObject.SetProxyRecord(userRecord)
-		result.Value = append(result.Value, dto.ListRangeUsersResponseItem{
-			UserID: userObject.UserId(),
-			Name:   userObject.Name(),
-			Type:   "???", // TODO: Add type to the user object
-		})
+	user := e.Get("user").(*models.User)
+	userHasAccess := HasRangeAccess(user.UserId(), rangeNumber)
+	if !userHasAccess && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You (%s) do not have access to range %s and cannot list users with access to it", user.UserId(), rangeID))
 	}
+
+	// Get all users with access to this range
+	result := GetRangeAccessibleUsers(rangeNumber)
 
 	return e.JSON(http.StatusOK, result)
 }
