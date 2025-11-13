@@ -82,35 +82,6 @@ func getProxmoxPasswordForUser(user *models.User) (string, error) {
 // One example where it falls short is that is can't set a description on a snapshot and requires permissions on each node.
 // So we use the Telmate library for now.
 
-func GetGoProxmoxClientForUser(e *core.RequestEvent) (*goproxmox.Client, error) {
-	user := e.Get("user").(*models.User)
-
-	proxmoxPassword, err := getProxmoxPasswordForUser(user)
-	if err != nil {
-		return nil, errors.New("unable to get proxmox password for user: " + err.Error())
-	}
-	if proxmoxPassword == "" {
-		return nil, errors.New("could not get proxmox password for user") // JSON set in getProxmoxPasswordForUser
-	}
-	credentials := goproxmox.Credentials{
-		Username: user.ProxmoxUsername() + "@" + user.ProxmoxRealm(),
-		Password: proxmoxPassword,
-	}
-	insecureHTTPClient := http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: ServerConfiguration.ProxmoxInvalidCert,
-			},
-		},
-	}
-
-	client := goproxmox.NewClient(ServerConfiguration.ProxmoxURL+"/api2/json",
-		goproxmox.WithHTTPClient(&insecureHTTPClient),
-		goproxmox.WithCredentials(&credentials),
-	)
-	return client, nil
-}
-
 func GetGoProxmoxClientForUserUsingToken(e *core.RequestEvent) (*goproxmox.Client, error) {
 	user := e.Get("user").(*models.User)
 
@@ -132,13 +103,18 @@ func GetGoProxmoxClientForUserUsingToken(e *core.RequestEvent) (*goproxmox.Clien
 		},
 	}
 
-	// Create a logger with debug level
-	logger := &goproxmox.LeveledLogger{Level: goproxmox.LevelDebug}
+	// Create a logger with debug level if the debug flag is set
+	var customLogger *goproxmox.LeveledLogger
+	if DebugProxmox { // Resolved in routers.go, based on the LUDUS_DEBUG_PROXMOX environment variable
+		customLogger = &goproxmox.LeveledLogger{Level: goproxmox.LevelDebug}
+	} else {
+		customLogger = &goproxmox.LeveledLogger{Level: goproxmox.LevelInfo}
+	}
 
 	client := goproxmox.NewClient(ServerConfiguration.ProxmoxURL+"/api2/json",
 		goproxmox.WithHTTPClient(&insecureHTTPClient),
 		goproxmox.WithAPIToken(tokenID, tokenSecret),
-		goproxmox.WithLogger(logger),
+		goproxmox.WithLogger(customLogger),
 	)
 	return client, nil
 }

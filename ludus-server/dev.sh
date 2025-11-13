@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # Parse command line arguments
-while getopts "hDd" opt; do
+while getopts "hDdP" opt; do
   case $opt in
     h)
       echo "Usage: $0 [-h] [-d] [-D]"
       echo "  -d  Enable debug logging for Ludus"
       echo "  -D  Enable debug logging for the database"
+      echo "  -P  Enable debug logging for proxmox"
       exit 0
       ;;
     d)
@@ -14,6 +15,9 @@ while getopts "hDd" opt; do
       ;;
     D)
       DEBUG_DATABASE=true
+      ;;
+    P)
+      DEBUG_PROXMOX=true
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -90,6 +94,14 @@ if [ "$DEBUG_DATABASE" = true ]; then
 else
     echo "[-] Unsetting LUDUS_DEBUG_DATABASE"
     systemctl unset-environment LUDUS_DEBUG_DATABASE
+fi
+
+if [ "$DEBUG_PROXMOX" = true ]; then
+    echo "[+] Setting LUDUS_DEBUG_PROXMOX=1"
+    systemctl set-environment LUDUS_DEBUG_PROXMOX=1
+else
+    echo "[-] Unsetting LUDUS_DEBUG_PROXMOX"
+    systemctl unset-environment LUDUS_DEBUG_PROXMOX
 fi
 
 ./ludus-server --update --no-dep-update

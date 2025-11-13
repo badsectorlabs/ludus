@@ -40,6 +40,7 @@ var adminProxy *httputil.ReverseProxy
 var PB *pocketbase.PocketBase
 var app core.App
 var LudusPluginHandlerManager *HandlerManager
+var DebugProxmox bool
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
@@ -48,6 +49,11 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 
 	ludusServer.ParseConfig()
 	server = ludusServer
+
+	// Resolve the Proxmox debug flag here for speed (vs every call to GetGoProxmoxClientForUserUsingToken)
+	if os.Getenv("LUDUS_DEBUG_PROXMOX") == "1" {
+		DebugProxmox = true
+	}
 
 	// PocketBase Config
 	pbConfig := pocketbase.Config{
