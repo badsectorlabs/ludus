@@ -110,6 +110,8 @@ func prettyPrintPocketBaseError(errorBytes []byte) error {
 	}
 	if parsedError.Message == "Something went wrong while processing your request." {
 		logger.Logger.Error("Check the PocketBase logs for crash details")
+	} else if parsedError.Message == "" {
+		return fmt.Errorf("not an error from PocketBase")
 	} else {
 		logger.Logger.Error(parsedError.Message)
 	}
