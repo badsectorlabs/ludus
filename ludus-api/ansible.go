@@ -430,8 +430,9 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 	}
 
 	// Always include the ludus, server, and user configs
+	// Use .tmp-range-config.yml since this function is called during PutConfig before the file is renamed
 	rangeDir := fmt.Sprintf("@%s/ranges/%s/", ludusInstallPath, usersRange.RangeId())
-	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeDir + "range-config.yml"}
+	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeDir + ".tmp-range-config.yml"}
 	inventory := "127.0.0.1"
 
 	ansibleExecute := execute.NewDefaultExecute(

@@ -24,10 +24,6 @@ func PowerAction(e *core.RequestEvent, action string) error {
 	}
 
 	usersRange := e.Get("range").(*models.Range)
-	proxmoxClient, err = GetGoProxmoxClientForUserUsingToken(e)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, err.Error())
-	}
 
 	err = updateRangeVMData(e, usersRange, proxmoxClient)
 	if err != nil {

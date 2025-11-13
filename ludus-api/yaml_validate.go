@@ -3,7 +3,6 @@ package ludusapi
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"ludusapi/models"
 	"os"
 	"regexp"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/goforj/godump"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/xeipuuv/gojsonschema"
 	yaml "sigs.k8s.io/yaml"
@@ -83,7 +83,7 @@ func validateBytes(bytes []byte, schemabytes []byte) error {
 			return fmt.Errorf("invalid YAML: %s", report)
 		}
 	} else {
-		log.Println("Yaml validate: checking syntax only")
+		logger.Debug("Yaml validate: checking syntax only")
 	}
 
 	return nil
@@ -227,10 +227,10 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 						if !exists {
 							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, targetRange.RangeId())
 						} else {
-							e.Set("userHasRoles", true)
+							e.Set("rangeHasRoles", true)
 						}
 					case map[string]interface{}:
-						log.Println(role)
+						logger.Debug("Yaml validate: checking role: " + godump.DumpStr(role))
 						if name, ok := r["name"].(string); ok {
 							exists, err := checkRoleExists(e, name)
 							if err != nil {
@@ -239,7 +239,7 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 							if !exists {
 								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, targetRange.RangeId())
 							} else {
-								e.Set("userHasRoles", true)
+								e.Set("rangeHasRoles", true)
 							}
 							if dependsOn, ok := r["depends_on"].([]interface{}); ok {
 								for _, dep := range dependsOn {
@@ -261,6 +261,7 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 				}
 			}
 		} else {
+			e.Set("rangeHasRoles", false)
 			// Remove the user-defined-roles.yml file in the event the range previously had a config with roles defined
 			_, err = os.Stat(fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, targetRange.RangeId()))
 			if err == nil {

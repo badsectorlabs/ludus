@@ -111,7 +111,6 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	user := &models.User{}
 	user.SetProxyRecord(e.Auth)
 	e.Set("user", user)
-	logger.Debug(fmt.Sprintf("Set user record to: %s", user.UserId()))
 
 	// Check if the user is requesting a specific range
 	rangeID := e.Request.URL.Query().Get("rangeID")
