@@ -23,6 +23,7 @@ func getGroupObjectFromRequest(e *core.RequestEvent) (*models.Group, error) {
 	}
 	group := &models.Group{}
 	group.SetProxyRecord(groupRecord)
+	e.App.ExpandRecord(group.Record, []string{"members", "managers", "ranges"}, nil)
 	return group, nil
 }
 
@@ -261,13 +262,15 @@ func RemoveUserFromGroup(e *core.RequestEvent) error {
 
 // AddRangeToGroup grants group access to a range (admin only)
 func AddRangeToGroup(e *core.RequestEvent) error {
-	if !e.Auth.GetBool("isAdmin") {
-		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot add ranges to groups")
-	}
 
 	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
 		return err
+	}
+
+	user := e.Get("user").(*models.User)
+	if !userIsManagerOfGroup(user, group) && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You are not a manager of group %s or an admin and cannot add ranges to it", group.Name()))
 	}
 
 	rangeID := e.Request.PathValue("rangeID")
@@ -291,8 +294,13 @@ func AddRangeToGroup(e *core.RequestEvent) error {
 	groupRanges := group.Ranges()
 	for _, groupRange := range groupRanges {
 		if groupRange.Id == rangeObj.Id {
-			return JSONError(e, http.StatusConflict, fmt.Sprintf("Group %s already has access to range %s", group.Name(), rangeObj.Name()))
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Group %s already has access to range %s", group.Name(), rangeObj.RangeId()))
 		}
+	}
+
+	// Check if the acting user has access to the range they want to add to the group
+	if !HasRangeAccess(user.UserId(), rangeObj.RangeNumber()) && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You do not have access to range %s and cannot add it to group %s", rangeObj.RangeId(), group.Name()))
 	}
 
 	group.Set("ranges+", rangeObj.Id)
@@ -312,13 +320,15 @@ func AddRangeToGroup(e *core.RequestEvent) error {
 
 // RemoveRangeFromGroup revokes group access from a range (admin only)
 func RemoveRangeFromGroup(e *core.RequestEvent) error {
-	if !e.Auth.GetBool("isAdmin") {
-		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot remove ranges from groups")
-	}
 
 	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
 		return err
+	}
+
+	user := e.Get("user").(*models.User)
+	if !userIsManagerOfGroup(user, group) && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You are not a manager of group %s or an admin and cannot remove ranges from it", group.Name()))
 	}
 
 	rangeID := e.Request.PathValue("rangeID")

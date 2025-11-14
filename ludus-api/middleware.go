@@ -30,7 +30,7 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 
 	record, err := e.App.FindFirstRecordByData("users", "userID", userID)
 	if err != nil {
-		return JSONError(e, http.StatusUnauthorized, fmt.Sprintf("user %s not found", userID))
+		return JSONError(e, http.StatusUnauthorized, fmt.Sprintf("User %s from API key not found", userID))
 	}
 
 	storedHash := record.GetString("hashedAPIKey")
@@ -45,7 +45,7 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 		if record.Get("isAdmin").(bool) {
 			record, err = e.App.FindFirstRecordByData("users", "userID", requestedUserID)
 			if err != nil {
-				return JSONError(e, http.StatusUnauthorized, fmt.Sprintf("user %s not found", requestedUserID))
+				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("User %s from query parameter not found", requestedUserID))
 			}
 		} else {
 			return JSONError(e, http.StatusUnauthorized, "You are not an admin and cannot impersonate other users")
@@ -189,7 +189,8 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 }
 
 func requireAuth(e *core.RequestEvent) error {
-	if e.Auth == nil {
+	// Check auth for all endpoints in our base path
+	if e.Auth == nil && strings.HasPrefix(e.Request.URL.Path, APIBasePath) {
 		return JSONError(e, http.StatusUnauthorized, "Authentication failed. Provide a valid API key in the X-API-KEY header or a valid JWT token in the Authorization header.")
 	}
 	return e.Next()

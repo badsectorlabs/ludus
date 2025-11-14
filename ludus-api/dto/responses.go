@@ -312,10 +312,10 @@ type ListRangeUsersResponseItem struct {
 	AccessType string `json:"accessType,omitempty"`
 }
 type ListUserAccessibleRangesResponse struct {
-	Value []ListUserAccessibleRangesResponseItem `json:"-"`
+	Result []ListUserAccessibleRangesResponseItem `json:"result"`
 }
 type ListUserAccessibleRangesResponseItem struct {
-	RangeNumber int64  `json:"rangeNumber,omitempty"`
+	RangeNumber int    `json:"rangeNumber,omitempty"`
 	RangeID     string `json:"rangeID,omitempty"`
 	AccessType  string `json:"accessType,omitempty"`
 }

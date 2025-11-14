@@ -829,18 +829,50 @@ func ListUserAccessibleRanges(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusUnauthorized, "User not found")
 	}
 
-	// Get all ranges the user can access
-	accessibleRanges := GetUserAccessibleRanges(user.UserId())
+	var result []dto.ListUserAccessibleRangesResponseItem
 
-	var result dto.ListUserAccessibleRangesResponse
-	result.Value = make([]dto.ListUserAccessibleRangesResponseItem, 0)
-	for _, accessibleRange := range accessibleRanges {
-		result.Value = append(result.Value, dto.ListUserAccessibleRangesResponseItem{
-			RangeID:     accessibleRange.RangeID,
-			RangeNumber: int64(accessibleRange.RangeNumber),
-			AccessType:  accessibleRange.AccessType,
+	// Get direct range assignments
+	userRanges := user.Ranges()
+	for _, rangeRecord := range userRanges {
+		result = append(result, dto.ListUserAccessibleRangesResponseItem{
+			RangeNumber: rangeRecord.GetInt("rangeNumber"),
+			RangeID:     rangeRecord.RangeId(),
+			AccessType:  "Direct",
 		})
 	}
+
+	// Find all groups the user is a member of or manager of
+	groupRecords, err := app.FindRecordsByFilter(
+		"groups", // collection name
+		"members.id ?= {:user_id} || managers.id ?= {:user_id}", // filter
+		"-created", // sort
+		0,          // limit
+		0,          // offset
+		dbx.Params{
+			"user_id": user.Id,
+		},
+	)
+
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
+		return fmt.Errorf("error finding groups: %w", err)
+	}
+
+	for _, groupRecord := range groupRecords {
+		app.ExpandRecord(groupRecord, []string{"ranges"}, nil)
+		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
+			result = append(result, dto.ListUserAccessibleRangesResponseItem{
+				RangeNumber: rangeRecord.GetInt("rangeNumber"),
+				RangeID:     rangeRecord.GetString("rangeID"),
+				AccessType:  "Group",
+			})
+		}
+	}
+
+	// Sort the result to ensure consistent ordering
+	slices.SortFunc(result, func(a, b dto.ListUserAccessibleRangesResponseItem) int {
+		return int(a.RangeNumber - b.RangeNumber)
+	})
 
 	return e.JSON(http.StatusOK, result)
 }

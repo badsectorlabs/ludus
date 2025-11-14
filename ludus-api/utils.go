@@ -322,6 +322,7 @@ func HasRangeAccess(userID string, rangeNumber int) bool {
 	}
 	logger.Debug(fmt.Sprintf("Found %d groups for user %s", len(groupRecords), userRecord.GetString("userID")))
 	for _, groupRecord := range groupRecords {
+		app.ExpandRecord(groupRecord, []string{"ranges"}, nil)
 		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
 			if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
 				return true
@@ -330,62 +331,6 @@ func HasRangeAccess(userID string, rangeNumber int) bool {
 	}
 
 	return false
-}
-
-type RangesAccessibleByUser struct {
-	RangeNumber int32  `json:"rangeNumber"`
-	RangeID     string `json:"rangeID"`
-	AccessType  string `json:"accessType"`
-}
-
-// GetUserAccessibleRanges returns all range numbers a user can access
-func GetUserAccessibleRanges(userID string) []RangesAccessibleByUser {
-
-	var result []RangesAccessibleByUser
-
-	// Get direct range assignments
-	userRecord, err := app.FindFirstRecordByData("users", "userID", userID)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Error finding user: %s", err.Error()))
-		return nil
-	}
-	userRanges := userRecord.ExpandedAll("ranges")
-	for _, rangeRecord := range userRanges {
-		rangeNumber := rangeRecord.GetInt("rangeNumber")
-		result = append(result, RangesAccessibleByUser{
-			RangeNumber: int32(rangeNumber),
-			RangeID:     rangeRecord.GetString("rangeID"),
-			AccessType:  "direct",
-		})
-	}
-
-	// Get group-based range access
-	groupRecords, err := app.FindAllRecords("groups",
-		dbx.NewExp("members ?= {:user_id} OR managers ?= {:user_id}", dbx.Params{
-			"user_id": userID,
-		}),
-	)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
-		return nil
-	}
-
-	for _, groupRecord := range groupRecords {
-		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
-			rangeNumber := rangeRecord.GetInt("rangeNumber")
-			result = append(result, RangesAccessibleByUser{
-				RangeNumber: int32(rangeNumber),
-				RangeID:     rangeRecord.GetString("rangeID"),
-				AccessType:  "group",
-			})
-		}
-	}
-
-	// Sort the result to ensure consistent ordering
-	slices.SortFunc(result, func(a, b RangesAccessibleByUser) int {
-		return int(a.RangeNumber - b.RangeNumber)
-	})
-	return result
 }
 
 // GetRangeAccessibleUsers returns all userIDs who can access a specific range
