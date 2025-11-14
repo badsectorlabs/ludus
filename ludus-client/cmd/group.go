@@ -32,8 +32,9 @@ var groupsListCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, "/groups")
-		if !success {
+		groupURL := buildURLWithRangeAndUserID("/groups")
+		responseJSON, success = rest.GenericGet(client, groupURL)
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
@@ -41,11 +42,6 @@ var groupsListCmd = &cobra.Command{
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
-		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-			return
 		}
 
 		// Create table
@@ -85,16 +81,13 @@ var groupsCreateCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericJSONPost(client, "/groups", payload)
-		if !success {
+		groupURL := buildURLWithRangeAndUserID("/groups")
+		responseJSON, success = rest.GenericJSONPost(client, groupURL, payload)
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-		} else {
-			logger.Logger.Info(fmt.Sprintf("Group '%s' created successfully", args[0]))
-		}
+		logger.Logger.Info(fmt.Sprintf("Group '%s' created successfully", args[0]))
 	},
 }
 
@@ -110,16 +103,12 @@ var groupsDeleteCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/groups/%s", groupName))
-		if !success {
+		groupURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s", groupName))
+		responseJSON, success = rest.GenericDelete(client, groupURL)
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-		} else {
-			logger.Logger.Info(fmt.Sprintf("Group %s deleted successfully", groupName))
-		}
+		logger.Logger.Info(fmt.Sprintf("Group %s deleted successfully", groupName))
 	},
 }
 
@@ -143,16 +132,15 @@ var groupsAddUserCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/groups/%s/users/%s?manager=%t", groupName, userID, manager), nil)
-		if !success {
+		groupUserURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/users/%s", groupName, userID))
+		if manager {
+			groupUserURL = addQueryParameterToURL(groupUserURL, "manager", "true")
+		}
+		responseJSON, success = rest.GenericJSONPost(client, groupUserURL, nil)
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-		} else {
-			logger.Logger.Info(fmt.Sprintf("User %s added to group %s successfully", userID, groupName))
-		}
+		logger.Logger.Info(fmt.Sprintf("User %s added to group %s successfully", userID, groupName))
 	},
 }
 
@@ -173,16 +161,12 @@ var groupsAddRangeCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/groups/%s/ranges/%s", groupName, rangeID), nil)
-		if !success {
+		groupRangeURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/ranges/%s", groupName, rangeID))
+		responseJSON, success = rest.GenericJSONPost(client, groupRangeURL, nil)
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-		} else {
-			logger.Logger.Info(fmt.Sprintf("Group %s granted access to range %s successfully", groupName, rangeID))
-		}
+		logger.Logger.Info(fmt.Sprintf("Group %s granted access to range %s successfully", groupName, rangeID))
 	},
 }
 
@@ -206,16 +190,12 @@ var groupsRemoveUserCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/groups/%s/users/%s", groupName, userID))
-		if !success {
+		groupUserURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/users/%s", groupName, userID))
+		responseJSON, success = rest.GenericDelete(client, groupUserURL)
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-		} else {
-			logger.Logger.Info(fmt.Sprintf("User %s removed from group %s successfully", userID, groupName))
-		}
+		logger.Logger.Info(fmt.Sprintf("User %s removed from group %s successfully", userID, groupName))
 	},
 }
 
@@ -236,16 +216,12 @@ var groupsRemoveRangeCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/groups/%s/ranges/%s", groupName, rangeID))
-		if !success {
+		groupRangeURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/ranges/%s", groupName, rangeID))
+		responseJSON, success = rest.GenericDelete(client, groupRangeURL)
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-		} else {
-			logger.Logger.Info(fmt.Sprintf("Group %s access to range %s revoked successfully", groupName, rangeID))
-		}
+		logger.Logger.Info(fmt.Sprintf("Group %s access to range %s revoked successfully", groupName, rangeID))
 	},
 }
 
@@ -261,8 +237,9 @@ var groupsMembersCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/groups/%s/users", groupName))
-		if !success {
+		groupURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/users", groupName))
+		responseJSON, success = rest.GenericGet(client, groupURL)
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
@@ -270,11 +247,6 @@ var groupsMembersCmd = &cobra.Command{
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
-		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-			return
 		}
 
 		// Create table
@@ -303,20 +275,16 @@ var groupsRangesCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/groups/%s/ranges", groupName))
-		if !success {
+
+		groupURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/ranges", groupName))
+		responseJSON, success = rest.GenericGet(client, groupURL)
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-
 		var data dto.ListGroupRangesResponse
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
-		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-			return
 		}
 
 		// Create table

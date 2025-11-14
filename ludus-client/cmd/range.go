@@ -24,8 +24,6 @@ var (
 	noPrompt       bool
 	onlyRoles      string
 	limit          string
-	targetUserID   string
-	sourceUserID   string
 	allRanges      bool
 	rangeID        string
 	description    string
@@ -307,19 +305,15 @@ var rangeLogsCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		var apiString, apiStringWithCursor string
 		if follow {
 			var newLogs string
 			var cursor int = 0
 			for {
-				// Build base URL with range/user parameters
-				baseURL := buildURLWithRangeAndUserID("/range/logs")
-				if strings.Contains(baseURL, "?") {
-					apiStringWithCursor = fmt.Sprintf("%s&cursor=%d", baseURL, cursor)
-				} else {
-					apiStringWithCursor = fmt.Sprintf("%s?cursor=%d", baseURL, cursor)
-				}
-				responseJSON, success := rest.GenericGet(client, apiStringWithCursor)
+				// Don't pull the buildURLWithRangeAndUserID out of the loop or it will add cursor query parameters on every iteration
+				// This way it starts fresh on each iteration
+				apiString := buildURLWithRangeAndUserID("/range/logs")
+				apiString = addQueryParameterToURL(apiString, "cursor", strconv.Itoa(cursor))
+				responseJSON, success := rest.GenericGet(client, apiString)
 				if didFailOrWantJSON(success, responseJSON) {
 					return
 				}
@@ -330,16 +324,9 @@ var rangeLogsCmd = &cobra.Command{
 				time.Sleep(2 * time.Second)
 			}
 		} else {
-			// Build base URL with range/user parameters
-			baseURL := buildURLWithRangeAndUserID("/range/logs")
+			apiString := buildURLWithRangeAndUserID("/range/logs")
 			if tail > 0 {
-				if strings.Contains(baseURL, "?") {
-					apiString = fmt.Sprintf("%s&tail=%d", baseURL, tail)
-				} else {
-					apiString = fmt.Sprintf("%s?tail=%d", baseURL, tail)
-				}
-			} else {
-				apiString = baseURL
+				apiString = addQueryParameterToURL(apiString, "tail", strconv.Itoa(tail))
 			}
 			responseJSON, success := rest.GenericGet(client, apiString)
 			if didFailOrWantJSON(success, responseJSON) {
@@ -414,7 +401,11 @@ Do you want to continue? (y/N): `, rangeIDString)
 		// Build URL with force parameter if specified
 		deleteURL := buildURLWithRangeAndUserID("/range")
 		if force {
-			deleteURL += "?force=true"
+			if strings.Contains(deleteURL, "?") {
+				deleteURL += "&force=true"
+			} else {
+				deleteURL += "?force=true"
+			}
 		}
 
 		responseJSON, success = rest.GenericDelete(client, deleteURL)
@@ -537,7 +528,7 @@ var rangeGetTags = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, "/range/tags")
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/range/tags"))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -624,43 +615,6 @@ var rangeEtcHostsGET = &cobra.Command{
 	},
 }
 
-var accessListCmd = &cobra.Command{
-	Use:     "list",
-	Short:   "List the status of all active cross-range accesses",
-	Args:    cobra.ExactArgs(0),
-	Aliases: []string{"status", "get"},
-	Run: func(cmd *cobra.Command, args []string) {
-		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-
-		var responseJSON []byte
-		var success bool
-		responseJSON, success = rest.GenericGet(client, "/range/access")
-		if !success {
-			return
-		}
-		var rangeAccessObjects []RangeAccessObject
-		err := json.Unmarshal(responseJSON, &rangeAccessObjects)
-		if err != nil {
-			logger.Logger.Fatal(err.Error())
-		}
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-			return
-		}
-		// Create table
-		table := tablewriter.NewWriter(os.Stdout)
-		table.SetAlignment(tablewriter.ALIGN_CENTER)
-		table.SetHeader([]string{"Target Range User ID", "Source User IDs"})
-
-		for _, item := range rangeAccessObjects {
-			table.Append([]string{item.TargetUserID, strings.Join(item.SourceUserIDs, ",")})
-		}
-
-		table.Render()
-
-	},
-}
-
 var rangeTaskOutputCmd = &cobra.Command{
 	Use:   "taskoutput",
 	Short: "Get the output of a task by name from the latest deploy logs",
@@ -715,7 +669,7 @@ var rangeCreateCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericJSONPost(client, "/ranges/create", payload)
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/ranges/create"), payload)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -745,7 +699,7 @@ var rangeAssignCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/ranges/assign/%s/%s", userID, rangeID), nil)
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID(fmt.Sprintf("/ranges/assign/%s/%s", userID, rangeID)), nil)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -767,7 +721,15 @@ var rangeRevokeCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/ranges/revoke/%s/%s?force=%t", userID, rangeID, force))
+		revokeURL := buildURLWithRangeAndUserID(fmt.Sprintf("/ranges/revoke/%s/%s", userID, rangeID))
+		if force {
+			if strings.Contains(revokeURL, "?") {
+				revokeURL += "&force=true"
+			} else {
+				revokeURL += "?force=true"
+			}
+		}
+		responseJSON, success = rest.GenericDelete(client, revokeURL)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -835,15 +797,7 @@ var rangeAccessibleCmd = &cobra.Command{
 			return
 		}
 
-		type Data struct {
-			Result []struct {
-				RangeNumber int32  `json:"rangeNumber"`
-				RangeID     string `json:"rangeID"`
-				AccessType  string `json:"accessType"`
-			} `json:"result"`
-		}
-
-		var data Data
+		var data []dto.ListUserAccessibleRangesResponseItem
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
@@ -854,7 +808,7 @@ var rangeAccessibleCmd = &cobra.Command{
 		table.SetHeader([]string{"Range ID", "Range Network", "Access Type"})
 
 		// Add data to table
-		for _, rangeObj := range data.Result {
+		for _, rangeObj := range data {
 			table.Append([]string{
 				rangeObj.RangeID,
 				fmt.Sprintf("10.%d.0.0/16", rangeObj.RangeNumber),

@@ -141,7 +141,8 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 	}
 
 	if resp.StatusCode() == 401 {
-		logger.Logger.Errorf("User %s is not authorized for this action! Check your API key.", user)
+		logger.Logger.Errorf("Error with request. Check your API key with --verbose")
+		prettyPrintError(resp.String())
 		error = true
 	}
 

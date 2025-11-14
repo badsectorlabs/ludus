@@ -67,11 +67,7 @@ var rolesListCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ansible?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/ansible")
-		}
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/ansible"))
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -118,11 +114,7 @@ func genericRoleCmd(use, short, long string, aliases []string) *cobra.Command {
 					logger.Logger.Fatalf("Could not tar directory: %s, error: %s\n", roleDirectory, err.Error())
 				}
 				filename := filepath.Base(roleDirectory)
-				if userID != "" {
-					responseJSON, success = rest.PostFileAndForceAndGlobal(client, fmt.Sprintf("/ansible/role/fromtar?userID=%s", userID), roleTar.Bytes(), filename, ansibleForce, ansibleGlobal)
-				} else {
-					responseJSON, success = rest.PostFileAndForceAndGlobal(client, "/ansible/role/fromtar", roleTar.Bytes(), filename, ansibleForce, ansibleGlobal)
-				}
+				responseJSON, success = rest.PostFileAndForceAndGlobal(client, buildURLWithRangeAndUserID("/ansible/role/fromtar"), roleTar.Bytes(), filename, ansibleForce, ansibleGlobal)
 
 				if didFailOrWantJSON(success, responseJSON) {
 					return
@@ -138,12 +130,7 @@ func genericRoleCmd(use, short, long string, aliases []string) *cobra.Command {
 				"global": %s
 			  }`, args[0], strconv.FormatBool(ansibleForce), ansibleVersion, action, strconv.FormatBool(ansibleGlobal))
 
-				if userID != "" {
-					responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/ansible/role?userID=%s", userID), requestBody)
-				} else {
-					responseJSON, success = rest.GenericJSONPost(client, "/ansible/role", requestBody)
-				}
-
+				responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/ansible/role"), requestBody)
 				if didFailOrWantJSON(success, responseJSON) {
 					return
 				}
@@ -186,11 +173,7 @@ var collectionAddCmd = &cobra.Command{
 				"version": "%s"
 			  }`, args[0], strconv.FormatBool(ansibleForce), ansibleVersion)
 
-		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/ansible/collection?userID=%s", userID), requestBody)
-		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/ansible/collection", requestBody)
-		}
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/ansible/collection"), requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -215,12 +198,7 @@ var collectionsListCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/ansible?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/ansible")
-		}
-
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/ansible"))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}

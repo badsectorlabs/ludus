@@ -103,11 +103,7 @@ var usersCredsGetsCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/user/credentials?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/user/credentials")
-		}
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/credentials"))
 		if !success {
 			return
 		}
@@ -168,7 +164,7 @@ Do you want to continue? (y/N): `, userID)
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/user/apikey?userID=%s", userID))
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/apikey"))
 		if !success {
 			return
 		}
@@ -227,11 +223,7 @@ var usersWireguardCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/user/wireguard?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/user/wireguard")
-		}
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/wireguard"))
 		if !success {
 			return
 		}
@@ -280,7 +272,7 @@ var usersAddCmd = &cobra.Command{
 			"isAdmin": %s,
 			"portforwardingEnabled": %s
 		  }`, userName, password, email, newUserID, strconv.FormatBool(userIsAdmin), strconv.FormatBool(enablePortforwarding))
-		responseJSON, success = rest.GenericJSONPost(client, "/user", requestBody)
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/user"), requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -331,7 +323,7 @@ var usersDeleteCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/user/%s", newUserID))
+		responseJSON, success = rest.GenericDelete(client, buildURLWithRangeAndUserID(fmt.Sprintf("/user/%s", newUserID)))
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -357,7 +349,7 @@ var usersCredsSetCmd = &cobra.Command{
 			"userID": "%s",
 			"proxmoxPassword": "%s"
 		  }`, newUserID, proxmoxPassword)
-		responseJSON, success := rest.GenericJSONPost(client, "/user/credentials", requestBody)
+		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/user/credentials"), requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return

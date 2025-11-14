@@ -42,11 +42,8 @@ var templatesListCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/templates?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/templates")
-		}
+
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/templates"))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -96,11 +93,7 @@ var templatesBuildCmd = &cobra.Command{
 			Parallel:  templateParallel,
 		}
 
-		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/templates?userID=%s", userID), requestBody)
-		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/templates", requestBody)
-		}
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/templates"), requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -127,7 +120,7 @@ var templatesStatusCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		responseJSON, success = rest.GenericGet(client, "/templates/status")
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/templates/status"))
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -170,16 +163,13 @@ var templateLogsCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, false, verbose, LudusVersion)
 
 		var apiString string
+		apiString = buildURLWithRangeAndUserID("/templates/logs")
 		if follow {
 			var newLogs string
 			var cursor int = 0
-			if userID != "" {
-				apiString = fmt.Sprintf("/templates/logs?userID=%s", userID)
-			} else {
-				apiString = "/templates/logs"
-			}
+
 			for {
-				apiStringWithCursor := fmt.Sprintf("%s?cursor=%d", apiString, cursor)
+				apiStringWithCursor := addQueryParameterToURL(apiString, "cursor", strconv.Itoa(cursor))
 				responseJSON, success := rest.GenericGet(client, apiStringWithCursor)
 				if !success {
 					return
@@ -191,14 +181,8 @@ var templateLogsCmd = &cobra.Command{
 				time.Sleep(2 * time.Second)
 			}
 		} else {
-			if userID != "" && tail > 0 {
-				apiString = fmt.Sprintf("/templates/logs?userID=%s&tail=%d", userID, tail)
-			} else if userID == "" && tail > 0 {
-				apiString = fmt.Sprintf("/templates/logs?tail=%d", tail)
-			} else if userID != "" {
-				apiString = fmt.Sprintf("/templates/logs?userID=%s", userID)
-			} else {
-				apiString = "/templates/logs"
+			if tail > 0 {
+				apiString = addQueryParameterToURL(apiString, "tail", strconv.Itoa(tail))
 			}
 			responseJSON, success := rest.GenericGet(client, apiString)
 			if didFailOrWantJSON(success, responseJSON) {
@@ -249,11 +233,7 @@ var templateAddCmd = &cobra.Command{
 			logger.Logger.Fatalf("Could not tar directory: %s, error: %s\n", templateDirectory, err.Error())
 		}
 		filename := filepath.Base(templateDirectory)
-		if userID != "" {
-			responseJSON, success = rest.PostFileAndForce(client, fmt.Sprintf("/templates?userID=%s", userID), roleTar.Bytes(), filename, force)
-		} else {
-			responseJSON, success = rest.PostFileAndForce(client, "/templates", roleTar.Bytes(), filename, force)
-		}
+		responseJSON, success = rest.PostFileAndForce(client, buildURLWithRangeAndUserID("/templates"), roleTar.Bytes(), filename, force)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -279,11 +259,7 @@ var templatesAbortCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/templates/abort?userID=%s", userID), "")
-		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/templates/abort", "")
-		}
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/templates/abort"), "")
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -310,11 +286,7 @@ var templatesRemoveCmd = &cobra.Command{
 			logger.Logger.Fatal("You must specify a template name to delete")
 		}
 
-		if userID != "" {
-			responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/template/%s?userID=%s", templateName, userID))
-		} else {
-			responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/template/%s", templateName))
-		}
+		responseJSON, success = rest.GenericDelete(client, buildURLWithRangeAndUserID(fmt.Sprintf("/template/%s", templateName)))
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return

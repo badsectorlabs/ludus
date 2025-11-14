@@ -37,7 +37,7 @@ var antiSandboxInstallCustomCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		responseJSON, success := rest.GenericJSONPost(client, "/antisandbox/install-custom", "")
+		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/antisandbox/install-custom"), "")
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -52,7 +52,7 @@ var antiSandboxInstallStandardCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		responseJSON, success := rest.GenericJSONPost(client, "/antisandbox/install-standard", "")
+		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/antisandbox/install-standard"), "")
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -116,11 +116,7 @@ Do you want to continue? (y/N): `, VMIDs)
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/antisandbox/enable?userID=%s", userID), string(payload))
-		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/antisandbox/enable", string(payload))
-		}
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/antisandbox/enable"), string(payload))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -184,7 +180,7 @@ var antiSandboxStatusCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		responseJSON, success := rest.GenericGet(client, "/antisandbox/status")
+		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/antisandbox/status"))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
