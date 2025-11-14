@@ -37,22 +37,6 @@ stages:
 # YAML ANCHORS #
 ################
 
-# Base anchor for the binaries cache settings
-.binaries_cache_base: &binaries_cache_base
-  key: "binaries-${CI_PIPELINE_ID}" # Only cache for the current pipeline, a cron on the server will clean up old caches
-  paths:
-    - binaries/
-
-# Anchor for the job that CREATES the cache
-.binaries_cache_push: &binaries_cache_push
-  <<: *binaries_cache_base # Inherits key and paths
-  policy: push
-
-# Anchor for all jobs that CONSUME the cache
-.binaries_cache_pull: &binaries_cache_pull
-  <<: *binaries_cache_base # Inherits key and paths
-  policy: pull
-
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key
 .common-setup: &common-setup # Sync time in the event this test is being run after a snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
@@ -341,7 +325,6 @@ build all:
     - ludus-proxmox-runner
   dependencies:
     - documentation
-  cache: *binaries_cache_push
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
@@ -436,7 +419,6 @@ install kickoff:
   stage: install-kickoff
   tags:
     - ludus-proxmox-runner
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -453,6 +435,7 @@ install kickoff:
   variables:
     LUDUS_BUILD_TYPE: full # We have to test the install process, so do a full build
     LUDUS_INSTALL_STEP: kickoff
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 10m
   script:
     - sudo hostname ludus-$CI_PIPELINE_ID
@@ -465,7 +448,6 @@ install check:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -482,6 +464,7 @@ install check:
   variables:
     LUDUS_BUILD_TYPE: full
     LUDUS_INSTALL_STEP: check
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 1h
   script:
     - sudo cat /opt/ludus/install/install.log
@@ -492,7 +475,6 @@ install snapshot:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -510,6 +492,7 @@ install snapshot:
     LUDUS_BUILD_TYPE: full
     LUDUS_INSTALL_STEP: take-snapshot # The magic happens in prepare.sh
     LUDUS_SNAPSHOT_NAME: clean_install
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 5m
   script:
     - echo "Snapshot complete"
@@ -522,7 +505,6 @@ templates build:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -548,6 +530,7 @@ templates build:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 5m
   retry:
     max: 2
@@ -561,7 +544,6 @@ templates check:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -587,6 +569,7 @@ templates check:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 2h
   retry:
     max: 2
@@ -604,7 +587,6 @@ templates snapshot:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -630,6 +612,7 @@ templates snapshot:
   variables:
     LUDUS_INSTALL_STEP: take-snapshot
     LUDUS_SNAPSHOT_NAME: templates_built
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 5m
   script:
     - echo "Snapshot complete"
@@ -642,7 +625,6 @@ client basic-commands:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -671,6 +653,7 @@ client basic-commands:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 5m
   script:
     - *ci-setup-admin
@@ -693,7 +676,6 @@ range deploy-admin:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -720,6 +702,7 @@ range deploy-admin:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: templates_built
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 5m
   retry:
     max: 2
@@ -736,7 +719,6 @@ range check-admin:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -761,6 +743,7 @@ range check-admin:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: templates_built
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 3h
   retry:
     max: 2
@@ -780,7 +763,6 @@ range snapshot-admin:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -805,6 +787,7 @@ range snapshot-admin:
   variables:
     LUDUS_INSTALL_STEP: take-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 5m
   retry:
     max: 2
@@ -820,7 +803,6 @@ post-deploy testing-as-admin:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -846,6 +828,7 @@ post-deploy testing-as-admin:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 15m
   retry:
     max: 2
@@ -859,7 +842,6 @@ post-deploy power-as-admin:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -887,6 +869,7 @@ post-deploy power-as-admin:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 15m
   retry:
     max: 2
@@ -900,7 +883,6 @@ post-deploy ansible-as-admin:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -927,6 +909,7 @@ post-deploy ansible-as-admin:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 15m
   retry:
     max: 2
@@ -940,7 +923,6 @@ post-deploy user-cmds-as-admin:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -967,6 +949,7 @@ post-deploy user-cmds-as-admin:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 15m
   retry:
     max: 2
@@ -1008,7 +991,6 @@ post-deploy groups-as-admin:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1034,6 +1016,7 @@ post-deploy groups-as-admin:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 15m
   retry:
     max: 2
@@ -1104,7 +1087,6 @@ post-deploy ranges-as-admin:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1130,6 +1112,7 @@ post-deploy ranges-as-admin:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 15m
   retry:
     max: 2
@@ -1166,7 +1149,6 @@ post-deploy templates-as-admin:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1192,6 +1174,7 @@ post-deploy templates-as-admin:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 45m
   retry:
     max: 2
@@ -1208,7 +1191,6 @@ range deploy-user:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1233,6 +1215,7 @@ range deploy-user:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 5m
   retry:
     max: 2
@@ -1249,7 +1232,6 @@ range check-user:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1272,6 +1254,7 @@ range check-user:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 3h
   retry:
     max: 2
@@ -1291,7 +1274,6 @@ range snapshot-user:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1314,6 +1296,7 @@ range snapshot-user:
   variables:
     LUDUS_INSTALL_STEP: take-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 5m
   retry:
     max: 2
@@ -1329,7 +1312,6 @@ post-deploy testing-as-user:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1366,7 +1348,6 @@ post-deploy power-as-user:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1392,6 +1373,7 @@ post-deploy power-as-user:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 15m
   retry:
     max: 2
@@ -1406,7 +1388,6 @@ post-deploy ansible-as-user:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1431,6 +1412,7 @@ post-deploy ansible-as-user:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 15m
   retry:
     max: 2
@@ -1444,7 +1426,6 @@ post-deploy user-cmds-as-user:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1469,6 +1450,7 @@ post-deploy user-cmds-as-user:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 15m
   retry:
     max: 2
@@ -1509,7 +1491,6 @@ post-deploy templates-as-user:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1533,6 +1514,7 @@ post-deploy templates-as-user:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 45m
   retry:
     max: 2
@@ -1546,7 +1528,6 @@ post-deploy snapshots-as-user:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1569,6 +1550,7 @@ post-deploy snapshots-as-user:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 45m
   retry:
     max: 2
@@ -1585,7 +1567,6 @@ test-everything:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1604,6 +1585,7 @@ test-everything:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 3h
   retry:
     max: 2
@@ -1678,7 +1660,6 @@ manual testing:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
   variables:
@@ -1700,6 +1681,7 @@ gitlab-upload:
   variables:
     LUDUS_BUILD_TYPE: any-built
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   rules:
     - if: $CI_COMMIT_TAG
   script:
@@ -1735,6 +1717,7 @@ keygen-upload:
     - gitlab-upload # Just so they don't try to run at the same time
   variables:
     LUDUS_BUILD_TYPE: any-built
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   rules:
     - if: $CI_COMMIT_TAG
   script:
@@ -1778,6 +1761,7 @@ release:
   variables:
     LUDUS_BUILD_TYPE: any-built
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   when: manual
   rules:
     - if: $CI_COMMIT_TAG
