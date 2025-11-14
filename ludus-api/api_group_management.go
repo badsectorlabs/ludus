@@ -216,13 +216,15 @@ func AddUserToGroup(e *core.RequestEvent) error {
 
 // RemoveUserFromGroup removes a user from a group (admin only)
 func RemoveUserFromGroup(e *core.RequestEvent) error {
-	if !e.Auth.GetBool("isAdmin") {
-		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot remove users from groups")
-	}
 
 	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
 		return err
+	}
+
+	actingUser := e.Get("user").(*models.User)
+	if !userIsManagerOfGroup(actingUser, group) && !actingUser.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "You are not a manager of this group and cannot remove users from it")
 	}
 
 	userID := e.Request.PathValue("userID")
@@ -249,11 +251,9 @@ func RemoveUserFromGroup(e *core.RequestEvent) error {
 
 	// Remove user from group
 	user.Set("groups-", group.Id)
-	if e.Request.URL.Query().Get("manager") == "true" {
-		group.Set("managers-", user.Id)
-	} else {
-		group.Set("members-", user.Id)
-	}
+	// Remove user from managers and members of the group (could be either)
+	group.Set("managers-", user.Id)
+	group.Set("members-", user.Id)
 	e.App.Save(user)
 	e.App.Save(group)
 
