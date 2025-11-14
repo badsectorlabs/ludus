@@ -368,14 +368,14 @@ func ListGroupMembers(e *core.RequestEvent) error {
 	var membersAndManagersArray []dto.ListGroupMembersResponseItem
 	for _, user := range groupMembers {
 		membersAndManagersArray = append(membersAndManagersArray, dto.ListGroupMembersResponseItem{
-			UserID: user.Id,
+			UserID: user.UserId(),
 			Name:   user.Name(),
 			Role:   "member",
 		})
 	}
 	for _, user := range groupManagers {
 		membersAndManagersArray = append(membersAndManagersArray, dto.ListGroupMembersResponseItem{
-			UserID: user.Id,
+			UserID: user.UserId(),
 			Name:   user.Name(),
 			Role:   "manager",
 		})
