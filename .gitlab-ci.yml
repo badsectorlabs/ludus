@@ -62,7 +62,7 @@ stages:
       timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true" ]]; do sleep 5; done'
     fi
   # Exit testing mode if we failed mid-testing mode and this is a retry
-  - if [[ "$(ludus testing status --json | jq '.testingEnabled')" == "true" ]]; then echo "Tested mode was on, stopping it now"; ludus testing stop; fi
+  - if [[ "$(ludus testing status --json | jq '.testingEnabled')" == "true" ]]; then echo "Testing mode was on, stopping it now"; ludus testing stop; fi
 
 .ci-setup-admin: &ci-setup-admin
   - *common-setup
@@ -446,6 +446,7 @@ install check:
   stage: install-check
   tags:
     - ludus-proxmox-runner
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -471,6 +472,7 @@ install snapshot:
   stage: install-snapshot
   tags:
     - ludus-proxmox-runner
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -499,8 +501,7 @@ templates build:
   stage: templates-build
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -538,8 +539,7 @@ templates check:
   stage: templates-check
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -581,6 +581,7 @@ templates snapshot:
   stage: templates-snapshot
   tags:
     - ludus-proxmox-runner
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -617,8 +618,7 @@ client basic-commands:
   stage: client
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -711,8 +711,7 @@ range check-admin:
   stage: range-admin-check
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -755,6 +754,7 @@ range snapshot-admin:
   stage: range-admin-snapshot
   tags:
     - ludus-proxmox-runner
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -793,8 +793,7 @@ post-deploy testing-as-admin:
   stage: post-deploy-admin-testing
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -832,8 +831,7 @@ post-deploy power-as-admin:
   stage: post-deploy-admin-power
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -873,8 +871,7 @@ post-deploy ansible-as-admin:
   stage: post-deploy-admin-ansible
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -913,8 +910,7 @@ post-deploy user-cmds-as-admin:
   stage: post-deploy-admin-user
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -981,8 +977,7 @@ post-deploy groups-as-admin:
   stage: post-deploy-admin-groups
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1044,6 +1039,24 @@ post-deploy groups-as-admin:
     - ludus groups add user GTU ci-group-test
     - ludus groups remove range CIA ci-group-test
     - '! ludus groups ranges ci-group-test | grep CIA'
+    # Add GTU as a manager, then have them add CIA
+    - ludus groups add user GTU ci-group-test --manager
+    - ludus groups members ci-group-test | grep GTU | grep manager
+    - ludus --user GTU groups add user CIA ci-group-test
+    - ludus groups members ci-group-test | grep CIA | grep member
+    # As GTU (manager) try toadd a range to the group that GTU does not have access to
+    - set +o pipefail
+    - ludus --user GTU groups add range CIA ci-group-test 2>&1 | grep "You do not have access to range CIA and cannot add it to group ci-group-test"
+    - set -o pipefail
+    # As GTU (manager) try to add a range to the group that GTU does have access to
+    - ludus --user GTU groups add range GTU ci-group-test
+    - ludus groups ranges ci-group-test | grep GTU
+    # As GTU (manager) remove a user from the group
+    - ludus --user GTU groups remove user CIA ci-group-test
+    - '! ludus groups members ci-group-test | grep CIA | grep member'
+    # As GTU (manager) remove a range from the group
+    - ludus --user GTU groups remove range GTU ci-group-test
+    - '! ludus groups ranges ci-group-test | grep GTU'
     # Delete group and cleanup user
     - ludus groups delete ci-group-test
     - '! ludus groups list | grep ci-group-test'
@@ -1053,8 +1066,7 @@ post-deploy ranges-as-admin:
   stage: post-deploy-admin-ranges
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1085,6 +1097,7 @@ post-deploy ranges-as-admin:
     max: 2
     when: script_failure
   script:
+    - *ci-setup-user # Ensure CIU user is created
     - *ci-setup-admin
     # Clean up potential leftovers (ignore errors)
     - ludus range rm-range -r CIA-extra-1 --no-prompt --force || true
@@ -1114,8 +1127,7 @@ post-deploy templates-as-admin:
   stage: post-deploy-admin-templates
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1197,8 +1209,7 @@ range check-user:
   stage: range-user-check
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1239,8 +1250,7 @@ range snapshot-user:
   stage: range-user-snapshot
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1277,8 +1287,7 @@ post-deploy testing-as-user:
   stage: post-deploy-user-testing
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1314,8 +1323,7 @@ post-deploy power-as-user:
   stage: post-deploy-user-power
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1354,8 +1362,7 @@ post-deploy ansible-as-user:
   stage: post-deploy-user-ansible
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1392,8 +1399,7 @@ post-deploy user-cmds-as-user:
   stage: post-deploy-user-user
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1457,8 +1463,7 @@ post-deploy templates-as-user:
   stage: post-deploy-user-templates
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1494,8 +1499,7 @@ post-deploy snapshots-as-user:
   stage: post-deploy-user-snapshots
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1533,8 +1537,7 @@ test-everything:
   stage: integration
   tags:
     - ludus-proxmox-runner
-  dependencies:
-    - build all
+  dependencies: [] # Prevent download of build artifacts
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
