@@ -915,7 +915,9 @@ post-deploy ansible-as-admin:
   timeout: 15m
   retry:
     max: 2
-    when: script_failure
+    when:
+      - script_failure
+      - job_execution_timeout
   script:
     - *ci-setup-admin
     - *ansible-tests

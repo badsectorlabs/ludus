@@ -669,7 +669,13 @@ var rangeCreateCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/ranges/create"), payload)
+
+		// We can't use buildURLWithRangeAndUserID here because the if the rangeID is added to the query it will fail to be looked up
+		apiPath := "/ranges/create"
+		if userID != "" {
+			apiPath = addQueryParameterToURL(apiPath, "userID", userID)
+		}
+		responseJSON, success = rest.GenericJSONPost(client, apiPath, payload)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
