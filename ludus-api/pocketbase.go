@@ -12,7 +12,7 @@ func getVMsForRange(rangeID string) ([]*models.VMs, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error finding range: %w", err)
 	}
-	rangeObj := models.Range{}
+	rangeObj := &models.Range{}
 	rangeObj.SetProxyRecord(rangeRecord)
 	rangeVMs, err := app.FindAllRecords("vms", dbx.NewExp("range = {:rangeID}", dbx.Params{"rangeID": rangeObj.Id}))
 	if err != nil {

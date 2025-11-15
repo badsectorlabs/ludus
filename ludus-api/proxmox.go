@@ -140,7 +140,7 @@ func getRootGoProxmoxClient() (*goproxmox.Client, error) {
 	if err != nil {
 		return nil, errors.New("unable to get root user object: " + err.Error())
 	}
-	rootUserObject := models.User{}
+	rootUserObject := &models.User{}
 	rootUserObject.SetProxyRecord(rootUserRecord)
 	tokenID := rootUserObject.ProxmoxTokenId()
 	tokenSecret, err := DecryptStringFromDatabase(rootUserObject.ProxmoxTokenSecret())

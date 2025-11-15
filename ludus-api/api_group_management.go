@@ -286,7 +286,7 @@ func AddRangeToGroup(e *core.RequestEvent) error {
 	if err == sql.ErrNoRows {
 		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found", rangeID))
 	}
-	rangeObj := models.Range{}
+	rangeObj := &models.Range{}
 	rangeObj.SetProxyRecord(rangeRecord)
 
 	// Check if group already has access to this range
@@ -343,7 +343,7 @@ func RemoveRangeFromGroup(e *core.RequestEvent) error {
 	if err == sql.ErrNoRows {
 		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found", rangeID))
 	}
-	rangeObj := models.Range{}
+	rangeObj := &models.Range{}
 	rangeObj.SetProxyRecord(rangeRecord)
 
 	// Remove group access to range in proxmox

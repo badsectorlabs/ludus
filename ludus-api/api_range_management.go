@@ -630,7 +630,7 @@ func CreateRange(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, "Unable to find ranges collection: "+err.Error())
 	}
 	rawRangeRecord := core.NewRecord(rangeCollection)
-	rangeRecord := models.Ranges{}
+	rangeRecord := &models.Ranges{}
 	rangeRecord.SetProxyRecord(rawRangeRecord)
 	rangeRecord.SetName(payload.Name)
 	rangeRecord.SetRangeId(payload.RangeID)
@@ -642,6 +642,8 @@ func CreateRange(e *core.RequestEvent) error {
 
 	err = e.App.Save(rangeRecord)
 	if err != nil {
+		removePool(payload.RangeID)
+		manageVmbrInterfaceLocally(rangeNumber, false)
 		return JSONError(e, http.StatusInternalServerError, "Unable to save range: "+err.Error())
 	}
 
@@ -703,7 +705,7 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting user object: %v", err))
 	}
-	sourceUserObject := models.User{}
+	sourceUserObject := &models.User{}
 	sourceUserObject.SetProxyRecord(sourceUserRecord)
 
 	extraVars := map[string]interface{}{

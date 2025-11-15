@@ -479,9 +479,9 @@ func GetRangeObjectByNumber(rangeNumber int) (*models.Range, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error finding range: %w", err)
 	}
-	rangeRecord := models.Range{}
+	rangeRecord := &models.Range{}
 	rangeRecord.SetProxyRecord(rawRangeRecord)
-	return &rangeRecord, nil
+	return rangeRecord, nil
 }
 
 // GetUserDefaultRange gets the default range for a user (range where user_id matches the user's ID)
@@ -498,9 +498,9 @@ func GetUserDefaultRange(userID string) (*models.Range, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error finding default range: %w", err)
 	}
-	rangeRecord := models.Range{}
+	rangeRecord := &models.Range{}
 	rangeRecord.SetProxyRecord(rawRangeRecord)
-	return &rangeRecord, nil
+	return rangeRecord, nil
 }
 
 // AppendIfMissing appends an element to a slice only if it's not already present.
