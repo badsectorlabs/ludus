@@ -26,7 +26,7 @@ func init() {
 			&core.TextField{
 				Name:     "rangeID",
 				Required: true,
-				Pattern:  "^[A-Za-z0-9]{1,20}$",
+				Pattern:  `^[A-Za-z0-9_\-]+(\/[A-Za-z0-9_\-]+){0,2}$`,
 			},
 			&core.TextField{
 				Name:     "name",
