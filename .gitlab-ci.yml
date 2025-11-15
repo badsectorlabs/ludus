@@ -505,7 +505,6 @@ templates build:
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
-  cache: *binaries_cache_pull
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
