@@ -136,7 +136,6 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 		`-var 'proxmox_url={{.ProxmoxURL}}/api2/json' ` +
 		`-var 'proxmox_host={{.ProxmoxHost}}' ` +
 		`-var 'proxmox_skip_tls_verify={{.ProxmoxSkipTLSVerify}}' ` +
-		`-var 'proxmox_username="{{ .ProxmoxTokenID }}"' ` +
 		`-var 'proxmox_pool=SHARED' ` +
 		`-var 'proxmox_storage_pool={{.ProxmoxVMStoragePool}}' ` +
 		`-var 'proxmox_storage_format={{.ProxmoxVMStorageFormat}}' ` +
