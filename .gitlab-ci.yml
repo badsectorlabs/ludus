@@ -76,7 +76,7 @@ stages:
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
   - *powered-on-and-not-in-testing
   # Set the config to simple-domain.yml if all templates are built
-  - if [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -eq 0 ]; then ludus range config set -f ludus-server/ci/configs/simple-domain.yml; fi
+  - if [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -eq 0 ]; then ludus range config set -f /opt/ludus/ci/configs/simple-domain.yml; fi
 
 .ci-setup-user: &ci-setup-user
   - *common-setup
@@ -89,7 +89,7 @@ stages:
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
   - *powered-on-and-not-in-testing
   # Set the config to simple-domain.yml
-  - ludus range config set -f ludus-server/ci/configs/simple-domain.yml
+  - ludus range config set -f /opt/ludus/ci/configs/simple-domain.yml
 
 .ansible-tests: &ansible-tests # Add and remove a role
   - ludus ansible role list
@@ -116,20 +116,20 @@ stages:
   - ludus ansible collection add maxhoesel.smallstep --version 0.24.4 --force
   - ludus ansible collection list | grep maxhoesel.smallstep | grep 0.24.4
   # Depends on tests
-  - ludus ansible role add -d ludus-server/ci/roles/hello_world --force
-  - ludus ansible role add -d ludus-server/ci/roles/first --force
-  - ludus ansible role add -d ludus-server/ci/roles/second --force
-  - ludus ansible role add -d ludus-server/ci/roles/third --force
-  - ludus range config set -f ludus-server/ci/configs/depends-on.yml
+  - ludus ansible role add -d /opt/ludus/ci/roles/hello_world --force
+  - ludus ansible role add -d /opt/ludus/ci/roles/first --force
+  - ludus ansible role add -d /opt/ludus/ci/roles/second --force
+  - ludus ansible role add -d /opt/ludus/ci/roles/third --force
+  - ludus range config set -f /opt/ludus/ci/configs/depends-on.yml
   - ludus range deploy -t user-defined-roles
   - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
   # Depends on - dependency that doesn't exist test
   - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
-  - 'ludus range config set -f ludus-server/ci/configs/depends-on-not-found.yml 2>&1 | egrep "ERROR: Dependency not found \w+-ad-dc-win2022-server-x64-1:geerlingguy.docker"'
+  - 'ludus range config set -f /opt/ludus/ci/configs/depends-on-not-found.yml 2>&1 | egrep "ERROR: Dependency not found \w+-ad-dc-win2022-server-x64-1:geerlingguy.docker"'
   # Depends on circular dependency test
-  - 'ludus range config set -f ludus-server/ci/configs/depends-on-circular.yml 2>&1 | egrep "ERROR: Circular dependency found for \w+-ad-win11-22h2-enterprise-x64-1:geerlingguy.docker"'
+  - 'ludus range config set -f /opt/ludus/ci/configs/depends-on-circular.yml 2>&1 | egrep "ERROR: Circular dependency found for \w+-ad-win11-22h2-enterprise-x64-1:geerlingguy.docker"'
   - set -o pipefail
-  - ludus range config set -f ludus-server/ci/configs/depends-on-complex.yml
+  - ludus range config set -f /opt/ludus/ci/configs/depends-on-complex.yml
   - ludus range deploy -t user-defined-roles
   - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
 
@@ -1615,7 +1615,7 @@ test-everything:
         timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true" ]]; do sleep 5; done'
       fi
     - ludus ansible role add geerlingguy.docker || true
-    - ludus range config set -f ludus-server/ci/configs/integration-test.yml
+    - ludus range config set -f /opt/ludus/ci/configs/integration-test.yml
     - ludus range deploy
     - while [ "$(ludus range list --json | jq -r '.rangeState')" == "DEPLOYING" ]; do date; sleep 60; done
     - if [[ "$(ludus range list --json | jq -r '.rangeState')" == "ERROR" ]]; then ludus range errors; fi
