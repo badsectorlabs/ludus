@@ -122,14 +122,28 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 	usersAnsibleDir := fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername())
 	os.MkdirAll(fmt.Sprintf("%s/users/%s/packer/tmp", ludusInstallPath, user.ProxmoxUsername()), 0755)
 
-	tmplStr := `PACKER_PLUGIN_PATH={{.LudusInstallPath}}/resources/packer/plugins PROXMOX_USERNAME='{{ .ProxmoxTokenID }}' PROXMOX_TOKEN={{ .ProxmoxToken }} ` +
-		`PACKER_CONFIG_DIR={{.UsersPackerDir}} PACKER_CACHE_DIR={{.UsersPackerDir}}/packer_cache ` +
-		`CHECKPOINT_DISABLE=1 PACKER_LOG={{.PackerVerbose}} PACKER_LOG_PATH='{{.PackerLogFile}}' TMPDIR='{{.UsersPackerDir}}/tmp' packer build -on-error=cleanup ` +
-		`-var 'proxmox_url={{.ProxmoxURL}}/api2/json' -var 'proxmox_host={{.ProxmoxHost}}' -var 'proxmox_password="LEGACY TEMPLATE COMPATIBILITY PLACEHOLDER"' ` +
-		`-var 'proxmox_skip_tls_verify={{.ProxmoxSkipTLSVerify}}' -var 'proxmox_username="{{ .ProxmoxTokenID }}"' ` +
-		`-var 'proxmox_pool=SHARED' -var 'proxmox_storage_pool={{.ProxmoxVMStoragePool}}' ` +
-		`-var 'proxmox_storage_format={{.ProxmoxVMStorageFormat}}' -var 'iso_storage_pool={{.ProxmoxISOStoragePool}}' ` +
-		`-var 'ansible_home={{.UsersAnsibleDir}}' -var 'ludus_nat_interface={{.LudusNATInterface}}' {{.PackerFile}}`
+	tmplStr := `PACKER_PLUGIN_PATH={{.LudusInstallPath}}/resources/packer/plugins ` +
+		`PROXMOX_USERNAME='{{ .ProxmoxTokenID }}' ` +
+		`PROXMOX_TOKEN={{ .ProxmoxToken }} ` +
+		`PACKER_CONFIG_DIR={{.UsersPackerDir}} ` +
+		`PACKER_CACHE_DIR={{.UsersPackerDir}}/packer_cache ` +
+		`PKR_VAR_proxmox_password="LEGACY TEMPLATE COMPATIBILITY PLACEHOLDER" ` +
+		`PKR_VAR_proxmox_username="LEGACY TEMPLATE COMPATIBILITY PLACEHOLDER" ` +
+		`CHECKPOINT_DISABLE=1 PACKER_LOG={{.PackerVerbose}} ` +
+		`PACKER_LOG_PATH='{{.PackerLogFile}}' ` +
+		`TMPDIR='{{.UsersPackerDir}}/tmp' ` +
+		` packer build -on-error=cleanup ` +
+		`-var 'proxmox_url={{.ProxmoxURL}}/api2/json' ` +
+		`-var 'proxmox_host={{.ProxmoxHost}}' ` +
+		`-var 'proxmox_skip_tls_verify={{.ProxmoxSkipTLSVerify}}' ` +
+		`-var 'proxmox_username="{{ .ProxmoxTokenID }}"' ` +
+		`-var 'proxmox_pool=SHARED' ` +
+		`-var 'proxmox_storage_pool={{.ProxmoxVMStoragePool}}' ` +
+		`-var 'proxmox_storage_format={{.ProxmoxVMStorageFormat}}' ` +
+		`-var 'iso_storage_pool={{.ProxmoxISOStoragePool}}' ` +
+		`-var 'ansible_home={{.UsersAnsibleDir}}' ` +
+		`-var 'ludus_nat_interface={{.LudusNATInterface}}' ` +
+		`{{.PackerFile}}`
 
 	var packerVerbose string
 	if verbose {
