@@ -126,11 +126,7 @@ var templatesStatusCmd = &cobra.Command{
 			return
 		}
 
-		type PackerProcessItem struct {
-			Name string
-			User string
-		}
-		var templatesInProgress []PackerProcessItem
+		var templatesInProgress []dto.GetTemplatesStatusResponseItem
 
 		err := json.Unmarshal(responseJSON, &templatesInProgress)
 		if err != nil {
@@ -145,7 +141,7 @@ var templatesStatusCmd = &cobra.Command{
 			table.SetHeader([]string{"Template Being Built", "User"})
 
 			for _, item := range templatesInProgress {
-				table.Append([]string{item.Name, item.User})
+				table.Append([]string{item.Template, item.User})
 
 			}
 

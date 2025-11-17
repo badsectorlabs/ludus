@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"ludusapi/commandmanager"
 	"ludusapi/dto"
 	"ludusapi/models"
 	"net/http"
@@ -528,11 +529,16 @@ func AbortAnsible(e *core.RequestEvent) error {
 	targetRange := e.Get("range").(*models.Range)
 	targetUser := e.Get("user").(*models.User)
 
-	ansiblePid, err := findAnsiblePidForUser(targetUser.ProxmoxUsername())
+	ansiblePidString, err := findAnsiblePidForUser(targetUser.ProxmoxUsername())
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-	killProcessAndChildren(ansiblePid)
+
+	ansiblePid, err := strconv.Atoi(ansiblePidString)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+	commandmanager.KillProcessAndChildren(ansiblePid)
 
 	// Set range state to "ABORTED"
 	targetRange.SetRangeState("ABORTED")

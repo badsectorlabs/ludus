@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"ludusapi/commandmanager"
 	"ludusapi/dto"
 	"ludusapi/models"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -22,6 +22,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -32,6 +33,8 @@ type TemplateStatus struct {
 }
 
 const templateRegex string = `(?m)[^"]*?-template`
+
+var templateStringRegex = regexp.MustCompile(templateRegex)
 
 var templateProgressStore sync.Map
 
@@ -66,45 +69,6 @@ func extractTemplateNameFromHCL(hclFile string, templateRegex *regexp.Regexp) st
 	} else {
 		return "could not find template name in " + hclFile
 	}
-}
-
-func Run(command string, workingDir string, outputLog string) error {
-
-	f, err := os.OpenFile(outputLog, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0660)
-	if err != nil {
-		log.Fatalf("error opening file: %v", err)
-	}
-	defer f.Close()
-	log.SetOutput(f)
-
-	shellBin := "/bin/bash"
-	if _, err := os.Stat(shellBin); err != nil {
-		if _, err = os.Stat("/bin/sh"); err != nil {
-			log.Println("Could not find /bin/bash or /bin/sh")
-		} else {
-			shellBin = "/bin/sh"
-		}
-	}
-	log.Println(command)
-	cmd := exec.Command(shellBin)
-	cmd.Dir = workingDir
-	cmd.Stdin = strings.NewReader(command)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	err = cmd.Run()
-	var outputString string
-	if out.String() == "" {
-		outputString = "Command processed (no output)."
-	} else {
-		outputString = out.String()
-	}
-	log.Println(outputString)
-	if err != nil {
-		log.Println(err.Error())
-		return err
-	}
-	return nil
 }
 
 func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose bool) {
@@ -220,7 +184,15 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 	renderedOutputString := renderedOutput.String()
 
 	// Run the command and log to a file
-	packerCommandError := Run(renderedOutputString, workingDir, packerLogFileDebug)
+	commandManager := commandmanager.GetInstance()
+	packerBuildCommandID := uuid.New().String()
+	packerBuildCommandMetadata := map[string]string{
+		"command_type":     "packer_build",
+		"template_name":    extractTemplateNameFromHCL(packerFile, templateStringRegex),
+		"template_file":    packerFile,
+		"proxmox_username": user.ProxmoxUsername(),
+	}
+	_, packerCommandError := commandManager.StartCommandInShellAndWait(packerBuildCommandID, renderedOutputString, packerLogFileDebug, workingDir, packerBuildCommandMetadata)
 
 	// Write 'Build complete' to the packerLogFile to indicate the end of the build so the user knows it's done
 	if verbose && packerCommandError == nil {
@@ -462,8 +434,23 @@ func GetTemplates(e *core.RequestEvent) error {
 }
 
 func GetTemplateStatus(e *core.RequestEvent) error {
-	templatesInProgress := findRunningPackerProcesses()
-	return e.JSON(http.StatusOK, templatesInProgress)
+	commandManager := commandmanager.GetInstance()
+
+	// Get all the commands in the command manager
+	commands := commandManager.GetAllCommands()
+
+	var templateStatusArray []dto.GetTemplatesStatusResponseItem
+
+	for _, packerCommand := range commands {
+		if packerCommand.Metadata["command_type"] == "packer_build" && packerCommand.Status == commandmanager.StatusRunning {
+			templateStatusArray = append(templateStatusArray, dto.GetTemplatesStatusResponseItem{
+				Template: packerCommand.Metadata["template_name"],
+				User:     packerCommand.Metadata["proxmox_username"],
+			})
+		}
+	}
+
+	return e.JSON(http.StatusOK, templateStatusArray)
 }
 
 // Build all templates
@@ -697,14 +684,34 @@ func AbortPacker(e *core.RequestEvent) error {
 		return true // continue iteration
 	})
 
-	// Then find and kill any running Packer processes
-	packerPids := findPackerPidsForUser(user.ProxmoxUsername())
-	if len(packerPids) == 0 {
+	// Get all the commands in the command manager
+	commandManager := commandmanager.GetInstance()
+	commands := commandManager.GetAllCommands()
+	foundCommand := false
+	for _, packerCommand := range commands {
+		if packerCommand.Metadata["command_type"] == "packer_build" && packerCommand.Metadata["proxmox_username"] == user.ProxmoxUsername() && packerCommand.Status == commandmanager.StatusRunning {
+			logger.Debug(fmt.Sprintf("Killing packer command for template %s with PID %d", packerCommand.Metadata["template_name"], packerCommand.PID))
+			err := commandManager.KillCommand(packerCommand.ID)
+			if err != nil {
+				return JSONError(e, http.StatusInternalServerError, "Error killing packer command for template "+packerCommand.Metadata["template_name"]+": "+err.Error())
+			}
+			commandManager.RemoveCommand(packerCommand.ID)
+			foundCommand = true
+		}
+	}
+
+	if !foundCommand {
 		return JSONError(e, http.StatusInternalServerError, "No packer processes found for user "+user.ProxmoxUsername())
 	}
-	for _, pid := range packerPids {
-		killProcessAndChildren(pid)
-	}
+
+	// Then find and kill any running Packer processes
+	// packerPids := findPackerPidsForUser(user.ProxmoxUsername())
+	// if len(packerPids) == 0 {
+	// 	return JSONError(e, http.StatusInternalServerError, "No packer processes found for user "+user.ProxmoxUsername())
+	// }
+	// for _, pid := range packerPids {
+	// 	killProcessAndChildren(pid)
+	// }
 
 	return JSONResult(e, http.StatusOK, "Packer process(es) aborted for user "+user.ProxmoxUsername())
 
