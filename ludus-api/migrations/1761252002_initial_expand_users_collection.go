@@ -2,7 +2,6 @@ package migrations
 
 import (
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/tools/types"
 
 	m "github.com/pocketbase/pocketbase/migrations"
 )
@@ -15,11 +14,11 @@ func init() {
 			return err
 		}
 
-		// restrict the list, view, update, and delete rules for record owners
-		usersCollection.ListRule = types.Pointer("id = @request.auth.id")
-		usersCollection.ViewRule = types.Pointer("id = @request.auth.id")
-		usersCollection.UpdateRule = types.Pointer("id = @request.auth.id")
-		usersCollection.DeleteRule = types.Pointer("id = @request.auth.id")
+		// Only superusers can list, view, update, and delete users
+		usersCollection.ListRule = nil
+		usersCollection.ViewRule = nil
+		usersCollection.UpdateRule = nil
+		usersCollection.DeleteRule = nil
 
 		// add fields to match the UserObject model
 		usersCollection.Fields.Add(
