@@ -300,7 +300,7 @@ documentation:
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at / # Any "start-at" will skip the doc build to speed up CI
       when: never
-    - if: $CI_COMMIT_MESSAGE = "Automatic backup from Apidog"
+    - if: $CI_COMMIT_MESSAGE == "Automatic backup from Apidog"
       when: never
     - changes:
         - "docs/**/*"
@@ -332,7 +332,7 @@ build all:
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
       when: never
-    - if: $CI_COMMIT_MESSAGE = "Automatic backup from Apidog"
+    - if: $CI_COMMIT_MESSAGE == "Automatic backup from Apidog"
       when: never
     - changes:
         - "**/*"
