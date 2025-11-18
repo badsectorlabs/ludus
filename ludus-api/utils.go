@@ -113,7 +113,8 @@ func containsSubstring(slice []string, target string) bool {
 func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxClient *goproxmox.Client) error {
 
 	// If the range has already been updated this request, return early, no need to do it again.
-	if e.Get("rangeHasBeenUpdatedThisRequest").(bool) {
+	rangeHasBeenUpdatedThisRequest := e.Get("rangeHasBeenUpdatedThisRequest")
+	if rangeHasBeenUpdatedThisRequest != nil && rangeHasBeenUpdatedThisRequest.(bool) {
 		return nil
 	}
 
