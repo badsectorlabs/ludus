@@ -91,8 +91,8 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 		`PROXMOX_TOKEN={{ .ProxmoxToken }} ` +
 		`PACKER_CONFIG_DIR={{.UsersPackerDir}} ` +
 		`PACKER_CACHE_DIR={{.UsersPackerDir}}/packer_cache ` +
-		`PKR_VAR_proxmox_password="LEGACY TEMPLATE COMPATIBILITY PLACEHOLDER" ` +
-		`PKR_VAR_proxmox_username="LEGACY TEMPLATE COMPATIBILITY PLACEHOLDER" ` +
+		`PKR_VAR_proxmox_password="" ` +
+		`PKR_VAR_proxmox_username="" ` +
 		`CHECKPOINT_DISABLE=1 PACKER_LOG={{.PackerVerbose}} ` +
 		`PACKER_LOG_PATH='{{.PackerLogFile}}' ` +
 		`TMPDIR='{{.UsersPackerDir}}/tmp' ` +
