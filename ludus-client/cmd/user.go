@@ -165,33 +165,15 @@ Do you want to continue? (y/N): `, userID)
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/apikey"))
-		if !success {
+		if didFailOrWantJSON(success, responseJSON) {
 			return
-		}
-
-		type Data struct {
-			Result struct {
-				ApiKey          string `json:"apiKey"`
-				DateCreated     string `json:"dateCreated"`
-				DateLastActive  string `json:"dateLastActive"`
-				HashedAPIKey    string `json:"hashedAPIKey"`
-				IsAdmin         bool   `json:"isAdmin"`
-				Name            string `json:"name"`
-				ProxmoxUsername string `json:"proxmoxUsername"`
-				UserID          string `json:"userID"`
-			} `json:"result"`
 		}
 
 		// Unmarshal JSON data
-		var data Data
+		var data dto.GetAPIKeyResponse
 		err := json.Unmarshal([]byte(responseJSON), &data)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
-		}
-
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
-			return
 		}
 
 		// Create table
@@ -224,18 +206,12 @@ var usersWireguardCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/wireguard"))
-		if !success {
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
-		type Data struct {
-			Result struct {
-				WireGuardConfig string `json:"wireGuardConfig"`
-			} `json:"result"`
-		}
-
 		// Unmarshal JSON data
-		var data Data
+		var data dto.GetWireguardConfigResponse
 		err := json.Unmarshal([]byte(responseJSON), &data)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
@@ -345,10 +321,14 @@ var usersCredsSetCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		requestBody := fmt.Sprintf(`{
-			"userID": "%s",
-			"proxmoxPassword": "%s"
-		  }`, newUserID, proxmoxPassword)
+		if newUserID == "" {
+			newUserID = strings.Split(apiKey, ".")[0]
+		}
+
+		requestBody := &dto.PostCredentialsRequest{
+			UserID:          newUserID,
+			ProxmoxPassword: proxmoxPassword,
+		}
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/user/credentials"), requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
@@ -359,7 +339,7 @@ var usersCredsSetCmd = &cobra.Command{
 }
 
 func setupUsersCredsSetCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the user")
+	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the user (default: the user ID of the API key)")
 	command.Flags().StringVarP(&proxmoxPassword, "password", "p", "", "the proxmox password of the user")
 
 	_ = command.MarkFlagRequired("password")
