@@ -23,7 +23,6 @@ func GetSnapshots(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, "Unable to get go proxmox client: "+err.Error())
 	}
 
-	response := dto.GetSnapshotsResponse{}
 	snapshotsResponse := []dto.GetSnapshotsResponseSnapshotsItem{}
 	errorsResponse := []dto.GetSnapshotsResponseErrorsItem{}
 
@@ -106,6 +105,11 @@ func GetSnapshots(e *core.RequestEvent) error {
 				})
 			}
 		}
+	}
+
+	response := dto.GetSnapshotsResponse{
+		Snapshots: snapshotsResponse,
+		Errors:    errorsResponse,
 	}
 
 	return e.JSON(http.StatusOK, response)
