@@ -61,7 +61,7 @@
     vmbr_number: "{{ range_second_octet + 1000 }}"
 
 - name: Apply all user defined network rules to the router
-  tags: [network]
+  tags: [network, access-control]
   hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
   become: true
   tasks:

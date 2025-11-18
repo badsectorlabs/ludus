@@ -309,6 +309,7 @@ type ListRangeTagsResponse struct {
 }
 type ListRangeUsersResponseItem struct {
 	UserID     string `json:"userID,omitempty"`
+	UserNumber int    `json:"userNumber,omitempty"`
 	Name       string `json:"name,omitempty"`
 	AccessType string `json:"accessType,omitempty"`
 }

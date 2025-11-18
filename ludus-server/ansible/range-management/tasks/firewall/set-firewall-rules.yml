@@ -91,13 +91,13 @@
 - name: Modify router firewall to allow WireGuard IP's for access grants to this range
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
-    source: "198.51.100.{{ item.second_octet }}"
+    source: "198.51.100.{{ item.userNumber }}"
     in_interface: "{{ router_external_interface }}"
     protocol: all
     jump: ACCEPT
     state: present
     action: insert
-    comment: "Access Grant: WireGuard client access rule for {{ item.username }}"
+    comment: "Access Grant: WireGuard client access rule for {{ item.userID }}"
     numeric: true
   loop: "{{ range_access_grants_array | default([]) | list }}"
 

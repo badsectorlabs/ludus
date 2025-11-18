@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"ludus/logger"
 	"ludus/rest"
+	"ludusapi"
 	"ludusapi/dto"
 	"os"
 	"strconv"
@@ -39,13 +40,13 @@ var rangeCmd = &cobra.Command{
 }
 
 func getRangeStateColor(data RangeObject) tablewriter.Colors {
-	if data.RangeState == "DEPLOYING" || data.RangeState == "DESTROYING" {
+	if data.RangeState == ludusapi.LudusRangeStateDeploying || data.RangeState == ludusapi.LudusRangeStateDestroying {
 		return tablewriter.Colors{tablewriter.FgYellowColor, tablewriter.Bold, tablewriter.BgBlackColor}
-	} else if data.RangeState == "ERROR" || data.RangeState == "ABORTED" {
+	} else if data.RangeState == ludusapi.LudusRangeStateError || data.RangeState == ludusapi.LudusRangeStateAborted {
 		return tablewriter.Colors{tablewriter.FgHiRedColor, tablewriter.Bold, tablewriter.BgBlackColor}
-	} else if data.RangeState == "SUCCESS" {
+	} else if data.RangeState == ludusapi.LudusRangeStateSuccess {
 		return tablewriter.Colors{tablewriter.FgBlackColor, tablewriter.Bold, tablewriter.BgGreenColor}
-	} else if data.RangeState == "DESTROYED" {
+	} else if data.RangeState == ludusapi.LudusRangeStateDestroyed {
 		return tablewriter.Colors{tablewriter.FgGreenColor, tablewriter.Bold, tablewriter.BgBlackColor}
 	} else {
 		// Default to normal formatting for "NEVER DEPLOYED"

@@ -4,6 +4,6 @@ Address = 198.51.100.{{ user_number }}/32
 
 [Peer]
 PublicKey = {{ server_public_key }}
-Endpoint = {{ proxmox_public_ip }}:51820
+Endpoint = {{ proxmox_public_ip }}:{{ wireguard_port }}
 AllowedIPs = 10.{{ user_number }}.0.0/16, 198.51.100.1/32
 PersistentKeepalive = 25

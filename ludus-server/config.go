@@ -88,6 +88,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					f.WriteString("expose_admin_port: false\n")
 					f.WriteString(fmt.Sprintf("data_directory: %s/db\n", ludusInstallPath))
 					f.WriteString(fmt.Sprintf("database_encryption_key: %s\n", security.RandomString(32)))
+					f.WriteString(fmt.Sprintf("wireguard_port: %d\n", 51820))
 				} else {
 					config.ProxmoxNode = nodeName
 					config.ProxmoxInterface = inter.Name
@@ -106,6 +107,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					config.ExposeAdminPort = false
 					config.DataDirectory = fmt.Sprintf("%s/db", ludusInstallPath)
 					config.DatabaseEncryptionKey = security.RandomString(32)
+					config.WireguardPort = 51820
 				}
 				return
 			}

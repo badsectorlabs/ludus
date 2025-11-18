@@ -25,5 +25,4 @@ ludus_users_dir: "{{ ludus_install_path }}/users"
 ludus_ranges_dir: "{{ ludus_install_path }}/ranges"
 
 # Wireguard config
-wg_port: "51820"
 wg_server_allowed_ips: "198.51.100.0/24"
