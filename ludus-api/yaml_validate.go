@@ -174,6 +174,7 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
 
 	var NETBIOSnameKey string
+	e.Set("rangeHasRoles", false)
 	for _, vm := range config.Ludus {
 		vlanIPKey := fmt.Sprintf("vlan: %d, ip_last_octet: %d", vm.VLAN, vm.IPLastOctet)
 		vmNameKey := vm.VMName
@@ -261,7 +262,6 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 				}
 			}
 		} else {
-			e.Set("rangeHasRoles", false)
 			// Remove the user-defined-roles.yml file in the event the range previously had a config with roles defined
 			_, err = os.Stat(fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, targetRange.RangeId()))
 			if err == nil {

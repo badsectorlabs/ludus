@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/goforj/godump"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -142,10 +141,6 @@ func DeleteRange(e *core.RequestEvent) error {
 	}
 
 	err = manageVmbrInterfaceLocally(targetRange.RangeNumber(), false)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, err.Error())
-	}
-	err = os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, targetRange.RangeId()))
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
@@ -449,6 +444,7 @@ func PutConfig(e *core.RequestEvent) error {
 
 	// Check the roles and dependencies
 	rangeHasRoles := e.Get("rangeHasRoles")
+	logger.Debug(fmt.Sprintf("Range has roles: %v", rangeHasRoles))
 	if rangeHasRoles != nil && rangeHasRoles.(bool) {
 		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), "Resolving dependencies for user-defined roles..\n", false)
 		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(e, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
@@ -549,8 +545,6 @@ func AbortAnsible(e *core.RequestEvent) error {
 
 	return JSONResult(e, http.StatusOK, "Ansible process aborted")
 }
-
-// New range management endpoints for group-based access system
 
 // CreateRange allows users to create ranges not tied to a specific user
 func CreateRange(e *core.RequestEvent) error {
@@ -675,18 +669,18 @@ func CreateRange(e *core.RequestEvent) error {
 }
 
 func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bool) error {
-	targetUser := e.Get("user").(*models.User)
-	if !targetUser.IsAdmin() {
+	actingUser := e.Get("user").(*models.User)
+	if !actingUser.IsAdmin() {
 		return JSONError(e, http.StatusForbidden, "You must be an admin to use this endpoint")
 	}
 
-	rangeID := e.Request.URL.Query().Get("rangeID")
+	rangeID := e.Request.PathValue("rangeID")
 	rangeNumber, err := GetRangeNumberFromRangeID(rangeID)
 	if err != nil {
 		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", rangeID, err))
 	}
 
-	userID := e.Request.URL.Query().Get("userID")
+	userID := e.Request.PathValue("userID")
 	if userID == "" {
 		return JSONError(e, http.StatusBadRequest, "User ID is required")
 	}
@@ -714,33 +708,18 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 	sourceUserObject := &models.User{}
 	sourceUserObject.SetProxyRecord(sourceUserRecord)
 
-	extraVars := map[string]interface{}{
-		"target_range_id":           targetRange.RangeId(),
-		"target_range_second_octet": targetRange.RangeNumber(),
-		"source_username":           sourceUserObject.ProxmoxUsername(),
-		"source_user_id":            sourceUserObject.UserId(),
-		"user_number":               sourceUserObject.UserNumber(),
-	}
-	logger.Debug(godump.DumpStr(extraVars))
-	output, err := server.RunAnsiblePlaybookWithVariables(e, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, actionVerb, false, "")
-	if err != nil {
-		logger.Debug("actionVerb: " + actionVerb)
-		if strings.Contains(output, "Target router is not up") && actionVerb == "grant" {
-			return JSONResult(e, http.StatusOK, `WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!
-The target range router VM is inaccessible!
-If the target range router is deployed, no firewall changes have taken place.
-If the VM is not deployed yet, the rule will be added when it is deployed and you can ignore this.
-WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`)
-		} else if strings.Contains(output, "Target router is not up") && actionVerb == "revoke" && !force {
-			return JSONError(e, http.StatusInternalServerError, "The target range router is inaccessible. To revoke access, the target range router must be up and accessible. Use --force to override this protection.")
-		} else if strings.Contains(output, "Target router is not up") && actionVerb == "revoke" && force {
-			return nil
-		} else { // Some other error we want to fail on
-			return JSONError(e, http.StatusInternalServerError, output)
-		}
-	}
-
 	if actionVerb == "grant" {
+
+		success, warning, err := RunAccessControlPlaybook(e, targetRange, sourceUserObject, actionVerb, force)
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
+		}
+
+		// Give the user access to the proxmox pool for the range
+		err = giveUserAccessToPool(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId())
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, "Unable to give user access to pool: "+err.Error())
+		}
 
 		sourceUserObject.Set("ranges+", targetRange.Id)
 		err = e.App.Save(sourceUserObject)
@@ -748,40 +727,35 @@ WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`)
 			return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+err.Error())
 		}
 
-		// Give the user access to the proxmox pool for the range
-		err = giveUserAccessToPool(sourceUserObject.ProxmoxUsername(), "pam", targetRange.RangeId())
-		if err != nil {
-			sourceUserObject.Set("ranges-", targetRange.Id)
-			saveErr := e.App.Save(sourceUserObject)
-			if saveErr != nil {
-				return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+saveErr.Error())
-			}
-			return JSONError(e, http.StatusInternalServerError, "Unable to give user access to pool: "+err.Error())
+		if success && warning != "" {
+			return JSONResult(e, http.StatusOK, warning)
 		}
 
-		// Check if c.Writer.Written() is false to prevent double response if we set the warning result above
-		return JSONResult(e, http.StatusCreated, "Range assigned to user successfully")
+		return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s assigned to user %s successfully", rangeID, userID))
 
 	} else if actionVerb == "revoke" {
 
-		// Check if the user has direct access to the range
+		success, warning, err := RunAccessControlPlaybook(e, targetRange, sourceUserObject, actionVerb, force)
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
+		}
+
+		err = removeUserAccessFromPool(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId())
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, "Unable to remove user access from pool: "+err.Error())
+		}
+
 		sourceUserObject.Set("ranges-", targetRange.Id)
 		err = e.App.Save(sourceUserObject)
 		if err != nil {
 			return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+err.Error())
 		}
 
-		err := removeUserAccessFromPool(sourceUserObject.ProxmoxUsername(), "pam", targetRange.RangeId())
-		if err != nil {
-			sourceUserObject.Set("ranges+", targetRange.Id)
-			saveErr := e.App.Save(sourceUserObject)
-			if saveErr != nil {
-				return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+saveErr.Error())
-			}
-			return JSONError(e, http.StatusInternalServerError, "Unable to remove user access from pool: "+err.Error())
+		if success && warning != "" {
+			return JSONResult(e, http.StatusOK, warning)
 		}
 
-		return JSONResult(e, http.StatusOK, "Range access revoked from user successfully")
+		return JSONResult(e, http.StatusOK, fmt.Sprintf("Range %s access revoked from user %s successfully", rangeID, userID))
 	} else {
 		return JSONError(e, http.StatusBadRequest, "Invalid action verb")
 	}

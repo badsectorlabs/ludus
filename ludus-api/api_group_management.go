@@ -194,22 +194,14 @@ func AddUserToGroup(e *core.RequestEvent) error {
 		group.Set("members+", user.Id)
 	}
 
-	e.App.Save(user)
-	e.App.Save(group)
-
 	// Add user to group in proxmox
 	err = addUserToGroupInProxmox(user.ProxmoxUsername(), user.ProxmoxRealm(), group.Name())
 	if err != nil {
-		user.Set("groups-", group.Id)
-		if e.Request.URL.Query().Get("manager") == "true" {
-			group.Set("managers-", user.Id)
-		} else {
-			group.Set("members-", user.Id)
-		}
-		e.App.Save(user)
-		e.App.Save(group)
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error adding user %s to group %s in proxmox: %v", userID, group.Name(), err))
 	}
+
+	e.App.Save(user)
+	e.App.Save(group)
 
 	return JSONResult(e, http.StatusCreated, "User added to group successfully")
 }
@@ -303,16 +295,13 @@ func AddRangeToGroup(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You do not have access to range %s and cannot add it to group %s", rangeObj.RangeId(), group.Name()))
 	}
 
-	group.Set("ranges+", rangeObj.Id)
-
 	// Grant group access to range in proxmox
 	err = grantGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId())
 	if err != nil {
-		group.Set("ranges-", rangeObj.Id)
-		e.App.Save(group)
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error granting group %s access to range %s in proxmox: %v", group.Name(), rangeObj.RangeId(), err))
 	}
 
+	group.Set("ranges+", rangeObj.Id)
 	e.App.Save(group)
 
 	return JSONResult(e, http.StatusCreated, fmt.Sprintf("Group %s access to range %s granted successfully", group.Name(), rangeObj.RangeId()))
@@ -350,6 +339,26 @@ func RemoveRangeFromGroup(e *core.RequestEvent) error {
 	err = revokeGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId())
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error revoking group %s access to range %s in proxmox: %v", group.Name(), rangeObj.RangeId(), err))
+	}
+
+	errorUsers := []string{}
+	wasWarning := false
+	for _, user := range group.Members() {
+		success, warning, err := RunAccessControlPlaybook(e, rangeObj, user, "revoke", false)
+		if err != nil {
+			errorUsers = append(errorUsers, user.UserId())
+		}
+		if success && warning != "" {
+			wasWarning = true
+		}
+	}
+
+	if len(errorUsers) > 0 {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running access control playbooks for users: %v", errorUsers))
+	}
+
+	if wasWarning {
+		return JSONResult(e, http.StatusOK, fmt.Sprintf("Group access to range %s revoked successfully, however the range router was not accessible and no firewall changes were made", rangeObj.RangeId()))
 	}
 
 	// Remove group access to range
