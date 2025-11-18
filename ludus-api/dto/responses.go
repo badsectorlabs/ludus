@@ -95,6 +95,7 @@ type GetAPIKeyResponse struct {
 }
 type GetAPIKeyResponseResult struct {
 	ApiKey string `json:"apiKey,omitempty"`
+	UserID string `json:"userID,omitempty"`
 }
 type GetAnsibleInventoryResponse struct {
 	Result string `json:"result,omitempty"`

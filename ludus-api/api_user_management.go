@@ -286,6 +286,7 @@ func GetAPIKey(e *core.RequestEvent) error {
 
 	result := dto.GetAPIKeyResponseResult{
 		ApiKey: apiKey,
+		UserID: user.UserId(),
 	}
 	response := dto.GetAPIKeyResponse{
 		Result: &result,
@@ -405,6 +406,11 @@ func PostCredentials(e *core.RequestEvent) error {
 	}
 	user := &models.User{}
 	user.SetProxyRecord(userRecord)
+
+	actingUser := e.Get("user").(*models.User)
+	if !actingUser.IsAdmin() && actingUser.UserId() != user.UserId() {
+		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot update the password for another user")
+	}
 
 	err = setProxmoxSystemPassword(user.ProxmoxUsername(), user.ProxmoxRealm(), credsToUpdate.ProxmoxPassword)
 	if err != nil {

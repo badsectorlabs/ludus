@@ -1427,7 +1427,6 @@ post-deploy ansible-as-user:
   timeout: 15m
   retry:
     max: 2
-    when: script_failure
   script:
     - *ci-setup-user
     - *ansible-tests
@@ -1470,7 +1469,7 @@ post-deploy user-cmds-as-user:
     - *ci-setup-user
     - set +o pipefail # lots of expected fails that we will grep in this job
     - ludus user list
-    - ludus users list all 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - ludus users list all 2>&1 | grep "You are not an admin and cannot list all users"
     # Get and set our own creds
     - ludus user creds get
     - OG_PW=$(ludus user creds get --json | jq -r '.result.proxmoxPassword')
@@ -1478,22 +1477,20 @@ post-deploy user-cmds-as-user:
     - ludus user creds get | grep test-password-123
     - ludus user creds set -p $OG_PW
     # Try to get and set other user's creds
-    - ludus user creds get --user CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
-    - ludus user creds set -i CIA -p test-password-123 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - ludus user creds get --user CIA 2>&1 | grep "You are not an admin and cannot impersonate other users"
+    - ludus user creds set -i CIA -p test-password-123 2>&1 | grep "You are not an admin and cannot update the password for another user"
     # Get wireguard
     - ludus user wireguard | grep Endpoint
     # Try to get other user's wireguard
-    - ludus user wireguard --user CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - ludus user wireguard --user CIA 2>&1 | grep "You are not an admin and cannot impersonate other users"
     # Try to add an admin user
-    - ludus user add -a -n "Test Admin" -i TA -e "ta@ludus.internal" -p "tapassword" 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
-    - '! ludus users list all | grep "Test Admin"'
+    - ludus user add -a -n "Test Admin" -i TA -e "ta@ludus.internal" -p "tapassword" 2>&1 | grep "You are not an admin and cannot add users"
     # Try to add a normal user
-    - ludus user add -n "Test User" -i TA -e "tu@ludus.internal" -p "tupassword" 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
-    - '! ludus users list all | grep "Test User"'
+    - ludus user add -n "Test User" -i TA -e "tu@ludus.internal" -p "tupassword" 2>&1 | grep "You are not an admin and cannot add users"
     # Try to remove a user
-    - ludus user rm -i CIA 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - ludus user rm -i CIA 2>&1 | grep "You are not an admin and cannot delete users"
     # Try to get an api key for another user
-    - ludus user apikey --user CIA --no-prompt 2>&1 | grep "This is an admin only endpoint or you queried another user and are not an admin"
+    - ludus user apikey --user CIA --no-prompt 2>&1 | grep "You are not an admin and cannot impersonate other users"
     # Get a new API for ourselves
     - ludus user apikey --no-prompt
 
