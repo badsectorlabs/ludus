@@ -458,7 +458,7 @@ Do you want to continue? (y/N): `, rangeIDString)
 		}
 
 		// Build URL for VM destruction endpoint
-		destroyVmsURL := buildURLWithRangeAndUserID(fmt.Sprintf("/range/%s/vms", rangeID))
+		destroyVmsURL := buildURLWithRangeAndUserID(fmt.Sprintf("/range/%s/vms", rangeIDString))
 
 		responseJSON, success = rest.GenericDelete(client, destroyVmsURL)
 		if !success {
