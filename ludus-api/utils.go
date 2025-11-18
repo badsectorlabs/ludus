@@ -6,13 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"ludusapi/dto"
 	"ludusapi/models"
 	"net"
 	"os"
 	"os/exec"
 	"os/user"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -113,6 +111,11 @@ func containsSubstring(slice []string, target string) bool {
 
 // updates the VM and range data for the provided range using the provided proxmox client
 func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxClient *goproxmox.Client) error {
+
+	// If the range has already been updated this request, return early, no need to do it again.
+	if e.Get("rangeHasBeenUpdatedThisRequest").(bool) {
+		return nil
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -216,6 +219,7 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 	}
 
 	logger.Debug(fmt.Sprintf("Updated range %s with %d VMs", targetRange.RangeId(), rangeVMCount))
+	e.Set("rangeHasBeenUpdatedThisRequest", true)
 
 	return nil
 }
@@ -333,80 +337,6 @@ func HasRangeAccess(userID string, rangeNumber int) bool {
 	return false
 }
 
-// GetRangeAccessibleUsers returns all userIDs who can access a specific range
-func GetRangeAccessibleUsers(rangeNumber int) []dto.ListRangeUsersResponseItem {
-	var result []dto.ListRangeUsersResponseItem
-
-	rangeRecord, err := GetRangeObjectByNumber(rangeNumber)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Error finding range: %s", err.Error()))
-		return nil
-	}
-
-	// Find all users who have direct access to the range by querying the user table looking for the range.Id in the user's ranges array
-	userRecords, err := app.FindRecordsByFilter(
-		"users",                    // collection name
-		"ranges.id ?= {:range_id}", // filter
-		"-created",                 // sort
-		0,                          // limit
-		0,                          // offset
-		dbx.Params{
-			"range_id": rangeRecord.Id,
-		},
-	)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Error finding users: %s", err.Error()))
-		return nil
-	}
-	for _, userRecord := range userRecords {
-		result = append(result, dto.ListRangeUsersResponseItem{
-			UserID:     userRecord.GetString("userID"),
-			Name:       userRecord.GetString("name"),
-			AccessType: "Direct",
-		})
-	}
-
-	// Find all users who are managers or members of a group with access to the range by querying the group table looking for the range.Id in the group's ranges array
-	groupRecords, err := app.FindRecordsByFilter(
-		"groups",                   // collection name
-		"ranges.id ?= {:range_id}", // filter
-		"-created",                 // sort
-		0,                          // limit
-		0,                          // offset
-		dbx.Params{
-			"range_id": rangeRecord.Id,
-		},
-	)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
-		return nil
-	}
-	for _, groupRecord := range groupRecords {
-		app.ExpandRecord(groupRecord, []string{"members", "managers"}, nil)
-		for _, member := range groupRecord.ExpandedAll("members") {
-			result = append(result, dto.ListRangeUsersResponseItem{
-				UserID:     member.GetString("userID"),
-				Name:       member.GetString("name"),
-				AccessType: "Group Member",
-			})
-		}
-		for _, manager := range groupRecord.ExpandedAll("managers") {
-			result = append(result, dto.ListRangeUsersResponseItem{
-				UserID:     manager.GetString("userID"),
-				Name:       manager.GetString("name"),
-				AccessType: "Group Manager",
-			})
-		}
-	}
-
-	// Sort the result to ensure consistent ordering
-	slices.SortFunc(result, func(a, b dto.ListRangeUsersResponseItem) int {
-		return strings.Compare(a.UserID, b.UserID)
-	})
-
-	return result
-}
-
 func mustGetUserFromRequest(e *core.RequestEvent) *models.User {
 	rawUser := e.Get("user")
 	if rawUser == nil {
@@ -443,7 +373,7 @@ func CreateDefaultUserRange(e *core.RequestEvent, txApp core.App, user *models.U
 	rangeRecord.SetDescription("Default range created automatically for user")
 	rangeRecord.SetPurpose("General testing and development")
 	rangeRecord.SetNumberOfVms(0)
-	rangeRecord.SetRangeState("NEVER DEPLOYED")
+	rangeRecord.SetRangeState(LudusRangeStateNeverDeployed)
 	if err := txApp.Save(rangeRecord); err != nil {
 		return err
 	}

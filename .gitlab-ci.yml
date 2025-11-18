@@ -1047,16 +1047,19 @@ post-deploy groups-as-admin:
     # Grant group access to CIA's default range
     - ludus groups add range CIA ci-group-test
     - ludus groups ranges ci-group-test | grep CIA
-    # Verify that GTU now appears as having access to CIA's range via group
+    # Verify that GTU now has access to CIA's range via group
     - ludus range users CIA | grep GTU
+    - export GTU_RANGE_NETWORK=$(ludus -r GTU range list --json | jq '.rangeNumber' | awk '{printf "10.%d.0.0/16", $0}')
+    - ludus --user GTU user wireguard | grep $GTU_RANGE_NETWORK
     # Idempotency/conflict on range access
     - set +o pipefail
     - ludus groups add range CIA ci-group-test 2>&1 | grep "already has access"
     - set -o pipefail
     # Remove user from group, ensure access is gone
     - ludus groups remove user GTU ci-group-test
-    - '! ludus range users CIU | grep GTU'
-    - '! ludus --user GTU range accessible | grep CIU'
+    - '! ludus range users CIA | grep GTU'
+    - '! ludus --user GTU range accessible | grep CIA'
+    - '! ludus --user GTU user wireguard | grep $GTU_RANGE_NETWORK'
     # Re-add user to group and then remove range access from group and verify access is gone
     - ludus groups add user GTU ci-group-test
     - ludus groups remove range CIA ci-group-test
@@ -1071,7 +1074,7 @@ post-deploy groups-as-admin:
     - ludus groups members ci-group-test | grep GTU | grep manager
     - ludus --user GTU groups add user CIA ci-group-test
     - ludus groups members ci-group-test | grep CIA | grep member
-    # As GTU (manager) try toadd a range to the group that GTU does not have access to
+    # As GTU (manager) try to add a range to the group that GTU does not have access to
     - set +o pipefail
     - ludus --user GTU groups add range CIA ci-group-test 2>&1 | grep "You do not have access to range CIA and cannot add it to group ci-group-test"
     - set -o pipefail
@@ -1658,6 +1661,7 @@ test-everything:
       sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     all  --  \*      \*       10.[1-9].0.0/16          10.[1-9].0.0/16          /\* User Default: Inter-VLAN Rule \*/ reject-with icmp-port-unreachable'
       sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.[1-9].0.0/16          /\* User Default: External Rule \*/'
       sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | grep "This is a custom iptables command"
+    # Check the custom DNS servers
 
 ##########
 # MANUAL #

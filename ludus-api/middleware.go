@@ -123,7 +123,7 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 				break
 			}
 		}
-		if !hasAccess {
+		if !hasAccess && !e.Auth.GetBool("isAdmin") {
 			return JSONError(e, http.StatusForbidden, fmt.Sprintf("User %s does not have access to range %s", e.Auth.GetString("userID"), rangeID))
 		}
 	} else {

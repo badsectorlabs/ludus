@@ -339,3 +339,31 @@ func applyBlockInFile(originalContent, marker, block string, present bool) (stri
 
 	return finalContent, changed
 }
+
+// applyBlockInFileAtPath is a Go implementation of Ansible's blockinfile logic.
+// It correctly updates a block in-place, removes it, or adds it to the end if not found.
+// It returns a boolean indicating if a change was made and an error if one occurred.
+func applyBlockInFileAtPath(filePath, marker, block string, present bool) (bool, error) {
+	// Read in the file
+	originalContent, err := os.ReadFile(filePath)
+	if err != nil {
+		return false, err
+	}
+
+	// Get original file permissions
+	var fileMode os.FileMode
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		fileMode = os.FileMode(0644) // Fall back to 0644 if we can't get the file permissions, it may not exist
+	} else {
+		fileMode = fileInfo.Mode()
+	}
+
+	newContent, contentChanged := applyBlockInFile(string(originalContent), marker, block, present)
+	if contentChanged {
+		if err := os.WriteFile(filePath, []byte(newContent), fileMode); err != nil {
+			return false, err
+		}
+	}
+	return contentChanged, nil
+}

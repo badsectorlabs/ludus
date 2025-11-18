@@ -30,6 +30,7 @@ type Configuration struct {
 	ReservedRangeNumbers   []int32 `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
 	DataDirectory          string  `mapstructure:"data_directory" yaml:"data_directory"`
 	DatabaseEncryptionKey  string  `mapstructure:"database_encryption_key" yaml:"database_encryption_key"`
+	WireguardPort          int     `mapstructure:"wireguard_port" yaml:"wireguard_port"`
 }
 
 var ServerConfiguration Configuration
@@ -57,6 +58,7 @@ func (s *Server) ParseConfig() {
 	viper.SetDefault("prevent_user_ansible_add", false)
 	viper.SetDefault("data_directory", "/opt/ludus/db")
 	viper.SetDefault("database_encryption_key", "hZD6RwYxrcQ7CS4lRxjdKI7thWp3jg48")
+	viper.SetDefault("wireguard_port", 51820)
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)
 	}

@@ -203,6 +203,32 @@ func AddUserToGroup(e *core.RequestEvent) error {
 	e.App.Save(user)
 	e.App.Save(group)
 
+	// For each range in the group, run the access control playbook
+	for _, rangeRecord := range group.Ranges() {
+		err = RunAccessControlPlaybook(e, rangeRecord)
+		if err != nil {
+			errorString := ""
+			isDeployed, err := rangeIsDeployed(e, rangeRecord)
+			if err != nil {
+				errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeRecord.RangeId(), err)
+			}
+			if isDeployed {
+				errorString = fmt.Sprintf("Range %s is deployed and access cannot be added to group %s", rangeRecord.RangeId(), group.Name())
+			}
+			if errorString != "" {
+				user.Set("groups-", group.Id)
+				e.App.Save(user)
+				if e.Request.URL.Query().Get("manager") == "true" {
+					group.Set("managers-", user.Id)
+				} else {
+					group.Set("members-", user.Id)
+				}
+				e.App.Save(group)
+				return JSONError(e, http.StatusInternalServerError, errorString)
+			}
+		}
+	}
+
 	return JSONResult(e, http.StatusCreated, "User added to group successfully")
 }
 
@@ -244,10 +270,42 @@ func RemoveUserFromGroup(e *core.RequestEvent) error {
 	// Remove user from group
 	user.Set("groups-", group.Id)
 	// Remove user from managers and members of the group (could be either)
-	group.Set("managers-", user.Id)
-	group.Set("members-", user.Id)
+	isManager := userIsManagerOfGroup(&user, group)
+	if isManager {
+		group.Set("managers-", user.Id)
+	} else {
+		group.Set("members-", user.Id)
+	}
 	e.App.Save(user)
 	e.App.Save(group)
+
+	// For each range in the group, run the access control playbook
+	for _, rangeRecord := range group.Ranges() {
+		// If there is an error here, potentially a user could still have access to a range via WireGuard.
+		err = RunAccessControlPlaybook(e, rangeRecord)
+		if err != nil {
+			errorString := ""
+			isDeployed, err := rangeIsDeployed(e, rangeRecord)
+			if err != nil {
+				errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeRecord.RangeId(), err)
+			}
+			if isDeployed {
+				errorString = fmt.Sprintf("Range %s is deployed and access cannot be removed from group %s", rangeRecord.RangeId(), group.Name())
+			}
+			if errorString != "" {
+				// If there is an error or the range is deployed, we need to restore the user to the group and range
+				if isManager {
+					group.Set("managers+", user.Id)
+				} else {
+					group.Set("members+", user.Id)
+				}
+				e.App.Save(group)
+				user.Set("groups+", group.Id)
+				e.App.Save(user)
+				return JSONError(e, http.StatusInternalServerError, errorString)
+			}
+		}
+	}
 
 	return JSONResult(e, http.StatusOK, "User removed from group successfully")
 }
@@ -304,6 +362,23 @@ func AddRangeToGroup(e *core.RequestEvent) error {
 	group.Set("ranges+", rangeObj.Id)
 	e.App.Save(group)
 
+	err = RunAccessControlPlaybook(e, rangeObj)
+	if err != nil {
+		errorString := ""
+		isDeployed, err := rangeIsDeployed(e, rangeObj)
+		if err != nil {
+			errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), err)
+		}
+		if isDeployed {
+			errorString = fmt.Sprintf("Range %s is deployed and access cannot be granted to group %s", rangeObj.RangeId(), group.Name())
+		}
+		if errorString != "" {
+			group.Set("ranges-", rangeObj.Id)
+			e.App.Save(group)
+			return JSONError(e, http.StatusInternalServerError, errorString)
+		}
+	}
+
 	return JSONResult(e, http.StatusCreated, fmt.Sprintf("Group %s access to range %s granted successfully", group.Name(), rangeObj.RangeId()))
 }
 
@@ -341,29 +416,26 @@ func RemoveRangeFromGroup(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error revoking group %s access to range %s in proxmox: %v", group.Name(), rangeObj.RangeId(), err))
 	}
 
-	errorUsers := []string{}
-	wasWarning := false
-	for _, user := range group.Members() {
-		success, warning, err := RunAccessControlPlaybook(e, rangeObj, user, "revoke", false)
-		if err != nil {
-			errorUsers = append(errorUsers, user.UserId())
-		}
-		if success && warning != "" {
-			wasWarning = true
-		}
-	}
-
-	if len(errorUsers) > 0 {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running access control playbooks for users: %v", errorUsers))
-	}
-
-	if wasWarning {
-		return JSONResult(e, http.StatusOK, fmt.Sprintf("Group access to range %s revoked successfully, however the range router was not accessible and no firewall changes were made", rangeObj.RangeId()))
-	}
-
 	// Remove group access to range
 	group.Set("ranges-", rangeObj.Id)
 	e.App.Save(group)
+
+	err = RunAccessControlPlaybook(e, rangeObj)
+	if err != nil {
+		errorString := ""
+		isDeployed, err := rangeIsDeployed(e, rangeObj)
+		if err != nil {
+			errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), err)
+		}
+		if isDeployed {
+			errorString = fmt.Sprintf("Range %s is deployed and access cannot be revoked from group %s", rangeObj.RangeId(), group.Name())
+		}
+		if errorString != "" {
+			group.Set("ranges+", rangeObj.Id)
+			e.App.Save(group)
+			return JSONError(e, http.StatusInternalServerError, errorString)
+		}
+	}
 
 	return JSONResult(e, http.StatusOK, fmt.Sprintf("Group %s access to range %s revoked successfully", group.Name(), rangeObj.RangeId()))
 }

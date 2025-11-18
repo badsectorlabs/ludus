@@ -322,7 +322,7 @@ func GetCredentials(e *core.RequestEvent) error {
 // GetWireguardConfig - retrieves a WireGuard configuration file for the user
 func GetWireguardConfig(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
-	wireGuardConfig, err := GetFileContents(fmt.Sprintf("%s/users/%s/%s_client.conf", ludusInstallPath, user.ProxmoxUsername(), user.UserId()))
+	wireGuardConfig, err := getWireGuardConfigForUser(user)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting wireguard config: %v", err))
 	}

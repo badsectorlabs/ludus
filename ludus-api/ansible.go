@@ -42,7 +42,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	user := e.Get("user").(*models.User)
 	usersRange := e.Get("range").(*models.Range)
 
-	accessGrantsArray := getAccessGrantsForUser(e, user.UserId())
+	accessGrantsArray := GetRangeAccessibleUsers(usersRange.RangeNumber())
 	userVars := map[string]interface{}{
 		"username":           user.ProxmoxUsername(),
 		"range_id":           usersRange.RangeId(),
@@ -236,12 +236,12 @@ func RunRangeManagementAnsibleWithTag(e *core.RequestEvent, tag string, verbose 
 	output, err := server.RunAnsiblePlaybookWithVariables(e, nil, nil, extraVars, tag, verbose, limit)
 
 	if err != nil {
-		usersRange.SetRangeState("ERROR")
+		usersRange.SetRangeState(LudusRangeStateError)
 		if saveErr := e.App.Save(usersRange); saveErr != nil {
 			return "", fmt.Errorf("error saving range: %w", saveErr)
 		}
 	} else {
-		usersRange.SetRangeState("SUCCESS")
+		usersRange.SetRangeState(LudusRangeStateSuccess)
 		if saveErr := e.App.Save(usersRange); saveErr != nil {
 			return "", fmt.Errorf("error saving range: %w", saveErr)
 		}
@@ -259,48 +259,6 @@ func RunPlaybookWithTag(e *core.RequestEvent, playbook string, tag string, verbo
 func RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbook string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
 	playbookPathArray := []string{fmt.Sprintf("%s/ansible/range-management/%s", ludusInstallPath, playbook)}
 	return server.RunAnsiblePlaybookWithVariables(e, playbookPathArray, extraVarsFiles, extraVars, tags, verbose, limit)
-}
-
-type AccessGrantStruct struct {
-	SecondOctet int    `json:"second_octet"`
-	Username    string `json:"username"`
-}
-
-// Get the access grants for the provided user ID and return an array of {second_octet, username} objects
-func getAccessGrantsForUser(e *core.RequestEvent, targetUserId string) []AccessGrantStruct {
-	var returnArray []AccessGrantStruct
-
-	// Get direct user-to-range assignments for the target user
-	user := e.Get("user").(*models.User)
-	ranges := user.Ranges()
-	for _, rangeRecord := range ranges {
-		returnArray = append(returnArray, AccessGrantStruct{rangeRecord.RangeNumber(), user.ProxmoxUsername()})
-	}
-
-	// Get group-based access
-	groups := user.Groups()
-
-	// For every group the user is a member of, get the ranges that group has access to
-	for _, groupRecord := range groups {
-		expandedGroupRecord := groupRecord.ExpandedOne("ranges")
-		expandedGroupModel := &models.Group{}
-		expandedGroupModel.SetProxyRecord(expandedGroupRecord)
-		groupRanges := expandedGroupModel.Ranges()
-
-		for _, groupAccess := range groupRanges {
-			// Only add the access grant if it is not already in the returnArray
-			if slices.ContainsFunc(returnArray, func(entry AccessGrantStruct) bool {
-				return entry.SecondOctet == groupAccess.RangeNumber()
-			}) {
-				continue
-			}
-			returnArray = append(returnArray, AccessGrantStruct{groupAccess.RangeNumber(), user.ProxmoxUsername()})
-		}
-	}
-
-	// logger.Debug("Access grants for user " + targetUserId + ": " + godump.DumpStr(returnArray))
-
-	return returnArray
 }
 
 // Return true if the role exists for the user, or false if it doesn't
@@ -418,7 +376,7 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 	user := e.Get("user").(*models.User)
 	usersRange := e.Get("range").(*models.Range)
 
-	accessGrantsArray := getAccessGrantsForUser(e, user.UserId())
+	accessGrantsArray := GetRangeAccessibleUsers(usersRange.RangeNumber())
 	userVars := map[string]interface{}{
 		"username":           user.ProxmoxUsername(),
 		"range_id":           usersRange.RangeId(),

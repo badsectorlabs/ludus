@@ -19,7 +19,17 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-var ansibleTags = []string{"all", "additional-tools", "allow-share-access", "assign-ip", "custom-choco", "custom-groups", "dcs", "debug", "dns-rewrites",
+const (
+	LudusRangeStateDeploying     = "DEPLOYING"
+	LudusRangeStateError         = "ERROR"
+	LudusRangeStateAborted       = "ABORTED"
+	LudusRangeStateDestroying    = "DESTROYING"
+	LudusRangeStateDestroyed     = "DESTROYED"
+	LudusRangeStateNeverDeployed = "NEVER DEPLOYED"
+	LudusRangeStateSuccess       = "SUCCESS"
+)
+
+var ansibleTags = []string{"all", "access-control", "additional-tools", "allow-share-access", "assign-ip", "custom-choco", "custom-groups", "dcs", "debug", "dns-rewrites",
 	"domain-join", "install-office", "install-visual-studio", "network", "nexus", "share", "sysprep", "user-defined-roles", "vm-deploy", "windows"}
 
 // DeployRange - deploys the range according to the range config
@@ -47,8 +57,12 @@ func DeployRange(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
 
 	// Make sure we aren't already in a "DEPLOYING" state
-	if usersRange.RangeState() == "DEPLOYING" && !deployBody.Force {
+	if usersRange.RangeState() == LudusRangeStateDeploying && !deployBody.Force {
 		return JSONError(e, http.StatusConflict, "The range has an active deployment running. Try `range abort` to stop the deployment or run with --force if you really want to try a deploy")
+	}
+
+	if usersRange.RangeState() == LudusRangeStateDestroying && !deployBody.Force {
+		return JSONError(e, http.StatusConflict, "The range is currently being destroyed. Wait for it to finish or run with --force if you really want to try a deploy")
 	}
 
 	if usersRange.TestingEnabled() && !deployBody.Force {
@@ -71,7 +85,7 @@ func DeployRange(e *core.RequestEvent) error {
 	}
 
 	// Set range state to "DEPLOYING"
-	usersRange.SetRangeState("DEPLOYING")
+	usersRange.SetRangeState(LudusRangeStateDeploying)
 	if err := e.App.Save(usersRange); err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving range: %v", err))
 	}
@@ -125,7 +139,7 @@ func DeleteRange(e *core.RequestEvent) error {
 			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "Error with destroy-range\n")
 			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), fmt.Sprintf("%s\n", err.Error()))
 			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
-			targetRange.SetRangeState("ERROR")
+			targetRange.SetRangeState(LudusRangeStateError)
 			err = e.App.Save(targetRange)
 			if err != nil {
 				return JSONError(e, http.StatusInternalServerError, err.Error())
@@ -167,7 +181,7 @@ func DeleteRangeVMs(e *core.RequestEvent) error {
 	logger.Debug("DeleteRangeVMs for range ID: " + usersRange.RangeId())
 
 	// Set range state to "DESTROYING"
-	usersRange.SetRangeState("DESTROYING")
+	usersRange.SetRangeState(LudusRangeStateDestroying)
 	err := e.App.Save(usersRange)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
@@ -181,7 +195,7 @@ func DeleteRangeVMs(e *core.RequestEvent) error {
 			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "Error with destroy-range\n")
 			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), fmt.Sprintf("%s\n", err.Error()))
 			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
-			usersRange.SetRangeState("ERROR")
+			usersRange.SetRangeState(LudusRangeStateError)
 			err = e.App.Save(usersRange)
 			if err != nil {
 				logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
@@ -200,7 +214,7 @@ func DeleteRangeVMs(e *core.RequestEvent) error {
 			}
 		}
 		// Set range state to "DESTROYED"
-		usersRange.SetRangeState("DESTROYED")
+		usersRange.SetRangeState(LudusRangeStateDestroyed)
 		err = e.App.Save(usersRange)
 		if err != nil {
 			logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
@@ -450,7 +464,7 @@ func PutConfig(e *core.RequestEvent) error {
 		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(e, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
 		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), rolesOutput, true)
 		if err != nil {
-			targetRange.SetRangeState("ERROR")
+			targetRange.SetRangeState(LudusRangeStateError)
 			err = e.App.Save(targetRange)
 			if err != nil {
 				logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
@@ -537,7 +551,7 @@ func AbortAnsible(e *core.RequestEvent) error {
 	commandmanager.KillProcessAndChildren(ansiblePid)
 
 	// Set range state to "ABORTED"
-	targetRange.SetRangeState("ABORTED")
+	targetRange.SetRangeState(LudusRangeStateAborted)
 	err = e.App.Save(targetRange)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
@@ -638,7 +652,7 @@ func CreateRange(e *core.RequestEvent) error {
 	rangeRecord.SetPurpose(payload.Purpose)
 	rangeRecord.SetRangeNumber(rangeNumber)
 	rangeRecord.SetNumberOfVms(0)
-	rangeRecord.SetRangeState("NEVER DEPLOYED")
+	rangeRecord.SetRangeState(LudusRangeStateNeverDeployed)
 
 	err = e.App.Save(rangeRecord)
 	if err != nil {
@@ -708,18 +722,7 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 	sourceUserObject := &models.User{}
 	sourceUserObject.SetProxyRecord(sourceUserRecord)
 
-	if actionVerb == "grant" {
-
-		success, warning, err := RunAccessControlPlaybook(e, targetRange, sourceUserObject, actionVerb, force)
-		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
-		}
-
-		// Give the user access to the proxmox pool for the range
-		err = giveUserAccessToPool(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId())
-		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, "Unable to give user access to pool: "+err.Error())
-		}
+	if actionVerb == "grant" || actionVerb == "assign" {
 
 		sourceUserObject.Set("ranges+", targetRange.Id)
 		err = e.App.Save(sourceUserObject)
@@ -727,23 +730,24 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 			return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+err.Error())
 		}
 
-		if success && warning != "" {
-			return JSONResult(e, http.StatusOK, warning)
+		err := RunAccessControlPlaybook(e, targetRange)
+		if err != nil {
+			sourceUserObject.Set("ranges-", targetRange.Id)
+			e.App.Save(sourceUserObject)
+			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
+		}
+
+		// Give the user access to the proxmox pool for the range
+		err = giveUserAccessToPool(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId())
+		if err != nil {
+			sourceUserObject.Set("ranges-", targetRange.Id)
+			e.App.Save(sourceUserObject)
+			return JSONError(e, http.StatusInternalServerError, "Unable to give user access to pool: "+err.Error())
 		}
 
 		return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s assigned to user %s successfully", rangeID, userID))
 
 	} else if actionVerb == "revoke" {
-
-		success, warning, err := RunAccessControlPlaybook(e, targetRange, sourceUserObject, actionVerb, force)
-		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
-		}
-
-		err = removeUserAccessFromPool(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId())
-		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, "Unable to remove user access from pool: "+err.Error())
-		}
 
 		sourceUserObject.Set("ranges-", targetRange.Id)
 		err = e.App.Save(sourceUserObject)
@@ -751,8 +755,18 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 			return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+err.Error())
 		}
 
-		if success && warning != "" {
-			return JSONResult(e, http.StatusOK, warning)
+		err := RunAccessControlPlaybook(e, targetRange)
+		if err != nil {
+			sourceUserObject.Set("ranges+", targetRange.Id)
+			e.App.Save(sourceUserObject)
+			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
+		}
+
+		err = removeUserAccessFromPool(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId())
+		if err != nil {
+			sourceUserObject.Set("ranges+", targetRange.Id)
+			e.App.Save(sourceUserObject)
+			return JSONError(e, http.StatusInternalServerError, "Unable to remove user access from pool: "+err.Error())
 		}
 
 		return JSONResult(e, http.StatusOK, fmt.Sprintf("Range %s access revoked from user %s successfully", rangeID, userID))
@@ -811,50 +825,10 @@ func ListUserAccessibleRanges(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusUnauthorized, "User not found")
 	}
 
-	var result []dto.ListUserAccessibleRangesResponseItem
-
-	// Get direct range assignments
-	userRanges := user.Ranges()
-	for _, rangeRecord := range userRanges {
-		result = append(result, dto.ListUserAccessibleRangesResponseItem{
-			RangeNumber: rangeRecord.GetInt("rangeNumber"),
-			RangeID:     rangeRecord.RangeId(),
-			AccessType:  "Direct",
-		})
-	}
-
-	// Find all groups the user is a member of or manager of
-	groupRecords, err := app.FindRecordsByFilter(
-		"groups", // collection name
-		"members.id ?= {:user_id} || managers.id ?= {:user_id}", // filter
-		"-created", // sort
-		0,          // limit
-		0,          // offset
-		dbx.Params{
-			"user_id": user.Id,
-		},
-	)
-
+	result, err := GetAccessibleRangesForUser(user)
 	if err != nil {
-		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
-		return fmt.Errorf("error finding groups: %w", err)
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting accessible ranges: %v", err))
 	}
-
-	for _, groupRecord := range groupRecords {
-		app.ExpandRecord(groupRecord, []string{"ranges"}, nil)
-		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
-			result = append(result, dto.ListUserAccessibleRangesResponseItem{
-				RangeNumber: rangeRecord.GetInt("rangeNumber"),
-				RangeID:     rangeRecord.GetString("rangeID"),
-				AccessType:  "Group",
-			})
-		}
-	}
-
-	// Sort the result to ensure consistent ordering
-	slices.SortFunc(result, func(a, b dto.ListUserAccessibleRangesResponseItem) int {
-		return int(a.RangeNumber - b.RangeNumber)
-	})
 
 	return e.JSON(http.StatusOK, result)
 }
