@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/denisbrodbeck/machineid"
 	"github.com/keygen-sh/keygen-go/v3"
@@ -53,6 +54,27 @@ func (s *Server) checkLicense() {
 		pluginsDir = fmt.Sprintf("%s/plugins/enterprise", ludusInstallPath)
 	}
 	enterpriseLoaded := false
+
+	// Hard code a beta license key for now
+	if s.LicenseKey == "soon-tm" {
+		s.LicenseValid = true
+		s.LicenseMessage = "License active, expires: 2025-12-08 23:59:59, licensed to a brave beta tester"
+		s.LicenseType = "pro"
+		s.LicenseName = "A brave beta tester"
+		expiry, err := time.Parse("2006-01-02 15:04:05", "2025-12-08 23:59:59")
+		if err != nil {
+			log.Println("LICENSE: error parsing expiry time:", err)
+			s.LicenseValid = false
+			s.LicenseMessage = "Error parsing expiry time"
+			return
+		}
+		s.LicenseExpiry = &expiry
+		if time.Now().After(expiry) {
+			s.LicenseValid = false
+			s.LicenseMessage = "License expired"
+		}
+		return
+	}
 
 	licenseCheckBucket := NewLeakyBucket(fmt.Sprintf("%s/install/.license-check-bucket", ludusInstallPath), 6, 0.02)
 	if !licenseCheckBucket.Allow() {
