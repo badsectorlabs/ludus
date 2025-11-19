@@ -396,9 +396,9 @@ build all:
     - CGO_ENABLED=0 GOOS=windows GOARCH=386 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-386.exe
     - CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-arm64.exe
     - cd ..
-    # If this is a release, build the enterprise and anti-sandbox plugins at the same time on the same build machine so the binaries are compatible
+    # If this is a non-beta release, build the enterprise and anti-sandbox plugins at the same time on the same build machine so the binaries are compatible
     - |
-      if [[ ! -z ${CI_COMMIT_TAG+x} ]]; then
+      if [[ ! -z ${CI_COMMIT_TAG+x} ]] && [[ ! ${CI_COMMIT_TAG} == *"beta"* ]]; then
         git clone https://ludus-enterprise:${LUDUS_ENTERPRISE_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-enterprise-plugin.git
         go work use ./ludus-enterprise-plugin
         cd ludus-enterprise-plugin
