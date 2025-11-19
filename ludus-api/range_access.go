@@ -58,6 +58,7 @@ func GetRangeAccessibleUsers(rangeNumber int) []dto.ListRangeUsersResponseItem {
 	for _, userRecord := range userRecords {
 		result = append(result, dto.ListRangeUsersResponseItem{
 			UserID:     userRecord.GetString("userID"),
+			UserNumber: userRecord.GetInt("userNumber"),
 			Name:       userRecord.GetString("name"),
 			AccessType: "Direct",
 		})
@@ -83,6 +84,7 @@ func GetRangeAccessibleUsers(rangeNumber int) []dto.ListRangeUsersResponseItem {
 		for _, member := range groupRecord.ExpandedAll("members") {
 			result = append(result, dto.ListRangeUsersResponseItem{
 				UserID:     member.GetString("userID"),
+				UserNumber: member.GetInt("userNumber"),
 				Name:       member.GetString("name"),
 				AccessType: "Group Member",
 			})
@@ -90,6 +92,7 @@ func GetRangeAccessibleUsers(rangeNumber int) []dto.ListRangeUsersResponseItem {
 		for _, manager := range groupRecord.ExpandedAll("managers") {
 			result = append(result, dto.ListRangeUsersResponseItem{
 				UserID:     manager.GetString("userID"),
+				UserNumber: manager.GetInt("userNumber"),
 				Name:       manager.GetString("name"),
 				AccessType: "Group Manager",
 			})
