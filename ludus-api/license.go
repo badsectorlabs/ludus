@@ -29,6 +29,9 @@ const (
 	licenseAccount                 = "26f20308-539a-4d95-bdad-8edf70553cec"
 	licensePublicKey               = "a3d9ac19af50b558b22e634531caddfa6a41bbeaee3685d796c02bbcd93aef59"
 	binaryPublicKey                = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
+	ludusLicenseEnterprise         = "enterprise"
+	ludusLicenseCommunity          = "community"
+	ludusLicenseProfessional       = "professional"
 )
 
 func (s *Server) checkLicense() {
@@ -59,7 +62,7 @@ func (s *Server) checkLicense() {
 	if s.LicenseKey == "soon-tm" {
 		s.LicenseValid = true
 		s.LicenseMessage = "License active, expires: 2025-12-08 23:59:59, licensed to a brave beta tester"
-		s.LicenseType = "pro"
+		s.LicenseType = ludusLicenseProfessional
 		s.LicenseName = "A brave beta tester"
 		expiry, err := time.Parse("2006-01-02 15:04:05", "2025-12-08 23:59:59")
 		if err != nil {
