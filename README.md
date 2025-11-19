@@ -1,5 +1,3 @@
-# Ludus
-
 <div align="center">
   <a href="https://ludus.cloud"><img width="500px" src="docs/static/img/ludus-social-card.png" alt="Ludus"></a>
 </div>
