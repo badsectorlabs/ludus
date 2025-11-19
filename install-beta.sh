@@ -459,6 +459,11 @@ install_completions() {
 
     */bash)
       if [[ "$EUID" -eq 0 ]]; then
+        # Check for bash-completion package
+        if ! dpkg -l | grep bash-completion >/dev/null 2>&1; then
+          print_message "[+] bash-completion package not found. Installing..." "info"
+          DEBIAN_FRONTEND=noninteractive apt install -yq bash-completion
+        fi
         completionsdir=$(pkg-config --variable=completionsdir bash-completion 2>/dev/null || echo "/usr/share/bash-completion/completions")
         mkdir -p "$completionsdir"
         ludus completion bash > "$completionsdir/ludus"
