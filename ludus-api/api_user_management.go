@@ -226,6 +226,11 @@ func DeleteUser(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, "You cannot remove yourself")
 	}
 
+	// Don't allow the user to delete the root user
+	if userID == "ROOT" {
+		return JSONError(e, http.StatusBadRequest, "You cannot delete the root user")
+	}
+
 	var user models.User
 	userRecord, err := app.FindFirstRecordByData("users", "userID", userID)
 	if err != nil && err == sql.ErrNoRows {
@@ -346,11 +351,14 @@ func ListAllUsers(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error listing users: %v", err))
 	}
 
-	users := make([]dto.ListAllUsersResponseItem, len(usersRecords))
-	for i, userRecord := range usersRecords {
+	users := make([]dto.ListAllUsersResponseItem, 0)
+	for _, userRecord := range usersRecords {
+		if userRecord.GetString("userID") == "ROOT" {
+			continue
+		}
 		userModel := &models.User{}
 		userModel.SetProxyRecord(userRecord)
-		users[i] = dto.ListAllUsersResponseItem{
+		users = append(users, dto.ListAllUsersResponseItem{
 			Name:            userModel.Name(),
 			UserID:          userModel.UserId(),
 			UserNumber:      userModel.UserNumber(),
@@ -358,7 +366,7 @@ func ListAllUsers(e *core.RequestEvent) error {
 			DateLastActive:  userModel.LastActive().Time(),
 			IsAdmin:         userModel.IsAdmin(),
 			ProxmoxUsername: userModel.ProxmoxUsername(),
-		}
+		})
 	}
 	return e.JSON(http.StatusOK, users)
 }
@@ -380,12 +388,7 @@ func ListUser(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, response)
 }
 
-// PasswordReset - resets a user's proxmox password
-func PasswordReset(e *core.RequestEvent) error {
-	return JSONError(e, http.StatusInternalServerError, "Not implemented")
-}
-
-// PostCredentials - updates the users proxmox password
+// PostCredentials - updates the users Ludus and proxmox password
 func PostCredentials(e *core.RequestEvent) error {
 
 	var credsToUpdate dto.PostCredentialsRequest
@@ -406,6 +409,10 @@ func PostCredentials(e *core.RequestEvent) error {
 	}
 	user := &models.User{}
 	user.SetProxyRecord(userRecord)
+
+	if user.UserId() == "ROOT" {
+		return JSONError(e, http.StatusBadRequest, "You cannot update the password for the root user")
+	}
 
 	actingUser := e.Get("user").(*models.User)
 	if !actingUser.IsAdmin() && actingUser.UserId() != user.UserId() {

@@ -112,6 +112,11 @@ func containsSubstring(slice []string, target string) bool {
 // updates the VM and range data for the provided range using the provided proxmox client
 func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxClient *goproxmox.Client) error {
 
+	// Don't update the ROOT range, it is a special case and should not be updated as this function will persist it to the database
+	if targetRange.RangeId() == "ROOT" {
+		return nil
+	}
+
 	// If the range has already been updated this request, return early, no need to do it again.
 	rangeHasBeenUpdatedThisRequest := e.Get("rangeHasBeenUpdatedThisRequest")
 	if rangeHasBeenUpdatedThisRequest != nil && rangeHasBeenUpdatedThisRequest.(bool) {

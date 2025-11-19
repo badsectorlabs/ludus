@@ -499,13 +499,6 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
-		"PasswordReset",
-		http.MethodPost,
-		"/user/passwordreset",
-		PasswordReset,
-	},
-
-	{
 		"PostCredentials",
 		http.MethodPost,
 		"/user/credentials",
