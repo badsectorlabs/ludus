@@ -282,8 +282,8 @@ pages:
   script:
     - cd docs
     # Change the base URL as we are hosting the site straight off the root of the domain
-    - "sed -i \"s|baseUrl: '/docs/'|baseUrl: '/'|\" docusaurus.config.js"
-    - "sed -i \"s|/docs/|/|\" static/api/index.html"
+    - "sed -i \"s|baseUrl: '/ludus/'|baseUrl: '/'|\" docusaurus.config.js"
+    - "sed -i \"s|/ludus/|/|\" static/api/index.html"
     - yarn install
     - yarn build
     - rm -f ./build/video/*
