@@ -125,6 +125,9 @@ curl -fsSL https://deb.nodesource.com/setup_21.x | bash - && apt-get install -y 
 npm install --global yarn
 npm install --global bun
 
+# Install rclone for beta uploads to R2
+curl https://rclone.org/install.sh | sudo bash
+
 # Helpful to auto-load the key on login for troubleshooting
 echo 'if [ -f /opt/ludus/ci/.apikey-admin ]; then export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin); fi' >> /home/gitlab-runner/.bashrc
 echo 'if [ -f /opt/ludus/ci/.apikey-user ]; then export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user); fi' >> /home/gitlab-runner/.bashrc
