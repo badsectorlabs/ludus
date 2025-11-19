@@ -1700,35 +1700,31 @@ beta-release:
   variables:
     LUDUS_BUILD_TYPE: any-built
   rules:
-    - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_TAG =~ /beta/
-    # If "beta" is not in the tag, then we don't want to run this job
-    - if: $CI_COMMIT_TAG !~ /beta/
-      when: never
   script:
     - touch ludus_${CI_COMMIT_TAG}_checksums.txt
     - cd binaries
-    - sha256sum ludus-server >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_linux-amd64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_linux-arm64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_linux-arm >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_macOS-amd64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_macOS-arm64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_windows-amd64.exe >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_windows-386.exe >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_windows-arm64.exe >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-server >> ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_linux-amd64 >> ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_linux-arm64 >> ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_linux-arm >> ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_macOS-amd64 >> ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_macOS-arm64 >> ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_windows-amd64.exe >> ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_windows-386.exe >> ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-client_windows-arm64.exe >> ludus_${CI_COMMIT_TAG}_checksums.txt
     - echo "${CI_COMMIT_TAG}" > latest.txt
-    - export RCLONE_CONFIG_MY_R2_TYPE="s3"
-    - export RCLONE_CONFIG_MY_R2_PROVIDER="r2"
-    - export RCLONE_CONFIG_MY_R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
-    - export RCLONE_CONFIG_MY_R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
-    - export RCLONE_CONFIG_MY_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+    - export RCLONE_CONFIG_R2_TYPE="s3"
+    - export RCLONE_CONFIG_R2_PROVIDER="Cloudflare"
+    - export RCLONE_CONFIG_R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+    - export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+    - export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
     - echo "Uploading files to Cloudflare R2..."
-    - for file in $(ls -1 binaries); do
+    - for file in $(ls -1 .); do
         if [[ ${file} == "latest.txt" ]]; then
-          rclone copy ${file} r2:ludus-beta/${file}
+          rclone copy ${file} r2:ludus-beta/ --s3-no-check-bucket
         else
-          rclone copy ${file} r2:ludus-beta/${CI_COMMIT_TAG}/${file}
+          rclone copy ${file} r2:ludus-beta/${CI_COMMIT_TAG}/ --s3-no-check-bucket
         fi
       done
 
@@ -1743,9 +1739,7 @@ gitlab-upload:
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   rules:
-    - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_TAG =~ /beta/
-      when: never
+    - if: $CI_COMMIT_TAG !~ /beta/
   script:
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-server ${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}'
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}'
@@ -1781,9 +1775,7 @@ keygen-upload:
     LUDUS_BUILD_TYPE: any-built
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   rules:
-    - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_TAG =~ /beta/
-      when: never
+    - if: $CI_COMMIT_TAG !~ /beta/
   script:
     - THIS_VERSION=$(echo ${CI_COMMIT_TAG} | tr -d 'v')
     - curl -sSL https://raw.pkg.keygen.sh/keygen/cli/latest/install.sh | sudo sh
@@ -1828,9 +1820,7 @@ release:
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   when: manual
   rules:
-    - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_TAG =~ /beta/
-      when: never
+    - if: $CI_COMMIT_TAG !~ /beta/
   script:
     - wget "https://github.com/orhun/git-cliff/releases/download/v2.7.0/git-cliff-2.7.0-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/git-cliff.tar.gz
     - tar -xvzf /tmp/git-cliff.tar.gz -C /tmp
