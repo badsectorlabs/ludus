@@ -1552,7 +1552,21 @@ paths:
                 type: object
                 properties:
                   result:
-                    $ref: '#/components/schemas/UserAPIKeyObject'
+                    type: object
+                    properties:
+                      apiKey:
+                        type: string
+                        pattern: ^[a-zA-Z0-9!@#%^&*()_+\-=\[\]{}:\\|<>\/?]{40}$
+                        readOnly: true
+                        examples:
+                          - G0rO+G+8Zlu%CAEDyYC2ZdW3pBWW+alAJ2_tli1h
+                      userID:
+                        type: string
+                    x-apidog-refs: {}
+                    x-apidog-orders:
+                      - apiKey
+                      - userID
+                    x-apidog-ignore-properties: []
                 x-apidog-orders:
                   - result
                 x-apidog-ignore-properties: []
