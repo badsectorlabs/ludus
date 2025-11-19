@@ -53,6 +53,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		"ludus_testing_enabled": usersRange.TestingEnabled(),
 		// Tell ansible if we have an enterprise license
 		"ludus_enterprise_license": server.LicenseType == "enterprise" && server.LicenseValid,
+		"wireguard_port":           ServerConfiguration.WireguardPort,
 	}
 
 	// Merge userVars with any extraVars provided
