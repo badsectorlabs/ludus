@@ -168,6 +168,27 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		return se.Next()
 	})
 
+	// Make /admin serve the same content as /_ (the pocketbase admin UI)
+	// This code is copied from the PocketBase codebase with just the path changed, https://github.com/pocketbase/pocketbase/blob/1dc5e061b8bbc7374e99c3fe6f153db25e71f860/apis/serve.go#L80-L94
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.GET("/admin/{path...}", apis.Static(ui.DistDirFS, false)).
+			BindFunc(func(e *core.RequestEvent) error {
+				// ignore root path
+				if e.Request.PathValue(apis.StaticWildcardParam) != "" {
+					e.Response.Header().Set("Cache-Control", "max-age=1209600, stale-while-revalidate=86400")
+				}
+
+				// add a default CSP
+				if e.Response.Header().Get("Content-Security-Policy") == "" {
+					e.Response.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' http://127.0.0.1:* https://tile.openstreetmap.org data: blob:; connect-src 'self' http://127.0.0.1:* https://nominatim.openstreetmap.org; script-src 'self' 'sha256-GRUzBA7PzKYug7pqxv5rJaec5bwDCw1Vo6/IXwvD3Tc='")
+				}
+
+				return e.Next()
+			}).
+			Bind(apis.Gzip())
+		return se.Next()
+	})
+
 	// Simple whoami to test authentication
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		se.Router.GET(APIBasePath+"/whoami", func(e *core.RequestEvent) error {
