@@ -259,10 +259,14 @@ pages:
   stage: pages
   variables:
     LUDUS_BUILD_TYPE: any-built
+    PAGES_PREFIX: "" # No prefix by default (main)
   tags:
     - ludus-proxmox-runner
   rules:
     - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_TAG =~ /beta/
+      variables:
+        PAGES_PREFIX: 'beta'
     - if: $CI_COMMIT_MESSAGE =~ /\[build pages\]/
     - if: $CI_COMMIT_MESSAGE == "Automatic backup from Apidog"
       when: never
@@ -271,13 +275,15 @@ pages:
     - if: $CI_COMMIT_BRANCH == "main" # Only update public docs in the main branch
       changes:
         - "docs/**/*"
+  pages:  # specifies that this is a Pages job and publishes the default public directory
+    path_prefix: "$PAGES_PREFIX"
   retry:
     max: 2
   script:
     - cd docs
     # Change the base URL as we are hosting the site straight off the root of the domain
-    - "sed -i \"s|baseUrl: '/ludus/'|baseUrl: '/'|\" docusaurus.config.js"
-    - "sed -i \"s|/ludus/|/|\" static/api/index.html"
+    - "sed -i \"s|baseUrl: '/docs/'|baseUrl: '/'|\" docusaurus.config.js"
+    - "sed -i \"s|/docs/|/|\" static/api/index.html"
     - yarn install
     - yarn build
     - rm -f ./build/video/*
