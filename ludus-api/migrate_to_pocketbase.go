@@ -151,7 +151,7 @@ func migrateRangeFiles() {
 		}
 
 		// Create the range directory if it doesn't exist
-		err = os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, userRecord.Id), 0755)
+		err = os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, userRecord.Get("userID")), 0755)
 		if err != nil {
 			logger.Error(fmt.Sprintf("Error creating range directory for user %s: %v", userRecord.Get("userID"), err))
 			continue
