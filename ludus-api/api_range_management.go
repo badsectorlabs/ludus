@@ -27,6 +27,7 @@ const (
 	LudusRangeStateDestroyed     = "DESTROYED"
 	LudusRangeStateNeverDeployed = "NEVER DEPLOYED"
 	LudusRangeStateSuccess       = "SUCCESS"
+	ProxmoxPoolNameRegexString   = `^[A-Za-z][A-Za-z0-9_\-]*(\/[A-Za-z0-9_\-]+){0,2}$`
 )
 
 var ansibleTags = []string{"all", "access-control", "additional-tools", "allow-share-access", "assign-ip", "custom-choco", "custom-groups", "dcs", "debug", "dns-rewrites",
@@ -616,9 +617,9 @@ func CreateRange(e *core.RequestEvent) error {
 	}
 
 	// Validate the name is a valid proxmox pool name using regex
-	proxmoxPoolNameRegex := regexp.MustCompile(`^[A-Za-z0-9_\-]+(\/[A-Za-z0-9_\-]+){0,2}$`)
+	proxmoxPoolNameRegex := regexp.MustCompile(ProxmoxPoolNameRegexString)
 	if !proxmoxPoolNameRegex.MatchString(payload.RangeID) {
-		return JSONError(e, http.StatusBadRequest, "Range ID name must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or 'New_Range'). Use only letters, numbers, hyphens, and underscores.")
+		return JSONError(e, http.StatusBadRequest, "Range ID name must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or 'New_Range'). Use only letters, numbers, hyphens, and underscores. Must start with a letter.")
 	}
 
 	// Create a new resource pool for the range
