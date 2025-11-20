@@ -638,6 +638,7 @@ func CreateRange(e *core.RequestEvent) error {
 	// Create the range config file
 	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), 0755)
 	copyFileContents(fmt.Sprintf("%s/ansible/user-files/range-config.example.yml", ludusInstallPath), fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, payload.RangeID))
+	chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), "ludus")
 
 	// Create the range
 	rangeCollection, err := e.App.FindCollectionByNameOrId("ranges")
@@ -659,6 +660,7 @@ func CreateRange(e *core.RequestEvent) error {
 	if err != nil {
 		removePool(payload.RangeID)
 		manageVmbrInterfaceLocally(rangeNumber, false)
+		os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID))
 		return JSONError(e, http.StatusInternalServerError, "Unable to save range: "+err.Error())
 	}
 
@@ -666,17 +668,17 @@ func CreateRange(e *core.RequestEvent) error {
 	if payload.UserID != "" {
 		userRecord, err := e.App.FindFirstRecordByData("users", "userID", payload.UserID)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user: %v", err))
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Range created but user was not granted access. Error finding user: %v", err))
 		}
 		userRecord.Set("ranges+", rangeRecord.Id)
 		err = e.App.Save(userRecord)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+err.Error())
+			return JSONError(e, http.StatusInternalServerError, "Range created but user was not granted access. Unable to save user: "+err.Error())
 		}
 		// Give the user in proxmox permissions to the pool
 		err = giveUserAccessToPool(userRecord.GetString("proxmoxUsername"), "pam", payload.RangeID)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, "Unable to give user access to pool: "+err.Error())
+			return JSONError(e, http.StatusInternalServerError, "Range created but user was not granted access. Unable to give user access to pool: "+err.Error())
 		}
 	}
 
