@@ -1740,7 +1740,7 @@ gitlab-upload:
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   rules:
-    - if: $CI_COMMIT_TAG !~ /beta/
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /beta/
   script:
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-server ${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}'
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}'
@@ -1776,7 +1776,7 @@ keygen-upload:
     LUDUS_BUILD_TYPE: any-built
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   rules:
-    - if: $CI_COMMIT_TAG !~ /beta/
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /beta/
   script:
     - THIS_VERSION=$(echo ${CI_COMMIT_TAG} | tr -d 'v')
     - curl -sSL https://raw.pkg.keygen.sh/keygen/cli/latest/install.sh | sudo sh
@@ -1821,7 +1821,7 @@ release:
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   when: manual
   rules:
-    - if: $CI_COMMIT_TAG !~ /beta/
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /beta/
   script:
     - wget "https://github.com/orhun/git-cliff/releases/download/v2.7.0/git-cliff-2.7.0-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/git-cliff.tar.gz
     - tar -xvzf /tmp/git-cliff.tar.gz -C /tmp
