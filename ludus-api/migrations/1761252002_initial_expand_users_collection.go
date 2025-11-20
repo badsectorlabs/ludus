@@ -17,6 +17,7 @@ func init() {
 		// Only superusers can list, view, update, and delete users
 		usersCollection.ListRule = nil
 		usersCollection.ViewRule = nil
+		usersCollection.CreateRule = nil
 		usersCollection.UpdateRule = nil
 		usersCollection.DeleteRule = nil
 
