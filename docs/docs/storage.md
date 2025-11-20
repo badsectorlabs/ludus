@@ -10,13 +10,13 @@ By default Ludus uses the `Directory` storage type on top of an `ext4` filesyste
 ## Proxmox Storage Types
 
 | **Storage Type** | **Disk Format** | **Snapshots** | **Revert to any Snapshot** | **TPM Snapshots** | **Shared** | **Complexity** |
-|------------------|-----------------|---------------|----------------------------|-------------------|------------|----------------|
-| Directory        | qcow2           | ✅            | ✅                          | ❌ ([WIP](https://bugzilla.proxmox.com/show_bug.cgi?id=4693))               | ❌         | 😊              |
+|------------------|-----------------|:-------------:|:--------------------------:|:-----------------:|:----------:|:--------------:|
+| Directory        | qcow2           | ✅            | ✅                          | ✅ (PVE 9.1+)     | ❌         | 😊              |
 | LVM-thin         | raw             | ✅            | ✅                          | ✅                | ❌         | 🙂              |
 | ZFS              | raw             | ✅            | ❌                          | ✅                | ❌         | 😐              |
 | Cephfs           | raw             | ✅            | ✅                          | ✅                | ✅         | 🤯              |
 
-For single node Ludus deployments, `LVM-thin` + `raw` is probably the best way to configure your storage disks if you are comfortable configuring the disks after install. If you want to use "striped" (RAID0) for `LVM-thin` you must set it up using the CLI, not in the Proxmox webUI.
+For single node Ludus deployments, `Directory` + `qcow2` is the simplest way to configure your storage disks. If you want to use "striped" (RAID0) for `LVM-thin` you must set it up using the CLI, not in the Proxmox webUI.
 
 For clustered Ludus deployments, `Ceph` + `raw` is best, but requires at least three nodes, a dedicated high speed (10Gb/s+) network, and 1GB of RAM for every 1TB of used storage.
 
