@@ -178,3 +178,10 @@ func requireAuth(e *core.RequestEvent) error {
 	}
 	return e.Next()
 }
+
+func redirectBaseURLToUI(e *core.RequestEvent) error {
+	if e.Request.URL.Path == "/" {
+		return e.Redirect(http.StatusTemporaryRedirect, "/ui")
+	}
+	return e.Next()
+}

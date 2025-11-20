@@ -135,6 +135,12 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 
 	// Register all custom middleware. These will apply to every request.
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		// Redirect the base URL to the UI
+		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
+			Id:       "redirectBaseURLToUI",
+			Func:     redirectBaseURLToUI,
+			Priority: 999,
+		})
 		// API key authentication for the PocketBase API
 		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
 			Id:       "APIKeyAuthenticationMiddleware",
@@ -217,13 +223,8 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	return &app
 }
 
-func Index(e *core.RequestEvent) error {
-	return e.Redirect(http.StatusTemporaryRedirect, "/ui")
-}
-
 func RegisterRoutesWithPocketBase(se *core.ServeEvent, routes PocketBaseRoutes) {
 	// Redirect / to /ui
-	se.Router.GET("/", Index)
 	for _, route := range routes {
 		switch route.Method {
 		case http.MethodGet:
