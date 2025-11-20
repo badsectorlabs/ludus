@@ -54,7 +54,10 @@ func DeployRange(e *core.RequestEvent) error {
 		tags = deployBody.Tags
 	}
 
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 	user := e.Get("user").(*models.User)
 
 	// Make sure we aren't already in a "DEPLOYING" state
@@ -120,12 +123,14 @@ func DeleteRange(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-	err = updateRangeVMData(e, e.Get("range").(*models.Range), proxmoxClient)
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
+	err = updateRangeVMData(e, targetRange, proxmoxClient)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-	// Get the updated range
-	targetRange := e.Get("range").(*models.Range)
 
 	// Check if range has VMs
 	if targetRange.NumberOfVms() > 0 && !force {
@@ -177,13 +182,16 @@ func DeleteRange(e *core.RequestEvent) error {
 
 // DeleteRangeVMs - stops and deletes all range VMs (keeps range object in database)
 func DeleteRangeVMs(e *core.RequestEvent) error {
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 
 	logger.Debug("DeleteRangeVMs for range ID: " + usersRange.RangeId())
 
 	// Set range state to "DESTROYING"
 	usersRange.SetRangeState(LudusRangeStateDestroying)
-	err := e.App.Save(usersRange)
+	err = e.App.Save(usersRange)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
@@ -227,7 +235,10 @@ func DeleteRangeVMs(e *core.RequestEvent) error {
 
 // GetConfig - retrieves the current configuration of the range
 func GetConfig(e *core.RequestEvent) error {
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 	rangeConfig, err := GetFileContents(fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId()))
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
@@ -279,7 +290,10 @@ func GetRDP(e *core.RequestEvent) error {
 
 // GetLogs - retrieves the latest range logs
 func GetLogs(e *core.RequestEvent) error {
-	targetRange := e.Get("range").(*models.Range)
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId())
 	GetLogsFromFile(e, ansibleLogPath)
 	return nil
@@ -292,7 +306,10 @@ func GetSSHConfig(e *core.RequestEvent) error {
 
 // ListRange - lists range VMs, their power state, and their testing state
 func ListRange(e *core.RequestEvent) error {
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 
 	proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
 	if err != nil {
@@ -421,7 +438,10 @@ func ListAllRanges(e *core.RequestEvent) error {
 
 // PutConfig - updates the range config
 func PutConfig(e *core.RequestEvent) error {
-	targetRange := e.Get("range").(*models.Range)
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 
 	// Retrieve the 'force' field and convert it to boolean
 	forceStr := e.Request.FormValue("force")
@@ -493,7 +513,10 @@ func PutConfig(e *core.RequestEvent) error {
 }
 
 func GetAnsibleInventoryForRange(e *core.RequestEvent) error {
-	targetRange := e.Get("range").(*models.Range)
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 	targetUser := e.Get("user").(*models.User)
 
 	proxmoxTokenSecret, err := DecryptStringFromDatabase(targetUser.ProxmoxTokenSecret())
@@ -537,7 +560,10 @@ func GetAnsibleTagsForDeployment(e *core.RequestEvent) error {
 
 // Find the ansible process for this user and kill it
 func AbortAnsible(e *core.RequestEvent) error {
-	targetRange := e.Get("range").(*models.Range)
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 	targetUser := e.Get("user").(*models.User)
 
 	ansiblePidString, err := findAnsiblePidForUser(targetUser.ProxmoxUsername())
@@ -703,11 +729,11 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 	}
 
 	// Check if user already has access to this range
-	if actionVerb == "grant" && HasRangeAccess(userID, rangeNumber) {
+	if actionVerb == "grant" && HasRangeAccess(e, userID, rangeNumber) {
 		return JSONError(e, http.StatusConflict, fmt.Sprintf("User %s already has access to range %s", userID, rangeID))
 	}
 
-	if actionVerb == "revoke" && !HasRangeAccess(userID, rangeNumber) {
+	if actionVerb == "revoke" && !HasRangeAccess(e, userID, rangeNumber) {
 		return JSONError(e, http.StatusConflict, fmt.Sprintf("User %s does not have access to range %s", userID, rangeID))
 	}
 
@@ -810,7 +836,7 @@ func ListRangeUsers(e *core.RequestEvent) error {
 	}
 
 	user := e.Get("user").(*models.User)
-	userHasAccess := HasRangeAccess(user.UserId(), rangeNumber)
+	userHasAccess := HasRangeAccess(e, user.UserId(), rangeNumber)
 	if !userHasAccess && !user.IsAdmin() {
 		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You (%s) do not have access to range %s and cannot list users with access to it", user.UserId(), rangeID))
 	}

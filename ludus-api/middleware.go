@@ -1,6 +1,7 @@
 package ludusapi
 
 import (
+	"database/sql"
 	"fmt"
 	"ludusapi/models"
 	"net/http"
@@ -90,23 +91,6 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		return e.Next()
 	}
 
-	// Expand the user record to load relationships (works for both API key and JWT/session auth)
-	errs := e.App.ExpandRecord(e.Auth, []string{"ranges", "groups"}, nil)
-	if len(errs) > 0 {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error expanding user record: %v", errs))
-	}
-
-	// Load and store the user's ranges as proxy records
-	var userRanges []*models.Range
-	userRangesRecords := e.Auth.ExpandedAll("ranges")
-	for _, r := range userRangesRecords {
-		thisRange := &models.Range{}
-		thisRange.SetProxyRecord(r)
-		userRanges = append(userRanges, thisRange)
-	}
-	// Save the user's ranges to the context
-	e.Set("ranges", userRanges)
-
 	// Create a User proxy record and save it to the context
 	user := &models.User{}
 	user.SetProxyRecord(e.Auth)
@@ -115,15 +99,11 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	// Check if the user is requesting a specific range
 	rangeID := e.Request.URL.Query().Get("rangeID")
 	if rangeID != "" {
-		// Check if the user has access to this range by looking up the rangeID in the array of ranges in the user record
-		hasAccess := false
-		for _, r := range userRanges {
-			if r.RangeId() == rangeID {
-				hasAccess = true
-				break
-			}
+		rangeNumber, err := GetRangeNumberFromRangeID(rangeID)
+		if err != nil {
+			return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", rangeID, err))
 		}
-		if !hasAccess && !e.Auth.GetBool("isAdmin") {
+		if !HasRangeAccess(e, user.UserId(), rangeNumber) && !e.Auth.GetBool("isAdmin") {
 			return JSONError(e, http.StatusForbidden, fmt.Sprintf("User %s does not have access to range %s", e.Auth.GetString("userID"), rangeID))
 		}
 	} else {
@@ -150,12 +130,15 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 
 	// Get the range object to use for the remainder of the request
 	rawRangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
-	if err != nil {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found", rangeID))
+	if err != nil && err != sql.ErrNoRows {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding range: %v", err))
+	} else if err == sql.ErrNoRows {
+		logger.Debug(fmt.Sprintf("Range %s not found during middleware lookup, continuing with no range", rangeID))
+	} else {
+		rangeRecord := &models.Range{}
+		rangeRecord.SetProxyRecord(rawRangeRecord)
+		e.Set("range", rangeRecord)
 	}
-	rangeRecord := &models.Range{}
-	rangeRecord.SetProxyRecord(rawRangeRecord)
-	e.Set("range", rangeRecord)
 
 	return e.Next()
 }

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"ludusapi/dto"
-	"ludusapi/models"
 
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -23,7 +22,10 @@ func PowerAction(e *core.RequestEvent, action string) error {
 		return JSONError(e, http.StatusInternalServerError, "Unable to get proxmox client: "+err.Error())
 	}
 
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 
 	err = updateRangeVMData(e, usersRange, proxmoxClient)
 	if err != nil {

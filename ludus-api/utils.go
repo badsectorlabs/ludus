@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -300,7 +301,20 @@ func removeUserFromHostSystem(username string) error {
 }
 
 // HasRangeAccess checks if a user has access to a range through direct assignment or group membership
-func HasRangeAccess(userID string, rangeNumber int) bool {
+func HasRangeAccess(e *core.RequestEvent, userID string, rangeNumber int) bool {
+
+	// Check if we have done this lookup before for this request, and if so, use the cached result
+	cachedRangesUserHasAccessTo := e.Get("rangesUserHasAccessTo")
+	if cachedRangesUserHasAccessTo != nil {
+		accessibleRangesIntArray := cachedRangesUserHasAccessTo.([]int)
+		if slices.Contains(accessibleRangesIntArray, rangeNumber) {
+			return true
+		}
+		return false
+	}
+
+	rangesUserHasAccessTo := make([]int, 0)
+
 	// Check direct user-to-range assignment
 	userRecord, err := app.FindFirstRecordByData("users", "userID", userID)
 	if err != nil {
@@ -311,7 +325,7 @@ func HasRangeAccess(userID string, rangeNumber int) bool {
 	userRanges := userRecord.ExpandedAll("ranges")
 	for _, rangeRecord := range userRanges {
 		if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
-			return true
+			rangesUserHasAccessTo = append(rangesUserHasAccessTo, rangeRecord.GetInt("rangeNumber"))
 		}
 	}
 
@@ -335,12 +349,13 @@ func HasRangeAccess(userID string, rangeNumber int) bool {
 		app.ExpandRecord(groupRecord, []string{"ranges"}, nil)
 		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
 			if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
-				return true
+				rangesUserHasAccessTo = append(rangesUserHasAccessTo, rangeRecord.GetInt("rangeNumber"))
 			}
 		}
 	}
 
-	return false
+	e.Set("rangesUserHasAccessTo", rangesUserHasAccessTo)
+	return slices.Contains(rangesUserHasAccessTo, rangeNumber)
 }
 
 func mustGetUserFromRequest(e *core.RequestEvent) *models.User {
@@ -352,13 +367,13 @@ func mustGetUserFromRequest(e *core.RequestEvent) *models.User {
 	return userRecord
 }
 
-func mustGetRangeFromRequest(e *core.RequestEvent) *models.Range {
+func GetRange(e *core.RequestEvent) (*models.Range, error) {
 	rawRange := e.Get("range")
 	if rawRange == nil {
-		panic("Range not found in request context")
+		return nil, errors.New("a range is required for this request and was not found")
 	}
 	rangeRecord := rawRange.(*models.Range)
-	return rangeRecord
+	return rangeRecord, nil
 }
 
 // CreateDefaultUserRange creates a default range for a user and assigns direct access

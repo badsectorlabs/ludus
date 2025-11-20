@@ -3,7 +3,6 @@ package ludusapi
 import (
 	"fmt"
 	"ludusapi/dto"
-	"ludusapi/models"
 	"net/http"
 	"slices"
 
@@ -28,7 +27,10 @@ func Allow(e *core.RequestEvent) error {
 
 	var errorArray []dto.AllowResponseErrorsItem
 
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 
 	if !usersRange.TestingEnabled() {
 		return JSONError(e, http.StatusConflict, "testing not enabled for range "+usersRange.RangeId())
@@ -119,7 +121,10 @@ func Deny(e *core.RequestEvent) error {
 
 	var errorArray []dto.DenyResponseErrorsItem
 
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 
 	if !usersRange.TestingEnabled() {
 		return JSONError(e, http.StatusConflict, "Testing not enabled for range "+usersRange.RangeId())
@@ -179,7 +184,10 @@ func Deny(e *core.RequestEvent) error {
 
 // StartTesting - snapshot and enter testing state
 func StartTesting(e *core.RequestEvent) error {
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 
 	if usersRange.TestingEnabled() {
 		return JSONError(e, http.StatusConflict, "Testing already enabled")
@@ -198,7 +206,10 @@ func StartTesting(e *core.RequestEvent) error {
 
 // StopTesting - revert and exit testing state
 func StopTesting(e *core.RequestEvent) error {
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 
 	if !usersRange.TestingEnabled() {
 		return JSONError(e, http.StatusConflict, "Testing not enabled")
@@ -223,7 +234,10 @@ func StopTesting(e *core.RequestEvent) error {
 
 // UpdateVMs - update a VM/group of VMs based on a name provided in the POST body
 func UpdateVMs(e *core.RequestEvent) error {
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 
 	if usersRange.TestingEnabled() {
 		return JSONError(e, http.StatusConflict, "Testing is enabled; stop testing to update VMs")

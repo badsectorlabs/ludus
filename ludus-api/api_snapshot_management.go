@@ -2,7 +2,6 @@ package ludusapi
 
 import (
 	"ludusapi/dto"
-	"ludusapi/models"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,13 +25,15 @@ func GetSnapshots(e *core.RequestEvent) error {
 	snapshotsResponse := []dto.GetSnapshotsResponseSnapshotsItem{}
 	errorsResponse := []dto.GetSnapshotsResponseErrorsItem{}
 
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 	// Get VMIDs from query parameters
 	vmIDs := e.Request.URL.Query().Get("vmids")
 	if vmIDs == "" {
 		// We have no VMIDs, assume we want all VMs
 		updateRangeVMData(e, usersRange, goProxmoxClient)
-		usersRange := e.Get("range").(*models.Range)
 		allVMs, err := getVMsForRange(usersRange.RangeId())
 		if err != nil {
 			return JSONError(e, http.StatusInternalServerError, "Unable to get VMs for range: "+err.Error())
@@ -133,7 +134,10 @@ func CreateSnapshot(e *core.RequestEvent) error {
 		VmState:     payload.IncludeRAM,
 	}
 
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 	proxmoxGoClient, err := GetGoProxmoxClientForUserUsingToken(e)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Unable to get go proxmox client: "+err.Error())
@@ -204,7 +208,10 @@ func RollbackSnapshot(e *core.RequestEvent) error {
 
 	snapshotName := proxmox.SnapshotName(payload.Name)
 
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 
 	if len(payload.Vmids) == 0 {
 		updateRangeVMData(e, usersRange, proxmoxGoClient)
@@ -272,7 +279,10 @@ func RemoveSnapshot(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, "Unable to get go proxmox client: "+err.Error())
 	}
 
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 	var successArray []int64
 	var errors []dto.SnapshotsRemoveResponseErrorsItem
 

@@ -40,7 +40,10 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	}
 
 	user := e.Get("user").(*models.User)
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return "", err
+	}
 
 	accessGrantsArray := GetRangeAccessibleUsers(usersRange.RangeNumber())
 	userVars := map[string]interface{}{
@@ -228,7 +231,10 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 
 // A helper to keep function calls clean
 func RunRangeManagementAnsibleWithTag(e *core.RequestEvent, tag string, verbose bool, onlyRoles []string, limit string) (string, error) {
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return "", err
+	}
 
 	onlyRolesArray := removeEmptyStrings(onlyRoles)
 	extraVars := map[string]interface{}{"only_roles": onlyRolesArray}
@@ -375,7 +381,10 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 		Connection: "local",
 	}
 	user := e.Get("user").(*models.User)
-	usersRange := e.Get("range").(*models.Range)
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return "", err
+	}
 
 	accessGrantsArray := GetRangeAccessibleUsers(usersRange.RangeNumber())
 	userVars := map[string]interface{}{
@@ -438,7 +447,7 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 		playbook.Binary = ansibleBinary
 	}
 
-	err := playbook.Run(context.TODO())
+	err = playbook.Run(context.TODO())
 	if err != nil {
 		return buff.String(), fmt.Errorf("error running ansible playbook: %w", err)
 	}

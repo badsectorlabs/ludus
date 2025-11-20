@@ -217,12 +217,13 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	return &app
 }
 
-// Index is the index handler.
 func Index(e *core.RequestEvent) error {
-	return JSONResult(e, http.StatusOK, "Ludus Server "+LudusVersion+" - "+server.LicenseMessage)
+	return e.Redirect(http.StatusTemporaryRedirect, "/ui")
 }
 
 func RegisterRoutesWithPocketBase(se *core.ServeEvent, routes PocketBaseRoutes) {
+	// Redirect / to /ui
+	se.Router.GET("/", Index)
 	for _, route := range routes {
 		switch route.Method {
 		case http.MethodGet:
@@ -239,12 +240,16 @@ func RegisterRoutesWithPocketBase(se *core.ServeEvent, routes PocketBaseRoutes) 
 	}
 }
 
+func Version(e *core.RequestEvent) error {
+	return JSONResult(e, http.StatusOK, "Ludus Server "+LudusVersion+" - "+server.LicenseMessage)
+}
+
 var routes = PocketBaseRoutes{
 	{
-		"Index",
+		"Version",
 		http.MethodGet,
 		"/",
-		Index,
+		Version,
 	},
 
 	{

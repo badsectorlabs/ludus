@@ -3,7 +3,6 @@ package ludusapi
 import (
 	"encoding/json"
 	"fmt"
-	"ludusapi/models"
 	"os"
 	"regexp"
 	"slices"
@@ -163,7 +162,10 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 		return err
 	}
 
-	targetRange := e.Get("range").(*models.Range)
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 	// Check for duplicate vlan and ip_last_octet combinations
 	seenVLANAndIP := make(map[string]bool)
 	// Check that all vm_names and hostnames are unique

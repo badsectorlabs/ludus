@@ -15,14 +15,17 @@ import (
 func RunAccessControlPlaybook(e *core.RequestEvent, targetRange *models.Range) error {
 
 	// Since RunPlaybookWithTag will use the range in the context, we need to set it to the target range, and then restore it after we run the playbook
-	originalRange := e.Get("range").(*models.Range)
+	originalRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
 	defer func() {
 		e.Set("range", originalRange)
 	}()
 
 	e.Set("range", targetRange)
 
-	_, err := RunPlaybookWithTag(e, "range-access.yml", "", false)
+	_, err = RunPlaybookWithTag(e, "range-access.yml", "", false)
 	if err != nil {
 		return err
 	}

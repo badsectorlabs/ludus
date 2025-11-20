@@ -349,7 +349,7 @@ func AddRangeToGroup(e *core.RequestEvent) error {
 	}
 
 	// Check if the acting user has access to the range they want to add to the group
-	if !HasRangeAccess(user.UserId(), rangeObj.RangeNumber()) && !user.IsAdmin() {
+	if !HasRangeAccess(e, user.UserId(), rangeObj.RangeNumber()) && !user.IsAdmin() {
 		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You do not have access to range %s and cannot add it to group %s", rangeObj.RangeId(), group.Name()))
 	}
 
