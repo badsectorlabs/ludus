@@ -25,6 +25,121 @@ tags:
   - name: Group Management
   - name: Migration
 paths:
+  /diagnostics:
+    get:
+      summary: Diagnostics
+      deprecated: false
+      description: >-
+        Get system information that can be helpful for debugging issues with
+        Ludus.
+      operationId: diagnostics
+      tags: []
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cpu:
+                    type: object
+                    properties:
+                      cores:
+                        type: integer
+                        x-apidog-mock: '16'
+                      model:
+                        type: string
+                        x-apidog-mock: AMD Ryzen 7 8845HS w/ Radeon 780M Graphics
+                    x-apidog-orders:
+                      - cores
+                      - model
+                    x-apidog-ignore-properties: []
+                  storage_pools:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          x-apidog-mock: local
+                        type:
+                          type: string
+                          x-apidog-mock: dir
+                        size:
+                          type: integer
+                          x-apidog-mock: '1966606663680'
+                        free:
+                          type: integer
+                          x-apidog-mock: '376010477568'
+                        disk_type:
+                          type: string
+                          x-apidog-mock: nvme
+                      x-apidog-orders:
+                        - name
+                        - type
+                        - size
+                        - free
+                        - disk_type
+                      x-apidog-ignore-properties: []
+                x-apidog-orders:
+                  - cpu
+                  - storage_pools
+                x-apidog-ignore-properties: []
+              example:
+                cpu:
+                  cores: 16
+                  model: AMD Ryzen 7 8845HS w/ Radeon 780M Graphics
+                storage_pools:
+                  - name: ''
+                    type: dir
+                    size: 1966606663680
+                    free: 376010477568
+                    disk_type: unknown
+          headers: {}
+          x-apidog-name: Success
+      security:
+        - JWT: []
+          x-apidog:
+            schemeGroups:
+              - id: GsLxs9h7xv12TxRBN12L_
+                schemeIds:
+                  - JWT
+              - id: XVEYlHAEiZeje6By6g1Mk
+                schemeIds:
+                  - ApiKeyAuth
+            required: true
+            use:
+              id: XVEYlHAEiZeje6By6g1Mk
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
+            scopes: {}
+        - ApiKeyAuth: []
+          x-apidog:
+            schemeGroups:
+              - id: GsLxs9h7xv12TxRBN12L_
+                schemeIds:
+                  - JWT
+              - id: XVEYlHAEiZeje6By6g1Mk
+                schemeIds:
+                  - ApiKeyAuth
+            required: true
+            use:
+              id: XVEYlHAEiZeje6By6g1Mk
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
+            scopes: {}
+      x-apidog-folder: Host Management
+      x-apidog-status: developing
+      x-apidog-maintainer: Erik Hunstad
+      x-run-in-apidog: https://app.apidog.com/web/project/1126461/apis/api-24493298-run
   /:
     get:
       summary: Retrieve the ludus version
@@ -86,7 +201,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -100,7 +219,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Host Management
       x-apidog-status: released
@@ -137,7 +260,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -151,7 +278,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Host Management
       x-apidog-status: released
@@ -227,7 +358,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -241,7 +376,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Ansible Management
       x-apidog-status: released
@@ -368,7 +507,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -382,7 +525,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Ansible Management
       x-apidog-status: released
@@ -506,7 +653,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -520,7 +671,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Ansible Management
       x-apidog-status: released
@@ -648,7 +803,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -662,7 +821,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Ansible Management
       x-apidog-status: released
@@ -1026,7 +1189,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1040,7 +1207,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: User Management
       x-apidog-status: released
@@ -1096,7 +1267,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1110,7 +1285,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: User Management
       x-apidog-status: released
@@ -1223,7 +1402,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1237,7 +1420,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: User Management
       x-apidog-status: released
@@ -1285,7 +1472,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1299,74 +1490,15 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: User Management
       x-apidog-status: released
       x-run-in-apidog: https://app.apidog.com/web/project/1126461/apis/api-24251973-run
-  /user/passwordreset:
-    post:
-      summary: Reset a user's proxmox password
-      deprecated: false
-      description: |
-        Resets a user's proxmox password.
-        This action is only available to admins.
-      operationId: passwordReset
-      tags:
-        - User Management
-      parameters: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              properties:
-                userID:
-                  $ref: '#/components/schemas/userID'
-              x-apidog-orders:
-                - userID
-              type: object
-              x-apidog-ignore-properties: []
-      responses:
-        '201':
-          description: user credentials updated
-          headers: {}
-          x-apidog-name: Created
-        '400':
-          description: invalid input, object invalid
-          headers: {}
-          x-apidog-name: Bad Request
-      security:
-        - JWT: []
-          x-apidog:
-            schemeGroups:
-              - id: GsLxs9h7xv12TxRBN12L_
-                schemeIds:
-                  - JWT
-              - id: XVEYlHAEiZeje6By6g1Mk
-                schemeIds:
-                  - ApiKeyAuth
-            required: true
-            use:
-              id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
-            scopes: {}
-        - ApiKeyAuth: []
-          x-apidog:
-            schemeGroups:
-              - id: GsLxs9h7xv12TxRBN12L_
-                schemeIds:
-                  - JWT
-              - id: XVEYlHAEiZeje6By6g1Mk
-                schemeIds:
-                  - ApiKeyAuth
-            required: true
-            use:
-              id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
-            scopes: {}
-      x-apidog-folder: User Management
-      x-apidog-status: released
-      x-run-in-apidog: https://app.apidog.com/web/project/1126461/apis/api-24251974-run
   /user/credentials:
     get:
       summary: Get proxmox creds for a user
@@ -1420,7 +1552,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1434,17 +1570,21 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: User Management
       x-apidog-status: released
       x-run-in-apidog: https://app.apidog.com/web/project/1126461/apis/api-24251975-run
     post:
-      summary: Set the proxmox creds for the user
+      summary: Set the Ludus and Proxmox creds for the user
       deprecated: false
       description: >
-        Set the proxmox password for a user. userID is optional and only can be
-        set
+        Set the Ludus and proxmox password for a user. userID is optional and
+        only can be set
 
         to other user's userIDs by admins.
       operationId: postCredentials
@@ -1467,6 +1607,7 @@ paths:
                 - proxmoxPassword
               type: object
               x-apidog-ignore-properties: []
+            examples: {}
       responses:
         '200':
           description: proxmox credentials for the user
@@ -1501,7 +1642,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1515,7 +1660,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: User Management
       x-apidog-status: released
@@ -1589,7 +1738,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1603,7 +1756,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: User Management
       x-apidog-status: released
@@ -1646,7 +1803,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1660,7 +1821,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: User Management
       x-apidog-status: released
@@ -1733,7 +1898,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1747,7 +1916,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: User Management
       x-apidog-status: released
@@ -1819,7 +1992,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1833,7 +2010,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -1939,7 +2120,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -1953,7 +2138,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -2027,7 +2216,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -2041,7 +2234,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -2117,7 +2314,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -2131,7 +2332,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -2179,7 +2384,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -2193,7 +2402,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -2242,7 +2455,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -2256,7 +2473,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -2386,7 +2607,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -2400,7 +2625,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -2488,7 +2717,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -2502,7 +2735,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -2581,7 +2818,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -2595,7 +2836,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -2714,7 +2959,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -2728,7 +2977,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -2874,7 +3127,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -2888,7 +3145,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -3005,7 +3266,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3019,7 +3284,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -3076,7 +3345,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3090,7 +3363,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -3170,7 +3447,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3184,7 +3465,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -3273,7 +3558,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3287,7 +3576,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -3374,7 +3667,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3388,7 +3685,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -3438,7 +3739,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3452,7 +3757,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -3508,7 +3817,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3522,7 +3835,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -3563,10 +3880,13 @@ paths:
                         - Direct
                         - Group Member
                         - Group Manager
+                    userNumber:
+                      type: integer
                   x-apidog-orders:
                     - userID
                     - name
                     - accessType
+                    - userNumber
                   x-apidog-ignore-properties: []
           headers: {}
           x-apidog-name: OK
@@ -3583,7 +3903,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3597,7 +3921,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -3679,7 +4007,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3693,7 +4025,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Range Management
       x-apidog-status: released
@@ -3793,7 +4129,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3807,7 +4147,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Power State Management
       x-apidog-status: released
@@ -3907,7 +4251,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -3921,7 +4269,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Power State Management
       x-apidog-status: released
@@ -3992,7 +4344,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -4006,7 +4362,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Testing State Management
       x-apidog-status: released
@@ -4093,7 +4453,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -4107,7 +4471,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Testing State Management
       x-apidog-status: released
@@ -4212,7 +4580,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -4226,7 +4598,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Testing State Management
       x-apidog-status: released
@@ -4332,7 +4708,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -4346,7 +4726,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Testing State Management
       x-apidog-status: released
@@ -4435,7 +4819,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -4449,7 +4837,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Testing State Management
       x-apidog-status: released
@@ -4621,7 +5013,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -4635,7 +5031,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Anti-Sandbox Management
       x-apidog-status: released
@@ -4701,7 +5101,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -4715,7 +5119,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Anti-Sandbox Management
       x-apidog-status: released
@@ -4780,7 +5188,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -4794,7 +5206,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Anti-Sandbox Management
       x-apidog-status: released
@@ -4851,7 +5267,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -4865,7 +5285,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Template Management
       x-apidog-status: released
@@ -4974,7 +5398,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -4988,7 +5416,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Template Management
       x-apidog-status: released
@@ -5081,7 +5513,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -5095,7 +5531,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Template Management
       x-apidog-status: released
@@ -5230,7 +5670,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -5244,7 +5688,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Template Management
       x-apidog-status: released
@@ -5321,7 +5769,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -5335,7 +5787,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Template Management
       x-apidog-status: released
@@ -5448,7 +5904,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -5462,7 +5922,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Template Management
       x-apidog-status: released
@@ -5520,7 +5984,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -5534,7 +6002,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Template Management
       x-apidog-status: released
@@ -5629,7 +6101,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -5643,7 +6119,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Snapshot Management
       x-apidog-status: released
@@ -5730,7 +6210,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -5744,7 +6228,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Snapshot Management
       x-apidog-status: released
@@ -5853,7 +6341,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -5867,7 +6359,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Snapshot Management
       x-apidog-status: released
@@ -5975,7 +6471,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -5989,7 +6489,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Snapshot Management
       x-apidog-status: released
@@ -6051,7 +6555,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6065,7 +6573,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: KMS Management
       x-apidog-status: released
@@ -6177,7 +6689,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6191,7 +6707,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: KMS Management
       x-apidog-status: released
@@ -6260,7 +6780,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6274,7 +6798,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Group Management
       x-apidog-status: released
@@ -6329,7 +6857,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6343,7 +6875,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Group Management
       x-apidog-status: released
@@ -6386,7 +6922,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6400,7 +6940,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Group Management
       x-apidog-status: released
@@ -6456,7 +7000,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6470,7 +7018,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Group Management
       x-apidog-status: released
@@ -6519,7 +7071,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6533,7 +7089,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Group Management
       x-apidog-status: released
@@ -6583,7 +7143,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6597,7 +7161,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Group Management
       x-apidog-status: released
@@ -6646,7 +7214,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6660,7 +7232,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Group Management
       x-apidog-status: released
@@ -6720,7 +7296,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6734,7 +7314,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Group Management
       x-apidog-status: released
@@ -6779,7 +7363,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6793,16 +7381,20 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Group Management
       x-apidog-status: released
       x-run-in-apidog: https://app.apidog.com/web/project/1126461/apis/api-24252031-run
   /migrate/sqlite:
     post:
-      summary: Migrate SQLite to PostgreSQL
+      summary: Migrate SQLite to PocketBase
       deprecated: false
-      description: Migrates Ludus data from SQLite to PostgreSQL.
+      description: Migrates Ludus data from SQLite to PocketBase.
       operationId: migrateSQLiteToPostgreSQL
       tags:
         - Migration
@@ -6829,7 +7421,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
         - ApiKeyAuth: []
           x-apidog:
@@ -6843,7 +7439,11 @@ paths:
             required: true
             use:
               id: XVEYlHAEiZeje6By6g1Mk
-              configs: {}
+              configs:
+                ApiKeyAuth:
+                  authConfigs:
+                    x-apidog:
+                      value: '{{X-API-KEY}}'
             scopes: {}
       x-apidog-folder: Migration
       x-apidog-status: released
@@ -7309,7 +7909,11 @@ security:
       required: true
       use:
         id: XVEYlHAEiZeje6By6g1Mk
-        configs: {}
+        configs:
+          ApiKeyAuth:
+            authConfigs:
+              x-apidog:
+                value: '{{X-API-KEY}}'
       scopes: {}
   - ApiKeyAuth: []
     x-apidog:
@@ -7323,5 +7927,9 @@ security:
       required: true
       use:
         id: XVEYlHAEiZeje6By6g1Mk
-        configs: {}
+        configs:
+          ApiKeyAuth:
+            authConfigs:
+              x-apidog:
+                value: '{{X-API-KEY}}'
       scopes: {}
