@@ -94,6 +94,7 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	// Create a User proxy record and save it to the context
 	user := &models.User{}
 	user.SetProxyRecord(e.Auth)
+	e.App.ExpandRecord(e.Auth, []string{"ranges", "groups"}, nil)
 	e.Set("user", user)
 
 	// Check if the user is requesting a specific range

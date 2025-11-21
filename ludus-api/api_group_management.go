@@ -370,7 +370,7 @@ func AddRangeToGroup(e *core.RequestEvent) error {
 			errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), err)
 		}
 		if isDeployed {
-			errorString = fmt.Sprintf("Range %s is deployed and access cannot be granted to group %s", rangeObj.RangeId(), group.Name())
+			errorString = fmt.Sprintf("Range %s is deployed and access cannot be granted to group %s. Make sure the router is powered on and accessible.", rangeObj.RangeId(), group.Name())
 		}
 		if errorString != "" {
 			group.Set("ranges-", rangeObj.Id)

@@ -130,7 +130,7 @@ func AddUser(e *core.RequestEvent) error {
 			}
 		}()
 
-		// Create a default range for the user using the new utility function, also creates a UserRangeAccess record
+		// Create a default range for the user using the new utility function, also add the range to the user's ranges relationship and sets the user's default range ID
 		err := CreateDefaultUserRange(e, txApp, user)
 		if err != nil {
 			wasError = true
