@@ -281,7 +281,7 @@ var groupsRangesCmd = &cobra.Command{
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		var data dto.ListGroupRangesResponse
+		var data []dto.ListGroupRangesResponseItem
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
@@ -292,7 +292,7 @@ var groupsRangesCmd = &cobra.Command{
 		table.SetHeader([]string{"Range Number", "Range ID", "Name", "Number of VMs", "Testing Enabled"})
 
 		// Add data to table
-		for _, rangeObj := range data.Result {
+		for _, rangeObj := range data {
 			table.Append([]string{
 				fmt.Sprintf("%d", rangeObj.RangeNumber),
 				rangeObj.RangeID,

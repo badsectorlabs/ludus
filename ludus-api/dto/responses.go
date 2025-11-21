@@ -248,9 +248,6 @@ type ListGroupMembersResponseItem struct {
 	UserID string `json:"userID,omitempty"`
 	Role   string `json:"role,omitempty"`
 }
-type ListGroupRangesResponse struct {
-	Result []ListGroupRangesResponseItem `json:"result,omitempty"`
-}
 type ListGroupRangesResponseItem struct {
 	NumberOfVMs    int32                                `json:"numberOfVMs"`
 	AllowedIPs     []string                             `json:"allowedIPs,omitempty"`

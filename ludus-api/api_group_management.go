@@ -524,9 +524,6 @@ func ListGroupRanges(e *core.RequestEvent) error {
 			Name:           rangeRecord.Name(),
 		})
 	}
-	response := dto.ListGroupRangesResponse{
-		Result: ranges,
-	}
-	return e.JSON(http.StatusOK, response)
+	return e.JSON(http.StatusOK, ranges)
 
 }
