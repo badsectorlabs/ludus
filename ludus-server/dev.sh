@@ -104,6 +104,8 @@ else
     systemctl unset-environment LUDUS_DEBUG_PROXMOX
 fi
 
+systemctl set-environment LUDUS_ENABLE_SUPERADMIN=ill-be-careful
+
 ./ludus-server --update --no-dep-update
 
 echo
