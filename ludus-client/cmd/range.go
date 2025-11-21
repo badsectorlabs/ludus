@@ -253,6 +253,81 @@ func setupRangeConfigSet(command *cobra.Command) {
 	command.Flags().BoolVar(&force, "force", false, "force the configuration to be updated, even with testing enabled")
 }
 
+var rangeDefaultCmd = &cobra.Command{
+	Use:   "default",
+	Short: "Get or set the default range ID for a user",
+	Long:  ``,
+}
+
+var rangeDefaultGetCmd = &cobra.Command{
+	Use:   "get",
+	Short: "Get the default range ID for a user",
+	Long:  ``,
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		var responseJSON []byte
+		var success bool
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/default-range"))
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+
+		// Unmarshal JSON data
+		var data dto.GetOrPostDefaultRangeIDResponse
+		err := json.Unmarshal([]byte(responseJSON), &data)
+		if err != nil {
+			logger.Logger.Fatal(err.Error())
+		}
+
+		if userID == "" {
+			userID = strings.Split(apiKey, ".")[0]
+		}
+
+		logger.Logger.Infof("Default range ID for user %s is: %s", userID, data.DefaultRangeID)
+	},
+}
+
+var rangeDefaultSetCmd = &cobra.Command{
+	Use:   "set [rangeID]",
+	Short: "Set the default range ID for a user",
+	Long:  ``,
+	Args:  cobra.RangeArgs(0, 1),
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		if len(args) == 1 {
+			rangeID = args[0]
+		}
+
+		if rangeID == "" {
+			logger.Logger.Fatal("rangeID is required. Use -r <rangeID> to specify the range ID.")
+		}
+
+		requestBody := &dto.PostDefaultRangeIDRequest{
+			DefaultRangeID: rangeID,
+		}
+		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/user/default-range"), requestBody)
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+
+		// Unmarshal JSON data
+		var data dto.GetOrPostDefaultRangeIDResponse
+		err := json.Unmarshal([]byte(responseJSON), &data)
+		if err != nil {
+			logger.Logger.Fatal(err.Error())
+		}
+
+		if userID == "" {
+			userID = strings.Split(apiKey, ".")[0]
+		}
+
+		logger.Logger.Infof("Default range ID for user %s has been set to %s", userID, data.DefaultRangeID)
+	},
+}
+
 type DeployBody struct {
 	Tags      string   `json:"tags"`
 	Force     bool     `json:"force"`
@@ -842,6 +917,9 @@ func init() {
 	setupDestroyVmsCmd(rangeDestroyVmsCmd)
 	rangeCmd.AddCommand(rangeDestroyVmsCmd)
 	rangeCmd.AddCommand(rangeConfigCmd)
+	rangeDefaultCmd.AddCommand(rangeDefaultGetCmd)
+	rangeDefaultCmd.AddCommand(rangeDefaultSetCmd)
+	rangeCmd.AddCommand(rangeDefaultCmd)
 	setupRangeAnsibleInventoryCmd(rangeAnsibleInventoryCmd)
 	rangeCmd.AddCommand(rangeAnsibleInventoryCmd)
 	rangeCmd.AddCommand(rangeGetTags)

@@ -512,6 +512,20 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"GetDefaultRangeID",
+		http.MethodGet,
+		"/user/default-range",
+		GetDefaultRangeID,
+	},
+
+	{
+		"SetDefaultRangeID",
+		http.MethodPost,
+		"/user/default-range",
+		SetDefaultRangeID,
+	},
+
+	{
 		"ListAllUsers",
 		http.MethodGet,
 		"/user/all",

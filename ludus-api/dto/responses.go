@@ -115,6 +115,9 @@ type GetCredentialsResponseResult struct {
 	ProxmoxPassword string `json:"proxmoxPassword,omitempty"`
 	LudusEmail      string `json:"ludusEmail,omitempty"`
 }
+type GetOrPostDefaultRangeIDResponse struct {
+	DefaultRangeID string `json:"defaultRangeID"`
+}
 type GetEtcHostsResponse struct {
 	Result string `json:"result,omitempty"`
 }
@@ -368,4 +371,34 @@ type SnapshotsTakeResponseErrorsItem struct {
 }
 type UpdateResponse struct {
 	Result string `json:"result,omitempty"`
+}
+
+type GetDiagnosticsResponse struct {
+	CPU          GetDiagnosticsResponseCPU           `json:"cpu"`
+	StoragePools []GetDiagnosticsResponseStoragePool `json:"storage_pools"`
+	Pveperf      GetDiagnosticsResponsePveperf       `json:"pveperf"`
+}
+
+type GetDiagnosticsResponseCPU struct {
+	Model string `json:"model"`
+	Cores int    `json:"cores"`
+}
+
+type GetDiagnosticsResponseStoragePool struct {
+	Name           string  `json:"name"`
+	Type           string  `json:"type"`
+	SizeGB         float64 `json:"size_gb"`
+	UsedGB         float64 `json:"used_gb"`
+	FreeGB         float64 `json:"free_gb"`
+	FreePercentage float64 `json:"free_percentage"`
+}
+
+type GetDiagnosticsResponsePveperf struct {
+	CPUBogomips     float64 `json:"cpu_bogomips"`
+	RegexPerSecond  int64   `json:"regex_per_second"`
+	HdSize          string  `json:"hd_size"`
+	BufferedReads   string  `json:"buffered_reads"`
+	AverageSeekTime string  `json:"average_seek_time"`
+	FsyncsPerSecond float64 `json:"fsyncs_per_second"`
+	DNSExt          string  `json:"dns_ext"`
 }

@@ -81,6 +81,9 @@ type PostCredentialsRequest struct {
 	ProxmoxPassword string `json:"proxmoxPassword,omitempty"`
 	UserID          string `json:"userID,omitempty"`
 }
+type PostDefaultRangeIDRequest struct {
+	DefaultRangeID string `json:"defaultRangeID"`
+}
 type PowerOffRangeRequest struct {
 	Machines []string `json:"machines,omitempty"`
 }

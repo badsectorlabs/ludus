@@ -339,6 +339,55 @@ func GetWireguardConfig(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, response)
 }
 
+// GetDefaultRangeID - retrieves the default range ID for the user
+func GetDefaultRangeID(e *core.RequestEvent) error {
+	user := e.Get("user").(*models.User)
+	defaultRangeID := user.DefaultRangeId()
+	if defaultRangeID == "" {
+		return JSONError(e, http.StatusNotFound, "User has no default range")
+	}
+	response := dto.GetOrPostDefaultRangeIDResponse{
+		DefaultRangeID: defaultRangeID,
+	}
+	return e.JSON(http.StatusOK, response)
+}
+
+// SetDefaultRangeID - sets the default range ID for the user
+func SetDefaultRangeID(e *core.RequestEvent) error {
+	user := e.Get("user").(*models.User)
+
+	var setDefaultRangeJSON dto.PostDefaultRangeIDRequest
+	e.BindBody(&setDefaultRangeJSON)
+
+	if setDefaultRangeJSON.DefaultRangeID == "" {
+		return JSONError(e, http.StatusBadRequest, "defaultRangeID is required")
+	}
+
+	// Validate that the range exists
+	rangeNumber, err := GetRangeNumberFromRangeID(setDefaultRangeJSON.DefaultRangeID)
+	if err != nil {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", setDefaultRangeJSON.DefaultRangeID, err))
+	}
+
+	// Check that the user has access to this range (unless admin)
+	if !user.IsAdmin() && !HasRangeAccess(e, user.UserId(), rangeNumber) {
+		return JSONError(e, http.StatusForbidden, fmt.Sprintf("User %s does not have access to range %s", user.UserId(), setDefaultRangeJSON.DefaultRangeID))
+	}
+
+	// Update the user's default range ID
+	user.SetDefaultRangeId(setDefaultRangeJSON.DefaultRangeID)
+	err = app.Save(user)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to set defaultRangeID for user %s: %v", user.UserId(), err))
+	}
+
+	response := dto.GetOrPostDefaultRangeIDResponse{
+		DefaultRangeID: setDefaultRangeJSON.DefaultRangeID,
+	}
+
+	return e.JSON(http.StatusOK, response)
+}
+
 // ListAllUsers - lists all users
 func ListAllUsers(e *core.RequestEvent) error {
 
