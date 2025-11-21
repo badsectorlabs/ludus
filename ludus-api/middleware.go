@@ -186,3 +186,10 @@ func redirectBaseURLToUI(e *core.RequestEvent) error {
 	}
 	return e.Next()
 }
+
+func restrictPocketBaseEndpoints(e *core.RequestEvent) error {
+	if strings.HasPrefix(e.Request.URL.Path, "/_") && os.Getenv("LUDUS_ENABLE_SUPERADMIN") != "ill-be-careful" {
+		return JSONError(e, http.StatusForbidden, "Superadmin access is disabled. Enable it by setting the LUDUS_ENABLE_SUPERADMIN environment variable to 'ill-be-careful'.")
+	}
+	return e.Next()
+}

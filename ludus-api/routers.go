@@ -135,6 +135,12 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 
 	// Register all custom middleware. These will apply to every request.
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		// Restrict access to the PocketBase admin API
+		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
+			Id:       "restrictPocketBaseEndpoints",
+			Func:     restrictPocketBaseEndpoints,
+			Priority: 998,
+		})
 		// Redirect the base URL to the UI
 		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
 			Id:       "redirectBaseURLToUI",
