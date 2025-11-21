@@ -688,4 +688,12 @@ var routes = PocketBaseRoutes{
 		"/migrate/sqlite",
 		MigrateSQLiteToPocketBaseHandler,
 	},
+
+	// Diagnostics route
+	{
+		"GetDiagnostics",
+		http.MethodGet,
+		"/diagnostics",
+		GetDiagnostics,
+	},
 }
