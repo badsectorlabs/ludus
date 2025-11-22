@@ -61,11 +61,11 @@ func getInstallStep(existingProxmox bool) {
 		}
 		// We need to write the canary file if not on an existing proxmox install no matter if this is interactive or not
 		if !existingProxmox {
-			debainInstallFile, err := os.Create(fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath))
+			debianInstallFile, err := os.Create(fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath))
 			if err != nil {
 				log.Fatalf("Failed to create or touch the file %s: %s", fmt.Sprintf("%s/install/.installed-on-debian", ludusInstallPath), err)
 			}
-			debainInstallFile.Close()
+			debianInstallFile.Close()
 		}
 	}
 }
