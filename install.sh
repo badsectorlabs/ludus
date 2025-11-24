@@ -446,6 +446,10 @@ install_completions() {
       mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/zsh/completions"
       ludus completion zsh > "${XDG_CONFIG_HOME:-$HOME/.config}/zsh/completions/_ludus"
       print_message "[+] Installed zsh completion file" "ok"
+
+      # guard against bash interpreting the script
+      : ${fpath:=}
+
       if [[ ! "$fpath" == *"${XDG_CONFIG_HOME:-$HOME/.config}/zsh/completions"* ]]; then
         print_message "[+] To enable, add the following to your .zshrc:" "info"
         echo
@@ -731,23 +735,25 @@ main() {
       { [[ "${EUID}" != "0" ]] && [[ ! -f "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/ludus" ]]; }; }; then
 
     print_message "[?] Would you like to install shell completions so tab works with the 'ludus' command?" "warn"
-    
-    if [[ "$SHELL" == "/bin/zsh" ]]; then
-      print_message "[?] (y/n): " "warn"
-      read -r completions_response </dev/tty
-    else
-      read -r -p "[?] (y/n): " completions_response </dev/tty
-    fi
-    
-    case "${completions_response}" in
-      y|Y ) 
+
+    # initialize var so set -u does not explode
+    completions_response=""
+
+    # prompt
+    printf "%s" "[?] (y/n): " > /dev/tty
+
+    # read safely in all shells
+    read -r completions_response < /dev/tty
+
+    case "$completions_response" in
+      y|Y )
         print_message "[+] Installing Ludus completions" "info"
         install_completions
         ;;
-      n|N ) 
+      n|N )
         print_message "[+] Skipping Ludus completions installation" "info"
         ;;
-      * ) 
+      * )
         print_message "[-_-] Invalid response. Skipping Ludus completions installation" "error"
         ;;
     esac
