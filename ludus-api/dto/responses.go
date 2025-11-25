@@ -402,3 +402,9 @@ type GetDiagnosticsResponsePveperf struct {
 	FsyncsPerSecond float64 `json:"fsyncs_per_second"`
 	DNSExt          string  `json:"dns_ext"`
 }
+
+type GetConsoleWebsocketTicketResponse struct {
+	Ticket   string `json:"ticket"`
+	Password string `json:"password"`
+	Port     int    `json:"port"`
+}

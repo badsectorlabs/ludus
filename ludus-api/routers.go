@@ -220,9 +220,27 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		return se.Next()
 	})
 
+	// Serve the console test from the embedded filesystem
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		logger.Debug("Serving console test page at /console_test")
+		consolePageFSRoot, err := fs.Sub(consolePage, "console_page")
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error serving docs: %v", err))
+			return err
+		}
+		se.Router.GET("/console_test/{path...}", apis.Static(consolePageFSRoot, true))
+		return se.Next()
+	})
+
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		RegisterRoutesWithPocketBase(se, routes)
 		RegisterPluginPlaceholderRoutes(se)
+		return se.Next()
+	})
+
+	// A special handler for the websocket upgrade request since it isn't a GET/POST/PUT/PATCH/DELETE
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.Any("/vm/console/view", vmConsoleWebsocketHandler)
 		return se.Next()
 	})
 
@@ -709,5 +727,12 @@ var routes = PocketBaseRoutes{
 		http.MethodGet,
 		"/diagnostics",
 		GetDiagnostics,
+	},
+
+	{
+		"GetConsoleWebsocketTicket",
+		http.MethodGet,
+		"/vm/console/ticket",
+		getConsoleWebsocketTicket,
 	},
 }

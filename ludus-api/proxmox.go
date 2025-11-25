@@ -639,3 +639,23 @@ func getAllVMs(e *core.RequestEvent, ctx context.Context, client *goproxmox.Clie
 	e.Set("allVMs", allVMs)
 	return allVMs, nil
 }
+
+func findNodeForVM(ctx context.Context, client *goproxmox.Client, vmid uint64) (string, error) {
+	cluster, err := client.Cluster(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	resources, err := cluster.Resources(ctx, "vm")
+	if err != nil {
+		return "", err
+	}
+
+	for _, res := range resources {
+		if res.VMID == vmid {
+			return res.Node, nil
+		}
+	}
+
+	return "", fmt.Errorf("VMID %d not found in cluster", vmid)
+}
