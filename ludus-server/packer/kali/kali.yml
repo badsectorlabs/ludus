@@ -81,7 +81,7 @@
 
     - name: Download kasmvnc deb
       ansible.builtin.get_url:
-        url: https://github.com/kasmtech/KasmVNC/releases/download/v1.3.2/kasmvncserver_kali-rolling_1.3.2_amd64.deb
+        url: https://github.com/kasmtech/KasmVNC/releases/download/v1.4.0/kasmvncserver_kali-rolling_1.4.0_amd64.deb
         dest: /tmp/kasmvncserver_kali-rolling.deb
         mode: '0700'
 
@@ -164,6 +164,10 @@
 
           pointer:
             enabled: true
+
+          security:
+            brute_force_protection:
+              blacklist_threshold: 0
 
     - name: Create a service for kasmvnc
       become: true
