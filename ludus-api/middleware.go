@@ -39,20 +39,6 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusUnauthorized, "Invalid API key")
 	}
 
-	// Check if the request path has a ?userID= parameter
-	requestedUserID := e.Request.URL.Query().Get("userID")
-	if requestedUserID != "" && requestedUserID != userID {
-		// If the user specified in the API key is an admin, impersonate the user specified in the ?userID= parameter
-		if record.GetBool("isAdmin") {
-			record, err = e.App.FindFirstRecordByData("users", "userID", requestedUserID)
-			if err != nil {
-				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("User %s from query parameter not found", requestedUserID))
-			}
-		} else {
-			return JSONError(e, http.StatusUnauthorized, "You are not an admin and cannot impersonate other users")
-		}
-	}
-
 	// Set this request as authenticated
 	// Note: The user record will be expanded in userAndRangesLookupMiddleware
 	e.Auth = record
@@ -91,24 +77,21 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		return e.Next()
 	}
 
-	// By default, use the user record from the authentication token or the record set by the API key authentication middleware
+	// By default, use the user record from the authentication token
 	userRecord := e.Auth
 
-	// If an API key was not used, and there is a userID query parameter, use the userID to set the user in the context
+	// If there is a userID query parameter, and the userID is different from the userID of the authenticated user,
+	// use the userID to set the user in the context if the authenticated user is an admin
 	requestedUserID := e.Request.URL.Query().Get("userID")
-	if e.Request.Header.Get("X-API-KEY") == "" && requestedUserID != "" {
-		// Check if the user is trying to impersonate another user
-		if requestedUserID != e.Auth.GetString("userID") {
-			// If the user specified in the token is an admin, impersonate the user specified in the ?userID= parameter
-			if e.Auth.GetBool("isAdmin") {
-				var err error
-				userRecord, err = e.App.FindFirstRecordByData("users", "userID", requestedUserID)
-				if err != nil {
-					return JSONError(e, http.StatusBadRequest, fmt.Sprintf("User %s from query parameter not found", requestedUserID))
-				}
-			} else {
-				return JSONError(e, http.StatusUnauthorized, "You are not an admin and cannot impersonate other users")
+	if requestedUserID != "" && requestedUserID != e.Auth.GetString("userID") {
+		if e.Auth.GetBool("isAdmin") {
+			var err error
+			userRecord, err = e.App.FindFirstRecordByData("users", "userID", requestedUserID)
+			if err != nil {
+				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("User %s from query parameter not found", requestedUserID))
 			}
+		} else {
+			return JSONError(e, http.StatusUnauthorized, "You are not an admin and cannot impersonate other users")
 		}
 	}
 
