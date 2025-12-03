@@ -243,7 +243,7 @@ var groupsMembersCmd = &cobra.Command{
 			return
 		}
 
-		var data dto.ListGroupMembersResponse
+		var data []dto.ListGroupMembersResponseItem
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {
 			logger.Logger.Fatal(err)
@@ -254,7 +254,7 @@ var groupsMembersCmd = &cobra.Command{
 		table.SetHeader([]string{"UserID", "Name", "Role"})
 
 		// Add data to table
-		for _, user := range data.Result {
+		for _, user := range data {
 			table.Append([]string{user.UserID, user.Name, user.Role})
 		}
 

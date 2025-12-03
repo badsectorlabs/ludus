@@ -243,9 +243,7 @@ type ListAllUsersResponseItem struct {
 	IsAdmin         bool      `json:"isAdmin"`
 	ProxmoxUsername string    `json:"proxmoxUsername,omitempty"`
 }
-type ListGroupMembersResponse struct {
-	Result []ListGroupMembersResponseItem `json:"result,omitempty"`
-}
+
 type ListGroupMembersResponseItem struct {
 	Name   string `json:"name,omitempty"`
 	UserID string `json:"userID,omitempty"`

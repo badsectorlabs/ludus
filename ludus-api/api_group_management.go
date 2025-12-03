@@ -471,10 +471,7 @@ func ListGroupMembers(e *core.RequestEvent) error {
 			Role:   "manager",
 		})
 	}
-	response := dto.ListGroupMembersResponse{
-		Result: membersAndManagersArray,
-	}
-	return e.JSON(http.StatusOK, response)
+	return e.JSON(http.StatusOK, membersAndManagersArray)
 }
 
 // ListGroupRanges lists ranges accessible to a group (admin only)
