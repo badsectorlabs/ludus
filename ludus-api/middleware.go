@@ -43,7 +43,7 @@ func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 	requestedUserID := e.Request.URL.Query().Get("userID")
 	if requestedUserID != "" && requestedUserID != userID {
 		// If the user specified in the API key is an admin, impersonate the user specified in the ?userID= parameter
-		if record.Get("isAdmin").(bool) {
+		if record.GetBool("isAdmin") {
 			record, err = e.App.FindFirstRecordByData("users", "userID", requestedUserID)
 			if err != nil {
 				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("User %s from query parameter not found", requestedUserID))
@@ -91,10 +91,31 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		return e.Next()
 	}
 
+	// By default, use the user record from the authentication token or the record set by the API key authentication middleware
+	userRecord := e.Auth
+
+	// If an API key was not used, and there is a userID query parameter, use the userID to set the user in the context
+	requestedUserID := e.Request.URL.Query().Get("userID")
+	if e.Request.Header.Get("X-API-KEY") == "" && requestedUserID != "" {
+		// Check if the user is trying to impersonate another user
+		if requestedUserID != e.Auth.GetString("userID") {
+			// If the user specified in the token is an admin, impersonate the user specified in the ?userID= parameter
+			if e.Auth.GetBool("isAdmin") {
+				var err error
+				userRecord, err = e.App.FindFirstRecordByData("users", "userID", requestedUserID)
+				if err != nil {
+					return JSONError(e, http.StatusBadRequest, fmt.Sprintf("User %s from query parameter not found", requestedUserID))
+				}
+			} else {
+				return JSONError(e, http.StatusUnauthorized, "You are not an admin and cannot impersonate other users")
+			}
+		}
+	}
+
 	// Create a User proxy record and save it to the context
 	user := &models.User{}
-	user.SetProxyRecord(e.Auth)
-	e.App.ExpandRecord(e.Auth, []string{"ranges", "groups"}, nil)
+	user.SetProxyRecord(userRecord)
+	e.App.ExpandRecord(userRecord, []string{"ranges", "groups"}, nil)
 	e.Set("user", user)
 
 	// Check if the user is requesting a specific range
