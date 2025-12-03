@@ -735,4 +735,11 @@ var routes = PocketBaseRoutes{
 		"/vm/console/ticket",
 		getConsoleWebsocketTicket,
 	},
+
+	{
+		"DestroyVM",
+		http.MethodDelete,
+		"/vm/{vmID}",
+		DestroyVM,
+	},
 }
