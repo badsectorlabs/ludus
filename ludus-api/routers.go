@@ -128,7 +128,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 				logger.Error(fmt.Sprintf("Error serving docs: %v", err))
 				return err
 			}
-			se.Router.GET("/docs/{path...}", apis.Static(docsFSRoot, true))
+			se.Router.GET("/ludus/{path...}", apis.Static(docsFSRoot, true))
 			return se.Next()
 		})
 	}
