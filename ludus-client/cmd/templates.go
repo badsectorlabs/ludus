@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/olekukonko/tablewriter"
@@ -49,8 +48,9 @@ var templatesListCmd = &cobra.Command{
 		}
 
 		type TemplateStatus struct {
-			Name  string
-			Built bool
+			Name   string
+			Built  bool
+			Status string
 		}
 		var templateStatusArray []TemplateStatus
 		err := json.Unmarshal(responseJSON, &templateStatusArray)
@@ -60,10 +60,20 @@ var templatesListCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Template", "Built"})
+		table.SetHeader([]string{"Template", "Status"})
 
 		for _, template := range templateStatusArray {
-			table.Append([]string{template.Name, strings.ToUpper(strconv.FormatBool(template.Built))})
+			var statusString string
+			if template.Status == "building" {
+				statusString = "🚧 BUILDING"
+			} else {
+				if template.Built {
+					statusString = "✅ BUILT"
+				} else {
+					statusString = "❌ NOT BUILT"
+				}
+			}
+			table.Append([]string{template.Name, statusString})
 		}
 
 		// Print table

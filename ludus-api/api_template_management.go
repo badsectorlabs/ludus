@@ -29,6 +29,7 @@ import (
 type TemplateStatus struct {
 	Name     string `json:"name"`
 	Built    bool   `json:"built"`
+	Status   string `json:"status"`
 	FilePath string `json:"-"`
 }
 
@@ -369,8 +370,19 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 		thisTemplateStatus.FilePath = templateFile
 		if slices.Contains(templates, thisTemplateName) {
 			thisTemplateStatus.Built = true
+			thisTemplateStatus.Status = "built"
 		} else {
 			thisTemplateStatus.Built = false
+			thisTemplateStatus.Status = "not_built"
+			// Check if the template is being built by a user using the command manager
+			commandManager := commandmanager.GetInstance()
+			commands := commandManager.GetAllCommands()
+			for _, command := range commands {
+				if command.Metadata["command_type"] == "packer_build" && command.Metadata["template_name"] == thisTemplateName {
+					thisTemplateStatus.Status = "building"
+					break
+				}
+			}
 		}
 		templateStatusArray = append(templateStatusArray, thisTemplateStatus)
 	}
@@ -382,6 +394,7 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 			thisTemplateStatus.Name = templateVM
 			thisTemplateStatus.FilePath = "None"
 			thisTemplateStatus.Built = true
+			thisTemplateStatus.Status = "built"
 			templateStatusArray = append(templateStatusArray, thisTemplateStatus)
 		}
 	}
