@@ -238,12 +238,6 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		return se.Next()
 	})
 
-	// A special handler for the websocket upgrade request since it isn't a GET/POST/PUT/PATCH/DELETE
-	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		se.Router.Any("/vm/console/view", vmConsoleWebsocketHandler)
-		return se.Next()
-	})
-
 	return &app
 }
 
@@ -734,6 +728,13 @@ var routes = PocketBaseRoutes{
 		http.MethodGet,
 		"/vm/console/ticket",
 		getConsoleWebsocketTicket,
+	},
+
+	{
+		"GetConsoleWebsocketView",
+		http.MethodGet,
+		"/vm/console/view",
+		vmConsoleWebsocketHandler,
 	},
 
 	{

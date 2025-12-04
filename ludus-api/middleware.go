@@ -150,7 +150,7 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 
 // This function makes sure the request is to a user endpoint if the server is running as root (i.e. :8081)
 func limitRootEndpoints(e *core.RequestEvent) error {
-	logger.Debug(fmt.Sprintf("Request URL: %s", e.Request.URL.Path))
+	logger.Debug(fmt.Sprintf("Request: %s %s", e.Request.Method, e.Request.URL.Path))
 	if os.Geteuid() == 0 &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") &&
@@ -179,8 +179,10 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 }
 
 func requireAuth(e *core.RequestEvent) error {
-	// Check auth for all endpoints in our base path
-	if e.Auth == nil && strings.HasPrefix(e.Request.URL.Path, APIBasePath) {
+	// Check auth for all endpoints in our base path except the console view endpoint
+	// /vm/console/view is used for a WebSocket connection and requires a valid ticket
+	// The JS websocket library doesn't support custom headers, so we exempt it from the auth check
+	if e.Auth == nil && strings.HasPrefix(e.Request.URL.Path, APIBasePath) && !strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/vm/console/view") {
 		return JSONError(e, http.StatusUnauthorized, "Authentication failed. Provide a valid API key in the X-API-KEY header or a valid JWT token in the Authorization header.")
 	}
 	return e.Next()

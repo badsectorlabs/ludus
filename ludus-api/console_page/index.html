@@ -114,7 +114,7 @@
                 // Force WSS because server is TLS
                 const host = window.location.hostname;
                 const port = window.location.port;
-                const url = `wss://${host}:${port}/vm/console/view?ticket=${encodeURIComponent(ticket)}`;
+                const url = `wss://${host}:${port}/api/v2/vm/console/view?ticket=${encodeURIComponent(ticket)}`;
 
                 rfb = new RFB(document.getElementById('screen'), url, {
                     credentials: { password: password },
