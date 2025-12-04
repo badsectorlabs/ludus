@@ -130,6 +130,10 @@ func Untar(tarFile, destDir string) error {
 				return fmt.Errorf("failed to create directory: %w", err)
 			}
 		case tar.TypeReg: // Regular file
+			// Check if the file starts with '._' and if so, skip it (these are macOS hidden files)
+			if strings.HasPrefix(filepath.Base(header.Name), "._") {
+				continue
+			}
 			// Create the directory for the file (may be the first file deeply nested in a dir)
 			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 				return fmt.Errorf("failed to create directory: %w", err)

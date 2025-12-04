@@ -635,7 +635,7 @@ func PutTemplateTar(e *core.RequestEvent) error {
 		if removeErr != nil {
 			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr))
 		}
-		return JSONError(e, http.StatusInternalServerError, "More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar!")
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar: %v", uploadedTemplatePackerFiles))
 	} else {
 		// Check the name of this template to see if it is already on the server - templates must have unique names
 		templateStringRegex, _ := regexp.Compile(templateRegex)
