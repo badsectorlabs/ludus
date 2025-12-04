@@ -14,6 +14,7 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/security"
 )
 
 var UserIDRegex = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
@@ -52,9 +53,13 @@ func AddUser(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, fmt.Sprintf("%s is a reserved user ID", addUserJSON.UserID))
 	}
 
-	// Validate there is an email and password
-	if addUserJSON.Email == "" || addUserJSON.Password == "" {
-		return JSONError(e, http.StatusBadRequest, "Email and password are required")
+	// Validate there is an email
+	if addUserJSON.Email == "" {
+		return JSONError(e, http.StatusBadRequest, "Email is required")
+	}
+
+	if addUserJSON.Password == "" {
+		addUserJSON.Password = security.RandomString(15)
 	}
 
 	// Check that the password is at least 8 characters long

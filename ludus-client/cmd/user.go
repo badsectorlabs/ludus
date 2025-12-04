@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"ludus/logger"
 	"ludus/rest"
 	"os"
@@ -13,17 +15,86 @@ import (
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
-	userName             string
-	newUserID            string
-	email                string
-	userIsAdmin          bool
-	proxmoxPassword      string
-	enablePortforwarding bool
-	password             string
+	userName        string
+	newUserID       string
+	email           string
+	userIsAdmin     bool
+	proxmoxPassword string
+	password        string
+	askPassword     bool
 )
+
+// readPasswordWithAsterisks reads a password from stdin, displaying asterisks for each character typed
+func readPasswordWithAsterisks() (string, error) {
+	fd := int(os.Stdin.Fd())
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return "", err
+	}
+
+	var password strings.Builder
+	reader := bufio.NewReader(os.Stdin)
+	newlinePrinted := false
+
+	// Ensure terminal is restored and newline is printed on exit
+	defer func() {
+		term.Restore(fd, oldState)
+		if !newlinePrinted && password.Len() > 0 {
+			fmt.Println()
+		}
+	}()
+
+	for {
+		char, err := reader.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				// EOF reached - will be handled by defer
+				break
+			}
+			return "", err
+		}
+
+		// Handle Enter/Return (CR or LF)
+		if char == '\r' || char == '\n' {
+			// Restore terminal state before printing newline
+			term.Restore(fd, oldState)
+			fmt.Println()
+			newlinePrinted = true
+			break
+		}
+
+		// Handle backspace/delete
+		if char == 127 || char == 8 { // DEL or BS
+			if password.Len() > 0 {
+				// Remove last character from password
+				currentPassword := password.String()
+				password.Reset()
+				password.WriteString(currentPassword[:len(currentPassword)-1])
+				// Move cursor back, print space, move cursor back again
+				fmt.Print("\b \b")
+			}
+			continue
+		}
+
+		// Handle Ctrl+C
+		if char == 3 {
+			term.Restore(fd, oldState)
+			fmt.Println() // Print newline even on interrupt
+			newlinePrinted = true
+			return "", fmt.Errorf("interrupted")
+		}
+
+		// Regular character - add to password and print asterisk
+		password.WriteByte(char)
+		fmt.Print("*")
+	}
+
+	return password.String(), nil
+}
 
 // usersCmd represents the users command
 var usersCmd = &cobra.Command{
@@ -233,21 +304,29 @@ var usersAddCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		// Check that the password is at least 8 characters long
-		if len(password) < 8 {
+		if askPassword {
+			fmt.Print("Enter password for the user: ")
+			passwordInput, err := readPasswordWithAsterisks()
+			if err != nil {
+				logger.Logger.Fatal("Failed to read password: " + err.Error())
+			}
+			password = passwordInput
+		}
+
+		// Check that the password is at least 8 characters long if it is not blank
+		if password != "" && len(password) < 8 {
 			logger.Logger.Fatal("Password must be at least 8 characters long")
 		}
 
 		logger.Logger.Info("Adding user to Ludus, this can take up to a minute. Please wait.")
 
-		requestBody := fmt.Sprintf(`{
-			"name": "%s",
-			"password": "%s",
-			"email": "%s",
-			"userID": "%s",
-			"isAdmin": %s,
-			"portforwardingEnabled": %s
-		  }`, userName, password, email, newUserID, strconv.FormatBool(userIsAdmin), strconv.FormatBool(enablePortforwarding))
+		requestBody := &dto.AddUserRequest{
+			Name:     userName,
+			Password: password,
+			Email:    email,
+			UserID:   newUserID,
+			IsAdmin:  userIsAdmin,
+		}
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/user"), requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
@@ -279,12 +358,12 @@ func setupUsersAddCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the new user (2-20 chars, typically capitalized initials)")
 	command.Flags().StringVarP(&userName, "name", "n", "", "the name of the user (typically 'first last')")
 	command.Flags().BoolVarP(&userIsAdmin, "admin", "a", false, "set this flag to make the user an admin of Ludus")
-	command.Flags().StringVarP(&password, "password", "p", "", "the password for the user (must be at least 8 characters long)")
+	command.Flags().StringVarP(&password, "password", "P", "", "the password for the user (must be at least 8 characters long, omit to generate a random password, password will be captured in terminal history - use -p to prompt for the password)")
+	command.Flags().BoolVarP(&askPassword, "password-ask", "p", false, "prompt for the password for the user")
 	command.Flags().StringVarP(&email, "email", "e", "", "the email for the user")
 	_ = command.MarkFlagRequired("email")
 	_ = command.MarkFlagRequired("userid")
 	_ = command.MarkFlagRequired("name")
-	_ = command.MarkFlagRequired("password")
 }
 
 var usersDeleteCmd = &cobra.Command{
