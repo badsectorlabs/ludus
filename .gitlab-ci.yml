@@ -263,10 +263,11 @@ pages:
   tags:
     - ludus-proxmox-runner
   rules:
-    - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_TAG =~ /beta/
       variables:
         PAGES_PREFIX: 'beta'
+    - if: $CI_COMMIT_TAG
+
     - if: $CI_COMMIT_MESSAGE =~ /\[build pages\]/
     - if: $CI_COMMIT_MESSAGE == "Automatic backup from Apidog"
       when: never
@@ -372,12 +373,15 @@ build all:
         fi
         TAGS="embedwebui"
       fi
-    - cd ludus-gui
-    - bun install
-    - bun next telemetry disable
-    - NODE_ENV=production bun run build
-    - mv out ../ludus-api/webUI
-    - cd ..
+    - |
+      if [[ -n ${LUDUS_WEBUI_GITLAB_TOKEN+x} ]]; then
+        cd ludus-gui
+        bun install
+        bun next telemetry disable
+        NODE_ENV=production bun run build
+        mv out ../ludus-api/webUI
+        cd ..
+      fi
     - cd ludus-server
     - | # If we have docs from the previous stage, embed them, otherwise build without docs
       if [[ -d ../built-docs ]]; then
@@ -1702,7 +1706,6 @@ beta-release:
   rules:
     - if: $CI_COMMIT_TAG =~ /beta/
   script:
-    - touch ludus_${CI_COMMIT_TAG}_checksums.txt
     - cd binaries
     - sha256sum ludus-server >> ludus_${CI_COMMIT_TAG}_checksums.txt
     - sha256sum ludus-client_linux-amd64 >> ludus_${CI_COMMIT_TAG}_checksums.txt
