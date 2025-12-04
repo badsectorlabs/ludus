@@ -26,6 +26,7 @@ var (
 	proxmoxPassword string
 	password        string
 	askPassword     bool
+	deleteRange     bool
 )
 
 // readPasswordWithAsterisks reads a password from stdin, displaying asterisks for each character typed
@@ -377,8 +378,46 @@ var usersDeleteCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
+		deleteURL := buildURLWithRangeAndUserID(fmt.Sprintf("/user/%s", newUserID))
 
-		responseJSON, success = rest.GenericDelete(client, buildURLWithRangeAndUserID(fmt.Sprintf("/user/%s", newUserID)))
+		// If --delete-range flag is set, try to get the user's default range and confirm deletion
+		if deleteRange {
+			// Get the default range for the user being deleted, set the userID to the new userID to get the default range for the user being deleted
+			originalUserID := userID
+			userID = newUserID
+			responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/default-range"))
+			userID = originalUserID
+
+			var defaultRangeID string
+			if success {
+				// Unmarshal JSON data
+				var data dto.GetOrPostDefaultRangeIDResponse
+				err := json.Unmarshal([]byte(responseJSON), &data)
+				if err == nil {
+					defaultRangeID = data.DefaultRangeID
+				}
+			}
+
+			// Show warning and ask for confirmation
+			var choice string
+			if defaultRangeID != "" {
+				logger.Logger.Warnf(`
+!!! WARNING: If you continue the range %s and any VMs it contains will be permanently deleted !!!
+
+Do you want to continue? (y/N): `, defaultRangeID)
+			} else {
+				logger.Logger.Fatalf("No default range found for user %s", newUserID)
+			}
+			fmt.Scanln(&choice)
+			if choice != "Y" && choice != "y" {
+				logger.Logger.Fatal("Bailing!")
+			}
+
+			// Add deleteDefaultRange=true to the URL
+			deleteURL = addQueryParameterToURL(deleteURL, "deleteDefaultRange", "true")
+		}
+
+		responseJSON, success = rest.GenericDelete(client, deleteURL)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -389,6 +428,7 @@ var usersDeleteCmd = &cobra.Command{
 
 func setupUsersDeleteCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the user to remove")
+	command.Flags().BoolVar(&deleteRange, "delete-range", false, "also delete the user's default range and any VMs it contains")
 	_ = command.MarkFlagRequired("userid")
 }
 

@@ -264,9 +264,27 @@ func DeleteUser(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing user from Proxmox: %v", err))
 	}
-	err = removePool(user.UserId())
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing pool from Proxmox: %v", err))
+
+	if e.Request.URL.Query().Get("deleteDefaultRange") == "true" {
+		// Get proxmox client and range object
+		proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, err.Error())
+		}
+		targetRangeRaw, err := app.FindFirstRecordByData("ranges", "rangeId", user.DefaultRangeId())
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding range: %v", err))
+		}
+		targetRange := &models.Range{}
+		targetRange.SetProxyRecord(targetRangeRaw)
+		err = updateRangeVMData(e, targetRange, proxmoxClient)
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, err.Error())
+		}
+		err = deleteRangeResources(targetRange, true, e)
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error deleting range resources: %v", err))
+		}
 	}
 	err = removeUserFromHostSystem(user.ProxmoxUsername())
 	if err != nil {

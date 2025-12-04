@@ -100,6 +100,55 @@ func DeployRange(e *core.RequestEvent) error {
 	return JSONResult(e, http.StatusOK, "Range deploy started")
 }
 
+// deleteRangeResources - performs the actual deletion of range resources (VMs, pool, vmbr, directory, database record)
+// This function can be reused in other places that need to delete a range.
+// It assumes the range object has already been updated with the latest VM data via updateRangeVMData.
+func deleteRangeResources(targetRange *models.Range, force bool, e *core.RequestEvent) error {
+	var err error
+
+	// If range has VMs and force is true, destroy VMs first
+	if targetRange.NumberOfVms() > 0 && force {
+		_, err = RunPlaybookWithTag(e, "power.yml", "destroy-range", false)
+		if err != nil {
+			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
+			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "Error with destroy-range\n")
+			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), fmt.Sprintf("%s\n", err.Error()))
+			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
+			targetRange.SetRangeState(LudusRangeStateError)
+			err = e.App.Save(targetRange)
+			if err != nil {
+				return fmt.Errorf("failed to save range state after destroy failure: %w", err)
+			}
+			return fmt.Errorf("failed to destroy range VMs: %w", err) // Don't remove the pool or range object if destroy fails
+		}
+	}
+
+	// Remove the Resource Pool from Proxmox (also removes all ACLs for the pool)
+	err = removePool(targetRange.RangeId())
+	if err != nil {
+		return fmt.Errorf("failed to remove pool: %w", err)
+	}
+
+	err = manageVmbrInterfaceLocally(targetRange.RangeNumber(), false)
+	if err != nil {
+		return fmt.Errorf("failed to manage vmbr interface: %w", err)
+	}
+
+	// Remove the range directory
+	err = os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, targetRange.RangeId()))
+	if err != nil {
+		return fmt.Errorf("failed to remove range directory: %w", err)
+	}
+
+	// Delete the range object from the database
+	err = e.App.Delete(targetRange)
+	if err != nil {
+		return fmt.Errorf("failed to delete range from database: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteRange - deletes a range object from the database and proxmox host
 func DeleteRange(e *core.RequestEvent) error {
 
@@ -118,7 +167,7 @@ func DeleteRange(e *core.RequestEvent) error {
 		}
 	}
 
-	// Update the range object to get the latest data
+	// Get proxmox client and range object
 	proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
@@ -127,52 +176,20 @@ func DeleteRange(e *core.RequestEvent) error {
 	if err != nil {
 		return err
 	}
+
+	// Check if range has VMs (before updating VM data to avoid unnecessary work)
+	// We need to update VM data first to get accurate count
 	err = updateRangeVMData(e, targetRange, proxmoxClient)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
 
-	// Check if range has VMs
 	if targetRange.NumberOfVms() > 0 && !force {
 		return JSONError(e, http.StatusConflict, "Range has VMs. Use --force to delete anyway")
 	}
 
-	// If range has VMs and force is true, destroy VMs first
-	if targetRange.NumberOfVms() > 0 && force {
-		_, err = RunPlaybookWithTag(e, "power.yml", "destroy-range", false)
-		if err != nil {
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "Error with destroy-range\n")
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), fmt.Sprintf("%s\n", err.Error()))
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
-			targetRange.SetRangeState(LudusRangeStateError)
-			err = e.App.Save(targetRange)
-			if err != nil {
-				return JSONError(e, http.StatusInternalServerError, err.Error())
-			}
-			return err // Don't remove the pool or range object if destroy fails
-		}
-	}
-
-	// Remove the Resource Pool from Proxmox (also removes all ACLs for the pool)
-	err = removePool(targetRange.RangeId())
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, err.Error())
-	}
-
-	err = manageVmbrInterfaceLocally(targetRange.RangeNumber(), false)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, err.Error())
-	}
-
-	// Remove the range directory
-	err = os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, targetRange.RangeId()))
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, err.Error())
-	}
-
-	// Delete the range object from the database
-	err = e.App.Delete(targetRange)
+	// Perform the actual deletion
+	err = deleteRangeResources(targetRange, force, e)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
