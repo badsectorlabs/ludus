@@ -108,7 +108,7 @@ type state int
 const (
 	statusNormal state = iota
 	stateDone
-	numberOfFields = 14 // 13 fields + 1 confirm, update this if you add any new fields
+	numberOfFields = 12 // 11 fields + 1 confirm, update this if you add any new fields
 )
 
 type Model struct {
@@ -261,18 +261,6 @@ func NewModel() Model {
 				Description("The default is 'local'").
 				Value(&config.ProxmoxISOStoragePool),
 
-			huh.NewInput().
-				Key("ludus_nat_interface").
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("Ludus NAT Interface cannot be empty")
-					}
-					return nil
-				}).
-				Title(fmt.Sprintf("What new interface will be used to NAT out of %s", config.ProxmoxInterface)).
-				Description("Default is 'vmbr1000' - don't change without a reason").
-				Value(&config.LudusNATInterface),
-
 			huh.NewConfirm().
 				Key("prevent_user_ansible_add").
 				Title("Should users be allowed to add ansible roles?").
@@ -283,14 +271,6 @@ func NewModel() Model {
 		),
 
 		huh.NewGroup(
-			huh.NewConfirm().
-				Key("expose_admin_port").
-				Title("Expose the admin API globally?").
-				Description("Default is 'deny' to listen on 127.0.0.1:8081").
-				Affirmative("Allow").
-				Negative("Deny").
-				Value(&config.ExposeAdminPort),
-
 			huh.NewInput().
 				Key("license_key").
 				Title("Do you have a Ludus license key?").
@@ -387,9 +367,7 @@ func (m Model) View() string {
 			proxmox_vm_storage_pool   string
 			proxmox_vm_storage_format string
 			proxmox_iso_storage_pool  string
-			ludus_nat_interface       string
 			prevent_user_ansible_add  string
-			expose_admin_port         string
 			license_key               string
 		)
 		if m.form.GetString("proxmox_node") != "" {
@@ -419,16 +397,9 @@ func (m Model) View() string {
 		if m.form.GetString("proxmox_iso_storage_pool") != "" {
 			proxmox_iso_storage_pool = "proxmox_iso_storage_pool: " + m.form.GetString("proxmox_iso_storage_pool")
 		}
-		if m.form.GetString("ludus_nat_interface") != "" {
-			ludus_nat_interface = "ludus_nat_interface: " + m.form.GetString("ludus_nat_interface")
-		}
 		if m.currentFieldIndex >= 11 || shouldShowAnsibleField {
 			prevent_user_ansible_add = "prevent_user_ansible_add: " + strconv.FormatBool(m.form.GetBool("prevent_user_ansible_add"))
 			shouldShowAnsibleField = true
-		}
-		if m.currentFieldIndex >= 12 || shouldShowAdminPortExpose {
-			expose_admin_port = "expose_admin_port: " + strconv.FormatBool(m.form.GetBool("expose_admin_port"))
-			shouldShowAdminPortExpose = true
 		}
 		if m.form.GetString("license_key") != "" {
 			license_key = "license_key: " + m.form.GetString("license_key")
@@ -459,9 +430,7 @@ func (m Model) View() string {
 					proxmox_vm_storage_pool + "\n" +
 					proxmox_vm_storage_format + "\n" +
 					proxmox_iso_storage_pool + "\n" +
-					ludus_nat_interface + "\n" +
 					prevent_user_ansible_add + "\n" +
-					expose_admin_port + "\n" +
 					license_key + "\n")
 		}
 
