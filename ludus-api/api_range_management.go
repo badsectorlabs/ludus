@@ -600,11 +600,11 @@ func CreateRange(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, "Invalid request body: "+err.Error())
 	}
 
-	// If UserID is provided, verify the user exists
-	if payload.UserID != "" {
-		_, err := e.App.FindFirstRecordByData("users", "userID", payload.UserID)
+	// If UserID array is provided, verify the users exist
+	for _, userID := range payload.UserID {
+		_, err := e.App.FindFirstRecordByData("users", "userID", userID)
 		if err != nil {
-			return JSONError(e, http.StatusNotFound, fmt.Sprintf("User not found: %v", err))
+			return e.JSON(http.StatusInternalServerError, dto.CreateRangeResponseError{Errors: []dto.CreateRangeResponseErrorItem{{UserID: userID, Error: fmt.Sprintf("Error finding user: %v", err)}}})
 		}
 	}
 
@@ -618,7 +618,7 @@ func CreateRange(e *core.RequestEvent) error {
 		// Check if range number is already in use
 		rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeNumber", payload.RangeNumber)
 		if err != nil && err != sql.ErrNoRows {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking if range number %d is already in use: %v", payload.RangeNumber, err))
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Error checking if range number %d is already in use: %v", payload.RangeNumber, err))
 		}
 		if rangeRecord != nil {
 			return JSONError(e, http.StatusConflict, fmt.Sprintf("Range number %d already in use", payload.RangeNumber))
@@ -636,7 +636,7 @@ func CreateRange(e *core.RequestEvent) error {
 	// Check if name is already in use
 	existingRange, err := e.App.FindFirstRecordByData("ranges", "rangeID", payload.RangeID)
 	if err != nil && err != sql.ErrNoRows {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking if range ID %s is already in use: %v", payload.RangeID, err))
+		return JSONError(e, http.StatusConflict, fmt.Sprintf("Error checking if range ID %s is already in use: %v", payload.RangeID, err))
 	}
 	if existingRange != nil {
 		return JSONError(e, http.StatusConflict, fmt.Sprintf("Range ID %s already in use", payload.RangeID))
@@ -645,20 +645,20 @@ func CreateRange(e *core.RequestEvent) error {
 	// Validate the name is a valid proxmox pool name using regex
 	proxmoxPoolNameRegex := regexp.MustCompile(ProxmoxPoolNameRegexString)
 	if !proxmoxPoolNameRegex.MatchString(payload.RangeID) {
-		return JSONError(e, http.StatusBadRequest, "Range ID name must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or 'New_Range'). Use only letters, numbers, hyphens, and underscores. Must start with a letter.")
+		return JSONError(e, http.StatusConflict, "Range ID name must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or 'New_Range'). Use only letters, numbers, hyphens, and underscores. Must start with a letter.")
 	}
 
 	// Create a new resource pool for the range
 	err = createPool(payload.RangeID)
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, "Unable to create resource pool: "+err.Error())
+		return JSONError(e, http.StatusConflict, "Unable to create resource pool: "+err.Error())
 	}
 
 	// Create the vmbr interface for the range
 	err = manageVmbrInterfaceLocally(rangeNumber, true)
 	if err != nil {
 		removePool(payload.RangeID)
-		return JSONError(e, http.StatusInternalServerError, "Unable to create vmbr interface: "+err.Error())
+		return JSONError(e, http.StatusConflict, "Unable to create vmbr interface: "+err.Error())
 	}
 
 	// Create the range config file
@@ -669,7 +669,7 @@ func CreateRange(e *core.RequestEvent) error {
 	// Create the range
 	rangeCollection, err := e.App.FindCollectionByNameOrId("ranges")
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, "Unable to find ranges collection: "+err.Error())
+		return JSONError(e, http.StatusConflict, "Unable to find ranges collection: "+err.Error())
 	}
 	rawRangeRecord := core.NewRecord(rangeCollection)
 	rangeRecord := &models.Ranges{}
@@ -687,28 +687,33 @@ func CreateRange(e *core.RequestEvent) error {
 		removePool(payload.RangeID)
 		manageVmbrInterfaceLocally(rangeNumber, false)
 		os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID))
-		return JSONError(e, http.StatusInternalServerError, "Unable to save range: "+err.Error())
+		return JSONError(e, http.StatusConflict, "Unable to save range: "+err.Error())
 	}
 
 	// If UserID was provided, create direct access record
-	if payload.UserID != "" {
-		userRecord, err := e.App.FindFirstRecordByData("users", "userID", payload.UserID)
+	errorArray := []dto.CreateRangeResponseErrorItem{}
+	for _, userID := range payload.UserID {
+		userRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Range created but user was not granted access. Error finding user: %v", err))
+			errorArray = append(errorArray, dto.CreateRangeResponseErrorItem{UserID: userID, Error: fmt.Sprintf("Error finding user: %v", err)})
 		}
 		userRecord.Set("ranges+", rangeRecord.Id)
 		err = e.App.Save(userRecord)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, "Range created but user was not granted access. Unable to save user: "+err.Error())
+			errorArray = append(errorArray, dto.CreateRangeResponseErrorItem{UserID: userID, Error: fmt.Sprintf("Unable to save user: %v", err)})
 		}
 		// Give the user in proxmox permissions to the pool
 		err = giveUserAccessToPool(userRecord.GetString("proxmoxUsername"), "pam", payload.RangeID)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, "Range created but user was not granted access. Unable to give user access to pool: "+err.Error())
+			errorArray = append(errorArray, dto.CreateRangeResponseErrorItem{UserID: userID, Error: fmt.Sprintf("Unable to give user access to pool: %v", err)})
 		}
 	}
 
-	return JSONResult(e, http.StatusCreated, "Range created successfully")
+	if len(errorArray) > 0 {
+		return e.JSON(http.StatusInternalServerError, dto.CreateRangeResponseError{Errors: errorArray})
+	}
+
+	return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s created successfully", payload.RangeID))
 }
 
 func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bool) error {

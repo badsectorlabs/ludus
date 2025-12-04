@@ -16,20 +16,20 @@ import (
 )
 
 var (
-	configFilePath string
-	tags           string
-	force          bool
-	rangeVerbose   bool
-	outputPath     string
-	noPrompt       bool
-	onlyRoles      string
-	limit          string
-	allRanges      bool
-	rangeID        string
-	description    string
-	purpose        string
-	userIDForRange string
-	rangeNumber    int32
+	configFilePath  string
+	tags            string
+	force           bool
+	rangeVerbose    bool
+	outputPath      string
+	noPrompt        bool
+	onlyRoles       string
+	limit           string
+	allRanges       bool
+	rangeID         string
+	description     string
+	purpose         string
+	userIDsForRange string
+	rangeNumber     int
 )
 
 var rangeCmd = &cobra.Command{
@@ -733,12 +733,33 @@ var rangeCreateCmd = &cobra.Command{
 			logger.Logger.Fatal("Name is required. Use --name or -n to specify the name.")
 		}
 
-		payload := RangeCreatePayload{
+		// Parse comma-separated user IDs into a slice
+		var userIDs []string
+		if userIDsForRange != "" {
+			userIDs = strings.Split(userIDsForRange, ",")
+			// Trim whitespace from each user ID
+			for i, id := range userIDs {
+				userIDs[i] = strings.TrimSpace(id)
+			}
+			// Remove empty strings
+			userIDs = removeEmptyStrings(userIDs)
+		} else if userIDsForRange == "none" {
+			userIDs = []string{}
+		} else {
+			// By default, assign the current user to the range (or the impersonated user if applicable)
+			if userID == "" {
+				userIDs = []string{strings.Split(apiKey, ".")[0]}
+			} else {
+				userIDs = []string{userID}
+			}
+		}
+
+		payload := dto.CreateRangeRequest{
 			Name:        name,
 			RangeID:     rangeID,
 			Description: description,
 			Purpose:     purpose,
-			UserID:      userIDForRange,
+			UserID:      userIDs,
 			RangeNumber: rangeNumber,
 		}
 
@@ -751,11 +772,24 @@ var rangeCreateCmd = &cobra.Command{
 			apiPath = addQueryParameterToURL(apiPath, "userID", userID)
 		}
 		responseJSON, success = rest.GenericJSONPost(client, apiPath, payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
+		if !success {
+			// Check for error response format
+			var errorResponse dto.CreateRangeResponseError
+			if err := json.Unmarshal(responseJSON, &errorResponse); err == nil && len(errorResponse.Errors) > 0 {
+				if !jsonFormat {
+					logger.Logger.Error("Range creation completed with errors:")
+					for _, errItem := range errorResponse.Errors {
+						logger.Logger.Errorf("  User %s: %s", errItem.UserID, errItem.Error)
+					}
+				} else {
+					fmt.Printf("%s\n", responseJSON)
+				}
+				return
+			}
 		}
 
-		logger.Logger.Info(fmt.Sprintf("Range '%s' created successfully", rangeID))
+		// Handle success response
+		handleGenericResult(responseJSON)
 	},
 }
 
@@ -763,8 +797,8 @@ func setupRangeCreateCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&name, "name", "n", "", "Name of the range")
 	command.Flags().StringVarP(&description, "description", "d", "", "Description of the range")
 	command.Flags().StringVarP(&purpose, "purpose", "o", "", "Purpose of the range")
-	command.Flags().StringVar(&userIDForRange, "user", "", "User ID to assign the range to (optional)")
-	command.Flags().Int32Var(&rangeNumber, "range-number", 0, "Specific range number to assign (optional)")
+	command.Flags().StringVar(&userIDsForRange, "users", "", "Comma-separated list of User IDs to assign the range to (optional). By default the current user is assigned. To assign no users to the range, use --users 'none'")
+	command.Flags().IntVar(&rangeNumber, "range-number", 0, "Specific range number to assign (optional)")
 }
 
 var rangeAssignCmd = &cobra.Command{

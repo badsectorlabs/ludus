@@ -406,3 +406,11 @@ type GetConsoleWebsocketTicketResponse struct {
 	Password string `json:"password"`
 	Port     int    `json:"port"`
 }
+
+type CreateRangeResponseError struct {
+	Errors []CreateRangeResponseErrorItem `json:"errors"`
+}
+type CreateRangeResponseErrorItem struct {
+	UserID string `json:"userID"`
+	Error  string `json:"error"`
+}

@@ -91,6 +91,7 @@ func prettyPrintError(errorString string) {
 	err := json.Unmarshal([]byte(errorString), &parsedError)
 	if err != nil {
 		logger.Logger.Fatalf("%s\nCheck the IP/hostname and port in the URL provided to ludus to ensure it is correct.", errorString)
+		return
 	}
 
 	logger.Logger.Error(parsedError.Error)

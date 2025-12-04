@@ -37,12 +37,12 @@ type CreateGroupRequest struct {
 	Name        string `json:"name"`
 }
 type CreateRangeRequest struct {
-	RangeID     string `json:"rangeID,omitempty"`
-	Description string `json:"description,omitempty"`
-	Purpose     string `json:"purpose,omitempty"`
-	UserID      string `json:"userID,omitempty"`
-	RangeNumber int64  `json:"rangeNumber,omitempty"`
-	Name        string `json:"name"`
+	RangeID     string   `json:"rangeID,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Purpose     string   `json:"purpose,omitempty"`
+	UserID      []string `json:"userID,omitempty"`
+	RangeNumber int      `json:"rangeNumber,omitempty"`
+	Name        string   `json:"name"`
 }
 type DenyRequest struct {
 	Domains []string `json:"domains,omitempty"`
