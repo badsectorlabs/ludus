@@ -709,6 +709,12 @@ func CreateRange(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusConflict, "Unable to save range: "+err.Error())
 	}
 
+	// Always give access to the ludus_admins group
+	err = grantGroupAccessToRangeInProxmox("ludus_admins", payload.RangeID)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to give group access to pool: "+err.Error())
+	}
+
 	// If UserID was provided, create direct access record
 	errorArray := []dto.CreateRangeResponseErrorItem{}
 	for _, userID := range payload.UserID {
@@ -722,7 +728,7 @@ func CreateRange(e *core.RequestEvent) error {
 			errorArray = append(errorArray, dto.CreateRangeResponseErrorItem{UserID: userID, Error: fmt.Sprintf("Unable to save user: %v", err)})
 		}
 		// Give the user in proxmox permissions to the pool
-		err = giveUserAccessToPool(userRecord.GetString("proxmoxUsername"), "pam", payload.RangeID)
+		err = giveUserAccessToPool(userRecord.GetString("proxmoxUsername"), userRecord.GetString("proxmoxRealm"), payload.RangeID)
 		if err != nil {
 			errorArray = append(errorArray, dto.CreateRangeResponseErrorItem{UserID: userID, Error: fmt.Sprintf("Unable to give user access to pool: %v", err)})
 		}
