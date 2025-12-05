@@ -17,6 +17,7 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 const (
@@ -90,6 +91,7 @@ func DeployRange(e *core.RequestEvent) error {
 
 	// Set range state to "DEPLOYING"
 	usersRange.SetRangeState(LudusRangeStateDeploying)
+	usersRange.SetLastDeployment(types.NowDateTime())
 	if err := e.App.Save(usersRange); err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving range: %v", err))
 	}
