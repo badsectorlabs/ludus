@@ -166,6 +166,10 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) ||
 			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics")) {
+		// First clear all the headers to prevent sending 2x of each header
+		for k := range e.Response.Header() {
+			e.Response.Header().Del(k)
+		}
 		// Reverse proxy to the admin API
 		adminProxy.ServeHTTP(e.Response, e.Request)
 
