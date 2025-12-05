@@ -99,6 +99,12 @@ func setProxmoxSystemPassword(username string, realm string, password string) er
 // So we use the Telmate library for now.
 
 func GetGoProxmoxClientForUserUsingToken(e *core.RequestEvent) (*goproxmox.Client, error) {
+
+	cachedClient := e.Get("proxmoxClient_" + e.Get("user").(*models.User).UserId())
+	if cachedClient != nil {
+		return cachedClient.(*goproxmox.Client), nil
+	}
+
 	user := e.Get("user").(*models.User)
 
 	if user.Name() == "ROOT" {
@@ -132,6 +138,7 @@ func GetGoProxmoxClientForUserUsingToken(e *core.RequestEvent) (*goproxmox.Clien
 		goproxmox.WithAPIToken(tokenID, tokenSecret),
 		goproxmox.WithLogger(customLogger),
 	)
+	e.Set("proxmoxClient_"+user.UserId(), client)
 	return client, nil
 }
 

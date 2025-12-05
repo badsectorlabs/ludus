@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	goproxmox "github.com/luthermonson/go-proxmox"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -32,22 +33,21 @@ func DestroyVM(e *core.RequestEvent) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	// Find which node the VM is on
-	nodeName, err := findNodeForVM(ctx, proxmoxClient, uint64(vmID))
+	err = destroyVM(ctx, proxmoxClient, vmID)
 	if err != nil {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Could not locate VM %d: %v", vmID, err))
+		return JSONError(e, http.StatusInternalServerError, "Unable to destroy VM: "+err.Error())
 	}
 
-	// Get the node object
-	node, err := proxmoxClient.Node(ctx, nodeName)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Failed to access node %s: %v", nodeName, err))
-	}
+	logger.Debug(fmt.Sprintf("VM %d destroyed successfully", vmID))
+	return JSONResult(e, http.StatusOK, fmt.Sprintf("VM %d destroyed successfully", vmID))
+}
+
+func destroyVM(ctx context.Context, proxmoxClient *goproxmox.Client, vmID int) error {
 
 	// Get the VM object
-	vm, err := node.VirtualMachine(ctx, vmID)
+	vm, err := getVMObjectFromVMID(ctx, proxmoxClient, vmID)
 	if err != nil {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Failed to access VM %d: %v", vmID, err))
+		return err
 	}
 
 	// Stop the VM if it's running
@@ -55,13 +55,13 @@ func DestroyVM(e *core.RequestEvent) error {
 		logger.Debug(fmt.Sprintf("Stopping VM %d before destruction...", vmID))
 		task, err := vm.Stop(ctx)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Failed to stop VM %d: %v", vmID, err))
+			return err
 		}
 
 		// Wait for the stop task to complete
 		err = task.Wait(ctx, 1*time.Second, 30*time.Second)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error while waiting for VM %d to stop: %v", vmID, err))
+			return err
 		}
 		logger.Debug(fmt.Sprintf("VM %d stopped successfully", vmID))
 	}
@@ -70,15 +70,59 @@ func DestroyVM(e *core.RequestEvent) error {
 	logger.Debug(fmt.Sprintf("Destroying VM %d...", vmID))
 	task, err := vm.Delete(ctx)
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Failed to destroy VM %d: %v", vmID, err))
+		return err
 	}
 
 	// Wait for the delete task to complete
 	err = task.Wait(ctx, 1*time.Second, 30*time.Second)
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error while waiting for VM %d to be destroyed: %v", vmID, err))
+		return err
 	}
 
-	logger.Debug(fmt.Sprintf("VM %d destroyed successfully", vmID))
-	return JSONResult(e, http.StatusOK, fmt.Sprintf("VM %d destroyed successfully", vmID))
+	return nil
+}
+
+func stopVM(ctx context.Context, proxmoxClient *goproxmox.Client, vmID int) error {
+	vm, err := getVMObjectFromVMID(ctx, proxmoxClient, vmID)
+	if err != nil {
+		return err
+	}
+
+	// Stop the VM if it's running
+	if vm.IsRunning() {
+		logger.Debug(fmt.Sprintf("Stopping VM %d", vmID))
+		task, err := vm.Stop(ctx)
+		if err != nil {
+			return err
+		}
+		// Wait for the stop task to complete
+		err = task.Wait(ctx, 1*time.Second, 30*time.Second)
+		if err != nil {
+			return err
+		}
+		logger.Debug(fmt.Sprintf("VM %d stopped successfully", vmID))
+	}
+	return nil
+}
+
+func getVMObjectFromVMID(ctx context.Context, proxmoxClient *goproxmox.Client, vmID int) (*goproxmox.VirtualMachine, error) {
+	// Find which node the VM is on
+	nodeName, err := findNodeForVM(ctx, proxmoxClient, uint64(vmID))
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the node object
+	node, err := proxmoxClient.Node(ctx, nodeName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the VM object
+	vm, err := node.VirtualMachine(ctx, vmID)
+	if err != nil {
+		return nil, err
+	}
+
+	return vm, nil
 }

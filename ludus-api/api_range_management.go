@@ -1,6 +1,7 @@
 package ludusapi
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -108,20 +110,23 @@ func DeployRange(e *core.RequestEvent) error {
 func deleteRangeResources(targetRange *models.Range, force bool, e *core.RequestEvent) error {
 	var err error
 
+	// Get the proxmox client
+	proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	// If range has VMs and force is true, destroy VMs first
 	if targetRange.NumberOfVms() > 0 && force {
-		_, err = RunPlaybookWithTag(e, "power.yml", "destroy-range", false)
+		// Get the VMs for the range
+		vms, err := getVMsForPool(e, ctx, targetRange.RangeId(), proxmoxClient)
 		if err != nil {
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "Error with destroy-range\n")
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), fmt.Sprintf("%s\n", err.Error()))
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
-			targetRange.SetRangeState(LudusRangeStateError)
-			err = e.App.Save(targetRange)
-			if err != nil {
-				return fmt.Errorf("failed to save range state after destroy failure: %w", err)
-			}
-			return fmt.Errorf("failed to destroy range VMs: %w", err) // Don't remove the pool or range object if destroy fails
+			return fmt.Errorf("failed to get VMs for range: %w", err)
+		}
+		for _, vm := range vms {
+			destroyVM(ctx, proxmoxClient, int(vm.VMID))
 		}
 	}
 
@@ -201,55 +206,65 @@ func DeleteRange(e *core.RequestEvent) error {
 
 // DeleteRangeVMs - stops and deletes all range VMs (keeps range object in database)
 func DeleteRangeVMs(e *core.RequestEvent) error {
-	usersRange, err := GetRange(e)
+	rangeIDToDelete := e.Request.PathValue("rangeID")
+	rangeRecordRaw, err := app.FindFirstRecordByData("ranges", "rangeID", rangeIDToDelete)
 	if err != nil {
-		return err
+		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
+	rangeRecord := &models.Range{}
+	rangeRecord.SetProxyRecord(rangeRecordRaw)
 
-	logger.Debug("DeleteRangeVMs for range ID: " + usersRange.RangeId())
+	logger.Debug("DeleteRangeVMs for range ID: " + rangeRecord.RangeId())
 
 	// Set range state to "DESTROYING"
-	usersRange.SetRangeState(LudusRangeStateDestroying)
-	err = e.App.Save(usersRange)
+	rangeRecord.SetRangeState(LudusRangeStateDestroying)
+	err = e.App.Save(rangeRecord)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
 
-	// This can take a long time, so run as a go routine and have the user check the status via another endpoint
-	go func(e *core.RequestEvent) {
-		_, err := RunPlaybookWithTag(e, "power.yml", "destroy-range", false)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Get the proxmox client
+	proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
+	// Destroy the VMs for the range
+	vms, err := getVMsForPool(e, ctx, rangeRecord.RangeId(), proxmoxClient)
+	if err != nil {
+		return fmt.Errorf("failed to get VMs for range: %w", err)
+	}
+	logger.Debug(fmt.Sprintf("Destroying %d VMs for range %s", len(vms), rangeRecord.RangeId()))
+	for _, vm := range vms {
+		logger.Debug(fmt.Sprintf("Destroying VM %d", int(vm.VMID)))
+		err = destroyVM(ctx, proxmoxClient, int(vm.VMID))
 		if err != nil {
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "Error with destroy-range\n")
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), fmt.Sprintf("%s\n", err.Error()))
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
-			usersRange.SetRangeState(LudusRangeStateError)
-			err = e.App.Save(usersRange)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
-			}
-			return // Don't reset testing if destroy fails
+			logger.Error(fmt.Sprintf("Error destroying VM %d: %s", int(vm.VMID), err.Error()))
 		}
-		// The user is rm-ing their range with testing enabled, so after all VMs are destroyed exit testing
-		if usersRange.TestingEnabled() {
-			// Update the testing state in the DB as well as allowed domains and ips
-			usersRange.SetTestingEnabled(false)
-			usersRange.SetAllowedDomains([]string{})
-			usersRange.SetAllowedIps([]string{})
-			err = e.App.Save(usersRange)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
-			}
-		}
-		// Set range state to "DESTROYED"
-		usersRange.SetRangeState(LudusRangeStateDestroyed)
-		err = e.App.Save(usersRange)
+	}
+
+	// The user is rm-ing their range with testing enabled, so after all VMs are destroyed exit testing
+	if rangeRecord.TestingEnabled() {
+		// Update the testing state in the DB as well as allowed domains and ips
+		rangeRecord.SetTestingEnabled(false)
+		rangeRecord.SetAllowedDomains([]string{})
+		rangeRecord.SetAllowedIps([]string{})
+		err = e.App.Save(rangeRecord)
 		if err != nil {
 			logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
 		}
-	}(e)
+	}
+	// Set range state to "DESTROYED"
+	rangeRecord.SetRangeState(LudusRangeStateDestroyed)
+	err = e.App.Save(rangeRecord)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
+	}
 
-	return JSONResult(e, http.StatusOK, "Range VM destroy in progress")
+	return JSONResult(e, http.StatusOK, "Range VMs Destroyed")
 }
 
 // GetConfig - retrieves the current configuration of the range
