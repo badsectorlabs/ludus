@@ -659,3 +659,24 @@ func findNodeForVM(ctx context.Context, client *goproxmox.Client, vmid uint64) (
 
 	return "", fmt.Errorf("VMID %d not found in cluster", vmid)
 }
+
+func getVMsForPool(e *core.RequestEvent, ctx context.Context, poolName string, client *goproxmox.Client) ([]goproxmox.ClusterResource, error) {
+
+	cachedVMsForPool := e.Get("getVMsForPool_" + poolName)
+	if cachedVMsForPool != nil {
+		return cachedVMsForPool.([]goproxmox.ClusterResource), nil
+	}
+
+	poolData, err := client.Pool(ctx, poolName, "qemu")
+	if err != nil {
+		return nil, errors.New("unable to get pool by ID: " + err.Error())
+	}
+	vmsForPool := make([]goproxmox.ClusterResource, 0)
+	for _, vm := range poolData.Members {
+		if vm.Type == "qemu" && vm.Template != 1 {
+			vmsForPool = append(vmsForPool, vm)
+		}
+	}
+	e.Set("getVMsForPool_"+poolName, vmsForPool)
+	return vmsForPool, nil
+}

@@ -128,9 +128,9 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 	defer cancel()
 
 	// Get all resources of type "vm" (which includes 'qemu' and 'lxc' types)
-	allVMs, err := getAllVMs(e, ctx, proxmoxClient)
+	allVMs, err := getVMsForPool(e, ctx, targetRange.RangeId(), proxmoxClient)
 	if err != nil {
-		return errors.New("unable to list VMs from cluster")
+		return err
 	}
 
 	// Clear the DB of any previous VMs for this range
@@ -161,11 +161,6 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 	}
 
 	for _, vmResource := range allVMs {
-		// We are only interested in QEMU VMs that belong to the range's pool and are not templates.
-		if vmResource.Type != "qemu" || vmResource.Pool != targetRange.RangeId() || vmResource.Template == 1 || strings.HasSuffix(vmResource.Name, "-template") {
-			continue
-		}
-
 		rawVM := core.NewRecord(vmCollection)
 		thisVM := &models.VMs{}
 		thisVM.SetProxyRecord(rawVM)
