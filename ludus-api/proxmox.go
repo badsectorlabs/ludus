@@ -319,7 +319,7 @@ func poolACLAction(username string, realm string, poolName string, revoke bool) 
 	}
 	PVEVMAdminACL := goproxmox.ACLOptions{
 		Path:      fmt.Sprintf("/pool/%s", poolName),
-		Roles:     "PVEVMAdmin,PVESDNAdmin",
+		Roles:     "PVEVMAdmin,PVESDNAdmin,PVEPoolUser",
 		Users:     username + "@" + realm,
 		Propagate: goproxmox.IntOrBool(true),
 		Delete:    goproxmox.IntOrBool(revoke),
@@ -466,7 +466,7 @@ func groupACLAction(groupID string, poolName string, revoke bool) error {
 	PVEVMAdminACL := goproxmox.ACLOptions{
 		Path:      fmt.Sprintf("/pool/%s", poolName),
 		Groups:    groupID,
-		Roles:     "PVEVMAdmin,PVESDNAdmin",
+		Roles:     "PVEVMAdmin,PVESDNAdmin,PVEPoolUser",
 		Propagate: goproxmox.IntOrBool(true),
 		Delete:    goproxmox.IntOrBool(revoke),
 	}
