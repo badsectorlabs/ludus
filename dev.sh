@@ -4,7 +4,7 @@
 # It assumes you are on a macOS or Linux host and have root SSH access to the target machine
 
 # Parse command line arguments
-while getopts "hlap:t:n:cdwsDCP" opt; do
+while getopts "hlap:t:n:cdwsDCPL" opt; do
   case $opt in
     h)
       echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c] [-d] [-p] [-w] [-s] [-D] [-C]"
@@ -21,6 +21,7 @@ while getopts "hlap:t:n:cdwsDCP" opt; do
       echo "  -D  Enable debug mode for database"
       echo "  -C  Build and install client remotely"
       echo "  -P  Enable debug mode for proxmox"
+      echo "  -L  Enable debug mode for license requests"
       exit 0
       ;;
     l)
@@ -58,6 +59,9 @@ while getopts "hlap:t:n:cdwsDCP" opt; do
       ;;
     P)
       DEBUG_PROXMOX=true
+      ;;
+    L)
+      DEBUG_LICENSE=true
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -127,6 +131,10 @@ fi
 
 if [ "$DEBUG_PROXMOX" = true ]; then
     DEBUG_FLAGS="${DEBUG_FLAGS} -P"
+fi
+
+if [ "$DEBUG_LICENSE" = true ]; then
+    DEBUG_FLAGS="${DEBUG_FLAGS} -L"
 fi
 
 ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh $DEBUG_FLAGS"

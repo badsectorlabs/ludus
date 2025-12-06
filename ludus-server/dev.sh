@@ -1,13 +1,14 @@
 #!/bin/bash
 
 # Parse command line arguments
-while getopts "hDdP" opt; do
+while getopts "hDdPL" opt; do
   case $opt in
     h)
-      echo "Usage: $0 [-h] [-d] [-D]"
+      echo "Usage: $0 [-h] [-d] [-D] [-P] [-L]"
       echo "  -d  Enable debug logging for Ludus"
       echo "  -D  Enable debug logging for the database"
       echo "  -P  Enable debug logging for proxmox"
+      echo "  -L  Enable debug logging for license requests"
       exit 0
       ;;
     d)
@@ -18,6 +19,9 @@ while getopts "hDdP" opt; do
       ;;
     P)
       DEBUG_PROXMOX=true
+      ;;
+    L)
+      DEBUG_LICENSE=true
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -102,6 +106,14 @@ if [ "$DEBUG_PROXMOX" = true ]; then
 else
     echo "[-] Unsetting LUDUS_DEBUG_PROXMOX"
     systemctl unset-environment LUDUS_DEBUG_PROXMOX
+fi
+
+if [ "$DEBUG_LICENSE" = true ]; then
+    echo "[+] Setting LUDUS_DEBUG_LICENSE=1"
+    systemctl set-environment LUDUS_DEBUG_LICENSE=1
+else
+    echo "[-] Unsetting LUDUS_DEBUG_LICENSE"
+    systemctl unset-environment LUDUS_DEBUG_LICENSE
 fi
 
 systemctl set-environment LUDUS_ENABLE_SUPERADMIN=ill-be-careful
