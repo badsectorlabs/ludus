@@ -263,11 +263,7 @@ pages:
   tags:
     - ludus-proxmox-runner
   rules:
-    - if: $CI_COMMIT_TAG =~ /beta/
-      variables:
-        PAGES_PREFIX: 'beta'
     - if: $CI_COMMIT_TAG
-
     - if: $CI_COMMIT_MESSAGE =~ /\[build pages\]/
     - if: $CI_COMMIT_MESSAGE == "Automatic backup from Apidog"
       when: never
@@ -276,8 +272,6 @@ pages:
     - if: $CI_COMMIT_BRANCH == "main" # Only update public docs in the main branch
       changes:
         - "docs/**/*"
-  pages:  # specifies that this is a Pages job and publishes the default public directory
-    path_prefix: "$PAGES_PREFIX"
   retry:
     max: 2
   script:
