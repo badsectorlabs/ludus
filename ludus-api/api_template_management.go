@@ -378,7 +378,7 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 			commandManager := commandmanager.GetInstance()
 			commands := commandManager.GetAllCommands()
 			for _, command := range commands {
-				if command.Metadata["command_type"] == "packer_build" && command.Metadata["template_name"] == thisTemplateName {
+				if command.Metadata["command_type"] == "packer_build" && command.Metadata["template_name"] == thisTemplateName && command.Status == commandmanager.StatusRunning {
 					thisTemplateStatus.Status = "building"
 					break
 				}
