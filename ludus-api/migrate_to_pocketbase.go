@@ -406,6 +406,34 @@ func migrateRangesToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 		if err := txApp.Save(rangeRecord); err != nil {
 			return fmt.Errorf("error saving range %d: %v", sqliteRange.RangeNumber, err)
 		}
+
+		// Grant the range owner access to their pool (pool name is the rangeID/UserID)
+		// This ensures the PVEPoolUser role is added to existing pools during migration
+		if poolExists(sqliteRange.UserID) {
+			// Look up the user from SQLite to get their proxmox username
+			var sqliteUser SQLiteUserObject
+			if err := sqliteDB.Table("user_objects").Where("user_id = ?", sqliteRange.UserID).First(&sqliteUser).Error; err == nil {
+				err = giveUserAccessToPool(sqliteUser.ProxmoxUsername, "pam", sqliteRange.UserID)
+				if err != nil {
+					logger.Error(fmt.Sprintf("Error granting pool access to user %s for pool %s: %v", sqliteUser.ProxmoxUsername, sqliteRange.UserID, err))
+					// Don't fail the migration if pool access fails, but log it
+				} else {
+					logger.Info(fmt.Sprintf("Granted pool access to user %s for pool %s", sqliteUser.ProxmoxUsername, sqliteRange.UserID))
+				}
+				err = grantGroupAccessToRangeInProxmox("ludus_admins", sqliteRange.UserID)
+				if err != nil {
+					logger.Error(fmt.Sprintf("Error granting group access to user %s for pool %s: %v", sqliteUser.ProxmoxUsername, sqliteRange.UserID, err))
+					// Don't fail the migration if group access fails, but log it
+				} else {
+					logger.Info(fmt.Sprintf("Granted ludus_admins group access to pool %s", sqliteRange.UserID))
+				}
+			} else {
+				logger.Debug(fmt.Sprintf("Could not find user %s in SQLite for pool access grant, will be handled during user migration", sqliteRange.UserID))
+			}
+		} else {
+			logger.Debug(fmt.Sprintf("Pool %s does not exist, skipping pool access grant", sqliteRange.UserID))
+		}
+
 		logger.Info(fmt.Sprintf("Migrated range: %d (User: %s)", sqliteRange.RangeNumber, sqliteRange.UserID))
 	}
 	return nil
