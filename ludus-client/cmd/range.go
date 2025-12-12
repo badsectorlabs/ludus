@@ -607,18 +607,16 @@ var rangeGetTags = &cobra.Command{
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		type Data struct {
-			Result string `json:"result"`
-		}
 
 		// Unmarshal JSON data
-		var data Data
+		var data dto.ListRangeTagsResponse
 		err := json.Unmarshal([]byte(responseJSON), &data)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
 		}
 
-		fmt.Print(data.Result)
+		// Convert tags array back to comma-separated string
+		fmt.Print(strings.Join(data.Tags, ", "), "\n")
 
 	},
 }
