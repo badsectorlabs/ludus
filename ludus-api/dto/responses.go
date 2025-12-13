@@ -303,7 +303,7 @@ type ListRangeResponseVMsItem struct {
 	ID          int32  `json:"ID"`
 }
 type ListRangeTagsResponse struct {
-	Value string `json:"-"`
+	Tags []string `json:"tags"`
 }
 type ListRangeUsersResponseItem struct {
 	UserID     string `json:"userID,omitempty"`
