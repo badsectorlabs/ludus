@@ -6,10 +6,12 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"ludusapi/dto"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,25 +20,29 @@ import (
 
 	"github.com/denisbrodbeck/machineid"
 	"github.com/keygen-sh/keygen-go/v3"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 const (
-	licenseURL                     = "https://license.ludus.cloud"
-	licenseAPIVersion              = "1.7"
-	licenseAPIPrefix               = "v1"
-	licenseProductEnterprisePlugin = "5722ca04-715d-4969-9130-a051532b7579"
-	licenseProductProRoles         = "a4ae3cf9-8991-48fa-befe-055492509c85"
-	licenseAccount                 = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
-	licensePublicKey               = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
-	binaryPublicKey                = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
-	ludusLicenseEnterprise         = "enterprise"
-	ludusLicenseCommunity          = "community"
-	ludusLicenseProfessional       = "professional"
+	licenseURL                              = "https://license.ludus.cloud"
+	licenseAPIVersion                       = "1.7"
+	licenseAPIPrefix                        = "v1"
+	LicenseProductLudus                     = "5722ca04-715d-4969-9130-a051532b7579"
+	licensePackageSubscriptionRoles         = "0d55c084-4181-4d13-8b05-a349b1409760"
+	licenseProductSubscriptionRolesMetadata = "7b75d702-0448-4d82-9963-2b1f1f460022"
+	LicensePackageLudusEnterprisePlugin     = "a8ecdfa4-6cf7-4a7c-93cc-95fe44c94d14"
+	LicensePackageLudusAntisandboxPlugin    = "a335f37d-e603-405c-8c99-0bb3185a87e8"
+	licenseAccount                          = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
+	licensePublicKey                        = "70cb26141f38840b8f3f499d4875a829a9d251bd3337278995832b9ea4e39d12"
+	binaryPublicKey                         = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
+	ludusLicenseEnterprise                  = "enterprise"
+	ludusLicenseCommunity                   = "community"
+	ludusLicenseProfessional                = "professional"
 )
 
 func (s *Server) checkLicense() {
 	keygen.Account = licenseAccount
-	keygen.Product = licenseProductEnterprisePlugin
+	keygen.Product = LicenseProductLudus
 	keygen.LicenseKey = s.LicenseKey
 	keygen.APIURL = licenseURL
 	keygen.UserAgent = "Ludus-Server/" + s.Version
@@ -138,7 +144,7 @@ func (s *Server) checkLicense() {
 				log.Println("LICENSE: license check bucket is full, skipping plugin download")
 				return
 			}
-			err = DownloadFileUsingLicenseKey(fmt.Sprintf("ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey)
+			err = DownloadFileUsingLicenseKey(fmt.Sprintf("ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey, LicenseProductLudus)
 			if err != nil {
 				log.Printf("LICENSE: error getting enterprise plugin: %v", err)
 			}
@@ -151,7 +157,7 @@ func (s *Server) checkLicense() {
 			log.Println("LICENSE: license check bucket is full, skipping plugin download")
 			return
 		}
-		err = DownloadFileUsingLicenseKey(fmt.Sprintf("ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey)
+		err = DownloadFileUsingLicenseKey(fmt.Sprintf("ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey, LicenseProductLudus)
 		if err != nil {
 			log.Printf("LICENSE: error getting enterprise plugin: %v", err)
 		}
@@ -169,11 +175,66 @@ func (s *Server) checkLicense() {
 	// s.InitializePlugins()
 }
 
-func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string, version string, licenseKey string) error {
+func GetSubscriptionRolesMetadata(e *core.RequestEvent) ([]dto.GetSubscriptionRolesResponseItem, error) {
+
+	// Check the request cache first
+	subscriptionRolesFromCache := e.Get("rolesJSON")
+	if subscriptionRolesFromCache != nil {
+		return subscriptionRolesFromCache.([]dto.GetSubscriptionRolesResponseItem), nil
+	}
+
+	// First get the version of the role from latest
+	err := DownloadFileUsingLicenseKey("roles.json", "roles.json", "/tmp", server.Version, server.LicenseKey, licenseProductSubscriptionRolesMetadata)
+	if err != nil {
+		return nil, err
+	}
+	rolesJSON, err := os.ReadFile("/tmp/roles.json")
+	if err != nil {
+		return nil, err
+	}
+	// Read the json into an array of GetSubscriptionRolesResponseItem
+	var subscriptionRoles []dto.GetSubscriptionRolesResponseItem
+	err = json.Unmarshal(rolesJSON, &subscriptionRoles)
+	if err != nil {
+		return nil, err
+	}
+	e.Set("rolesJSON", subscriptionRoles)
+	return subscriptionRoles, nil
+}
+
+func DownloadRoleUsingLicenseKey(e *core.RequestEvent, roleName string, targetDir string) (string, error) {
+
+	// Get the subscription roles metadata
+	subscriptionRoles, err := GetSubscriptionRolesMetadata(e)
+	if err != nil {
+		return "", err
+	}
+
+	// Find the version of the role
+	var roleVersion string
+	for _, role := range subscriptionRoles {
+		if role.Role == roleName {
+			roleVersion = role.Version
+			break
+		}
+	}
+	if roleVersion == "" {
+		return "", errors.New("role " + roleName + " not found")
+	}
+
+	roleFileName := fmt.Sprintf("%s_v%s.tar.gz", roleName, roleVersion)
+	err = DownloadFileUsingLicenseKey(roleFileName, roleFileName, targetDir, server.Version, server.LicenseKey, LicenseProductLudus)
+	if err != nil {
+		return "", err
+	}
+	return roleFileName, nil
+}
+
+func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string, version string, licenseKey string, packageUUID string) error {
 
 	// If the file path doesn't start with /artifacts/, add it
-	if !strings.HasPrefix(path, "/artifacts/") {
-		path = "/artifacts/" + path
+	if !strings.HasPrefix(path, "artifacts/") || !strings.HasPrefix(path, "/artifacts/") {
+		path = "artifacts/" + path
 	}
 
 	// Check for a .local-testing file in the target directory
@@ -191,6 +252,7 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 		UserAgent:  "Ludus-Server/" + version,
 		LicenseKey: licenseKey,
 	})
+	keygen.Package = packageUUID
 	ctx := context.Background()
 
 	if os.Getenv("LUDUS_DEBUG_LICENSE") == "1" {
@@ -204,7 +266,7 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 		return err
 	}
 	artifact.URL = response.Headers.Get("Location")
-	// Write the enterprise plugin to disk
+	// Write the binary to disk
 	if !FileExists(targetDir) {
 		err := os.MkdirAll(targetDir, 0755)
 		if err != nil {
@@ -220,7 +282,7 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 	}
 	defer targetFile.Close()
 
-	// Download the actual plugin binary
+	// Download the actual binary
 	targetResp, err := http.Get(artifact.URL)
 	if err != nil {
 		log.Printf("LICENSE: unable to download target file %s: %v", fileName, err)
@@ -228,7 +290,7 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 	}
 	defer targetResp.Body.Close()
 
-	// Copy the plugin binary to the file
+	// Copy the binary to the file
 	_, err = io.Copy(targetFile, targetResp.Body)
 	if err != nil {
 		log.Printf("LICENSE: unable to write %s target file: %v", fileName, err)
@@ -236,7 +298,7 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 	}
 
 	// Verify the signature
-	if err := VerifySignature(targetPath, artifact.Signature, binaryPublicKey, licenseProductEnterprisePlugin); err != nil {
+	if err := VerifySignature(targetPath, artifact.Signature, binaryPublicKey, LicenseProductLudus); err != nil {
 		log.Printf("LICENSE: unable to verify signature for %s target file: %v", fileName, err)
 		return err
 	}
