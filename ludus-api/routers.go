@@ -630,6 +630,13 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"GetUserMemberships",
+		http.MethodGet,
+		"/user/memberships",
+		GetUserMemberships,
+	},
+
+	{
 		"AddUserToGroup",
 		http.MethodPost,
 		"/groups/{groupName}/users/{userID}",

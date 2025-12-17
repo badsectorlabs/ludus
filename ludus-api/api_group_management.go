@@ -7,6 +7,7 @@ import (
 	"ludusapi/models"
 	"net/http"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -523,4 +524,49 @@ func ListGroupRanges(e *core.RequestEvent) error {
 	}
 	return e.JSON(http.StatusOK, ranges)
 
+}
+
+// GetUserMemberships returns the groups a user belongs to, along with their role in each group.
+// By default, it returns memberships for the authenticated user.
+// Admins may impersonate another user by providing the `userID` query parameter.
+func GetUserMemberships(e *core.RequestEvent) error {
+	targetUser := e.Get("user").(*models.User)
+
+	// Find all groups where the target user is either a member or a manager
+	groupRecords, err := e.App.FindRecordsByFilter(
+		"groups",
+		"members.id ?= {:user_id} || managers.id ?= {:user_id}",
+		"-created",
+		0,
+		0,
+		dbx.Params{
+			"user_id": targetUser.Id,
+		},
+	)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error listing groups for user: %v", err))
+	}
+
+	memberships := make([]dto.GetUserMembershipsResponseItem, 0, len(groupRecords))
+
+	for _, groupRecord := range groupRecords {
+		group := &models.Group{}
+		group.SetProxyRecord(groupRecord)
+
+		// Expand relations so we can compute role and counts
+		e.App.ExpandRecord(groupRecord, []string{"members", "managers", "ranges"}, nil)
+
+		role := "member"
+		if userIsManagerOfGroup(targetUser, group) {
+			role = "manager"
+		}
+
+		memberships = append(memberships, dto.GetUserMembershipsResponseItem{
+			GroupName:   group.Name(),
+			Description: group.Description(),
+			Role:        role,
+		})
+	}
+
+	return e.JSON(http.StatusOK, memberships)
 }

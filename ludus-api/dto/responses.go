@@ -279,6 +279,13 @@ type ListGroupsResponseItem struct {
 	NumManagers int    `json:"numManagers"`
 	NumRanges   int    `json:"numRanges"`
 }
+
+type GetUserMembershipsResponseItem struct {
+	GroupName   string `json:"groupName"`
+	Description string `json:"description,omitempty"`
+	Role        string `json:"role"` // "member" or "manager"
+}
+
 type ListRangeResponse struct {
 	RangeState     string                     `json:"rangeState,omitempty"`
 	RangeNumber    int32                      `json:"rangeNumber"`
