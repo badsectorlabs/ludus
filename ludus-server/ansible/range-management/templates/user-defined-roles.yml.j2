@@ -23,7 +23,14 @@
 - name: Run user-defined roles
   tags: [user-defined-roles]
   hosts: "{{ item.vm_name }}"
+  gather_facts: false
   tasks:
+    - name: Wait for the VM to be accessible (600s)
+      ansible.builtin.wait_for_connection:
+
+    - name: Gather facts
+      ansible.builtin.gather_facts:
+
     - name: Show the host and role being run
       ansible.builtin.debug:
         msg: "Running role {{ item.role_name }} on {{ item.vm_name }}"
