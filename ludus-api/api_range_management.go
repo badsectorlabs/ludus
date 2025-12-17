@@ -584,12 +584,29 @@ func GetAnsibleInventoryForRange(e *core.RequestEvent) error {
 }
 
 func GetAnsibleTagsForDeployment(e *core.RequestEvent) error {
+	// returns a comma-separated string of tags
 	cmd := fmt.Sprintf("grep 'tags:' %s/ansible/range-management/ludus.yml | cut -d ':' -f 2 | tr -d '[]' | tr ',' '\\n' | egrep -v 'always|never' | sort -u | paste -sd ',' -", ludusInstallPath)
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Unable to get the ansible tags: "+err.Error())
 	}
-	return JSONResult(e, http.StatusOK, string(out))
+
+	// Parse comma-separated string into array
+	tagsString := strings.TrimSpace(string(out))
+	var tags []string
+	if tagsString != "" {
+		tagList := strings.Split(tagsString, ",")
+		for _, tag := range tagList {
+			tag = strings.TrimSpace(tag)
+			if tag != "" {
+				tags = append(tags, tag)
+			}
+		}
+	}
+
+	// Return structured JSON response
+	response := dto.ListRangeTagsResponse{Tags: tags}
+	return e.JSON(http.StatusOK, response)
 }
 
 // Find the ansible process for this user and kill it
