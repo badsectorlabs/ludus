@@ -114,3 +114,8 @@ type StopTestingRequest struct {
 type UpdateRequest struct {
 	Name string `json:"name,omitempty"`
 }
+type InstallSubscriptionRolesRequest struct {
+	Roles  []string `json:"roles"`
+	Global bool     `json:"global"`
+	Force  bool     `json:"force"`
+}

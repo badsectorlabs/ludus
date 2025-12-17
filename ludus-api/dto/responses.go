@@ -414,3 +414,20 @@ type CreateRangeResponseErrorItem struct {
 	UserID string `json:"userID"`
 	Error  string `json:"error"`
 }
+
+type GetSubscriptionRolesResponseItem struct {
+	Role             string `json:"role,omitempty"`
+	FileCount        int    `json:"file_count,omitempty"`
+	LastModified     string `json:"last_modified,omitempty"`
+	LastModifiedUnix string `json:"last_modified_unix,omitempty"`
+	Version          string `json:"version,omitempty"`
+	Description      string `json:"description,omitempty"`
+}
+type InstallSubscriptionRolesResponse struct {
+	Success []string                                     `json:"success"`
+	Errors  []InstallSubscriptionRolesResponseErrorsItem `json:"errors"`
+}
+type InstallSubscriptionRolesResponseErrorsItem struct {
+	Role   string `json:"role"`
+	Reason string `json:"reason"`
+}

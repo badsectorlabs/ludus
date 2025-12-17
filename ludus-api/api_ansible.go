@@ -369,3 +369,107 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 	return JSONResult(e, http.StatusCreated, "Successfully installed: "+collectionString)
 
 }
+
+func GetSubscriptionRoles(e *core.RequestEvent) error {
+	subscriptionRoles, err := GetSubscriptionRolesMetadata(e)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to get subscription roles: "+err.Error())
+	}
+	return e.JSON(http.StatusOK, subscriptionRoles)
+}
+
+// InstallSubscriptionRoles - installs one or more subscription roles using the license key
+func InstallSubscriptionRoles(e *core.RequestEvent) error {
+	var requestBody dto.InstallSubscriptionRolesRequest
+	e.BindBody(&requestBody)
+
+	// Check if license is valid
+	if !server.LicenseValid || server.LicenseKey == "" {
+		return JSONError(e, http.StatusForbidden, "A valid Ludus license key is required to install subscription roles")
+	}
+
+	user := e.Get("user").(*models.User)
+	if user.ProxmoxUsername() == "root" {
+		return JSONError(e, http.StatusForbidden, "Don't use the ROOT API key for ansible actions, use a user API key instead.")
+	}
+
+	if !user.IsAdmin() && ServerConfiguration.PreventUserAnsibleAdd {
+		return JSONError(e, http.StatusForbidden, "You are not authorized to perform this ansible action")
+	}
+
+	var success []string
+	var errors []dto.InstallSubscriptionRolesResponseErrorsItem
+
+	// Create temp directory for role downloads
+	tempDir := fmt.Sprintf("%s/users/%s/.ansible/tmp", ludusInstallPath, user.ProxmoxUsername())
+	err := os.MkdirAll(tempDir, 0755)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to create temp directory: "+err.Error())
+	}
+
+	// Process each role
+	for _, roleName := range requestBody.Roles {
+
+		// Make sure the file name is escaped
+		escapedRoleName := shellescape.Quote(roleName)
+
+		// Download the role tar file from the license server
+		roleFileName, err := DownloadRoleUsingLicenseKey(e, escapedRoleName, tempDir)
+		if err != nil {
+			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
+				Role:   roleName,
+				Reason: fmt.Sprintf("Failed to download role from server: %s", err.Error()),
+			})
+			continue
+		}
+
+		roleTarPath := fmt.Sprintf("%s/%s", tempDir, roleFileName)
+
+		// Install the role using ansible-galaxy (globally or per-user based on request)
+		var cmd *exec.Cmd
+		if requestBody.Global && requestBody.Force {
+			cmd = exec.Command("ansible-galaxy", "role", "install", roleFileName, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
+		} else if requestBody.Global {
+			cmd = exec.Command("ansible-galaxy", "role", "install", roleFileName, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
+		} else if requestBody.Force {
+			cmd = exec.Command("ansible-galaxy", "role", "install", roleFileName, "-f")
+		} else {
+			cmd = exec.Command("ansible-galaxy", "role", "install", roleFileName)
+		}
+		cmd.Dir = tempDir // ansible-galaxy needs to be run from the directory containing the tar file
+		cmd.Env = os.Environ()
+		cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
+		cmdOutput, err := cmd.CombinedOutput()
+		if err != nil {
+			os.Remove(roleTarPath) // Clean up temp file
+			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
+				Role:   roleName,
+				Reason: fmt.Sprintf("Failed to install role: %s; Output was: %s", err.Error(), string(cmdOutput)),
+			})
+			continue
+		}
+
+		// Check for warnings that indicate failure
+		if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), roleFileName+" was installed successfully") {
+			os.Remove(roleTarPath) // Clean up temp file
+			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
+				Role:   roleName,
+				Reason: fmt.Sprintf("Installation warning: %s", string(cmdOutput)),
+			})
+			continue
+		}
+
+		// Clean up temp file after successful installation
+		os.Remove(roleTarPath)
+
+		// Success - add to success list
+		success = append(success, roleName)
+	}
+
+	response := dto.InstallSubscriptionRolesResponse{
+		Success: success,
+		Errors:  errors,
+	}
+
+	return e.JSON(http.StatusOK, response)
+}

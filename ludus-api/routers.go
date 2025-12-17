@@ -743,4 +743,18 @@ var routes = PocketBaseRoutes{
 		"/vm/{vmID}",
 		DestroyVM,
 	},
+
+	{
+		"GetSubscriptionRoles",
+		http.MethodGet,
+		"/ansible/subscription-roles",
+		GetSubscriptionRoles,
+	},
+
+	{
+		"InstallSubscriptionRoles",
+		http.MethodPost,
+		"/ansible/subscription-roles",
+		InstallSubscriptionRoles,
+	},
 }
