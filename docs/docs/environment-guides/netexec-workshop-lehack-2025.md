@@ -68,7 +68,7 @@ Set and deploy the configuration for the lab.
 #terminal-command-local
 git clone https://github.com/Pennyw0rth/NetExec-Lab
 #terminal-command-local
-ludus range config set -f NetExec-Lab/LEHACK-2025/ad/LEHACK/providers/ludus/config.yml
+ludus range config set -f NetExec-Lab/LeHack-2025/ad/LEHACK/providers/ludus/config.yml
 #terminal-command-local
 ludus range deploy
 # Wait for the range to successfully deploy
@@ -90,7 +90,7 @@ python3 -m pip install pywinrm
 #terminal-command-local
 git clone https://github.com/Pennyw0rth/NetExec-Lab
 #terminal-command-local
-cd LEHACK-2025/ansible
+cd LeHack-2025/ansible
 #terminal-command-local
 ansible-galaxy install -r requirements.yml
 ```
@@ -104,7 +104,7 @@ The inventory file is already present in the providers folder and replace RANGEN
   <TabItem value="linux" label="Linux">
 ```bash
 #terminal-command-local
-cd LEHACK-2025/ansible
+cd LeHack-2025/ansible
 # go the the ansible directory as above
 #terminal-command-local
 export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
@@ -118,7 +118,7 @@ sed -i "s/RANGENUMBER/$RANGENUMBER/g" ../ad/LEHACK/providers/ludus/inventory_dis
   <TabItem value="macos" label="macOS">
 ```bash
 #terminal-command-local
-cd LEHACK-2025/ansible
+cd LeHack-2025/ansible
 # paste in the inventory file above
 #terminal-command-local
 export RANGENUMBER=$(ludus range list --json | jq '.rangeNumber')
@@ -144,7 +144,7 @@ If not running on the Ludus host, you must be connected to your Ludus wireguard 
   <TabItem value="linux" label="Linux">
 ```bash
 #terminal-command-local
-cd LEHACK-2025/ansible
+cd LeHack-2025/ansible
 # in the ansible folder perform the following
 #terminal-command-local
 export ANSIBLE_COMMAND="ansible-playbook -i ../ad/LEHACK/data/inventory -i ../ad/LEHACK/providers/ludus/inventory.yml"
@@ -159,7 +159,7 @@ chmod +x ../scripts/provisionning.sh
   <TabItem value="macos" label="macOS">
 ```bash
 #terminal-command-local
-cd LEHACK-2025/ansible
+cd LeHack-2025/ansible
 # In the ansible folder perform the following
 #terminal-command-local
 export ANSIBLE_COMMAND="ansible-playbook -i ../ad/LEHACK/data/inventory -i ../ad/LEHACK/providers/ludus/inventory.yml"
