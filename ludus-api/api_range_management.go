@@ -573,7 +573,7 @@ func GetAnsibleInventoryForRange(e *core.RequestEvent) error {
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_SECRET=%s", proxmoxTokenSecret))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_CONFIG=%s/ranges/%s/range-config.yml", ludusInstallPath, targetRange.RangeId()))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_NUMBER=%s", strconv.Itoa(int(targetRange.RangeNumber()))))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_ID=%s", targetUser.UserId()))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_ID=%s", targetRange.RangeId()))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RETURN_ALL_RANGES=%s", strconv.FormatBool(allRanges)))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_USER_IS_ADMIN=%s", strconv.FormatBool(targetUser.IsAdmin())))
 	out, err := cmd.CombinedOutput()
