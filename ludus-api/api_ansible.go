@@ -266,8 +266,18 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 	if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), fileHeader.Filename+" was installed successfully") {
 		return JSONError(e, http.StatusInternalServerError, string(cmdOutput))
 	}
-	// Parse the version.yml file in the meta directory for this role, and set the value in meta/.galaxy_install_info
 	roleName := strings.TrimSuffix(fileHeader.Filename, ".tar.gz")
+	_, err = parseRoleVersion(roleName, user, global)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
+	return JSONResult(e, http.StatusCreated, "Successfully installed role")
+
+}
+
+// Parse the version.yml file in the meta directory for this role, and set the value in meta/.galaxy_install_info
+func parseRoleVersion(roleName string, user *models.User, global bool) (string, error) {
 	var roleMetaPath string
 	var galaxyInstallInfoPath string
 	if !global {
@@ -281,18 +291,18 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 	if _, err := os.Stat(versionYmlPath); err == nil {
 		versionYmlContents, err := os.ReadFile(versionYmlPath)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to read version.yml in the role meta directory: %s", roleMetaPath))
+			return "", fmt.Errorf("Unable to read version.yml in the role meta directory: %s", roleMetaPath)
 		}
 		// Parse the version.yml file
 		var versionYml map[string]string
 		err = yaml.Unmarshal(versionYmlContents, &versionYml)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to parse version.yml in the role meta directory: %s", roleMetaPath))
+			return "", fmt.Errorf("Unable to parse version.yml in the role meta directory: %s", roleMetaPath)
 		}
 		// Write the version to the .galaxy_install_info file
 		fileContents, err := os.ReadFile(galaxyInstallInfoPath)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to read .galaxy_install_info: %s", err))
+			return "", fmt.Errorf("Unable to read .galaxy_install_info: %s", err)
 		}
 
 		// Convert the contents to a string and split into lines
@@ -321,13 +331,12 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 		// Write the updated contents back to the file
 		err = os.WriteFile(galaxyInstallInfoPath, []byte(updatedContents), 0660)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to write to .galaxy_install_info in the role meta directory: %s", roleMetaPath))
+			return "", fmt.Errorf("Unable to write to .galaxy_install_info in the role meta directory: %s", roleMetaPath)
 		}
 
+		return versionYml["version"], nil
 	}
-
-	return JSONResult(e, http.StatusCreated, "Successfully installed role")
-
+	return "", nil
 }
 
 // ActionCollectionFromInternet - installs an ansible collection from ansible galaxy or publicly available source control
@@ -416,6 +425,13 @@ func InstallSubscriptionRoles(e *core.RequestEvent) error {
 		// Download the role tar file from the license server
 		roleFileName, err := DownloadRoleUsingLicenseKey(e, escapedRoleName, tempDir)
 		if err != nil {
+			if strings.Contains(err.Error(), "resource was not found") {
+				errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
+					Role:   roleName,
+					Reason: "Role not found, it may not be available to your license level",
+				})
+				continue
+			}
 			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
 				Role:   roleName,
 				Reason: fmt.Sprintf("Failed to download role from server: %s", err.Error()),
@@ -425,23 +441,25 @@ func InstallSubscriptionRoles(e *core.RequestEvent) error {
 
 		roleTarPath := fmt.Sprintf("%s/%s", tempDir, roleFileName)
 
+		os.Rename(roleTarPath, fmt.Sprintf("%s/%s", tempDir, escapedRoleName))
+		defer os.Remove(fmt.Sprintf("%s/%s", tempDir, escapedRoleName))
+
 		// Install the role using ansible-galaxy (globally or per-user based on request)
 		var cmd *exec.Cmd
 		if requestBody.Global && requestBody.Force {
-			cmd = exec.Command("ansible-galaxy", "role", "install", roleFileName, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
+			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
 		} else if requestBody.Global {
-			cmd = exec.Command("ansible-galaxy", "role", "install", roleFileName, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
+			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
 		} else if requestBody.Force {
-			cmd = exec.Command("ansible-galaxy", "role", "install", roleFileName, "-f")
+			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName, "-f")
 		} else {
-			cmd = exec.Command("ansible-galaxy", "role", "install", roleFileName)
+			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName)
 		}
 		cmd.Dir = tempDir // ansible-galaxy needs to be run from the directory containing the tar file
 		cmd.Env = os.Environ()
 		cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 		cmdOutput, err := cmd.CombinedOutput()
-		if err != nil {
-			os.Remove(roleTarPath) // Clean up temp file
+		if err != nil && !strings.Contains(string(cmdOutput), "was installed successfully") {
 			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
 				Role:   roleName,
 				Reason: fmt.Sprintf("Failed to install role: %s; Output was: %s", err.Error(), string(cmdOutput)),
@@ -451,16 +469,16 @@ func InstallSubscriptionRoles(e *core.RequestEvent) error {
 
 		// Check for warnings that indicate failure
 		if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), roleFileName+" was installed successfully") {
-			os.Remove(roleTarPath) // Clean up temp file
-			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
-				Role:   roleName,
-				Reason: fmt.Sprintf("Installation warning: %s", string(cmdOutput)),
-			})
-			continue
+			logger.Warn("Installation warning for role %s: %s", roleName, string(cmdOutput))
 		}
 
-		// Clean up temp file after successful installation
-		os.Remove(roleTarPath)
+		_, err = parseRoleVersion(roleName, user, requestBody.Global)
+		if err != nil {
+			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
+				Role:   roleName,
+				Reason: fmt.Sprintf("Failed to parse role version: %s", err.Error()),
+			})
+		}
 
 		// Success - add to success list
 		success = append(success, roleName)

@@ -84,7 +84,7 @@ func formatSubscriptionRolesResponse(subscriptionRoles []dto.GetSubscriptionRole
 	// Create table
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetAlignment(tablewriter.ALIGN_CENTER)
-	table.SetHeader([]string{"Role", "Version", "Last Modified", "Description"})
+	table.SetHeader([]string{"Role", "Version", "Last Modified", "Description", "License"})
 	table.SetColWidth(60)       // Set wider column width to allow description to be more readable
 	table.SetAutoWrapText(true) // Enable text wrapping for longer descriptions
 
@@ -93,11 +93,20 @@ func formatSubscriptionRolesResponse(subscriptionRoles []dto.GetSubscriptionRole
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
 		}
+
+		license := "Unknown"
+		if strings.Contains(item.Entitlements, "ENTERPRISE_ROLES") {
+			license = "Enterprise"
+		} else if strings.Contains(item.Entitlements, "PRO_ROLES") {
+			license = "Pro"
+		}
+
 		table.Append([]string{
 			item.Role,
 			item.Version,
 			formatTimeObject(time.Unix(lastModifiedUnix, 0), "2006-01-02 15:04"),
 			item.Description,
+			license,
 		})
 	}
 

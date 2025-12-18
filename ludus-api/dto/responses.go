@@ -429,6 +429,8 @@ type GetSubscriptionRolesResponseItem struct {
 	LastModifiedUnix string `json:"last_modified_unix,omitempty"`
 	Version          string `json:"version,omitempty"`
 	Description      string `json:"description,omitempty"`
+	PackageUUID      string `json:"package_uuid,omitempty"`
+	Entitlements     string `json:"entitlements,omitempty"`
 }
 type InstallSubscriptionRolesResponse struct {
 	Success []string                                     `json:"success"`

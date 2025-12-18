@@ -212,18 +212,20 @@ func DownloadRoleUsingLicenseKey(e *core.RequestEvent, roleName string, targetDi
 
 	// Find the version of the role
 	var roleVersion string
+	var rolePackageUUID string
 	for _, role := range subscriptionRoles {
 		if role.Role == roleName {
 			roleVersion = role.Version
+			rolePackageUUID = role.PackageUUID
 			break
 		}
 	}
-	if roleVersion == "" {
+	if roleVersion == "" || rolePackageUUID == "" {
 		return "", errors.New("role " + roleName + " not found")
 	}
 
 	roleFileName := fmt.Sprintf("%s_v%s.tar.gz", roleName, roleVersion)
-	err = DownloadFileUsingLicenseKey(roleFileName, roleFileName, targetDir, server.Version, server.LicenseKey, LicenseProductLudus)
+	err = DownloadFileUsingLicenseKey(roleFileName, roleFileName, targetDir, server.Version, server.LicenseKey, rolePackageUUID)
 	if err != nil {
 		return "", err
 	}
@@ -262,7 +264,7 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 	artifact := &keygen.Artifact{}
 	response, err := client.Get(ctx, path, nil, artifact)
 	if err != nil {
-		log.Printf("LICENSE: unable to download file %s: %v", fileName, err)
+		logger.Error(fmt.Sprintf("LICENSE: unable to download file %s: %v", fileName, err))
 		return err
 	}
 	artifact.URL = response.Headers.Get("Location")
@@ -270,14 +272,14 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 	if !FileExists(targetDir) {
 		err := os.MkdirAll(targetDir, 0755)
 		if err != nil {
-			log.Printf("LICENSE: unable to create target directory: %v", err)
+			logger.Error(fmt.Sprintf("LICENSE: unable to create target directory: %v", err))
 			return err
 		}
 	}
 	targetPath := filepath.Join(targetDir, fileName)
 	targetFile, err := os.Create(targetPath)
 	if err != nil {
-		log.Printf("LICENSE: unable to create target file %s: %v", fileName, err)
+		logger.Error(fmt.Sprintf("LICENSE: unable to create target file %s: %v", fileName, err))
 		return err
 	}
 	defer targetFile.Close()
@@ -285,7 +287,7 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 	// Download the actual binary
 	targetResp, err := http.Get(artifact.URL)
 	if err != nil {
-		log.Printf("LICENSE: unable to download target file %s: %v", fileName, err)
+		logger.Error(fmt.Sprintf("LICENSE: unable to download target file %s: %v", fileName, err))
 		return err
 	}
 	defer targetResp.Body.Close()
@@ -293,16 +295,16 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 	// Copy the binary to the file
 	_, err = io.Copy(targetFile, targetResp.Body)
 	if err != nil {
-		log.Printf("LICENSE: unable to write %s target file: %v", fileName, err)
+		logger.Error(fmt.Sprintf("LICENSE: unable to write %s target file: %v", fileName, err))
 		return err
 	}
 
 	// Verify the signature
-	if err := VerifySignature(targetPath, artifact.Signature, binaryPublicKey, LicenseProductLudus); err != nil {
-		log.Printf("LICENSE: unable to verify signature for %s target file: %v", fileName, err)
+	if err := VerifySignature(targetPath, artifact.Signature, binaryPublicKey, packageUUID); err != nil {
+		logger.Error(fmt.Sprintf("LICENSE: unable to verify signature for %s target file: %v", fileName, err))
 		return err
 	}
-	log.Printf("LICENSE: successfully verified signature for %s target file", fileName)
+	logger.Debug(fmt.Sprintf("LICENSE: successfully verified signature for %s target file", fileName))
 
 	return nil
 }
@@ -348,6 +350,19 @@ func VerifySignature(filePath string, signatureString string, publicKeyHex strin
 	// Verify the signature
 	err = ed25519.VerifyWithOptions(publicKey, checksum, signature, opts)
 	if err != nil {
+		// Fall back to the Ludus product UUID
+		if strings.Contains(err.Error(), "invalid signature") {
+			opts := &ed25519.Options{
+				Hash:    crypto.SHA512,
+				Context: LicenseProductLudus,
+			}
+			err = ed25519.VerifyWithOptions(publicKey, checksum, signature, opts)
+			if err != nil {
+				return fmt.Errorf("failed to verify ed25519ph signature with package and product UUID: %v", err)
+			} else {
+				return nil
+			}
+		}
 		return fmt.Errorf("failed to verify ed25519ph signature: %v", err)
 	}
 
