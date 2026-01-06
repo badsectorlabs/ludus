@@ -41,7 +41,7 @@ chmod +x install.sh
 ./install.sh
 ```
 
-2. Follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user).
+2. Follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user.md).
 
 
 If you made a mistake, you can update the values in `/opt/ludus/config.yml` to reflect the install.
