@@ -440,3 +440,11 @@ type InstallSubscriptionRolesResponseErrorsItem struct {
 	Role   string `json:"role"`
 	Reason string `json:"reason"`
 }
+type GetRoleVarsResponse struct {
+	Roles []GetRoleVarsResponseRole `json:"roles"`
+}
+type GetRoleVarsResponseRole struct {
+	Name   string                 `json:"name"`
+	Global bool                   `json:"global,omitempty"`
+	Vars   map[string]interface{} `json:"vars"`
+}
