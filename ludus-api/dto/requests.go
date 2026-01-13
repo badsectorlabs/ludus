@@ -119,3 +119,6 @@ type InstallSubscriptionRolesRequest struct {
 	Global bool     `json:"global"`
 	Force  bool     `json:"force"`
 }
+type GetRoleVarsRequest struct {
+	Roles []string `json:"roles"`
+}
