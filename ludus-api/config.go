@@ -81,7 +81,7 @@ func (s *Server) ParseConfig() {
 		s.LicenseValid = true
 		s.LicenseMessage = "community license"
 	} else {
-		s.LicenseType = ludusLicenseEnterprise
+		// Don't set LicenseType here - let checkLicense() determine it from keygen metadata
 		s.LicenseMessage = ""
 		s.LicenseKey = ServerConfiguration.LicenseKey
 		s.checkLicense()

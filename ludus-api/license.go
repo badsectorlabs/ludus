@@ -133,6 +133,23 @@ func (s *Server) checkLicense() {
 	}
 	s.LicenseValid = true
 
+	// Extract license type from metadata
+	if license.Metadata != nil {
+		if licenseType, ok := license.Metadata["type"].(string); ok && licenseType != "" {
+			switch strings.ToLower(licenseType) {
+			case "professional":
+				s.LicenseType = ludusLicenseProfessional
+			case "enterprise":
+				s.LicenseType = ludusLicenseEnterprise
+			case "community":
+				s.LicenseType = ludusLicenseCommunity
+			default:
+				s.LicenseType = strings.ToLower(licenseType)
+			}
+			log.Printf("LICENSE: determined license type from metadata: %s", s.LicenseType)
+		}
+	}
+
 	// Always load the enterprise plugin if it exists first
 	if FileExists(pluginsDir + "/ludus-enterprise.so") {
 		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
