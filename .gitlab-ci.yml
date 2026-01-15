@@ -1093,6 +1093,38 @@ post-deploy groups-as-admin:
     # As GTU (manager) remove a range from the group
     - ludus --user GTU groups remove range GTU ci-group-test
     - '! ludus groups ranges ci-group-test | grep GTU'
+    # Bulk operation tests
+    # Create additional test users for bulk operations
+    - ludus user add -n "Bulk Test User 1" -i BTU1 -e "btu1@ludus.internal" -p "btupassword" || true
+    - ludus user add -n "Bulk Test User 2" -i BTU2 -e "btu2@ludus.internal" -p "btupassword" || true
+    # Test bulk add users (multiple users at once)
+    - ludus groups add user BTU1,BTU2 ci-group-test
+    - ludus groups members ci-group-test | grep BTU1
+    - ludus groups members ci-group-test | grep BTU2
+    # Test bulk add ranges (multiple ranges at once, if GTU range still exists)
+    - ludus groups add range GTU,CIA ci-group-test
+    - ludus groups ranges ci-group-test | grep GTU
+    - ludus groups ranges ci-group-test | grep CIA
+    # Test bulk remove users (multiple users at once)
+    - ludus groups remove user BTU1,BTU2 ci-group-test
+    - '! ludus groups members ci-group-test | grep BTU1'
+    - '! ludus groups members ci-group-test | grep BTU2'
+    # Test bulk remove ranges (multiple ranges at once)
+    - ludus groups remove range GTU,CIA ci-group-test
+    - '! ludus groups ranges ci-group-test | grep GTU'
+    - '! ludus groups ranges ci-group-test | grep CIA'
+    # Test bulk operation with mixed valid/invalid items (error handling)
+    # Add a valid user first
+    - ludus groups add user BTU1 ci-group-test
+    # Try to add the same user again along with a new one (should partially succeed)
+    - set +o pipefail
+    - ludus groups add user BTU1,BTU2 ci-group-test 2>&1 | grep -E "(already a member|Successfully added)"
+    - set -o pipefail
+    # Verify BTU2 was added despite BTU1 error
+    - ludus groups members ci-group-test | grep BTU2
+    # Cleanup bulk test users
+    - ludus user rm -i BTU1 || true
+    - ludus user rm -i BTU2 || true
     # Delete group and cleanup user
     - ludus groups delete ci-group-test
     - '! ludus groups list | grep ci-group-test'

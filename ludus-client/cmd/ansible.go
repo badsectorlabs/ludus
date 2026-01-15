@@ -339,21 +339,11 @@ var subscriptionRolesInstallCmd = &cobra.Command{
 			return
 		}
 
-		// Unmarshal response (wrapped in result key)
-		var resultWrapper map[string]json.RawMessage
-		err = json.Unmarshal(responseJSON, &resultWrapper)
+		// Unmarshal response
+		var response dto.InstallSubscriptionRolesResponse
+		err = json.Unmarshal(responseJSON, &response)
 		if err != nil {
 			logger.Logger.Fatalf("Failed to parse response: %s", err.Error())
-		}
-
-		var response dto.InstallSubscriptionRolesResponse
-		if resultData, ok := resultWrapper["result"]; ok {
-			err = json.Unmarshal(resultData, &response)
-			if err != nil {
-				logger.Logger.Fatalf("Failed to parse result: %s", err.Error())
-			}
-		} else {
-			logger.Logger.Fatalf("Response missing 'result' key")
 		}
 
 		// Display results

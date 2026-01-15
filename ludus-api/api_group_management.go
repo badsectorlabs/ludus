@@ -286,11 +286,9 @@ func AddUsersToGroup(e *core.RequestEvent) error {
 		}
 	}
 
-	return e.JSON(http.StatusOK, map[string]any{
-		"result": dto.BulkGroupOperationResponse{
-			Success: success,
-			Errors:  errors,
-		},
+	return e.JSON(http.StatusOK, dto.BulkGroupOperationResponse{
+		Success: success,
+		Errors:  errors,
 	})
 }
 
@@ -397,11 +395,9 @@ func RemoveUsersFromGroup(e *core.RequestEvent) error {
 		}
 	}
 
-	return e.JSON(http.StatusOK, map[string]any{
-		"result": dto.BulkGroupOperationResponse{
-			Success: success,
-			Errors:  errors,
-		},
+	return e.JSON(http.StatusOK, dto.BulkGroupOperationResponse{
+		Success: success,
+		Errors:  errors,
 	})
 }
 
@@ -513,11 +509,9 @@ func AddRangesToGroup(e *core.RequestEvent) error {
 		success = append(success, rangeID)
 	}
 
-	return e.JSON(http.StatusOK, map[string]any{
-		"result": dto.BulkGroupOperationResponse{
-			Success: success,
-			Errors:  errors,
-		},
+	return e.JSON(http.StatusOK, dto.BulkGroupOperationResponse{
+		Success: success,
+		Errors:  errors,
 	})
 }
 
