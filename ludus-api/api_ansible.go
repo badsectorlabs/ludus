@@ -489,5 +489,5 @@ func InstallSubscriptionRoles(e *core.RequestEvent) error {
 		Errors:  errors,
 	}
 
-	return e.JSON(http.StatusOK, map[string]any{"result": response})
+	return e.JSON(http.StatusOK, response)
 }

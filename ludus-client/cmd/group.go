@@ -26,21 +26,9 @@ func splitAndTrimIDs(idsArg string) []string {
 
 // printBulkOperationResponse parses and prints the bulk operation response
 func printBulkOperationResponse(responseJSON []byte, action string, itemType string) {
-	var resultWrapper map[string]json.RawMessage
-	if err := json.Unmarshal(responseJSON, &resultWrapper); err != nil {
-		logger.Logger.Info(fmt.Sprintf("Operation completed successfully"))
-		return
-	}
-
-	resultData, ok := resultWrapper["result"]
-	if !ok {
-		logger.Logger.Info(fmt.Sprintf("Operation completed successfully"))
-		return
-	}
-
 	var bulkResponse dto.BulkGroupOperationResponse
-	if err := json.Unmarshal(resultData, &bulkResponse); err != nil {
-		logger.Logger.Info(fmt.Sprintf("Operation completed successfully"))
+	if err := json.Unmarshal(responseJSON, &bulkResponse); err != nil {
+		logger.Logger.Info("Operation completed successfully")
 		return
 	}
 
