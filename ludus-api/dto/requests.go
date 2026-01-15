@@ -132,3 +132,6 @@ type BulkAddRangesToGroupRequest struct {
 type BulkRemoveRangesFromGroupRequest struct {
 	RangeIDs []string `json:"rangeIDs"`
 }
+type GetRoleVarsRequest struct {
+	Roles []string `json:"roles"`
+}

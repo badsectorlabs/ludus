@@ -482,6 +482,13 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"GetRoleVars",
+		http.MethodPost,
+		"/ansible/role/vars",
+		GetRoleVars,
+	},
+
+	{
 		"GetAnsibleTagsForDeployment",
 		http.MethodGet,
 		"/range/tags",

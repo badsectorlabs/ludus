@@ -448,3 +448,11 @@ type BulkGroupOperationErrorItem struct {
 	Item   string `json:"item"`
 	Reason string `json:"reason"`
 }
+type GetRoleVarsResponse struct {
+	Roles []GetRoleVarsResponseRole `json:"roles"`
+}
+type GetRoleVarsResponseRole struct {
+	Name   string                 `json:"name"`
+	Global bool                   `json:"global,omitempty"`
+	Vars   map[string]interface{} `json:"vars"`
+}

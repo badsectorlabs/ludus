@@ -491,3 +491,65 @@ func InstallSubscriptionRoles(e *core.RequestEvent) error {
 
 	return e.JSON(http.StatusOK, response)
 }
+
+// GetRoleVars - retrieves the variables for one or more Ansible roles
+func GetRoleVars(e *core.RequestEvent) error {
+	var requestBody dto.GetRoleVarsRequest
+	e.BindBody(&requestBody)
+
+	if len(requestBody.Roles) == 0 {
+		return JSONError(e, http.StatusBadRequest, "At least one role name is required")
+	}
+
+	user := e.Get("user").(*models.User)
+	var response dto.GetRoleVarsResponse
+
+	for _, roleName := range requestBody.Roles {
+		roleResponse := dto.GetRoleVarsResponseRole{
+			Name: roleName,
+			Vars: make(map[string]interface{}),
+		}
+
+		// Try user-specific role first
+		userRolePath := fmt.Sprintf("%s/users/%s/.ansible/roles/%s", ludusInstallPath, user.ProxmoxUsername(), roleName)
+		// Try global role
+		globalRolePath := fmt.Sprintf("%s/resources/global-roles/%s", ludusInstallPath, roleName)
+
+		var rolePath string
+		var roleFound bool
+
+		// Check if role exists in user-specific location
+		if _, err := os.Stat(userRolePath); err == nil {
+			rolePath = userRolePath
+			roleResponse.Global = false
+			roleFound = true
+		} else if _, err := os.Stat(globalRolePath); err == nil {
+			// Check if role exists in global location
+			rolePath = globalRolePath
+			roleResponse.Global = true
+			roleFound = true
+		}
+
+		// If role found, read user-configurable variables from defaults/main.yml
+		if roleFound {
+			// Read defaults/main.yml (user-configurable variables)
+			defaultsPath := fmt.Sprintf("%s/defaults/main.yml", rolePath)
+			if _, err := os.Stat(defaultsPath); err == nil {
+				defaultsContent, err := os.ReadFile(defaultsPath)
+				if err == nil {
+					var defaultsVars map[string]interface{}
+					if err := yaml.Unmarshal(defaultsContent, &defaultsVars); err == nil {
+						// Set defaults as vars (these are what users can configure via role_vars)
+						for k, v := range defaultsVars {
+							roleResponse.Vars[k] = v
+						}
+					}
+				}
+			}
+		}
+
+		response.Roles = append(response.Roles, roleResponse)
+	}
+
+	return e.JSON(http.StatusOK, response)
+}
