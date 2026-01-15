@@ -7,12 +7,53 @@ import (
 	"ludus/rest"
 	"ludusapi/dto"
 	"os"
+	"strings"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
 
 var manager bool
+
+// splitAndTrimIDs splits a comma-separated string of IDs and trims whitespace from each
+func splitAndTrimIDs(idsArg string) []string {
+	ids := strings.Split(idsArg, ",")
+	for i, id := range ids {
+		ids[i] = strings.TrimSpace(id)
+	}
+	return ids
+}
+
+// printBulkOperationResponse parses and prints the bulk operation response
+func printBulkOperationResponse(responseJSON []byte, action string, itemType string) {
+	var resultWrapper map[string]json.RawMessage
+	if err := json.Unmarshal(responseJSON, &resultWrapper); err != nil {
+		logger.Logger.Info(fmt.Sprintf("Operation completed successfully"))
+		return
+	}
+
+	resultData, ok := resultWrapper["result"]
+	if !ok {
+		logger.Logger.Info(fmt.Sprintf("Operation completed successfully"))
+		return
+	}
+
+	var bulkResponse dto.BulkGroupOperationResponse
+	if err := json.Unmarshal(resultData, &bulkResponse); err != nil {
+		logger.Logger.Info(fmt.Sprintf("Operation completed successfully"))
+		return
+	}
+
+	if len(bulkResponse.Success) > 0 {
+		logger.Logger.Info(fmt.Sprintf("Successfully %s %d %s: %v", action, len(bulkResponse.Success), itemType, bulkResponse.Success))
+	}
+	if len(bulkResponse.Errors) > 0 {
+		logger.Logger.Warn(fmt.Sprintf("Failed to process %d %s:", len(bulkResponse.Errors), itemType))
+		for _, err := range bulkResponse.Errors {
+			logger.Logger.Warn(fmt.Sprintf("  %s: %s", err.Item, err.Reason))
+		}
+	}
+}
 
 // groupsCmd represents the groups command
 var groupsCmd = &cobra.Command{
@@ -120,53 +161,68 @@ var groupsAddCmd = &cobra.Command{
 }
 
 var groupsAddUserCmd = &cobra.Command{
-	Use:   "user [userID] [groupName]",
-	Short: "Add a user to a group",
-	Long:  `Add a user to a group to grant them access to ranges assigned to that group.`,
-	Args:  cobra.ExactArgs(2),
+	Use:     "user [userID(s)] [groupName]",
+	Aliases: []string{"users"},
+	Short:   "Add user(s) to a group",
+	Long:    `Add one or more users to a group. For multiple users, provide comma-separated userIDs (e.g., "user1,user2,user3").`,
+	Args:    cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		userID := args[0]
+		userIDArg := args[0]
 		groupName := args[1]
 
-		var responseJSON []byte
-		var success bool
-		groupUserURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/users/%s", groupName, userID))
+		userIDs := splitAndTrimIDs(userIDArg)
+
+		var managersFlag []string
 		if manager {
-			groupUserURL = addQueryParameterToURL(groupUserURL, "manager", "true")
+			managersFlag = userIDs
 		}
-		responseJSON, success = rest.GenericJSONPost(client, groupUserURL, nil)
+
+		payload := dto.BulkAddUsersToGroupRequest{
+			UserIDs:  userIDs,
+			Managers: managersFlag,
+		}
+
+		groupUserURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/users", groupName))
+		responseJSON, success := rest.GenericJSONPost(client, groupUserURL, payload)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		logger.Logger.Info(fmt.Sprintf("User %s added to group %s successfully", userID, groupName))
+
+		printBulkOperationResponse(responseJSON, "added", "user(s)")
 	},
 }
 
 func setupGroupsAddUserCmd(command *cobra.Command) {
-	command.Flags().BoolVarP(&manager, "manager", "m", false, "whether the user should be a manager of the group")
+	command.Flags().BoolVarP(&manager, "manager", "m", false, "whether the user(s) should be manager(s) of the group")
 }
 
 var groupsAddRangeCmd = &cobra.Command{
-	Use:   "range [rangeID] [groupName]",
-	Short: "Grant group access to a range",
-	Long:  `Grant a group access to a specific range, allowing all group members to access that range.`,
-	Args:  cobra.ExactArgs(2),
+	Use:     "range [rangeID(s)] [groupName]",
+	Aliases: []string{"ranges"},
+	Short:   "Grant group access to range(s)",
+	Long:    `Grant a group access to one or more ranges. For multiple ranges, provide comma-separated rangeIDs (e.g., "range1,range2,range3").`,
+	Args:    cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		rangeID := args[0]
+		rangeIDArg := args[0]
 		groupName := args[1]
 
-		var responseJSON []byte
-		var success bool
-		groupRangeURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/ranges/%s", groupName, rangeID))
-		responseJSON, success = rest.GenericJSONPost(client, groupRangeURL, nil)
+		rangeIDs := splitAndTrimIDs(rangeIDArg)
+
+		payload := dto.BulkAddRangesToGroupRequest{
+			RangeIDs: rangeIDs,
+		}
+
+		groupRangeURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/ranges", groupName))
+		responseJSON, success := rest.GenericJSONPost(client, groupRangeURL, payload)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		logger.Logger.Info(fmt.Sprintf("Group %s granted access to range %s successfully", groupName, rangeID))
+
+		printBulkOperationResponse(responseJSON, "granted access to", "range(s)")
 	},
 }
 
@@ -178,50 +234,58 @@ var groupsRemoveCmd = &cobra.Command{
 }
 
 var groupsRemoveUserCmd = &cobra.Command{
-	Use:   "user [userID] [groupName]",
-	Short: "Remove a user from a group",
-	Long:  `Remove a user from a group to revoke their access to ranges assigned to that group.`,
-	Args:  cobra.ExactArgs(2),
+	Use:     "user [userID(s)] [groupName]",
+	Aliases: []string{"users"},
+	Short:   "Remove user(s) from a group",
+	Long:    `Remove one or more users from a group. For multiple users, provide comma-separated userIDs (e.g., "user1,user2,user3").`,
+	Args:    cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		userID := args[0]
+		userIDArg := args[0]
 		groupName := args[1]
 
-		var responseJSON []byte
-		var success bool
-		groupUserURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/users/%s", groupName, userID))
-		responseJSON, success = rest.GenericDelete(client, groupUserURL)
+		userIDs := splitAndTrimIDs(userIDArg)
+
+		payload := dto.BulkRemoveUsersFromGroupRequest{
+			UserIDs: userIDs,
+		}
+
+		groupUserURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/users", groupName))
+		responseJSON, success := rest.GenericDeleteWithBody(client, groupUserURL, payload)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		logger.Logger.Info(fmt.Sprintf("User %s removed from group %s successfully", userID, groupName))
+
+		printBulkOperationResponse(responseJSON, "removed", "user(s)")
 	},
 }
 
 var groupsRemoveRangeCmd = &cobra.Command{
-	Use:   "range [rangeID] [groupName]",
-	Short: "Revoke group access from a range",
-	Long:  `Revoke a group's access to a specific range, removing access for all group members.`,
-	Args:  cobra.ExactArgs(2),
+	Use:     "range [rangeID(s)] [groupName]",
+	Aliases: []string{"ranges"},
+	Short:   "Revoke group access from range(s)",
+	Long:    `Revoke a group's access to one or more ranges. For multiple ranges, provide comma-separated rangeIDs (e.g., "range1,range2,range3").`,
+	Args:    cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		rangeID := args[0]
+		rangeIDArg := args[0]
 		groupName := args[1]
 
-		if rangeID == "" || groupName == "" {
-			logger.Logger.Fatal("rangeID and groupName are required")
+		rangeIDs := splitAndTrimIDs(rangeIDArg)
+
+		payload := dto.BulkRemoveRangesFromGroupRequest{
+			RangeIDs: rangeIDs,
 		}
 
-		var responseJSON []byte
-		var success bool
-		groupRangeURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/ranges/%s", groupName, rangeID))
-		responseJSON, success = rest.GenericDelete(client, groupRangeURL)
+		groupRangeURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/ranges", groupName))
+		responseJSON, success := rest.GenericDeleteWithBody(client, groupRangeURL, payload)
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		logger.Logger.Info(fmt.Sprintf("Group %s access to range %s revoked successfully", groupName, rangeID))
+
+		printBulkOperationResponse(responseJSON, "revoked access from", "range(s)")
 	},
 }
 
