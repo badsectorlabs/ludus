@@ -490,7 +490,7 @@ func InstallSubscriptionRoles(e *core.RequestEvent) error {
 		Errors:  errors,
 	}
 
-	return e.JSON(http.StatusOK, response)
+	return e.JSON(http.StatusOK, map[string]any{"result": response})
 }
 
 // GetRoleVars - retrieves the variables for one or more Ansible roles

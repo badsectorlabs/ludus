@@ -131,13 +131,22 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 	}
 
 	if resp.StatusCode() == 403 || resp.StatusCode() == 409 || resp.StatusCode() == 404 {
-		prettyPrintError(resp.String())
+		// Try to parse as PocketBase error first, then fall back to simple error format
+		err := prettyPrintPocketBaseError(resp.Body())
+		if err != nil {
+			// Not a PocketBase error, try simple error format
+			prettyPrintError(resp.String())
+		}
 		error = true
 	}
 
 	if resp.StatusCode() == 400 {
-		logger.Logger.Error("Bad Request")
-		prettyPrintError(resp.String())
+		// Try to parse as PocketBase error first, then fall back to simple error format
+		err := prettyPrintPocketBaseError(resp.Body())
+		if err != nil {
+			// Not a PocketBase error, try simple error format
+			prettyPrintError(resp.String())
+		}
 		error = true
 	}
 
@@ -216,6 +225,24 @@ func GenericDelete(client *resty.Client, apiPath string) ([]byte, bool) {
 
 	return processRESTResult(resp, err)
 
+}
+
+func GenericDeleteWithBody(client *resty.Client, apiPath string, data any) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	s.Suffix = " Waiting for server..."
+	s.Start()
+
+	resp, err := client.R().
+		SetHeader("Content-Type", "application/json").
+		SetBody(data).
+		Delete(apiPath)
+
+	s.Stop()
+
+	return processRESTResult(resp, err)
 }
 
 func GenericPutFile(client *resty.Client, apiPath string, data []byte) ([]byte, bool) {

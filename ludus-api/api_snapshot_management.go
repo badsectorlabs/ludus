@@ -186,7 +186,7 @@ func CreateSnapshot(e *core.RequestEvent) error {
 		Success: successArray,
 		Errors:  errors,
 	}
-	return e.JSON(http.StatusOK, response)
+	return e.JSON(http.StatusOK, map[string]any{"result": response})
 }
 
 // RollbackSnapshot - rolls back a snapshot for specified VMs or all VMs in the range
@@ -246,7 +246,7 @@ func RollbackSnapshot(e *core.RequestEvent) error {
 		Success: successArray,
 		Errors:  errors,
 	}
-	return e.JSON(http.StatusOK, response)
+	return e.JSON(http.StatusOK, map[string]any{"result": response})
 }
 
 // Helper function to rollback a snapshot for a specific VM
@@ -321,7 +321,7 @@ func RemoveSnapshot(e *core.RequestEvent) error {
 		Success: successArray,
 		Errors:  errors,
 	}
-	return e.JSON(http.StatusOK, response)
+	return e.JSON(http.StatusOK, map[string]any{"result": response})
 }
 
 // Helper function to remove a snapshot for a specific VM

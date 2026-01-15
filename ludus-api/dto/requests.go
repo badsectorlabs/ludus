@@ -127,3 +127,16 @@ type MoveRoleScopeRequest struct {
 	Global bool     `json:"global"`
 	Copy   bool     `json:"copy,omitempty"` // If true, keep source; if false, remove source (move)
 }
+type BulkAddUsersToGroupRequest struct {
+	UserIDs  []string `json:"userIDs"`
+	Managers []string `json:"managers,omitempty"` // Optional: userIDs that should be managers
+}
+type BulkRemoveUsersFromGroupRequest struct {
+	UserIDs []string `json:"userIDs"`
+}
+type BulkAddRangesToGroupRequest struct {
+	RangeIDs []string `json:"rangeIDs"`
+}
+type BulkRemoveRangesFromGroupRequest struct {
+	RangeIDs []string `json:"rangeIDs"`
+}
