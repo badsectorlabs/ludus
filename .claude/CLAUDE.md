@@ -1,0 +1,3 @@
+Go Best Practices:
+Go >=1.21:
+- Use slices.Contains() instead of writing custom helper functions for checking if a string is in a slice
