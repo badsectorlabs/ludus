@@ -60,5 +60,23 @@ if [[ "$SKIP_BUILD" == "false" ]]; then
     runner_vm_name=$RUNNER_VM_NAME skip_build=$SKIP_BUILD" $LUDUS_DIR/ci/prepare.yml
 fi
 
+# Sync fresh binaries from Proxmox host to VM if they exist
+# This happens when dependencies: ["build all"] downloads artifacts to the Proxmox host
+# but the VM was restored from a snapshot (so it has old binaries)
+if [[ ! -z "$CUSTOM_ENV_CI_PROJECT_DIR" && -d "$CUSTOM_ENV_CI_PROJECT_DIR/binaries" ]]; then
+    echo "Fresh binaries detected on Proxmox host, syncing to VM..."
+
+    # Ensure the project directory structure exists on the VM
+    ssh -F /home/gitlab-runner/.ssh/config gitlab-runner@"$VM_IP" \
+        "mkdir -p $CUSTOM_ENV_CI_PROJECT_DIR"
+
+    # Sync binaries from Proxmox host to VM
+    rsync -avz -e "ssh -F /home/gitlab-runner/.ssh/config" \
+        "$CUSTOM_ENV_CI_PROJECT_DIR/binaries/" \
+        gitlab-runner@"$VM_IP":"$CUSTOM_ENV_CI_PROJECT_DIR/binaries/"
+
+    echo "Binaries synced successfully"
+fi
+
 # Clean up old rollback files (over 2 days old)
 find /tmp/ -name '.ludus-ci*' -type f -mtime +2 -exec rm {} +

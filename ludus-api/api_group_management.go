@@ -6,6 +6,7 @@ import (
 	"ludusapi/dto"
 	"ludusapi/models"
 	"net/http"
+	"slices"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -26,16 +27,6 @@ func getGroupObjectFromRequest(e *core.RequestEvent) (*models.Group, error) {
 	group.SetProxyRecord(groupRecord)
 	e.App.ExpandRecord(group.Record, []string{"members", "managers", "ranges"}, nil)
 	return group, nil
-}
-
-// Helper function to check if a string is in a slice
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }
 
 // CreateGroup creates a new group (admin only)
@@ -182,7 +173,7 @@ func AddUsersToGroup(e *core.RequestEvent) error {
 	var errors []dto.BulkGroupOperationErrorItem
 
 	for _, userID := range userIDs {
-		isManager := contains(managers, userID)
+		isManager := slices.Contains(managers, userID)
 
 		// Check if user exists
 		var user models.User

@@ -68,7 +68,7 @@ stages:
 .ci-setup-admin: &ci-setup-admin
   - *common-setup
   # Add the CIA user if it doesn't already exist, try 5 times since the server just restarted the first might fail
-  - for i in {1..5}; do (ludus users list all | grep -q 'Continuous Integration Admin' || ludus users add -a -n "Continuous Integration Admin" -i CIA -e "cia@ludus.internal" -P "cicdpassword") && break || sleep 5; done
+  - for i in {1..5}; do (ludus users list all | grep -q 'Continuous Integration Admin' || ludus users add -a -n "Continuous Integration Admin" -i CIA -e "cia@ludus.internal" -p "cicdpassword") && break || sleep 5; done
   # Switch to CIA user API Key - only request it once, save it to disk
   - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --json --user CIA users apikey --no-prompt | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-admin; fi
   # Set the CIA user key as the key for all future ludus operations
@@ -81,7 +81,7 @@ stages:
 .ci-setup-user: &ci-setup-user
   - *common-setup
   # Add the CIU user if it doesn't already exist, try 5 times since the server just restarted the first might fail
-  - for i in {1..5}; do (ludus users list all | grep -q 'Continuous Integration User' || ludus users add -n "Continuous Integration User" -i CIU -e "ciu@ludus.internal" -P "cicdpassword") && break || sleep 5; done
+  - for i in {1..5}; do (ludus users list all | grep -q 'Continuous Integration User' || ludus users add -n "Continuous Integration User" -i CIU -e "ciu@ludus.internal" -p "cicdpassword") && break || sleep 5; done
   # Switch to CIU user API Key - only request it once, save it to disk
   - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --json --user CIU users apikey --no-prompt | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-user; fi
   # Set the CIU user key as the key for all future ludus operations
@@ -348,7 +348,7 @@ build all:
     - echo "Compiling the server code..."
     - export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
     - if [[ -n $CI_COMMIT_TAG ]]; then export VERSION=$CI_COMMIT_TAG; else export VERSION=${CI_COMMIT_BRANCH}; fi
-    - mkdir binaries
+    - rm -rf binaries && mkdir binaries
     - echo "Getting web UI code..."
     - |
       if [[ -z ${LUDUS_WEBUI_GITLAB_TOKEN+x} ]]; then
@@ -633,7 +633,8 @@ client basic-commands:
   stage: client
   tags:
     - ludus-proxmox-runner
-  dependencies: [] # Prevent download of build artifacts, use local cache
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1003,7 +1004,8 @@ post-deploy groups-as-admin:
   stage: post-deploy-admin-groups
   tags:
     - ludus-proxmox-runner
-  dependencies: [] # Prevent download of build artifacts, use local cache
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
