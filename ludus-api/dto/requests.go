@@ -122,3 +122,8 @@ type InstallSubscriptionRolesRequest struct {
 type GetRoleVarsRequest struct {
 	Roles []string `json:"roles"`
 }
+type MoveRoleScopeRequest struct {
+	Roles  []string `json:"roles"`
+	Global bool     `json:"global"`
+	Copy   bool     `json:"copy,omitempty"` // If true, keep source; if false, remove source (move)
+}

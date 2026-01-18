@@ -295,6 +295,25 @@ func GenericJSONPut(client *resty.Client, apiPath string, data string) ([]byte, 
 
 }
 
+func GenericJSONPatch(client *resty.Client, apiPath string, data string) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	s.Suffix = " Waiting for server..."
+	s.Start()
+
+	resp, err := client.R().
+		SetHeader("Content-Type", "application/json").
+		SetBody(data).
+		Patch(apiPath)
+
+	s.Stop()
+
+	return processRESTResult(resp, err)
+
+}
+
 func FileGet(client *resty.Client, apiPath string, outputPath string) {
 	if !strings.HasPrefix(apiPath, APIBasePath) {
 		apiPath = APIBasePath + apiPath
