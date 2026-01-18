@@ -455,6 +455,7 @@ type MoveRoleScopeResponse struct {
 type MoveRoleScopeResponseErrorsItem struct {
 	Role  string `json:"role"`
 	Error string `json:"error"`
+}
 type BulkGroupOperationResponse struct {
 	Success []string                      `json:"success,omitempty"`
 	Errors  []BulkGroupOperationErrorItem `json:"errors,omitempty"`
