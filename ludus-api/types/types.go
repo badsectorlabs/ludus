@@ -148,6 +148,8 @@ type VMs struct {
 	poweredOn bool
 	ip        string
 	isRouter  bool
+	cpu       int // Number of CPU cores
+	ram       int // RAM in GB
 	created   types.DateTime
 	updated   types.DateTime
 }

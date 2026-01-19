@@ -386,6 +386,8 @@ func ListRange(e *core.RequestEvent) error {
 			PoweredOn:   vmRecord.PoweredOn(),
 			Ip:          vmRecord.Ip(),
 			IsRouter:    vmRecord.IsRouter(),
+			CPU:         int32(vmRecord.Cpu()),
+			RAM:         int32(vmRecord.Ram()),
 		})
 	}
 
@@ -462,6 +464,8 @@ func ListAllRanges(e *core.RequestEvent) error {
 				RangeNumber: int32(vmRecordObj.Range().RangeNumber()),
 				Name:        vmRecordObj.Name(),
 				PoweredOn:   vmRecordObj.PoweredOn(),
+				CPU:         int32(vmRecordObj.Cpu()),
+				RAM:         int32(vmRecordObj.Ram()),
 			})
 		}
 		response = append(response, responseItem)
