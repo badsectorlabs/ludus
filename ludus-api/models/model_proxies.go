@@ -812,6 +812,22 @@ func (p *VMs) SetIsRouter(isRouter bool) {
 	p.Set("isRouter", isRouter)
 }
 
+func (p *VMs) Cpu() int {
+	return p.GetInt("cpu")
+}
+
+func (p *VMs) SetCpu(cpu int) {
+	p.Set("cpu", cpu)
+}
+
+func (p *VMs) Ram() int {
+	return p.GetInt("ram")
+}
+
+func (p *VMs) SetRam(ram int) {
+	p.Set("ram", ram)
+}
+
 func (p *VMs) Created() types.DateTime {
 	return p.GetDateTime("created")
 }

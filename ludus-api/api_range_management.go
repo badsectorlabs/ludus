@@ -449,7 +449,7 @@ func ListAllRanges(e *core.RequestEvent) error {
 			Purpose:        rangeRecord.Purpose(),
 			TestingEnabled: rangeRecord.TestingEnabled(),
 		}
-		vmRecords, err := app.FindAllRecords("vms", dbx.NewExp("range = {:rangeID}", dbx.Params{"rangeID": rangeRecord.RangeId()}))
+		vmRecords, err := app.FindAllRecords("vms", dbx.NewExp("range = {:rangeID}", dbx.Params{"rangeID": rangeRecord.Id}))
 		if err != nil {
 			logger.Error(fmt.Sprintf("Error finding VMs for range %s: %s", rangeRecord.RangeId(), err.Error()))
 			continue
@@ -457,11 +457,14 @@ func ListAllRanges(e *core.RequestEvent) error {
 		for _, vmRecord := range vmRecords {
 			vmRecordObj := &models.VM{}
 			vmRecordObj.SetProxyRecord(vmRecord)
+
+			// Use rangeRecord from outer loop rather than expanding VM's range relation
+			// for efficiency. We already queried VMs by range ID, so they must belong to this range.
 			responseItem.VMs = append(responseItem.VMs, dto.ListAllRangeResponseItemVMsItem{
 				Ip:          vmRecordObj.Ip(),
 				IsRouter:    vmRecordObj.IsRouter(),
 				ProxmoxID:   int32(vmRecordObj.ProxmoxId()),
-				RangeNumber: int32(vmRecordObj.Range().RangeNumber()),
+				RangeNumber: int32(rangeRecord.RangeNumber()),
 				Name:        vmRecordObj.Name(),
 				PoweredOn:   vmRecordObj.PoweredOn(),
 				CPU:         int32(vmRecordObj.Cpu()),
