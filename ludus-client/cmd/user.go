@@ -305,7 +305,7 @@ var usersAddCmd = &cobra.Command{
 		var success bool
 
 		// If no password provided via -p flag, prompt for it
-	if password == "" {
+		if password == "" {
 			fmt.Print("Enter password for the user (leave empty to generate a random password): ")
 			passwordInput, err := readPasswordWithAsterisks()
 			if err != nil {
