@@ -122,11 +122,11 @@ type GetEtcHostsResponse struct {
 	Result string `json:"result,omitempty"`
 }
 type GetLicenseResponse struct {
-	LicensedTo string    `json:"licensed_to,omitempty"`
-	ExpiresAt  time.Time `json:"expires_at,omitempty"`
-	Active     bool      `json:"active,omitempty"`
-	Message    string    `json:"message,omitempty"`
-	Edition    string    `json:"edition,omitempty"`
+	LicensedTo   string    `json:"licensed_to,omitempty"`
+	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	Active       bool      `json:"active,omitempty"`
+	Message      string    `json:"message,omitempty"`
+	Entitlements []string  `json:"entitlements,omitempty"`
 }
 type GetLogsResponse struct {
 	Result string `json:"result,omitempty"`

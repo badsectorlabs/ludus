@@ -28,16 +28,12 @@ const (
 	licenseAPIVersion                       = "1.7"
 	licenseAPIPrefix                        = "v1"
 	LicenseProductLudus                     = "5722ca04-715d-4969-9130-a051532b7579"
-	licensePackageSubscriptionRoles         = "0d55c084-4181-4d13-8b05-a349b1409760"
 	licenseProductSubscriptionRolesMetadata = "7b75d702-0448-4d82-9963-2b1f1f460022"
 	LicensePackageLudusEnterprisePlugin     = "a8ecdfa4-6cf7-4a7c-93cc-95fe44c94d14"
 	LicensePackageLudusAntisandboxPlugin    = "a335f37d-e603-405c-8c99-0bb3185a87e8"
 	licenseAccount                          = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
 	licensePublicKey                        = "70cb26141f38840b8f3f499d4875a829a9d251bd3337278995832b9ea4e39d12"
 	binaryPublicKey                         = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
-	ludusLicenseEnterprise                  = "enterprise"
-	ludusLicenseCommunity                   = "community"
-	ludusLicenseProfessional                = "professional"
 )
 
 func (s *Server) checkLicense() {
@@ -133,21 +129,17 @@ func (s *Server) checkLicense() {
 	}
 	s.LicenseValid = true
 
-	// Extract license type from metadata
-	if license.Metadata != nil {
-		if licenseType, ok := license.Metadata["type"].(string); ok && licenseType != "" {
-			switch strings.ToLower(licenseType) {
-			case "professional":
-				s.LicenseType = ludusLicenseProfessional
-			case "enterprise":
-				s.LicenseType = ludusLicenseEnterprise
-			case "community":
-				s.LicenseType = ludusLicenseCommunity
-			default:
-				s.LicenseType = strings.ToLower(licenseType)
-			}
-			log.Printf("LICENSE: determined license type from metadata: %s", s.LicenseType)
+	// Extract entitlements from license
+	entitlements, err := license.Entitlements(ctx)
+	if err != nil {
+		log.Printf("LICENSE: unable to get entitlements: %v", err)
+		s.Entitlements = []string{}
+	} else {
+		s.Entitlements = make([]string, len(entitlements))
+		for i, entitlement := range entitlements {
+			s.Entitlements[i] = string(entitlement.Code)
 		}
+		log.Printf("LICENSE: found entitlements: %s", strings.Join(s.Entitlements, ", "))
 	}
 
 	// Always load the enterprise plugin if it exists first

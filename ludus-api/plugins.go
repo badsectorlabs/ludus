@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"plugin"
+	"slices"
 	"time"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -27,7 +28,7 @@ type Server struct {
 	Version          string
 	VersionString    string
 	LudusInstallPath string
-	LicenseType      string
+	Entitlements     []string
 	LicenseMessage   string
 	LicenseValid     bool
 	LicenseKey       string
@@ -128,4 +129,9 @@ func (s *Server) ShutdownPlugins() {
 			logger.Info(fmt.Sprintf("Error shutting down plugin %s: %v", p.Name(), err))
 		}
 	}
+}
+
+// HasEntitlement checks if the server license has a specific entitlement
+func (s *Server) HasEntitlement(code string) bool {
+	return slices.Contains(s.Entitlements, code)
 }
