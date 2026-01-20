@@ -1536,7 +1536,7 @@ post-deploy user-cmds-as-user:
     # Try to get an api key for another user
     - ludus user apikey --user CIA --no-prompt 2>&1 | grep "You are not an admin and cannot impersonate other users"
     # Get a new API for ourselves
-    - ludus user apikey --no-prompt > /opt/ludus/ci/.apikey-user
+    - ludus user apikey --no-prompt --value > /opt/ludus/ci/.apikey-user
 
 post-deploy templates-as-user:
   stage: post-deploy-user-templates
