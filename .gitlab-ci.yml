@@ -74,7 +74,7 @@ stages:
   # Add the CIA user if it doesn't already exist, try 5 times since the server just restarted the first might fail
   - for i in {1..5}; do (ludus users list all | grep -q 'Continuous Integration Admin' || ludus users add -a -n "Continuous Integration Admin" -i CIA -e "cia@ludus.internal" -p "cicdpassword") && break || sleep 5; done
   # Switch to CIA user API Key - only request it once, save it to disk
-  - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --json --user CIA users apikey --no-prompt | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-admin; fi
+  - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --user CIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-admin; fi
   # Set the CIA user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
@@ -87,7 +87,7 @@ stages:
   # Add the CIU user if it doesn't already exist, try 5 times since the server just restarted the first might fail
   - for i in {1..5}; do (ludus users list all | grep -q 'Continuous Integration User' || ludus users add -n "Continuous Integration User" -i CIU -e "ciu@ludus.internal" -p "cicdpassword") && break || sleep 5; done
   # Switch to CIU user API Key - only request it once, save it to disk
-  - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --json --user CIU users apikey --no-prompt | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-user; fi
+  - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --user CIU users apikey --no-prompt --value > /opt/ludus/ci/.apikey-user; fi
   # Set the CIU user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
