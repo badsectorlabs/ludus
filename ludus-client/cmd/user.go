@@ -26,6 +26,7 @@ var (
 	proxmoxPassword string
 	password        string
 	deleteRange     bool
+	valueOnly       bool
 )
 
 // readPasswordWithAsterisks reads a password from stdin, displaying asterisks for each character typed
@@ -247,6 +248,12 @@ Do you want to continue? (y/N): `, userID)
 			logger.Logger.Fatal(err.Error())
 		}
 
+		// If valueOnly flag is set, print just the API key
+		if valueOnly {
+			fmt.Println(data.Result.ApiKey)
+			return
+		}
+
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"UserID", "API Key"})
@@ -264,6 +271,7 @@ Do you want to continue? (y/N): `, userID)
 
 func setupAPIKeyCmd(command *cobra.Command) {
 	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
+	command.Flags().BoolVar(&valueOnly, "value", false, "output only the API key value without table formatting")
 }
 
 var usersWireguardCmd = &cobra.Command{
