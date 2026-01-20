@@ -59,8 +59,9 @@ stages:
 .powered-on-and-not-in-testing: &powered-on-and-not-in-testing
   # Start from a known state (in the event this is a retry)
   # Power on all VMs if we are not in a "user" test as admin (admin VMs are powered off for user tests to save resources)
+  # Exception: always power on VMs for testing mode tests (they need VMs running)
   - |
-    if [[ ! ($(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true") && ("$CI_JOB_NAME" != *"-user"* && "$LUDUS_USER_ID" != "CIU") ]]; then 
+    if [[ ! ($(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true") && ! ("$CI_JOB_NAME" == *"-user"* && "$CI_JOB_NAME" != *"testing"*) ]]; then
       echo "Not all VMs are powered on, powering on now"
       ludus power on -n all
       timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true" ]]; do sleep 5; done'
