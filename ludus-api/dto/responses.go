@@ -456,3 +456,19 @@ type GetRoleVarsResponseRole struct {
 	Global bool                   `json:"global,omitempty"`
 	Vars   map[string]interface{} `json:"vars"`
 }
+type MoveRoleScopeResponse struct {
+	Success []string                          `json:"success"`
+	Errors  []MoveRoleScopeResponseErrorsItem `json:"errors"`
+}
+type MoveRoleScopeResponseErrorsItem struct {
+	Role  string `json:"role"`
+	Error string `json:"error"`
+}
+type BulkGroupOperationResponse struct {
+	Success []string                      `json:"success,omitempty"`
+	Errors  []BulkGroupOperationErrorItem `json:"errors,omitempty"`
+}
+type BulkGroupOperationErrorItem struct {
+	Item   string `json:"item"`
+	Reason string `json:"reason"`
+}

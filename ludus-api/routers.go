@@ -771,4 +771,11 @@ var routes = PocketBaseRoutes{
 		"/ansible/subscription-roles",
 		InstallSubscriptionRoles,
 	},
+
+	{
+		"MoveRoleScope",
+		http.MethodPatch,
+		"/ansible/role/scope",
+		MoveRoleScope,
+	},
 }

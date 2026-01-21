@@ -26,6 +26,7 @@ var (
 	subscriptionRoleNames  string
 	subscriptionRoleForce  bool
 	subscriptionRoleGlobal bool
+	roleScopeCopy          bool
 )
 
 var ansibleCmd = &cobra.Command{
@@ -370,6 +371,84 @@ func setupSubscriptionRolesInstallCmd(command *cobra.Command) {
 	command.Flags().BoolVarP(&subscriptionRoleForce, "force", "f", false, "force installation even if role already exists")
 }
 
+var roleScopeCmd = &cobra.Command{
+	Use:   "scope <global|local> <rolename>[,<rolename>,...]",
+	Short: "Move or copy roles between global and local scopes",
+	Long:  `Move or copy one or more Ansible roles between global (all users) and local (current user) installation scopes. Provide scope as 'global' or 'local', followed by a comma-separated list of role names.`,
+	Args:  cobra.ExactArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		scope := args[0]
+		if scope != "global" && scope != "local" {
+			logger.Logger.Fatalf("Scope must be either 'global' or 'local', got: %s", scope)
+		}
+
+		targetGlobal := scope == "global"
+
+		// Parse comma-separated role names
+		roleNames := strings.Split(args[1], ",")
+		// Trim whitespace from each role name
+		for i, role := range roleNames {
+			roleNames[i] = strings.TrimSpace(role)
+		}
+
+		// Create request body using dto
+		requestBody := dto.MoveRoleScopeRequest{
+			Roles:  roleNames,
+			Global: targetGlobal,
+			Copy:   roleScopeCopy,
+		}
+
+		// Marshal to JSON
+		requestJSON, err := json.Marshal(requestBody)
+		if err != nil {
+			logger.Logger.Fatalf("Failed to marshal request: %s", err.Error())
+		}
+
+		var responseJSON []byte
+		var success bool
+
+		responseJSON, success = rest.GenericJSONPatch(client, buildURLWithRangeAndUserID("/ansible/role/scope"), string(requestJSON))
+
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+
+		// Unmarshal response
+		var response dto.MoveRoleScopeResponse
+		err = json.Unmarshal(responseJSON, &response)
+		if err != nil {
+			logger.Logger.Fatalf("Failed to parse response: %s", err.Error())
+		}
+
+		// Display results
+		action := "moved"
+		if roleScopeCopy {
+			action = "copied"
+		}
+
+		if len(response.Success) > 0 {
+			logger.Logger.Infof("Successfully %s roles to %s scope: %s", action, scope, strings.Join(response.Success, ", "))
+		}
+
+		if len(response.Errors) > 0 {
+			logger.Logger.Warnf("Failed to process %d role(s):", len(response.Errors))
+			for _, errItem := range response.Errors {
+				logger.Logger.Warnf("  - %s: %s", errItem.Role, errItem.Error)
+			}
+		}
+
+		if len(response.Success) == 0 && len(response.Errors) == 0 {
+			logger.Logger.Info("No roles were processed")
+		}
+	},
+}
+
+func setupRoleScopeCmd(command *cobra.Command) {
+	command.Flags().BoolVarP(&roleScopeCopy, "copy", "c", false, "copy the role instead of moving it (keeps the source)")
+}
+
 func init() {
 	collectionCmd.AddCommand(collectionsListCmd)
 	setupCollectionAddCmd(collectionAddCmd)
@@ -377,8 +456,10 @@ func init() {
 	roleCmd.AddCommand(rolesListCmd)
 	setupRoleCmd(roleAddCmd)
 	setupRoleCmd(roleRmCmd)
+	setupRoleScopeCmd(roleScopeCmd)
 	roleCmd.AddCommand(roleAddCmd)
 	roleCmd.AddCommand(roleRmCmd)
+	roleCmd.AddCommand(roleScopeCmd)
 	subscriptionRolesCmd.AddCommand(subscriptionRolesListCmd)
 	setupSubscriptionRolesInstallCmd(subscriptionRolesInstallCmd)
 	subscriptionRolesCmd.AddCommand(subscriptionRolesInstallCmd)

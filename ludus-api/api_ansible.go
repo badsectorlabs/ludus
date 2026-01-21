@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -549,6 +550,155 @@ func GetRoleVars(e *core.RequestEvent) error {
 		}
 
 		response.Roles = append(response.Roles, roleResponse)
+	}
+
+	return e.JSON(http.StatusOK, response)
+}
+
+// copyDir recursively copies a directory from src to dst
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		dstPath := filepath.Join(dst, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+
+		srcFile, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer srcFile.Close()
+
+		dstFile, err := os.Create(dstPath)
+		if err != nil {
+			return err
+		}
+		defer dstFile.Close()
+
+		_, err = io.Copy(dstFile, srcFile)
+		return err
+	})
+}
+
+// MoveRoleScope - moves one or more roles between local and global installation paths
+func MoveRoleScope(e *core.RequestEvent) error {
+	var requestBody dto.MoveRoleScopeRequest
+	e.BindBody(&requestBody)
+
+	if len(requestBody.Roles) == 0 {
+		return JSONError(e, http.StatusBadRequest, "At least one role name is required")
+	}
+
+	user := e.Get("user").(*models.User)
+	if !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "Only administrators can move roles between scopes")
+	}
+
+	targetGlobal := requestBody.Global
+	var success []string
+	var errors []dto.MoveRoleScopeResponseErrorsItem
+
+	// Process each role
+	for _, roleName := range requestBody.Roles {
+		// Determine source and destination paths
+		userRolePath := fmt.Sprintf("%s/users/%s/.ansible/roles/%s", ludusInstallPath, user.ProxmoxUsername(), roleName)
+		globalRolePath := fmt.Sprintf("%s/resources/global-roles/%s", ludusInstallPath, roleName)
+
+		isCurrentlyGlobal := false
+		var currentPath string
+
+		// Find where role currently exists
+		if _, err := os.Stat(globalRolePath); err == nil {
+			isCurrentlyGlobal = true
+			currentPath = globalRolePath
+		} else if _, err := os.Stat(userRolePath); err == nil {
+			isCurrentlyGlobal = false
+			currentPath = userRolePath
+		} else {
+			errors = append(errors, dto.MoveRoleScopeResponseErrorsItem{
+				Role:  roleName,
+				Error: fmt.Sprintf("Role '%s' not found", roleName),
+			})
+			continue
+		}
+
+		// Check if we're already at target
+		if isCurrentlyGlobal == targetGlobal {
+			scope := "global"
+			if !targetGlobal {
+				scope = "local"
+			}
+			errors = append(errors, dto.MoveRoleScopeResponseErrorsItem{
+				Role:  roleName,
+				Error: fmt.Sprintf("Role is already installed in %s scope", scope),
+			})
+			continue
+		}
+
+		// Set destination path
+		var destPath string
+		if targetGlobal {
+			destPath = globalRolePath
+		} else {
+			destPath = userRolePath
+		}
+
+		// Check destination doesn't exist
+		if _, err := os.Stat(destPath); err == nil {
+			errors = append(errors, dto.MoveRoleScopeResponseErrorsItem{
+				Role:  roleName,
+				Error: "Role already exists at destination",
+			})
+			continue
+		}
+
+		// Create parent directory for destination if it doesn't exist
+		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			errors = append(errors, dto.MoveRoleScopeResponseErrorsItem{
+				Role:  roleName,
+				Error: fmt.Sprintf("Failed to create destination directory: %s", err.Error()),
+			})
+			continue
+		}
+
+		// Copy the role directory
+		if err := copyDir(currentPath, destPath); err != nil {
+			errors = append(errors, dto.MoveRoleScopeResponseErrorsItem{
+				Role:  roleName,
+				Error: fmt.Sprintf("Failed to copy role: %s", err.Error()),
+			})
+			continue
+		}
+
+		// Remove the source directory only if copy is false (move operation)
+		// If copy is true, keep the source (useful for global->local to keep global for others,
+		// or local->global to keep local override)
+		if !requestBody.Copy {
+			if err := os.RemoveAll(currentPath); err != nil {
+				// Best effort cleanup - log but don't fail if we can't remove source
+				logger.Warn("Failed to remove source role directory %s: %s", currentPath, err.Error())
+			}
+		}
+
+		// Update the role version in the new location
+		_, _ = parseRoleVersion(roleName, user, targetGlobal)
+
+		// Success - add to success list
+		success = append(success, roleName)
+	}
+
+	response := dto.MoveRoleScopeResponse{
+		Success: success,
+		Errors:  errors,
 	}
 
 	return e.JSON(http.StatusOK, response)
