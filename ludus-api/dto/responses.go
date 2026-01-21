@@ -440,14 +440,6 @@ type InstallSubscriptionRolesResponseErrorsItem struct {
 	Role   string `json:"role"`
 	Reason string `json:"reason"`
 }
-type BulkGroupOperationResponse struct {
-	Success []string                      `json:"success,omitempty"`
-	Errors  []BulkGroupOperationErrorItem `json:"errors,omitempty"`
-}
-type BulkGroupOperationErrorItem struct {
-	Item   string `json:"item"`
-	Reason string `json:"reason"`
-}
 type GetRoleVarsResponse struct {
 	Roles []GetRoleVarsResponseRole `json:"roles"`
 }
