@@ -41,12 +41,15 @@ stages:
 .common-setup: &common-setup # Sync time in the event this test is being run after a snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
-  - cd binaries
-  # Update the server to make sure we are running the latest version if a packer or ansible build is not running
-  - pgrep -f 'ansible|packer' || sudo ./ludus-server --update
-  # Move the latest client to /usr/local/bin for clean commands
-  - sudo cp -f ludus-client_linux-amd64 /usr/local/bin/ludus
-  - cd ..
+  - |
+    if [ -d binaries ]; then
+      cd binaries
+      # Update the server to make sure we are running the latest version if a packer or ansible build is not running
+      pgrep -f 'ansible|packer' || sudo ./ludus-server --update
+      # Move the latest client to /usr/local/bin for clean commands
+      sudo cp -f ludus-client_linux-amd64 /usr/local/bin/ludus
+      cd ..
+    fi
   # Set the config to use the "user" API by default
   - mkdir -p ~/.config/ludus/
   - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
@@ -56,8 +59,9 @@ stages:
 .powered-on-and-not-in-testing: &powered-on-and-not-in-testing
   # Start from a known state (in the event this is a retry)
   # Power on all VMs if we are not in a "user" test as admin (admin VMs are powered off for user tests to save resources)
+  # Exception: always power on VMs for testing mode tests (they need VMs running)
   - |
-    if [[ ! ($(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true") && ("$CI_JOB_NAME" != *"-user"* && "$LUDUS_USER_ID" != "CIU") ]]; then 
+    if [[ ! ($(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true") && ! ("$CI_JOB_NAME" == *"-user"* && "$CI_JOB_NAME" != *"testing"*) ]]; then
       echo "Not all VMs are powered on, powering on now"
       ludus power on -n all
       timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true" ]]; do sleep 5; done'
@@ -70,7 +74,7 @@ stages:
   # Add the CIA user if it doesn't already exist, try 5 times since the server just restarted the first might fail
   - for i in {1..5}; do (ludus users list all | grep -q 'Continuous Integration Admin' || ludus users add -a -n "Continuous Integration Admin" -i CIA -e "cia@ludus.internal" -p "cicdpassword") && break || sleep 5; done
   # Switch to CIA user API Key - only request it once, save it to disk
-  - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --json --user CIA users apikey --no-prompt | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-admin; fi
+  - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --user CIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-admin; fi
   # Set the CIA user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
@@ -83,7 +87,7 @@ stages:
   # Add the CIU user if it doesn't already exist, try 5 times since the server just restarted the first might fail
   - for i in {1..5}; do (ludus users list all | grep -q 'Continuous Integration User' || ludus users add -n "Continuous Integration User" -i CIU -e "ciu@ludus.internal" -p "cicdpassword") && break || sleep 5; done
   # Switch to CIU user API Key - only request it once, save it to disk
-  - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --json --user CIU users apikey --no-prompt | jq -r '.result.apiKey' > /opt/ludus/ci/.apikey-user; fi
+  - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --user CIU users apikey --no-prompt --value > /opt/ludus/ci/.apikey-user; fi
   # Set the CIU user key as the key for all future ludus operations
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
@@ -348,7 +352,7 @@ build all:
     - echo "Compiling the server code..."
     - export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
     - if [[ -n $CI_COMMIT_TAG ]]; then export VERSION=$CI_COMMIT_TAG; else export VERSION=${CI_COMMIT_BRANCH}; fi
-    - mkdir binaries
+    - rm -rf binaries && mkdir binaries
     - echo "Getting web UI code..."
     - |
       if [[ -z ${LUDUS_WEBUI_GITLAB_TOKEN+x} ]]; then
@@ -633,7 +637,8 @@ client basic-commands:
   stage: client
   tags:
     - ludus-proxmox-runner
-  dependencies: [] # Prevent download of build artifacts, use local cache
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1003,7 +1008,8 @@ post-deploy groups-as-admin:
   stage: post-deploy-admin-groups
   tags:
     - ludus-proxmox-runner
-  dependencies: [] # Prevent download of build artifacts, use local cache
+  dependencies:
+    - build all
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -1093,6 +1099,38 @@ post-deploy groups-as-admin:
     # As GTU (manager) remove a range from the group
     - ludus --user GTU groups remove range GTU ci-group-test
     - '! ludus groups ranges ci-group-test | grep GTU'
+    # Bulk operation tests
+    # Create additional test users for bulk operations
+    - ludus user add -n "Bulk Test User 1" -i BTU1 -e "btu1@ludus.internal" -p "btupassword" || true
+    - ludus user add -n "Bulk Test User 2" -i BTU2 -e "btu2@ludus.internal" -p "btupassword" || true
+    # Test bulk add users (multiple users at once)
+    - ludus groups add user BTU1,BTU2 ci-group-test
+    - ludus groups members ci-group-test | grep BTU1
+    - ludus groups members ci-group-test | grep BTU2
+    # Test bulk add ranges (multiple ranges at once, if GTU range still exists)
+    - ludus groups add range GTU,CIA ci-group-test
+    - ludus groups ranges ci-group-test | grep GTU
+    - ludus groups ranges ci-group-test | grep CIA
+    # Test bulk remove users (multiple users at once)
+    - ludus groups remove user BTU1,BTU2 ci-group-test
+    - '! ludus groups members ci-group-test | grep BTU1'
+    - '! ludus groups members ci-group-test | grep BTU2'
+    # Test bulk remove ranges (multiple ranges at once)
+    - ludus groups remove range GTU,CIA ci-group-test
+    - '! ludus groups ranges ci-group-test | grep GTU'
+    - '! ludus groups ranges ci-group-test | grep CIA'
+    # Test bulk operation with mixed valid/invalid items (error handling)
+    # Add a valid user first
+    - ludus groups add user BTU1 ci-group-test
+    # Try to add the same user again along with a new one (should partially succeed)
+    - set +o pipefail
+    - ludus groups add user BTU1,BTU2 ci-group-test 2>&1 | grep -E "(already a member|Successfully added)"
+    - set -o pipefail
+    # Verify BTU2 was added despite BTU1 error
+    - ludus groups members ci-group-test | grep BTU2
+    # Cleanup bulk test users
+    - ludus user rm -i BTU1 || true
+    - ludus user rm -i BTU2 || true
     # Delete group and cleanup user
     - ludus groups delete ci-group-test
     - '! ludus groups list | grep ci-group-test'
@@ -1190,7 +1228,6 @@ post-deploy templates-as-admin:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
-    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 45m
   retry:
     max: 2
@@ -1499,7 +1536,7 @@ post-deploy user-cmds-as-user:
     # Try to get an api key for another user
     - ludus user apikey --user CIA --no-prompt 2>&1 | grep "You are not an admin and cannot impersonate other users"
     # Get a new API for ourselves
-    - ludus user apikey --no-prompt
+    - ludus user apikey --no-prompt --value > /opt/ludus/ci/.apikey-user
 
 post-deploy templates-as-user:
   stage: post-deploy-user-templates
@@ -1529,7 +1566,6 @@ post-deploy templates-as-user:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
-    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 45m
   retry:
     max: 2

@@ -6,6 +6,7 @@ import (
 	"ludusapi/dto"
 	"ludusapi/models"
 	"net/http"
+	"slices"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -147,8 +148,8 @@ func ListGroups(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, groups)
 }
 
-// AddUserToGroup adds a user to a group (admin only)
-func AddUserToGroup(e *core.RequestEvent) error {
+// AddUsersToGroup adds one or more users to a group
+func AddUsersToGroup(e *core.RequestEvent) error {
 
 	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
@@ -160,81 +161,130 @@ func AddUserToGroup(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not a manager of this group and cannot add users to it")
 	}
 
-	userID := e.Request.PathValue("userID")
-	if userID == "" {
-		return JSONError(e, http.StatusBadRequest, "User ID is required")
+	var bulkRequest dto.BulkAddUsersToGroupRequest
+	if err := e.BindBody(&bulkRequest); err != nil || len(bulkRequest.UserIDs) == 0 {
+		return JSONError(e, http.StatusBadRequest, "Request body with userIDs is required")
 	}
+	userIDs := bulkRequest.UserIDs
+	managers := bulkRequest.Managers
 
-	// Check if user exists
-	var user models.User
-	userRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
-	if err != nil && err != sql.ErrNoRows {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user: %v", err))
-	}
-	if err == sql.ErrNoRows {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("User %s not found", userID))
-	}
-	user.SetProxyRecord(userRecord)
+	// Process all userIDs
+	var success []string
+	var errors []dto.BulkGroupOperationErrorItem
 
-	// Check if user is already a member
-	e.App.ExpandRecord(userRecord, []string{"groups"}, nil)
-	userGroups := user.Groups()
-	for _, userGroup := range userGroups {
-		if userGroup.Id == group.Id {
-			return JSONError(e, http.StatusConflict, fmt.Sprintf("User %s is already a member of group %s", userID, group.Name()))
+	for _, userID := range userIDs {
+		isManager := slices.Contains(managers, userID)
+
+		// Check if user exists
+		var user models.User
+		userRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
+		if err != nil && err != sql.ErrNoRows {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   userID,
+				Reason: fmt.Sprintf("Error finding user: %v", err),
+			})
+			continue
 		}
-	}
+		if err == sql.ErrNoRows {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   userID,
+				Reason: fmt.Sprintf("User %s not found", userID),
+			})
+			continue
+		}
+		user.SetProxyRecord(userRecord)
 
-	// Add user to group
-	user.Set("groups+", group.Id)
+		// Check if user is already a member
+		e.App.ExpandRecord(userRecord, []string{"groups"}, nil)
+		userGroups := user.Groups()
+		alreadyMember := false
+		for _, userGroup := range userGroups {
+			if userGroup.Id == group.Id {
+				alreadyMember = true
+				break
+			}
+		}
+		if alreadyMember {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   userID,
+				Reason: fmt.Sprintf("User %s is already a member of group %s", userID, group.Name()),
+			})
+			continue
+		}
 
-	// Check if the user is to be a manager of the group
-	if e.Request.URL.Query().Get("manager") == "true" {
-		group.Set("managers+", user.Id)
-	} else {
-		group.Set("members+", user.Id)
-	}
+		// Add user to group
+		user.Set("groups+", group.Id)
+		if isManager {
+			group.Set("managers+", user.Id)
+		} else {
+			group.Set("members+", user.Id)
+		}
 
-	// Add user to group in proxmox
-	err = addUserToGroupInProxmox(user.ProxmoxUsername(), user.ProxmoxRealm(), group.Name())
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error adding user %s to group %s in proxmox: %v", userID, group.Name(), err))
-	}
-
-	e.App.Save(user)
-	e.App.Save(group)
-
-	// For each range in the group, run the access control playbook
-	for _, rangeRecord := range group.Ranges() {
-		err = RunAccessControlPlaybook(e, rangeRecord)
+		// Add user to group in proxmox
+		err = addUserToGroupInProxmox(user.ProxmoxUsername(), user.ProxmoxRealm(), group.Name())
 		if err != nil {
-			errorString := ""
-			isDeployed, err := rangeIsDeployed(e, rangeRecord)
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   userID,
+				Reason: fmt.Sprintf("Error adding user to proxmox: %v", err),
+			})
+			// Rollback
+			user.Set("groups-", group.Id)
+			if isManager {
+				group.Set("managers-", user.Id)
+			} else {
+				group.Set("members-", user.Id)
+			}
+			continue
+		}
+
+		e.App.Save(user)
+		e.App.Save(group)
+
+		// For each range in the group, run the access control playbook
+		playbookError := false
+		for _, rangeRecord := range group.Ranges() {
+			err = RunAccessControlPlaybook(e, rangeRecord)
 			if err != nil {
-				errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeRecord.RangeId(), err)
-			}
-			if isDeployed {
-				errorString = fmt.Sprintf("Range %s is deployed and access cannot be added to group %s", rangeRecord.RangeId(), group.Name())
-			}
-			if errorString != "" {
-				user.Set("groups-", group.Id)
-				e.App.Save(user)
-				if e.Request.URL.Query().Get("manager") == "true" {
-					group.Set("managers-", user.Id)
-				} else {
-					group.Set("members-", user.Id)
+				errorString := ""
+				isDeployed, err := rangeIsDeployed(e, rangeRecord)
+				if err != nil {
+					errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeRecord.RangeId(), err)
 				}
-				e.App.Save(group)
-				return JSONError(e, http.StatusInternalServerError, errorString)
+				if isDeployed {
+					errorString = fmt.Sprintf("Range %s is deployed and access cannot be added to group %s", rangeRecord.RangeId(), group.Name())
+				}
+				if errorString != "" {
+					// Rollback
+					user.Set("groups-", group.Id)
+					e.App.Save(user)
+					if isManager {
+						group.Set("managers-", user.Id)
+					} else {
+						group.Set("members-", user.Id)
+					}
+					e.App.Save(group)
+					errors = append(errors, dto.BulkGroupOperationErrorItem{
+						Item:   userID,
+						Reason: errorString,
+					})
+					playbookError = true
+					break
+				}
 			}
+		}
+		if !playbookError {
+			success = append(success, userID)
 		}
 	}
 
-	return JSONResult(e, http.StatusCreated, "User added to group successfully")
+	return e.JSON(http.StatusOK, dto.BulkGroupOperationResponse{
+		Success: success,
+		Errors:  errors,
+	})
 }
 
-// RemoveUserFromGroup removes a user from a group (admin only)
-func RemoveUserFromGroup(e *core.RequestEvent) error {
+// RemoveUsersFromGroup removes one or more users from a group
+func RemoveUsersFromGroup(e *core.RequestEvent) error {
 
 	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
@@ -246,73 +296,104 @@ func RemoveUserFromGroup(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not a manager of this group and cannot remove users from it")
 	}
 
-	userID := e.Request.PathValue("userID")
-	if userID == "" {
-		return JSONError(e, http.StatusBadRequest, "User ID is required")
+	var bulkRequest dto.BulkRemoveUsersFromGroupRequest
+	if err := e.BindBody(&bulkRequest); err != nil || len(bulkRequest.UserIDs) == 0 {
+		return JSONError(e, http.StatusBadRequest, "Request body with userIDs is required")
 	}
+	userIDs := bulkRequest.UserIDs
 
-	// Check if user exists
-	var user models.User
-	userRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
-	if err != nil && err != sql.ErrNoRows {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user: %v", err))
-	}
-	if err == sql.ErrNoRows {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("User %s not found", userID))
-	}
-	user.SetProxyRecord(userRecord)
+	// Process all userIDs
+	var success []string
+	var errors []dto.BulkGroupOperationErrorItem
 
-	// Remove user from group in proxmox
-	err = removeUserFromGroupInProxmox(user.ProxmoxUsername(), user.ProxmoxRealm(), group.Name())
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing user %s from group %s in proxmox: %v", userID, group.Name(), err))
-	}
+	for _, userID := range userIDs {
+		// Check if user exists
+		var user models.User
+		userRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
+		if err != nil && err != sql.ErrNoRows {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   userID,
+				Reason: fmt.Sprintf("Error finding user: %v", err),
+			})
+			continue
+		}
+		if err == sql.ErrNoRows {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   userID,
+				Reason: fmt.Sprintf("User %s not found", userID),
+			})
+			continue
+		}
+		user.SetProxyRecord(userRecord)
 
-	// Remove user from group
-	user.Set("groups-", group.Id)
-	// Remove user from managers and members of the group (could be either)
-	isManager := userIsManagerOfGroup(&user, group)
-	if isManager {
-		group.Set("managers-", user.Id)
-	} else {
-		group.Set("members-", user.Id)
-	}
-	e.App.Save(user)
-	e.App.Save(group)
-
-	// For each range in the group, run the access control playbook
-	for _, rangeRecord := range group.Ranges() {
-		// If there is an error here, potentially a user could still have access to a range via WireGuard.
-		err = RunAccessControlPlaybook(e, rangeRecord)
+		// Remove user from group in proxmox
+		err = removeUserFromGroupInProxmox(user.ProxmoxUsername(), user.ProxmoxRealm(), group.Name())
 		if err != nil {
-			errorString := ""
-			isDeployed, err := rangeIsDeployed(e, rangeRecord)
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   userID,
+				Reason: fmt.Sprintf("Error removing user from proxmox: %v", err),
+			})
+			continue
+		}
+
+		// Remove user from group
+		user.Set("groups-", group.Id)
+		// Remove user from managers and members of the group (could be either)
+		isManager := userIsManagerOfGroup(&user, group)
+		if isManager {
+			group.Set("managers-", user.Id)
+		} else {
+			group.Set("members-", user.Id)
+		}
+		e.App.Save(user)
+		e.App.Save(group)
+
+		// For each range in the group, run the access control playbook
+		playbookError := false
+		for _, rangeRecord := range group.Ranges() {
+			// If there is an error here, potentially a user could still have access to a range via WireGuard.
+			err = RunAccessControlPlaybook(e, rangeRecord)
 			if err != nil {
-				errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeRecord.RangeId(), err)
-			}
-			if isDeployed {
-				errorString = fmt.Sprintf("Range %s is deployed and access cannot be removed from group %s", rangeRecord.RangeId(), group.Name())
-			}
-			if errorString != "" {
-				// If there is an error or the range is deployed, we need to restore the user to the group and range
-				if isManager {
-					group.Set("managers+", user.Id)
-				} else {
-					group.Set("members+", user.Id)
+				errorString := ""
+				isDeployed, err := rangeIsDeployed(e, rangeRecord)
+				if err != nil {
+					errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeRecord.RangeId(), err)
 				}
-				e.App.Save(group)
-				user.Set("groups+", group.Id)
-				e.App.Save(user)
-				return JSONError(e, http.StatusInternalServerError, errorString)
+				if isDeployed {
+					errorString = fmt.Sprintf("Range %s is deployed and access cannot be removed from group %s", rangeRecord.RangeId(), group.Name())
+				}
+				if errorString != "" {
+					// If there is an error or the range is deployed, we need to restore the user to the group and range
+					if isManager {
+						group.Set("managers+", user.Id)
+					} else {
+						group.Set("members+", user.Id)
+					}
+					e.App.Save(group)
+					user.Set("groups+", group.Id)
+					e.App.Save(user)
+					errors = append(errors, dto.BulkGroupOperationErrorItem{
+						Item:   userID,
+						Reason: errorString,
+					})
+					playbookError = true
+					break
+				}
 			}
+		}
+		if !playbookError {
+			success = append(success, userID)
 		}
 	}
 
-	return JSONResult(e, http.StatusOK, "User removed from group successfully")
+	return e.JSON(http.StatusOK, dto.BulkGroupOperationResponse{
+		Success: success,
+		Errors:  errors,
+	})
 }
 
-// AddRangeToGroup grants group access to a range (admin only)
-func AddRangeToGroup(e *core.RequestEvent) error {
+// AddRangesToGroup grants group access to one or more ranges
+func AddRangesToGroup(e *core.RequestEvent) error {
 
 	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
@@ -324,67 +405,109 @@ func AddRangeToGroup(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You are not a manager of group %s or an admin and cannot add ranges to it", group.Name()))
 	}
 
-	rangeID := e.Request.PathValue("rangeID")
-	if rangeID == "" {
-		return JSONError(e, http.StatusBadRequest, "Range ID is required")
+	var bulkRequest dto.BulkAddRangesToGroupRequest
+	if err := e.BindBody(&bulkRequest); err != nil || len(bulkRequest.RangeIDs) == 0 {
+		return JSONError(e, http.StatusBadRequest, "Request body with rangeIDs is required")
 	}
+	rangeIDs := bulkRequest.RangeIDs
 
-	// Check if range exists
-	rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
-	if err != nil && err != sql.ErrNoRows {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding range: %v", err))
-	}
-	if err == sql.ErrNoRows {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found", rangeID))
-	}
-	rangeObj := &models.Range{}
-	rangeObj.SetProxyRecord(rangeRecord)
+	// Process all rangeIDs
+	var success []string
+	var errors []dto.BulkGroupOperationErrorItem
 
-	// Check if group already has access to this range
-	e.App.ExpandRecord(group.Record, []string{"ranges"}, nil)
-	groupRanges := group.Ranges()
-	for _, groupRange := range groupRanges {
-		if groupRange.Id == rangeObj.Id {
-			return JSONError(e, http.StatusConflict, fmt.Sprintf("Group %s already has access to range %s", group.Name(), rangeObj.RangeId()))
+	for _, rangeID := range rangeIDs {
+		// Check if range exists
+		rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
+		if err != nil && err != sql.ErrNoRows {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   rangeID,
+				Reason: fmt.Sprintf("Error finding range: %v", err),
+			})
+			continue
 		}
-	}
+		if err == sql.ErrNoRows {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   rangeID,
+				Reason: fmt.Sprintf("Range %s not found", rangeID),
+			})
+			continue
+		}
+		rangeObj := &models.Range{}
+		rangeObj.SetProxyRecord(rangeRecord)
 
-	// Check if the acting user has access to the range they want to add to the group
-	if !HasRangeAccess(e, user.UserId(), rangeObj.RangeNumber()) && !user.IsAdmin() {
-		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You do not have access to range %s and cannot add it to group %s", rangeObj.RangeId(), group.Name()))
-	}
+		// Check if group already has access to this range
+		e.App.ExpandRecord(group.Record, []string{"ranges"}, nil)
+		groupRanges := group.Ranges()
+		alreadyHasAccess := false
+		for _, groupRange := range groupRanges {
+			if groupRange.Id == rangeObj.Id {
+				alreadyHasAccess = true
+				break
+			}
+		}
+		if alreadyHasAccess {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   rangeID,
+				Reason: fmt.Sprintf("Group %s already has access to range %s", group.Name(), rangeObj.RangeId()),
+			})
+			continue
+		}
 
-	// Grant group access to range in proxmox
-	err = grantGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId())
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error granting group %s access to range %s in proxmox: %v", group.Name(), rangeObj.RangeId(), err))
-	}
+		// Check if the acting user has access to the range they want to add to the group
+		if !HasRangeAccess(e, user.UserId(), rangeObj.RangeNumber()) && !user.IsAdmin() {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   rangeID,
+				Reason: fmt.Sprintf("You do not have access to range %s and cannot add it to group %s", rangeObj.RangeId(), group.Name()),
+			})
+			continue
+		}
 
-	group.Set("ranges+", rangeObj.Id)
-	e.App.Save(group)
-
-	err = RunAccessControlPlaybook(e, rangeObj)
-	if err != nil {
-		errorString := ""
-		isDeployed, err := rangeIsDeployed(e, rangeObj)
+		// Grant group access to range in proxmox
+		err = grantGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId())
 		if err != nil {
-			errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), err)
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   rangeID,
+				Reason: fmt.Sprintf("Error granting group access to proxmox: %v", err),
+			})
+			continue
 		}
-		if isDeployed {
-			errorString = fmt.Sprintf("Range %s is deployed and access cannot be granted to group %s. Make sure the router is powered on and accessible.", rangeObj.RangeId(), group.Name())
+
+		group.Set("ranges+", rangeObj.Id)
+		e.App.Save(group)
+
+		err = RunAccessControlPlaybook(e, rangeObj)
+		if err != nil {
+			errorString := ""
+			isDeployed, err := rangeIsDeployed(e, rangeObj)
+			if err != nil {
+				errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), err)
+			}
+			if isDeployed {
+				errorString = fmt.Sprintf("Range %s is deployed and access cannot be granted to group %s. Make sure the router is powered on and accessible.", rangeObj.RangeId(), group.Name())
+			}
+			if errorString != "" {
+				// Rollback
+				group.Set("ranges-", rangeObj.Id)
+				e.App.Save(group)
+				errors = append(errors, dto.BulkGroupOperationErrorItem{
+					Item:   rangeID,
+					Reason: errorString,
+				})
+				continue
+			}
 		}
-		if errorString != "" {
-			group.Set("ranges-", rangeObj.Id)
-			e.App.Save(group)
-			return JSONError(e, http.StatusInternalServerError, errorString)
-		}
+
+		success = append(success, rangeID)
 	}
 
-	return JSONResult(e, http.StatusCreated, fmt.Sprintf("Group %s access to range %s granted successfully", group.Name(), rangeObj.RangeId()))
+	return e.JSON(http.StatusOK, dto.BulkGroupOperationResponse{
+		Success: success,
+		Errors:  errors,
+	})
 }
 
-// RemoveRangeFromGroup revokes group access from a range (admin only)
-func RemoveRangeFromGroup(e *core.RequestEvent) error {
+// RemoveRangesFromGroup revokes group access from one or more ranges
+func RemoveRangesFromGroup(e *core.RequestEvent) error {
 
 	group, err := getGroupObjectFromRequest(e)
 	if err != nil {
@@ -396,49 +519,80 @@ func RemoveRangeFromGroup(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You are not a manager of group %s or an admin and cannot remove ranges from it", group.Name()))
 	}
 
-	rangeID := e.Request.PathValue("rangeID")
-	if rangeID == "" {
-		return JSONError(e, http.StatusBadRequest, "Range ID is required")
+	var bulkRequest dto.BulkRemoveRangesFromGroupRequest
+	if err := e.BindBody(&bulkRequest); err != nil || len(bulkRequest.RangeIDs) == 0 {
+		return JSONError(e, http.StatusBadRequest, "Request body with rangeIDs is required")
 	}
+	rangeIDs := bulkRequest.RangeIDs
 
-	rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
-	if err != nil && err != sql.ErrNoRows {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding range: %v", err))
-	}
-	if err == sql.ErrNoRows {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found", rangeID))
-	}
-	rangeObj := &models.Range{}
-	rangeObj.SetProxyRecord(rangeRecord)
+	// Process all rangeIDs
+	var success []string
+	var errors []dto.BulkGroupOperationErrorItem
 
-	// Remove group access to range in proxmox
-	err = revokeGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId())
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error revoking group %s access to range %s in proxmox: %v", group.Name(), rangeObj.RangeId(), err))
-	}
+	for _, rangeID := range rangeIDs {
+		rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
+		if err != nil && err != sql.ErrNoRows {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   rangeID,
+				Reason: fmt.Sprintf("Error finding range: %v", err),
+			})
+			continue
+		}
+		if err == sql.ErrNoRows {
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   rangeID,
+				Reason: fmt.Sprintf("Range %s not found", rangeID),
+			})
+			continue
+		}
+		rangeObj := &models.Range{}
+		rangeObj.SetProxyRecord(rangeRecord)
 
-	// Remove group access to range
-	group.Set("ranges-", rangeObj.Id)
-	e.App.Save(group)
-
-	err = RunAccessControlPlaybook(e, rangeObj)
-	if err != nil {
-		errorString := ""
-		isDeployed, err := rangeIsDeployed(e, rangeObj)
+		// Remove group access to range in proxmox
+		err = revokeGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId())
 		if err != nil {
-			errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), err)
+			errors = append(errors, dto.BulkGroupOperationErrorItem{
+				Item:   rangeID,
+				Reason: fmt.Sprintf("Error revoking group access from proxmox: %v", err),
+			})
+			continue
 		}
-		if isDeployed {
-			errorString = fmt.Sprintf("Range %s is deployed and access cannot be revoked from group %s", rangeObj.RangeId(), group.Name())
+
+		// Remove group access to range
+		group.Set("ranges-", rangeObj.Id)
+		e.App.Save(group)
+
+		err = RunAccessControlPlaybook(e, rangeObj)
+		if err != nil {
+			errorString := ""
+			isDeployed, err := rangeIsDeployed(e, rangeObj)
+			if err != nil {
+				errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), err)
+			}
+			if isDeployed {
+				errorString = fmt.Sprintf("Range %s is deployed and access cannot be revoked from group %s", rangeObj.RangeId(), group.Name())
+			}
+			if errorString != "" {
+				// Rollback
+				group.Set("ranges+", rangeObj.Id)
+				e.App.Save(group)
+				errors = append(errors, dto.BulkGroupOperationErrorItem{
+					Item:   rangeID,
+					Reason: errorString,
+				})
+				continue
+			}
 		}
-		if errorString != "" {
-			group.Set("ranges+", rangeObj.Id)
-			e.App.Save(group)
-			return JSONError(e, http.StatusInternalServerError, errorString)
-		}
+
+		success = append(success, rangeID)
 	}
 
-	return JSONResult(e, http.StatusOK, fmt.Sprintf("Group %s access to range %s revoked successfully", group.Name(), rangeObj.RangeId()))
+	return e.JSON(http.StatusOK, map[string]any{
+		"result": dto.BulkGroupOperationResponse{
+			Success: success,
+			Errors:  errors,
+		},
+	})
 }
 
 // ListGroupMembers lists users in a group (admin only)

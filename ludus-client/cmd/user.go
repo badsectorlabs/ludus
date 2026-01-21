@@ -25,8 +25,8 @@ var (
 	userIsAdmin     bool
 	proxmoxPassword string
 	password        string
-	askPassword     bool
 	deleteRange     bool
+	valueOnly       bool
 )
 
 // readPasswordWithAsterisks reads a password from stdin, displaying asterisks for each character typed
@@ -248,6 +248,12 @@ Do you want to continue? (y/N): `, userID)
 			logger.Logger.Fatal(err.Error())
 		}
 
+		// If valueOnly flag is set, print just the API key
+		if valueOnly {
+			fmt.Println(data.Result.ApiKey)
+			return
+		}
+
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"UserID", "API Key"})
@@ -265,6 +271,7 @@ Do you want to continue? (y/N): `, userID)
 
 func setupAPIKeyCmd(command *cobra.Command) {
 	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
+	command.Flags().BoolVar(&valueOnly, "value", false, "output only the API key value without table formatting")
 }
 
 var usersWireguardCmd = &cobra.Command{
@@ -305,8 +312,9 @@ var usersAddCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		if askPassword {
-			fmt.Print("Enter password for the user: ")
+		// If no password provided via -p flag, prompt for it
+		if password == "" {
+			fmt.Print("Enter password for the user (leave empty to generate a random password): ")
 			passwordInput, err := readPasswordWithAsterisks()
 			if err != nil {
 				logger.Logger.Fatal("Failed to read password: " + err.Error())
@@ -359,8 +367,7 @@ func setupUsersAddCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the new user (2-20 chars, typically capitalized initials)")
 	command.Flags().StringVarP(&userName, "name", "n", "", "the name of the user (typically 'first last')")
 	command.Flags().BoolVarP(&userIsAdmin, "admin", "a", false, "set this flag to make the user an admin of Ludus")
-	command.Flags().StringVarP(&password, "password", "P", "", "the password for the user (must be at least 8 characters long, omit to generate a random password, password will be captured in terminal history - use -p to prompt for the password)")
-	command.Flags().BoolVarP(&askPassword, "password-ask", "p", false, "prompt for the password for the user")
+	command.Flags().StringVarP(&password, "password", "p", "", "the password for the user (must be at least 8 characters long, omit to prompt and generate a random password)")
 	command.Flags().StringVarP(&email, "email", "e", "", "the email for the user")
 	_ = command.MarkFlagRequired("email")
 	_ = command.MarkFlagRequired("userid")

@@ -644,31 +644,31 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
-		"AddUserToGroup",
+		"AddUsersToGroup",
 		http.MethodPost,
-		"/groups/{groupName}/users/{userID}",
-		AddUserToGroup,
+		"/groups/{groupName}/users",
+		AddUsersToGroup,
 	},
 
 	{
-		"RemoveUserFromGroup",
+		"RemoveUsersFromGroup",
 		http.MethodDelete,
-		"/groups/{groupName}/users/{userID}",
-		RemoveUserFromGroup,
+		"/groups/{groupName}/users",
+		RemoveUsersFromGroup,
 	},
 
 	{
-		"AddRangeToGroup",
+		"AddRangesToGroup",
 		http.MethodPost,
-		"/groups/{groupName}/ranges/{rangeID}",
-		AddRangeToGroup,
+		"/groups/{groupName}/ranges",
+		AddRangesToGroup,
 	},
 
 	{
-		"RemoveRangeFromGroup",
+		"RemoveRangesFromGroup",
 		http.MethodDelete,
-		"/groups/{groupName}/ranges/{rangeID}",
-		RemoveRangeFromGroup,
+		"/groups/{groupName}/ranges",
+		RemoveRangesFromGroup,
 	},
 
 	{
