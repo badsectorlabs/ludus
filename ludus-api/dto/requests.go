@@ -119,6 +119,19 @@ type InstallSubscriptionRolesRequest struct {
 	Global bool     `json:"global"`
 	Force  bool     `json:"force"`
 }
+type BulkAddUsersToGroupRequest struct {
+	UserIDs  []string `json:"userIDs"`
+	Managers []string    `json:"managers,omitempty"` // Optional: userIDs that should be managers
+}
+type BulkRemoveUsersFromGroupRequest struct {
+	UserIDs []string `json:"userIDs"`
+}
+type BulkAddRangesToGroupRequest struct {
+	RangeIDs []string `json:"rangeIDs"`
+}
+type BulkRemoveRangesFromGroupRequest struct {
+	RangeIDs []string `json:"rangeIDs"`
+}
 type GetRoleVarsRequest struct {
 	Roles []string `json:"roles"`
 }
