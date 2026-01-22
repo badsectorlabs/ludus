@@ -204,6 +204,8 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 		thisVM.SetName(vmResource.Name)
 		thisVM.SetPoweredOn(vmResource.Status == goproxmox.StatusVirtualMachineRunning)
 		thisVM.SetIsRouter(vmResource.Name == routerVMName)
+		thisVM.SetCpu(int(vmResource.MaxCPU))
+		thisVM.SetRam(int(vmResource.MaxMem / 1024 / 1024 / 1024)) // Convert bytes to GB
 
 		logger.Debug(fmt.Sprintf("Adding VM %s to range %s with range number %d", thisVM.Name(), targetRange.RangeId(), thisVM.Range().RangeNumber()))
 		err = app.Save(thisVM)

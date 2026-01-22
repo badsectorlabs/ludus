@@ -659,6 +659,8 @@ func ListGroupRanges(e *core.RequestEvent) error {
 				IsRouter:    vm.IsRouter(),
 				ID:          int32(vm.ProxmoxId()),
 				ProxmoxID:   int32(vm.ProxmoxId()),
+				CPU:         int32(vm.Cpu()),
+				RAM:         int32(vm.Ram()),
 			})
 		}
 		ranges = append(ranges, dto.ListGroupRangesResponseItem{
