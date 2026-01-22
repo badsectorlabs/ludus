@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/denisbrodbeck/machineid"
@@ -143,7 +144,7 @@ func (s *Server) checkLicense() {
 	}
 
 	// Always load the enterprise plugin if it exists first
-	if FileExists(pluginsDir + "/ludus-enterprise.so") {
+	if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") && FileExists(pluginsDir+"/ludus-enterprise.so") {
 		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
 		if err != nil {
 			log.Printf("LICENSE: error loading enterprise plugin: %v", err)
@@ -160,7 +161,7 @@ func (s *Server) checkLicense() {
 		} else {
 			enterpriseLoaded = true
 		}
-	} else {
+	} else if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") {
 		log.Println("LICENSE: no enterprise plugin found, pulling compatible plugin from server")
 		if !licenseCheckBucket.Allow() {
 			log.Println("LICENSE: license check bucket is full, skipping plugin download")
@@ -171,7 +172,7 @@ func (s *Server) checkLicense() {
 			log.Printf("LICENSE: error getting enterprise plugin: %v", err)
 		}
 	}
-	if !enterpriseLoaded {
+	if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") && !enterpriseLoaded {
 		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
 		if err != nil {
 			log.Printf("LICENSE: error loading enterprise plugin: %v", err)
