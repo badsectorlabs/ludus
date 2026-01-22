@@ -48,8 +48,22 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 
 	LudusPluginHandlerManager = NewHandlerManager()
 
-	ludusServer.ParseConfig()
 	server = ludusServer
+
+	// Transition from using log.Printf to using slog.Info, slog.Error, etc.
+	// Adopts the debug level from the main server logger
+	// Initialize logger BEFORE ParseConfig() as it may be used during license checking
+	if server.Logger != nil {
+		logger = server.Logger
+		slog.SetDefault(server.Logger)
+	} else {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+		slog.SetDefault(logger)
+	}
+
+	ludusServer.ParseConfig()
 
 	// Resolve the Proxmox debug flag here for speed (vs every call to GetGoProxmoxClientForUserUsingToken)
 	if os.Getenv("LUDUS_DEBUG_PROXMOX") == "1" {
@@ -70,18 +84,6 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		// enable auto creation of migration files when making collection changes in the Dashboard
 		Automigrate: false,
 	})
-
-	// Transition from using log.Printf to using slog.Info, slog.Error, etc.
-	// Adopts the debug level from the main server logger
-	if server.Logger != nil {
-		logger = server.Logger
-		slog.SetDefault(server.Logger)
-	} else {
-		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}))
-		slog.SetDefault(logger)
-	}
 
 	// We must bootstrap PocketBase before we can use it, and it creates the DB that is used by InitDb()
 	if err := app.Bootstrap(); err != nil {
