@@ -77,11 +77,10 @@ func (s *Server) ParseConfig() {
 	}
 	// If there is no license in the config, set it to community
 	if ServerConfiguration.LicenseKey == "" || ServerConfiguration.LicenseKey == "community" {
-		s.LicenseType = ludusLicenseCommunity
+		s.Entitlements = []string{}
 		s.LicenseValid = true
 		s.LicenseMessage = "community license"
 	} else {
-		s.LicenseType = ludusLicenseEnterprise
 		s.LicenseMessage = ""
 		s.LicenseKey = ServerConfiguration.LicenseKey
 		s.checkLicense()

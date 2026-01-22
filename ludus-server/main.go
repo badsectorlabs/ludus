@@ -52,8 +52,8 @@ func serve() {
 	// Setup PocketBase app
 	app := ludusapi.NewRouter(LudusVersion, server)
 
-	if server.LicenseType == "community" {
-		logger.Info("LICENSE: Community Edition")
+	if len(server.Entitlements) == 0 {
+		logger.Info("LICENSE: Community (no entitlements)")
 	}
 
 	// Load plugins

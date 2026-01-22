@@ -122,11 +122,11 @@ type GetEtcHostsResponse struct {
 	Result string `json:"result,omitempty"`
 }
 type GetLicenseResponse struct {
-	LicensedTo string    `json:"licensed_to,omitempty"`
-	ExpiresAt  time.Time `json:"expires_at,omitempty"`
-	Active     bool      `json:"active,omitempty"`
-	Message    string    `json:"message,omitempty"`
-	Edition    string    `json:"edition,omitempty"`
+	LicensedTo   string    `json:"licensed_to,omitempty"`
+	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	Active       bool      `json:"active,omitempty"`
+	Message      string    `json:"message,omitempty"`
+	Entitlements []string  `json:"entitlements,omitempty"`
 }
 type GetLogsResponse struct {
 	Result string `json:"result,omitempty"`
@@ -438,14 +438,6 @@ type InstallSubscriptionRolesResponse struct {
 }
 type InstallSubscriptionRolesResponseErrorsItem struct {
 	Role   string `json:"role"`
-	Reason string `json:"reason"`
-}
-type BulkGroupOperationResponse struct {
-	Success []string                      `json:"success,omitempty"`
-	Errors  []BulkGroupOperationErrorItem `json:"errors,omitempty"`
-}
-type BulkGroupOperationErrorItem struct {
-	Item   string `json:"item"`
 	Reason string `json:"reason"`
 }
 type GetRoleVarsResponse struct {
