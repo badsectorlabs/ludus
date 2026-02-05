@@ -91,6 +91,8 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		os.Exit(1)
 	}
 
+	// Debug-only hooks removed after troubleshooting file upload permissions.
+
 	InitDb()
 	LudusVersion = ludusVersion
 

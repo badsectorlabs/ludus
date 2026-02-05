@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strconv"
 )
 
@@ -33,6 +34,40 @@ func chownFileToUsername(filePath string, username string) {
 	err = os.Chown(filePath, uid, gid)
 	if err != nil {
 		fmt.Printf("Failed to change ownership of the file: %s\n", err)
+		return
+	}
+}
+
+func chownDirToUsernameRecursive(filePath string, username string) {
+	runnerUser, err := user.Lookup(username)
+	if err != nil {
+		fmt.Printf("Failed to lookup user %s for chown of %s\n", err, filePath)
+		return
+	}
+
+	uid, err := strconv.Atoi(runnerUser.Uid)
+	if err != nil {
+		fmt.Printf("Failed to convert UID to integer: %s\n", err)
+		return
+	}
+
+	gid, err := strconv.Atoi(runnerUser.Gid)
+	if err != nil {
+		fmt.Printf("Failed to convert GID to integer: %s\n", err)
+		return
+	}
+
+	err = filepath.Walk(filePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := os.Chown(path, uid, gid); err != nil {
+			return fmt.Errorf("failed to chown %s: %w", path, err)
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("Failed to chown directory %s: %s\n", filePath, err)
 		return
 	}
 }

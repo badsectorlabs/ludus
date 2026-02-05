@@ -96,6 +96,7 @@ rsync -av --progress \
     --exclude='docs/' \
     --exclude='webUI/' \
     --exclude='ludus-gui/node_modules/' \
+    --exclude='ludus-gui/.next/' \
     --include='ludus-antisandbox-plugin/' \
     --include='ludus-enterprise-plugin/' \
     --filter=':- ./*/.gitignore' \

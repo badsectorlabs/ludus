@@ -7592,6 +7592,11 @@ components:
           type: string
           examples:
             - Testing
+        thumbnailUrl:
+          type: string
+          readOnly: true
+          examples:
+            - /api/files/ranges/4l9n0t9ed3sxq8n/thumbnail.png
         lastDeployment:
           type: string
           format: date-time
@@ -7635,6 +7640,7 @@ components:
         - name
         - description
         - purpose
+        - thumbnailUrl
         - lastDeployment
         - numberOfVMs
         - testingEnabled
