@@ -666,6 +666,10 @@ func CreateRange(e *core.RequestEvent) error {
 		}
 	}
 
+	if payload.RangeID == "" {
+		return JSONError(e, http.StatusBadRequest, "Range ID is required")
+	}
+
 	if poolExists(payload.RangeID) {
 		return JSONError(e, http.StatusConflict, fmt.Sprintf("Pool with the name %s already exists", payload.RangeID))
 	}
