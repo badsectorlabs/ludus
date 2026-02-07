@@ -14,8 +14,8 @@ func init() {
 			return err
 		}
 
-		// Use relation-id lookups explicitly so auth relation checks work
-		// consistently when listing by filter before update.
+		// Allow access if the user is authenticated and is either directly assigned the range,
+		// or is a member/manager of a group that is assigned the range. Or if they are an Admin.
 		hasAccessRule := types.Pointer(`
 		@request.auth.id != "" && (
 			@request.auth.isAdmin = true ||
@@ -29,6 +29,10 @@ func init() {
 			)
 		)`)
 
+		// Allow access if the user is authenticated and directly assigned the range
+		// or a manager of a group that is assigned the range. Admins always have access.
+		// We also check explicitly that the only fields that are allowed to be changed are: name, description, purpose and thumbnail
+		// This is to prevent users from changing other fields that are not allowed to be changed directly via the API
 		isManagerOrDirectlyAssignedRule := types.Pointer(`
 		@request.auth.id != "" && (
 			@request.auth.isAdmin = true ||
@@ -57,4 +61,3 @@ func init() {
 		return app.Save(rangesCollection)
 	}, nil)
 }
-
