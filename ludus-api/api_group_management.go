@@ -671,6 +671,7 @@ func ListGroupRanges(e *core.RequestEvent) error {
 			RangeNumber:    int32(rangeRecord.RangeNumber()),
 			Description:    rangeRecord.Description(),
 			Purpose:        rangeRecord.Purpose(),
+			ThumbnailUrl:   rangeThumbnailURL(rangeRecord),
 			LastDeployment: rangeRecord.LastDeployment().Time(),
 			TestingEnabled: rangeRecord.TestingEnabled(),
 			VMs:            rangeVMs,

@@ -223,6 +223,7 @@ type ListAllRangeResponseItem struct {
 	RangeNumber    int32                             `json:"rangeNumber"`
 	Description    string                            `json:"description,omitempty"`
 	Purpose        string                            `json:"purpose,omitempty"`
+	ThumbnailUrl   string                            `json:"thumbnailUrl,omitempty"`
 	LastDeployment time.Time                         `json:"lastDeployment"`
 	TestingEnabled bool                              `json:"testingEnabled"`
 }
@@ -261,6 +262,7 @@ type ListGroupRangesResponseItem struct {
 	RangeNumber    int32                                `json:"rangeNumber"`
 	Description    string                               `json:"description,omitempty"`
 	Purpose        string                               `json:"purpose,omitempty"`
+	ThumbnailUrl   string                               `json:"thumbnailUrl,omitempty"`
 	LastDeployment time.Time                            `json:"lastDeployment"`
 	TestingEnabled bool                                 `json:"testingEnabled"`
 	VMs            []ListGroupRangesResponseItemVMsItem `json:"VMs"`
@@ -297,6 +299,7 @@ type ListRangeResponse struct {
 	RangeNumber    int32                      `json:"rangeNumber"`
 	Description    string                     `json:"description,omitempty"`
 	Purpose        string                     `json:"purpose,omitempty"`
+	ThumbnailUrl   string                     `json:"thumbnailUrl,omitempty"`
 	LastDeployment time.Time                  `json:"lastDeployment"`
 	TestingEnabled bool                       `json:"testingEnabled"`
 	VMs            []ListRangeResponseVMsItem `json:"VMs"`

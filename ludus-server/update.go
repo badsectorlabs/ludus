@@ -35,6 +35,8 @@ Move the updated binary to a different location and run it with --update to comp
 	Run("systemctl stop ludus", false, true)
 	Run("systemctl stop ludus-admin", false, true)
 
+	loadConfig()
+
 	// Backup, and extract files from this binary
 	checkDirAndReplaceFiles()
 
@@ -49,6 +51,8 @@ Move the updated binary to a different location and run it with --update to comp
 	copyThisBinaryToInstallPath()
 	chownFileToUsername(ludusServerBinaryPath, "root")
 	os.Chmod(ludusServerBinaryPath, 0711)
+
+	ensurePocketBaseStoragePermissions()
 
 	// Start ludus and ludus-admin
 	Run("systemctl start ludus", false, true)
@@ -75,6 +79,32 @@ Move the updated binary to a different location and run it with --update to comp
 	}
 
 	fmt.Printf("Ludus updated to %s\n", LudusVersion)
+}
+
+func ensurePocketBaseStoragePermissions() {
+	dataDir := config.DataDirectory
+	if dataDir == "" {
+		dataDir = fmt.Sprintf("%s/db", ludusInstallPath)
+	}
+
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Printf("Failed to create PocketBase data directory: %v", err)
+		return
+	}
+
+	if userExists("ludus") {
+		chownDirToUsernameRecursive(dataDir, "ludus")
+	}
+
+	storageDir := filepath.Join(dataDir, "storage")
+	if err := os.MkdirAll(storageDir, 0755); err != nil {
+		log.Printf("Failed to create PocketBase storage directory: %v", err)
+		return
+	}
+
+	if userExists("ludus") {
+		chownDirToUsernameRecursive(storageDir, "ludus")
+	}
 }
 
 // recursively extract an embed.FS directory to the ludus install path, skipping the file "config.yml.example"
