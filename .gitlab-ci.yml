@@ -1136,6 +1136,70 @@ post-deploy groups-as-admin:
     - '! ludus groups list | grep ci-group-test'
     - ludus user rm -i GTU
 
+post-deploy blueprints-as-admin:
+  stage: post-deploy-admin-groups
+  tags:
+    - ludus-proxmox-runner
+  dependencies:
+    - build all
+  rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[blueprint tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/blueprint.go
+      - ludus-api/api_blueprint_management.go
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
+  timeout: 15m
+  retry:
+    max: 2
+    when: script_failure
+  script:
+    - *ci-setup-admin
+    # Fast blueprint-only flow with no extra user/range fixture setup
+    - ludus blueprint rm ci-bp-main --no-prompt || true
+    - ludus blueprint rm ci-bp-copy --no-prompt || true
+    # Create, list, fetch config, copy, apply, and remove as admin
+    - ludus blueprint create --id ci-bp-main --name "CI Blueprint Main" --description "created in CI" --from-range CIA
+    - ludus blueprint list | grep ci-bp-main
+    - ludus blueprint config get ci-bp-main > /tmp/ci-bp-main-raw.yml
+    - test -s /tmp/ci-bp-main-raw.yml
+    - ludus blueprint access users ci-bp-main | grep CIA
+    - ludus blueprint access groups ci-bp-main
+    - ludus blueprint create --from-blueprint ci-bp-main --id ci-bp-copy --name "CI BP Copy"
+    - ludus blueprint list | grep ci-bp-copy
+    - ludus blueprint apply ci-bp-main --target-range CIA --force
+    - ludus range config get > /tmp/ci-bp-main-range-after-apply.yml
+    - diff -u /tmp/ci-bp-main-raw.yml /tmp/ci-bp-main-range-after-apply.yml
+    - set +o pipefail
+    - ludus blueprint create --id 1bad --name "Bad Blueprint" --from-range CIA 2>&1 | grep "Blueprint ID must be a valid ID"
+    - ludus blueprint create --id ci-bp-main --name "Duplicate Blueprint" --from-range CIA 2>&1 | grep "already in use"
+    - ludus blueprint create --id ci-bp-missing-range --name "Missing Range Blueprint" --from-range NOTARANGE 2>&1 | grep "Range NOTARANGE not found"
+    - set -o pipefail
+    # Cleanup
+    - ludus blueprint rm ci-bp-copy --no-prompt || true
+    - '! ludus blueprint list | grep ci-bp-copy'
+    - ludus blueprint rm ci-bp-main --no-prompt || true
+    - '! ludus blueprint list | grep ci-bp-main'
+
 post-deploy ranges-as-admin:
   stage: post-deploy-admin-ranges
   tags:
@@ -1537,6 +1601,129 @@ post-deploy user-cmds-as-user:
     - ludus user apikey --user CIA --no-prompt 2>&1 | grep "You are not an admin and cannot impersonate other users"
     # Get a new API for ourselves
     - ludus user apikey --no-prompt --value > /opt/ludus/ci/.apikey-user
+
+post-deploy blueprints-as-user:
+  stage: post-deploy-user-user
+  tags:
+    - ludus-proxmox-runner
+  dependencies: [] # Prevent download of build artifacts, use local cache
+  rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[blueprint tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+        - ludus-client/cmd/blueprint.go
+        - ludus-api/api_blueprint_management.go
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_user
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
+  timeout: 15m
+  retry:
+    max: 2
+    when: script_failure
+  script:
+    - *ci-setup-user
+    - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key); ludus --user CIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-admin; fi
+    - export CIU_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
+    - export CIA_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
+    - export LUDUS_API_KEY=$CIA_API_KEY
+    # Cleanup from prior retries
+    - ludus groups delete ci-bp-cli-group || true
+    - ludus blueprint rm ci-acl-main --no-prompt || true
+    - ludus blueprint rm ci-acl-copy-cia --no-prompt || true
+    - ludus blueprint rm ci-acl-copy-ciu --no-prompt || true
+    # Admin/owner CLI coverage
+    - ludus blueprint create --id ci-acl-main --name "CI ACL Main" --description "access-control coverage" --from-range CIA
+    - ludus blueprint list | grep ci-acl-main
+    - ludus blueprint config get ci-acl-main > /tmp/ci-acl-main-raw.yml
+    - test -s /tmp/ci-acl-main-raw.yml
+    - ludus blueprint access users ci-acl-main | grep CIA
+    - ludus blueprint access groups ci-acl-main
+    - ludus blueprint create --from-blueprint ci-acl-main --id ci-acl-copy-cia --name "CI ACL Copy CIA"
+    - ludus blueprint list | grep ci-acl-copy-cia
+    - ludus blueprint apply ci-acl-main --target-range CIA --force
+    - ludus range config get > /tmp/ci-acl-main-range-after-apply-cia.yml
+    - diff -u /tmp/ci-acl-main-raw.yml /tmp/ci-acl-main-range-after-apply-cia.yml
+    # Access-control negative checks as CIU before sharing
+    - export LUDUS_API_KEY=$CIU_API_KEY
+    - '! ludus blueprint list | grep ci-acl-main'
+    - set +o pipefail
+    - ludus blueprint access users ci-acl-main 2>&1 | grep "do not have access"
+    - ludus blueprint access groups ci-acl-main 2>&1 | grep "do not have access"
+    - ludus blueprint config get ci-acl-main 2>&1 | grep "do not have access"
+    - ludus blueprint create --from-blueprint ci-acl-main --id ci-acl-copy-ciu --name "CI ACL Copy CIU" 2>&1 | grep "do not have access"
+    - ludus blueprint apply ci-acl-main --target-range CIU --force 2>&1 | grep "do not have access"
+    - set -o pipefail
+    # Share coverage (user + group) as admin
+    - export LUDUS_API_KEY=$CIA_API_KEY
+    - ludus groups create ci-bp-cli-group --description "CI Blueprint CLI Group"
+    - ludus groups add user CIU ci-bp-cli-group
+    - ludus groups members ci-bp-cli-group | grep CIU | grep member
+    - set +o pipefail
+    - ludus blueprint share user ci-acl-main CI-MISSING-USER 2>&1 | grep "User CI-MISSING-USER not found"
+    - ludus blueprint share group ci-acl-main ci-missing-group 2>&1 | grep "Group ci-missing-group not found"
+    - set -o pipefail
+    - ludus blueprint share user ci-acl-main CIU
+    - ludus blueprint share group ci-acl-main ci-bp-cli-group
+    - ludus blueprint access users ci-acl-main | grep CIU
+    - ludus blueprint access groups ci-acl-main | grep ci-bp-cli-group
+    - set +o pipefail
+    - ludus blueprint share user ci-acl-main CIU 2>&1 | grep -E "(already shared|Failed to process|Successfully shared)"
+    - ludus blueprint share group ci-acl-main ci-bp-cli-group 2>&1 | grep -E "(already shared|Failed to process|Successfully shared)"
+    - set -o pipefail
+    # Positive access + permission boundaries as CIU
+    - export LUDUS_API_KEY=$CIU_API_KEY
+    - ludus blueprint list | grep ci-acl-main
+    - ludus blueprint config get ci-acl-main > /tmp/ci-acl-main-ciu.yml
+    - test -s /tmp/ci-acl-main-ciu.yml
+    - ludus blueprint create --from-blueprint ci-acl-main --id ci-acl-copy-ciu --name "CI ACL Copy CIU"
+    - ludus blueprint list | grep ci-acl-copy-ciu
+    - ludus blueprint apply ci-acl-main --target-range CIU --force
+    - ludus range config get > /tmp/ci-acl-main-range-after-apply-ciu.yml
+    - diff -u /tmp/ci-acl-main-ciu.yml /tmp/ci-acl-main-range-after-apply-ciu.yml
+    - set +o pipefail
+    - ludus blueprint apply ci-acl-main --target-range CIA --force 2>&1 | grep "do not have access to range CIA"
+    - ludus blueprint rm ci-acl-main --no-prompt 2>&1 | grep "do not own this blueprint and cannot delete it"
+    - ludus blueprint share user ci-acl-main CIA 2>&1 | grep "not a manager of a group that contains user CIA"
+    - ludus blueprint share group ci-acl-main ci-bp-cli-group 2>&1 | grep "not a manager of group ci-bp-cli-group"
+    - set -o pipefail
+    # Unshare coverage and verify access revocation
+    - export LUDUS_API_KEY=$CIA_API_KEY
+    - ludus blueprint unshare user ci-acl-main CIU
+    - ludus blueprint unshare group ci-acl-main ci-bp-cli-group
+    - '! ludus blueprint access users ci-acl-main | grep CIU'
+    - '! ludus blueprint access groups ci-acl-main | grep ci-bp-cli-group'
+    - set +o pipefail
+    - ludus blueprint unshare user ci-acl-main CIU 2>&1 | grep "is not shared with user CIU"
+    - ludus blueprint unshare group ci-acl-main ci-bp-cli-group 2>&1 | grep "is not shared with group ci-bp-cli-group"
+    - set -o pipefail
+    - export LUDUS_API_KEY=$CIU_API_KEY
+    - set +o pipefail
+    - ludus blueprint config get ci-acl-main 2>&1 | grep "do not have access"
+    - set -o pipefail
+    # Cleanup
+    - export LUDUS_API_KEY=$CIA_API_KEY
+    - ludus blueprint rm ci-acl-copy-ciu --no-prompt || true
+    - ludus blueprint rm ci-acl-copy-cia --no-prompt || true
+    - ludus blueprint rm ci-acl-main --no-prompt || true
+    - ludus groups delete ci-bp-cli-group || true
+    - '! ludus blueprint list | grep ci-acl-main'
+    - '! ludus blueprint list | grep ci-acl-copy-cia'
+    - '! ludus blueprint list | grep ci-acl-copy-ciu'
 
 post-deploy templates-as-user:
   stage: post-deploy-user-templates
