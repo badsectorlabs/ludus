@@ -765,7 +765,24 @@ range check-admin:
     when: script_failure
   script:
     - *ci-setup-admin
-    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - |
+      while true; do
+        range_state="$(ludus range list --json | jq -r '.rangeState')"
+        echo "Current range state: ${range_state}"
+
+        if [ "${range_state}" = "SUCCESS" ]; then
+          break
+        fi
+
+        if [ "${range_state}" = "ERROR" ]; then
+          echo "Range deployment failed. Exiting."
+          ludus range errors
+          exit 1
+        fi
+
+        ludus range logs --tail 20 || true
+        sleep 60
+      done
     - ludus range logs
     - ludus range list
     # Check to make sure the IPs were set correctly
