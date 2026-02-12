@@ -140,3 +140,33 @@ type BulkAddRangesToGroupRequest struct {
 type BulkRemoveRangesFromGroupRequest struct {
 	RangeIDs []string `json:"rangeIDs"`
 }
+type CreateBlueprintFromRangeRequest struct {
+	BlueprintID string `json:"blueprintID,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	RangeID     string `json:"rangeID,omitempty"`
+}
+type CopyBlueprintRequest struct {
+	BlueprintID string `json:"blueprintID,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+type ApplyBlueprintRequest struct {
+	RangeID string `json:"rangeID,omitempty"`
+	Force   bool   `json:"force,omitempty"`
+}
+type UpdateBlueprintConfigRequest struct {
+	Config string `json:"config"`
+}
+type BulkShareBlueprintWithGroupsRequest struct {
+	GroupNames []string `json:"groupNames"`
+}
+type BulkUnshareBlueprintWithGroupsRequest struct {
+	GroupNames []string `json:"groupNames"`
+}
+type BulkShareBlueprintWithUsersRequest struct {
+	UserIDs []string `json:"userIDs"`
+}
+type BulkUnshareBlueprintWithUsersRequest struct {
+	UserIDs []string `json:"userIDs"`
+}

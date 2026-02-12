@@ -337,6 +337,29 @@ type ListUserAccessibleRangesResponseItem struct {
 	RangeID     string `json:"rangeID,omitempty"`
 	AccessType  string `json:"accessType,omitempty"`
 }
+type ListBlueprintsResponseItem struct {
+	BlueprintID  string    `json:"blueprintID"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description,omitempty"`
+	ThumbnailURL string    `json:"thumbnailUrl,omitempty"`
+	OwnerUserID  string    `json:"ownerUserID"`
+	SharedUsers  []string  `json:"sharedUsers,omitempty"`
+	SharedGroups []string  `json:"sharedGroups,omitempty"`
+	AccessType   string    `json:"accessType,omitempty"`
+	Created      time.Time `json:"created"`
+	Updated      time.Time `json:"updated"`
+}
+type ListBlueprintAccessUsersResponseItem struct {
+	UserID string   `json:"userID"`
+	Name   string   `json:"name,omitempty"`
+	Access []string `json:"access,omitempty"`
+	Groups []string `json:"groups,omitempty"`
+}
+type ListBlueprintAccessGroupsResponseItem struct {
+	GroupName string   `json:"groupName"`
+	Managers  []string `json:"managers,omitempty"`
+	Members   []string `json:"members,omitempty"`
+}
 type ListUserResponse struct {
 	Value []ListUserResponseItem `json:"-"`
 }
@@ -472,6 +495,14 @@ type BulkGroupOperationResponse struct {
 	Errors  []BulkGroupOperationErrorItem `json:"errors,omitempty"`
 }
 type BulkGroupOperationErrorItem struct {
+	Item   string `json:"item"`
+	Reason string `json:"reason"`
+}
+type BulkBlueprintOperationResponse struct {
+	Success []string                          `json:"success,omitempty"`
+	Errors  []BulkBlueprintOperationErrorItem `json:"errors,omitempty"`
+}
+type BulkBlueprintOperationErrorItem struct {
 	Item   string `json:"item"`
 	Reason string `json:"reason"`
 }
