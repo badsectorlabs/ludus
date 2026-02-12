@@ -17,6 +17,7 @@ stages:
   - post-deploy-admin-ansible
   - post-deploy-admin-user
   - post-deploy-admin-groups
+  - post-deploy-admin-blueprints
   - post-deploy-admin-ranges
   - post-deploy-admin-templates
   - range-user-deploy
@@ -26,6 +27,7 @@ stages:
   - post-deploy-user-power
   - post-deploy-user-ansible
   - post-deploy-user-user
+  - post-deploy-user-blueprints
   - post-deploy-user-templates
   - post-deploy-user-snapshots
   - integration
@@ -1154,7 +1156,7 @@ post-deploy groups-as-admin:
     - ludus user rm -i GTU
 
 post-deploy blueprints-as-admin:
-  stage: post-deploy-admin-groups
+  stage: post-deploy-admin-blueprints
   tags:
     - ludus-proxmox-runner
   dependencies:
@@ -1620,7 +1622,7 @@ post-deploy user-cmds-as-user:
     - ludus user apikey --no-prompt --value > /opt/ludus/ci/.apikey-user
 
 post-deploy blueprints-as-user:
-  stage: post-deploy-user-user
+  stage: post-deploy-user-blueprints
   tags:
     - ludus-proxmox-runner
   dependencies: [] # Prevent download of build artifacts, use local cache
