@@ -21,6 +21,9 @@ func getGroupObjectFromRequest(e *core.RequestEvent) (*models.Group, error) {
 
 	groupRecord, err := e.App.FindFirstRecordByData("groups", "name", groupName)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, JSONError(e, http.StatusNotFound, fmt.Sprintf("Group %s not found", groupName))
+		}
 		return nil, JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding group: %v", err))
 	}
 	group := &models.Group{}
@@ -671,6 +674,7 @@ func ListGroupRanges(e *core.RequestEvent) error {
 			RangeNumber:    int32(rangeRecord.RangeNumber()),
 			Description:    rangeRecord.Description(),
 			Purpose:        rangeRecord.Purpose(),
+			ThumbnailUrl:   rangeThumbnailURL(rangeRecord),
 			LastDeployment: rangeRecord.LastDeployment().Time(),
 			TestingEnabled: rangeRecord.TestingEnabled(),
 			VMs:            rangeVMs,

@@ -16,7 +16,6 @@ import (
 )
 
 func InitDb() {
-
 	if os.Geteuid() == 0 {
 		// If a root-api-key file doesn't exist, recreate the root user in the database
 		if !FileExists(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath)) {

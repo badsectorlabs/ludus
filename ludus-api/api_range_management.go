@@ -366,6 +366,7 @@ func ListRange(e *core.RequestEvent) error {
 		RangeNumber:    int32(usersRange.RangeNumber()),
 		Description:    usersRange.Description(),
 		Purpose:        usersRange.Purpose(),
+		ThumbnailUrl:   rangeThumbnailURL(usersRange),
 		LastDeployment: usersRange.LastDeployment().Time(),
 		TestingEnabled: usersRange.TestingEnabled(),
 		VMs:            make([]dto.ListRangeResponseVMsItem, 0),
@@ -447,6 +448,7 @@ func ListAllRanges(e *core.RequestEvent) error {
 			RangeNumber:    int32(rangeRecord.RangeNumber()),
 			Description:    rangeRecord.Description(),
 			Purpose:        rangeRecord.Purpose(),
+			ThumbnailUrl:   rangeThumbnailURL(rangeRecord),
 			TestingEnabled: rangeRecord.TestingEnabled(),
 		}
 		vmRecords, err := app.FindAllRecords("vms", dbx.NewExp("range = {:rangeID}", dbx.Params{"rangeID": rangeRecord.Id}))

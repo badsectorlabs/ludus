@@ -261,6 +261,7 @@
     port: 22
     delay: 3
     state: started
+    timeout: 900 # Router/host reboot and network rebind can take longer than the default timeout
   delegate_to: localhost
   become: false
   register: wait_result

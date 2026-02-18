@@ -7,22 +7,12 @@ import (
 	"ludus/rest"
 	"ludusapi/dto"
 	"os"
-	"strings"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
 
 var manager bool
-
-// splitAndTrimIDs splits a comma-separated string of IDs and trims whitespace from each
-func splitAndTrimIDs(idsArg string) []string {
-	ids := strings.Split(idsArg, ",")
-	for i, id := range ids {
-		ids[i] = strings.TrimSpace(id)
-	}
-	return ids
-}
 
 // printBulkOperationResponse parses and prints the bulk operation response
 func printBulkOperationResponse(responseJSON []byte, action string, itemType string) {
@@ -32,15 +22,15 @@ func printBulkOperationResponse(responseJSON []byte, action string, itemType str
 		return
 	}
 
-	if len(bulkResponse.Success) > 0 {
-		logger.Logger.Info(fmt.Sprintf("Successfully %s %d %s: %v", action, len(bulkResponse.Success), itemType, bulkResponse.Success))
+	errors := make([]bulkOperationError, 0, len(bulkResponse.Errors))
+	for _, err := range bulkResponse.Errors {
+		errors = append(errors, bulkOperationError{
+			Item:   err.Item,
+			Reason: err.Reason,
+		})
 	}
-	if len(bulkResponse.Errors) > 0 {
-		logger.Logger.Warn(fmt.Sprintf("Failed to process %d %s:", len(bulkResponse.Errors), itemType))
-		for _, err := range bulkResponse.Errors {
-			logger.Logger.Warn(fmt.Sprintf("  %s: %s", err.Item, err.Reason))
-		}
-	}
+
+	printBulkOperationResult(action, itemType, bulkResponse.Success, errors)
 }
 
 // groupsCmd represents the groups command

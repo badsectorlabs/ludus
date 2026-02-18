@@ -723,6 +723,98 @@ var routes = PocketBaseRoutes{
 		ListUserAccessibleRanges,
 	},
 
+	// Blueprint management routes
+	{
+		"ListBlueprints",
+		http.MethodGet,
+		"/blueprints",
+		ListBlueprints,
+	},
+
+	{
+		"CreateBlueprintFromRange",
+		http.MethodPost,
+		"/blueprints/from-range",
+		CreateBlueprintFromRange,
+	},
+
+	{
+		"ApplyBlueprintToRange",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/apply",
+		ApplyBlueprintToRange,
+	},
+
+	{
+		"CopyBlueprint",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/copy",
+		CopyBlueprint,
+	},
+
+	{
+		"DeleteBlueprint",
+		http.MethodDelete,
+		"/blueprints/{blueprintID}",
+		DeleteBlueprint,
+	},
+
+	{
+		"GetBlueprintConfig",
+		http.MethodGet,
+		"/blueprints/{blueprintID}/config",
+		GetBlueprintConfig,
+	},
+
+	{
+		"UpdateBlueprintConfig",
+		http.MethodPut,
+		"/blueprints/{blueprintID}/config",
+		UpdateBlueprintConfig,
+	},
+
+	{
+		"ListBlueprintAccessUsers",
+		http.MethodGet,
+		"/blueprints/{blueprintID}/access/users",
+		ListBlueprintAccessUsers,
+	},
+
+	{
+		"ListBlueprintAccessGroups",
+		http.MethodGet,
+		"/blueprints/{blueprintID}/access/groups",
+		ListBlueprintAccessGroups,
+	},
+
+	{
+		"ShareBlueprintWithGroups",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/share/groups",
+		ShareBlueprintWithGroups,
+	},
+
+	{
+		"UnshareBlueprintWithGroups",
+		http.MethodDelete,
+		"/blueprints/{blueprintID}/share/groups",
+		UnshareBlueprintWithGroups,
+	},
+
+	{
+		"ShareBlueprintWithUsers",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/share/users",
+		ShareBlueprintWithUsers,
+	},
+
+	{
+		"UnshareBlueprintWithUsers",
+		http.MethodDelete,
+		"/blueprints/{blueprintID}/share/users",
+		UnshareBlueprintWithUsers,
+	},
+
 	// Migration routes
 	{
 		"MigrateSQLiteToPocketBase",

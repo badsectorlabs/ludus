@@ -82,6 +82,7 @@ type Ranges struct {
 	allowedDomains []string
 	allowedIPs     []string
 	rangeState     string
+	thumbnail      string
 	created        types.DateTime
 	updated        types.DateTime
 }
