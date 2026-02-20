@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v2"
 )
+
+var inCluster bool
 
 // check for vmx or svm features in /proc/cpu with egrep. Will print a message and exit if they are not found.
 func checkForVirtualizationSupport() {
@@ -96,4 +99,18 @@ func checkDebian12or13() {
 	} else {
 		log.Fatal("Could not read /etc/os-release to check for Debian 12 or 13. Ludus only supports Debian 12 or 13.")
 	}
+}
+
+func isInCluster() bool {
+	clusterStatus, err := RunWithOutput("ls -1 /etc/pve/nodes | wc -l")
+	if err != nil {
+		logger.Error(fmt.Sprintf("Could not get cluster status: %v", err))
+		return false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(clusterStatus))
+	if err != nil {
+		logger.Error(fmt.Sprintf("Could not parse node count from cluster status: %v", err))
+		return false
+	}
+	return n > 1
 }

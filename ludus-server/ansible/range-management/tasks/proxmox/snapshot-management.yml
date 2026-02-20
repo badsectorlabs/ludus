@@ -1,7 +1,7 @@
 - name: Get time of last snapshot
   ansible.builtin.shell:
     cmd: |
-      curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ item }}/snapshot/{{ snapshot_name }}/config" | jq '.[] | .snaptime'
+      curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ item }}/snapshot/{{ snapshot_name }}/config" | jq '.[] | .snaptime'
   loop: "{{ hostvars[router.vm_name | default(range_id + '-router-debian11-x64')]['vmids_to_snapshot'] }}"
   register: snapshot_times
   ignore_errors: true

@@ -1,0 +1,34 @@
+defaults:
+  snapshot_with_RAM: true
+  stale_hours: 1
+  ad_domain_functional_level: WinThreshold
+  ad_forest_functional_level: WinThreshold
+  ad_domain_admin: superadmin
+  ad_domain_admin_password: password123
+  ad_domain_user: john-doe
+  ad_domain_user_password: password123
+  ad_domain_safe_mode_password: P@ssword123
+  timezone: "America/Los_Angeles"
+  enable_dynamic_wallpaper: false
+  target_node: EH-Ludus
+
+ludus:
+  - vm_name: deb1-CITEST
+    hostname: deb1
+    template: debian-11-x64-server-template
+    vlan: 10
+    ip_last_octet: 10
+    ram_gb: 4
+    cpus: 2
+    linux: true
+  - vm_name: deb2-CITEST
+    hostname: deb2
+    template: debian-11-x64-server-template
+    vlan: 10
+    ip_last_octet: 11
+    ram_gb: 4
+    cpus: 2
+    linux: true
+
+router:
+  vm_name: router-CITEST

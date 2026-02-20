@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
+
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/list"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v2"
 
 	ludusapi "ludusapi"
 )
@@ -27,7 +31,22 @@ var (
 	finalConfirm              = false
 	shouldShowAnsibleField    = false
 	shouldShowAdminPortExpose = false
+	initialAdmin              initialAdminConfig
 )
+
+// initialAdminConfig holds the initial admin user details collected during interactive install.
+type initialAdminConfig struct {
+	Name     string `yaml:"name"`
+	Email    string `yaml:"email"`
+	UserID   string `yaml:"userID"`
+	Password string `yaml:"password"`
+}
+
+// reservedUserIDs are not allowed for the initial admin (same as AddUser in ludus-api).
+var reservedUserIDs = []string{"ADMIN", "ROOT", "CICD", "SHARED", "0"}
+
+// initialAdminUserIDRegex matches valid user IDs: ^[A-Za-z0-9]{1,20}$
+var initialAdminUserIDRegex = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
 
 type Styles struct {
 	Base,
@@ -108,7 +127,7 @@ type state int
 const (
 	statusNormal state = iota
 	stateDone
-	numberOfFields = 12 // 11 fields + 1 confirm, update this if you add any new fields
+	numberOfFields = 16 // 11 config + 4 initial admin + 1 confirm, update this if you add any new fields
 )
 
 type Model struct {
@@ -279,6 +298,60 @@ func NewModel() Model {
 		),
 
 		huh.NewGroup(
+			huh.NewInput().
+				Key("initial_admin_name").
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("Initial admin name cannot be empty")
+					}
+					return nil
+				}).
+				Title("Initial admin display name").
+				Description("e.g. John Doe - used for the first admin user").
+				Value(&initialAdmin.Name),
+			huh.NewInput().
+				Key("initial_admin_email").
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("Initial admin email cannot be empty")
+					}
+					return nil
+				}).
+				Title("Initial admin email").
+				Description("Used for web UI login").
+				Value(&initialAdmin.Email),
+			huh.NewInput().
+				Key("initial_admin_userid").
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("User ID cannot be empty")
+					}
+					if !initialAdminUserIDRegex.MatchString(s) {
+						return fmt.Errorf("User ID must match ^[A-Za-z0-9]{1,20}$")
+					}
+					if slices.Contains(reservedUserIDs, strings.ToUpper(s)) {
+						return fmt.Errorf("%s is a reserved user ID", s)
+					}
+					return nil
+				}).
+				Title("Initial admin user ID").
+				Description("Short ID for CLI/API (e.g. JD). Letters and numbers only, 1-20 chars").
+				Value(&initialAdmin.UserID),
+			huh.NewInput().
+				Key("initial_admin_password").
+				Validate(func(s string) error {
+					if len(s) < 8 {
+						return fmt.Errorf("Password must be at least 8 characters long")
+					}
+					return nil
+				}).
+				Title("Initial admin password").
+				Description("At least 8 characters - for web UI and Proxmox").
+				Value(&initialAdmin.Password).
+				EchoMode(huh.EchoModePassword),
+		),
+
+		huh.NewGroup(
 			huh.NewConfirm().
 				Key("done").
 				Title("Ready?").
@@ -303,13 +376,6 @@ func NewModel() Model {
 
 func (m Model) Init() tea.Cmd {
 	return m.form.Init()
-}
-
-func min(x, y int) int {
-	if x > y {
-		return y
-	}
-	return x
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -538,6 +604,20 @@ to function. The Ludus install process will not reboot your host.
 	// Now that the form is done, write the config
 	config.ProxmoxHostname = config.ProxmoxNode
 	writeConfigToFile(config, fmt.Sprintf("%s/config.yml", ludusInstallPath))
+
+	// Write initial admin details for creation after ROOT is created in InitDb
+	installDir := fmt.Sprintf("%s/install", ludusInstallPath)
+	if err := os.MkdirAll(installDir, 0700); err != nil {
+		fmt.Printf("Warning: could not create install dir: %v\n", err)
+	} else {
+		initialAdminPath := fmt.Sprintf("%s/initial-admin.yml", installDir)
+		data, err := yaml.Marshal(&initialAdmin)
+		if err != nil {
+			fmt.Printf("Warning: could not marshal initial admin config: %v\n", err)
+		} else if err := os.WriteFile(initialAdminPath, data, 0600); err != nil {
+			fmt.Printf("Warning: could not write %s: %v\n", initialAdminPath, err)
+		}
+	}
 }
 
 func generateFinalMessage() string {

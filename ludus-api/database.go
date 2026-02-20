@@ -6,14 +6,27 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/security"
+	"gopkg.in/yaml.v2"
 
 	_ "ludusapi/migrations"
 	"ludusapi/models"
 )
+
+// initialAdminYAML matches the structure written by the install form (ludus-server/form.go).
+type initialAdminYAML struct {
+	Name     string `yaml:"name"`
+	Email    string `yaml:"email"`
+	UserID   string `yaml:"userID"`
+	Password string `yaml:"password"`
+}
+
+var reservedInitialAdminUserIDs = []string{"ADMIN", "ROOT", "CICD", "SHARED", "0"}
 
 func InitDb() {
 	if os.Geteuid() == 0 {
@@ -21,6 +34,15 @@ func InitDb() {
 		if !FileExists(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath)) {
 			logger.Info("Creating root user in database")
 			createRootUserInDatabase()
+		}
+		// If initial-admin.yml exists (from interactive install), create the initial admin user
+		initialAdminPath := fmt.Sprintf("%s/install/initial-admin.yml", ludusInstallPath)
+		if FileExists(initialAdminPath) {
+			logger.Info("Creating initial admin user from install config")
+			if err := createInitialAdminFromFile(initialAdminPath); err != nil {
+				logger.Error(fmt.Sprintf("Failed to create initial admin user: %v", err))
+				os.Exit(2)
+			}
 		}
 		// Check if there was a previous sqlite db, and if so, run the migrations
 		if FileExists(fmt.Sprintf("%s/ludus.db", ludusInstallPath)) && !FileExists(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath)) {
@@ -66,7 +88,14 @@ func createRootUserInDatabase() {
 	user.SetUserNumber(1)
 	user.SetIsAdmin(true)
 	user.SetEmail("root@ludus.internal")
-	user.SetPassword(security.RandomString(25)) // Will never be used, but needed to create the record
+
+	rootWebPassword := security.RandomString(25)
+	err = os.WriteFile(fmt.Sprintf("%s/install/root-web-password", ludusInstallPath), []byte(rootWebPassword), 0400)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	os.Chown(fmt.Sprintf("%s/install/root-web-password", ludusInstallPath), 0, 0)
+	user.SetPassword(rootWebPassword)
 
 	apiKey := GenerateAPIKey(user.UserId())
 	err = os.WriteFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), []byte(apiKey), 0400)
@@ -109,6 +138,167 @@ func createRootUserInDatabase() {
 	}
 
 	logger.Info("Successfully created root user in database")
+}
+
+func createInitialAdminFromFile(initialAdminPath string) error {
+	data, err := os.ReadFile(initialAdminPath)
+	if err != nil {
+		return fmt.Errorf("reading initial-admin.yml: %w", err)
+	}
+	var cfg initialAdminYAML
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parsing initial-admin.yml: %w", err)
+	}
+	if cfg.Name == "" || cfg.Email == "" || cfg.UserID == "" || cfg.Password == "" {
+		return fmt.Errorf("initial-admin.yml must contain name, email, userID, and password")
+	}
+	if !UserIDRegex.MatchString(cfg.UserID) {
+		return fmt.Errorf("initial admin userID does not match ^[A-Za-z0-9]{1,20}$")
+	}
+	if slices.Contains(reservedInitialAdminUserIDs, strings.ToUpper(cfg.UserID)) {
+		return fmt.Errorf("%s is a reserved user ID", cfg.UserID)
+	}
+	if len(cfg.Password) < 8 {
+		return fmt.Errorf("initial admin password must be at least 8 characters")
+	}
+
+	proxmoxUsername := strings.ReplaceAll(strings.ToLower(cfg.Name), " ", "-")
+
+	matchingUsers, err := app.CountRecords("users", dbx.HashExp{"userID": cfg.UserID})
+	if err != nil {
+		return fmt.Errorf("checking if user exists: %w", err)
+	}
+	if matchingUsers > 0 {
+		return fmt.Errorf("user with ID %s already exists", cfg.UserID)
+	}
+	matchingUsers, err = app.CountRecords("users", dbx.HashExp{"proxmoxUsername": proxmoxUsername})
+	if err != nil {
+		return fmt.Errorf("checking if username exists: %w", err)
+	}
+	if matchingUsers > 0 {
+		return fmt.Errorf("user with name %s already exists", proxmoxUsername)
+	}
+	if userExistsOnHostSystem(proxmoxUsername) {
+		return fmt.Errorf("username %s already exists on the host system", proxmoxUsername)
+	}
+	if poolExists(cfg.UserID) {
+		return fmt.Errorf("pool %s already exists", cfg.UserID)
+	}
+
+	userCollection, err := app.FindCollectionByNameOrId("users")
+	if err != nil {
+		return fmt.Errorf("finding users collection: %w", err)
+	}
+	userRecord := core.NewRecord(userCollection)
+	user := &models.User{}
+	user.SetProxyRecord(userRecord)
+	user.SetName(cfg.Name)
+	user.SetUserId(cfg.UserID)
+	user.SetEmail(cfg.Email)
+	user.SetPassword(cfg.Password)
+	user.SetIsAdmin(true)
+	user.SetProxmoxUsername(proxmoxUsername)
+	user.SetProxmoxRealm("pam")
+	encryptedPassword, err := EncryptStringForDatabase(cfg.Password)
+	if err != nil {
+		return fmt.Errorf("encrypting password: %w", err)
+	}
+	user.SetProxmoxPassword(encryptedPassword)
+
+	wasError := false
+	err = app.RunInTransaction(func(txApp core.App) error {
+		defer func() {
+			if wasError {
+				removeUserFromHostSystem(user.ProxmoxUsername())
+				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
+				removePool(user.UserId())
+				defaultRangeRecord, findErr := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
+				if findErr == nil && defaultRangeRecord != nil {
+					txApp.Delete(defaultRangeRecord)
+				}
+				txApp.Delete(user)
+			}
+		}()
+
+		user.SetUserNumber(findNextAvailableUserNumber(txApp))
+		if user.UserNumber() > 150 {
+			wasError = true
+			return fmt.Errorf("cannot create more than 150 users")
+		}
+
+		if err := CreateDefaultUserRangeForBootstrap(txApp, user); err != nil {
+			wasError = true
+			return fmt.Errorf("creating default range: %w", err)
+		}
+
+		extraVars := map[string]interface{}{
+			"username":          user.ProxmoxUsername(),
+			"user_id":           user.UserId(),
+			"user_number":       user.UserNumber(),
+			"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
+			"user_is_admin":     true,
+			"proxmox_password":  cfg.Password,
+		}
+		output, err := RunAddUserPlaybookStandalone(extraVars)
+		if err != nil {
+			wasError = true
+			return fmt.Errorf("running add-user playbook: %w (output: %s)", err, output)
+		}
+
+		apiKey := GenerateAPIKey(user.UserId())
+		hashedAPIKey, err := HashString(apiKey)
+		if err != nil {
+			wasError = true
+			return fmt.Errorf("hashing API key: %w", err)
+		}
+		user.SetHashedApikey(hashedAPIKey)
+
+		tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm(), cfg.Password)
+		if err != nil {
+			wasError = true
+			return fmt.Errorf("creating Proxmox API token: %w", err)
+		}
+		encryptedTokenSecret, err := EncryptStringForDatabase(tokenSecret)
+		if err != nil {
+			wasError = true
+			return fmt.Errorf("encrypting Proxmox token: %w", err)
+		}
+		user.SetProxmoxTokenId(tokenID)
+		user.SetProxmoxTokenSecret(encryptedTokenSecret)
+
+		// Grant user and ludus_admins Proxmox pool/SDN access to the user's default range
+		// (required for range deployment, especially SDN.Use in cluster mode)
+		if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
+			wasError = true
+			return fmt.Errorf("granting Proxmox access to default range: %w", err)
+		}
+
+		if err := txApp.Save(user); err != nil {
+			wasError = true
+			return fmt.Errorf("saving user: %w", err)
+		}
+
+		os.MkdirAll(fmt.Sprintf("%s/users/%s", ludusInstallPath, user.ProxmoxUsername()), 0700)
+
+		credentialsPath := fmt.Sprintf("%s/install/initial-admin-credentials", ludusInstallPath)
+		credentialsContent := fmt.Sprintf("email:%s\nusername:%s\napi_key:%s\npassword:%s\n", user.Email(), user.ProxmoxUsername(), apiKey, cfg.Password)
+		if err := os.WriteFile(credentialsPath, []byte(credentialsContent), 0600); err != nil {
+			logger.Error(fmt.Sprintf("Failed to write initial-admin-credentials: %v", err))
+			// non-fatal: we still created the user
+		} else {
+			os.Chown(credentialsPath, 0, 0)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if removeErr := os.Remove(initialAdminPath); removeErr != nil {
+		logger.Error(fmt.Sprintf("Failed to remove initial-admin.yml: %v", removeErr))
+	}
+	logger.Info("Successfully created initial admin user")
+	return nil
 }
 
 func createRootUserAsSuperuserInPocketBase(txApp core.App) error {

@@ -143,6 +143,13 @@ func GetGoProxmoxClientForUserUsingToken(e *core.RequestEvent) (*goproxmox.Clien
 }
 
 func getRootGoProxmoxClient() (*goproxmox.Client, error) {
+
+	rawCachedClient := app.Store().Get("proxmoxClient_root")
+	cachedClient, ok := rawCachedClient.(*goproxmox.Client)
+	if ok {
+		return cachedClient, nil
+	}
+
 	rootUserRecord, err := app.FindFirstRecordByData("users", "userID", "ROOT")
 	if err != nil {
 		return nil, errors.New("unable to get root user object: " + err.Error())
@@ -174,6 +181,8 @@ func getRootGoProxmoxClient() (*goproxmox.Client, error) {
 		goproxmox.WithAPIToken(tokenID, tokenSecret),
 		goproxmox.WithLogger(customLogger),
 	)
+
+	app.Store().Set("proxmoxClient_root", client)
 	return client, nil
 }
 
@@ -304,11 +313,17 @@ func removePool(poolName string) error {
 	return nil
 }
 
-func giveUserAccessToPool(username string, realm string, poolName string) error {
+func giveUserAccessToRange(username string, realm string, poolName string, rangeNumber int) error {
+	if UseSDN {
+		return sdnVNetACLAction(username, realm, rangeNumber, false)
+	}
 	return poolACLAction(username, realm, poolName, false)
 }
 
-func removeUserAccessFromPool(username string, realm string, poolName string) error {
+func removeUserAccessFromRange(username string, realm string, poolName string, rangeNumber int) error {
+	if UseSDN {
+		return sdnVNetACLAction(username, realm, rangeNumber, true)
+	}
 	return poolACLAction(username, realm, poolName, true)
 }
 
@@ -326,9 +341,30 @@ func poolACLAction(username string, realm string, poolName string, revoke bool) 
 	}
 	err = proxmoxClient.UpdateACL(context.Background(), PVEVMAdminACL)
 	if err != nil {
-		return errors.New("unable to set permissions for user: " + err.Error())
+		return errors.New("unable to set pool permissions for user: " + err.Error())
 	}
 
+	return nil
+}
+
+func sdnVNetACLAction(username string, realm string, rangeNumber int, revoke bool) error {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client: " + err.Error())
+	}
+
+	vnetName := fmt.Sprintf("r%d", rangeNumber)
+	SDNVNetACL := goproxmox.ACLOptions{
+		Path:      fmt.Sprintf("/sdn/zones/%s/%s", ServerConfiguration.SDNZone, vnetName),
+		Roles:     "PVESDNUser",
+		Users:     username + "@" + realm,
+		Propagate: goproxmox.IntOrBool(true),
+		Delete:    goproxmox.IntOrBool(revoke),
+	}
+	err = proxmoxClient.UpdateACL(context.Background(), SDNVNetACL)
+	if err != nil {
+		return errors.New("unable to set SDN permissions for user: " + err.Error())
+	}
 	return nil
 }
 
@@ -449,11 +485,17 @@ func removeUserFromGroupInProxmox(username string, realm string, groupName strin
 	return nil
 }
 
-func grantGroupAccessToRangeInProxmox(groupID string, poolName string) error {
+func grantGroupAccessToRangeInProxmox(groupID string, poolName string, rangeNumber int) error {
+	if UseSDN {
+		return grantGroupAccessToSDNVNet(groupID, rangeNumber)
+	}
 	return groupACLAction(groupID, poolName, false)
 }
 
-func revokeGroupAccessToRangeInProxmox(groupID string, poolName string) error {
+func revokeGroupAccessToRangeInProxmox(groupID string, poolName string, rangeNumber int) error {
+	if UseSDN {
+		return revokeGroupAccessToSDNVNet(groupID, rangeNumber)
+	}
 	return groupACLAction(groupID, poolName, true)
 }
 
@@ -667,6 +709,32 @@ func findNodeForVM(ctx context.Context, client *goproxmox.Client, vmid uint64) (
 	return "", fmt.Errorf("VMID %d not found in cluster", vmid)
 }
 
+func getNodeForVMByName(e *core.RequestEvent, vmName string) (string, error) {
+
+	ctx := context.TODO()
+	client, err := GetGoProxmoxClientForUserUsingToken(e)
+	if err != nil {
+		return "", err
+	}
+	cluster, err := client.Cluster(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	resources, err := cluster.Resources(ctx, "vm")
+	if err != nil {
+		return "", err
+	}
+
+	for _, res := range resources {
+		if res.Name == vmName {
+			return res.Node, nil
+		}
+	}
+
+	return "", fmt.Errorf("VM %s not found in cluster", vmName)
+}
+
 func getVMsForPool(e *core.RequestEvent, ctx context.Context, poolName string, client *goproxmox.Client) ([]goproxmox.ClusterResource, error) {
 
 	cachedVMsForPool := e.Get("getVMsForPool_" + poolName)
@@ -686,4 +754,37 @@ func getVMsForPool(e *core.RequestEvent, ctx context.Context, poolName string, c
 	}
 	e.Set("getVMsForPool_"+poolName, vmsForPool)
 	return vmsForPool, nil
+}
+
+func grantGroupAccessToSDNVNet(groupID string, rangeNumber int) error {
+	return sdnGroupVNetACLAction(groupID, rangeNumber, false)
+}
+
+func revokeGroupAccessToSDNVNet(groupID string, rangeNumber int) error {
+	return sdnGroupVNetACLAction(groupID, rangeNumber, true)
+}
+
+func sdnGroupVNetACLAction(groupID string, rangeNumber int, revoke bool) error {
+	proxmoxClient, err := getRootGoProxmoxClient()
+	if err != nil {
+		return errors.New("unable to create proxmox client: " + err.Error())
+	}
+
+	SDNVNetName := fmt.Sprintf("r%d", rangeNumber)
+
+	SDNVNetACL := goproxmox.ACLOptions{
+		Path:      fmt.Sprintf("/sdn/zones/%s/%s", ServerConfiguration.SDNZone, SDNVNetName),
+		Groups:    groupID,
+		Roles:     "PVESDNUser",
+		Propagate: goproxmox.IntOrBool(true),
+		Delete:    goproxmox.IntOrBool(revoke),
+	}
+	logger.Debug(fmt.Sprintf("Attempting to set permissions for group '%s' to SDN VNet '%s'\n", groupID, SDNVNetName))
+	logger.Debug(godump.DumpStr(SDNVNetACL))
+	err = proxmoxClient.UpdateACL(context.Background(), SDNVNetACL)
+	if err != nil {
+		return errors.New("unable to set permissions for group: " + err.Error())
+	}
+
+	return nil
 }

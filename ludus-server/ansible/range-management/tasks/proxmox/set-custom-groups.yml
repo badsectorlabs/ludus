@@ -6,7 +6,7 @@
         api_token_id: "{{ proxmox_token_id }}"
         api_token_secret: "{{ proxmox_token_secret }}"
         api_host: "{{ api_host }}"
-        node: "{{ node_name }}"
+        node: "{{ vm_target_nodes[vm_name] | default(range_default_target_node) | default(node_name) }}"
         name: "{{ vm_name }}"
         description: '{ "groups": [{{ vm_groups }}] }'
         update: true
@@ -20,7 +20,7 @@
         api_token_id: "{{ proxmox_token_id }}"
         api_token_secret: "{{ proxmox_token_secret }}"
         api_host: "{{ api_host }}"
-        node: "{{ node_name }}"
+        node: "{{ vm_target_nodes[vm_name] | default(range_default_target_node) | default(node_name) }}"
         name: "{{ vm_name }}"
         description: '{ "groups": [{{ vm_groups }}] }'
         update: true

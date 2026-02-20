@@ -4,24 +4,28 @@
 # It assumes you are on a macOS or Linux host and have root SSH access to the target machine
 
 # Parse command line arguments
-while getopts "hlap:t:n:cdwsDCPL" opt; do
+while getopts "hlap:t:n:cdwsSDCPL" opt; do
   case $opt in
     h)
       echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c] [-d] [-p] [-w] [-s] [-D] [-C]"
       echo "  -h  Show this help message"
       echo "  -l  Show Ludus service logs (default 100 lines)"
       echo "  -a  Show Ludus admin service logs (requires -l)"
-      echo "  -t  Target development hostname (default: lkdev2)"
       echo "  -n  Number of log lines to show (default 100)"
-      echo "  -c  Build and install client locally"
-      echo "  -d  Build and install debug mode"
+      echo "  -t  Target development hostname (default: lkdev2)"
       echo "  -p  Port to use for SSH/rsync"
+      echo "  -c  Build and install client locally"
+      echo "  -C  Build and install client remotely"
       echo "  -w  Build and install web UI"
       echo "  -s  Skip plugins"
+      echo "  -S  Skip building the server, just sync the code"
+      echo "  -d  Enable debug mode for Ludus server"
       echo "  -D  Enable debug mode for database"
-      echo "  -C  Build and install client remotely"
-      echo "  -P  Enable debug mode for proxmox"
+      echo "  -P  Enable debug mode for Proxmox"
       echo "  -L  Enable debug mode for license requests"
+      echo ""
+      echo "Examples:"
+      echo "  $0 -t ludus-dev-hostname -C -d -s # Build and install client remotely, Build and install Ludus server with debug mode, skip plugins"
       exit 0
       ;;
     l)
@@ -50,6 +54,9 @@ while getopts "hlap:t:n:cdwsDCPL" opt; do
       ;;
     s)
       SKIP_PLUGINS=true
+      ;;
+    S)
+      SKIP_SERVER=true
       ;;
     D)
       DEBUG_DATABASE=true
@@ -138,7 +145,11 @@ if [ "$DEBUG_LICENSE" = true ]; then
     DEBUG_FLAGS="${DEBUG_FLAGS} -L"
 fi
 
-ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh $DEBUG_FLAGS"
+if [ "$SKIP_SERVER" != true ]; then
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh $DEBUG_FLAGS"
+else
+    echo "[-] Skipping server build"
+fi
 
 # Build the client remotely if requested
 if [ "$BUILD_CLIENT_REMOTELY" = true ]; then

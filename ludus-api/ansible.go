@@ -22,6 +22,7 @@ import (
 	"github.com/apenella/go-ansible/pkg/playbook"
 	"github.com/pocketbase/pocketbase/core"
 	"golang.org/x/exp/maps"
+	yaml "sigs.k8s.io/yaml"
 )
 
 // Runs an ansible playbook with an arbitrary amount of extraVars
@@ -46,6 +47,10 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	}
 
 	accessGrantsArray := GetRangeAccessibleUsers(usersRange.RangeNumber())
+
+	// Compute target nodes for cluster deployments
+	rangeDefaultTargetNode, vmTargetNodes := computeTargetNodes(e, usersRange.RangeId())
+
 	userVars := map[string]interface{}{
 		"username":           user.ProxmoxUsername(),
 		"range_id":           usersRange.RangeId(),
@@ -57,6 +62,10 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		// Pass license entitlements to ansible
 		"ludus_entitlements": server.Entitlements,
 		"wireguard_port":     ServerConfiguration.WireguardPort,
+		// Cluster mode target node settings
+		"range_default_target_node": rangeDefaultTargetNode,
+		"vm_target_nodes":           vmTargetNodes,
+		"ludus_cluster_mode":        UseSDN,
 	}
 
 	// Merge userVars with any extraVars provided
@@ -227,6 +236,67 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 
 	return buff.String(), nil
 
+}
+
+// RunAddUserPlaybookStandalone runs the add-user playbook without a request event.
+// Used when creating the initial admin user during InitDb. extraVars must include:
+// username, user_id, user_number, proxmox_public_ip, user_is_admin, proxmox_password.
+func RunAddUserPlaybookStandalone(extraVars map[string]interface{}) (string, error) {
+	buff := new(bytes.Buffer)
+	playbookPath := ludusInstallPath + "/ansible/user-management/add-user.yml"
+	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
+
+	ansiblePlaybookConnectionOptions := &options.AnsibleConnectionOptions{
+		Connection: "local",
+	}
+
+	ansiblePlaybookOptions := &playbook.AnsiblePlaybookOptions{
+		Inventory:     "127.0.0.1",
+		ExtraVarsFile: serverAndUserConfigs,
+		ExtraVars:     extraVars,
+		Tags:          "",
+		Verbose:       false,
+	}
+
+	ansibleLogFilePath := fmt.Sprintf("%s/install/ansible.log", ludusInstallPath)
+	ansibleLogFile, err := os.OpenFile(ansibleLogFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0660)
+	if err != nil {
+		return "", fmt.Errorf("failed to open ansible log file: %w", err)
+	}
+	defer func() {
+		ansibleLogFile.Close()
+		if os.Geteuid() == 0 {
+			changeFileOwner(ansibleLogFilePath, "ludus")
+		}
+	}()
+
+	ansibleExecute := execute.NewDefaultExecute(
+		execute.WithWrite(io.MultiWriter(buff, ansibleLogFile)),
+		execute.WithWriteError(io.MultiWriter(buff, ansibleLogFile)),
+		execute.WithEnvVar("ANSIBLE_NOCOLOR", "true"),
+		execute.WithEnvVar("ANSIBLE_HOME", fmt.Sprintf("%s/install", ludusInstallPath)),
+		execute.WithEnvVar("PROXMOX_NODE", ServerConfiguration.ProxmoxNode),
+		execute.WithEnvVar("PROXMOX_INVALID_CERT", strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert)),
+		execute.WithEnvVar("PROXMOX_URL", ServerConfiguration.ProxmoxURL),
+		execute.WithEnvVar("PROXMOX_HOSTNAME", ServerConfiguration.ProxmoxHostname),
+	)
+
+	pb := &playbook.AnsiblePlaybookCmd{
+		Playbooks:         []string{playbookPath},
+		Exec:              ansibleExecute,
+		ConnectionOptions: ansiblePlaybookConnectionOptions,
+		Options:           ansiblePlaybookOptions,
+		StdoutCallback:    "default",
+	}
+	if ansibleBinary, ok := os.LookupEnv("LUDUS_ANSIBLE_BINARY"); ok {
+		pb.Binary = ansibleBinary
+	}
+
+	err = pb.Run(context.TODO())
+	if err != nil {
+		return buff.String(), err
+	}
+	return buff.String(), nil
 }
 
 // A helper to keep function calls clean
@@ -497,4 +567,96 @@ func getFatalErrorsFromLog(input string) []string {
 		fatalErrors = append(fatalErrors, previousLine)
 	}
 	return fatalErrors
+}
+
+// computeTargetNodes computes the target node for each VM in the range config
+// Returns: (rangeDefaultTargetNode, vmTargetNodes map[vm_name]node)
+// Priority:
+// 1. Node the VM is already running on
+// 2. VM target_node
+// 3. Range target_node
+// 4. Auto-select (80% RAM + 20% CPU weighted algorithm)
+// 5. Server proxmox_node
+func computeTargetNodes(e *core.RequestEvent, rangeID string) (string, map[string]string) {
+	vmTargetNodes := make(map[string]string)
+
+	// Read and parse the range config
+	rangeConfigPath := fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, rangeID)
+	if !FileExists(rangeConfigPath) {
+		// No range config, use default node
+		return ServerConfiguration.ProxmoxNode, vmTargetNodes
+	}
+
+	configBytes, err := os.ReadFile(rangeConfigPath)
+	if err != nil {
+		logger.Debug(fmt.Sprintf("Failed to read range config for target node computation: %v", err))
+		return ServerConfiguration.ProxmoxNode, vmTargetNodes
+	}
+
+	var config LudusConfig
+	if err := yaml.Unmarshal(configBytes, &config); err != nil {
+		logger.Debug(fmt.Sprintf("Failed to parse range config for target node computation: %v", err))
+		return ServerConfiguration.ProxmoxNode, vmTargetNodes
+	}
+
+	// Determine the default target node
+	// Priority: Range target_node > Auto-select
+	var defaultTargetNode string
+	if config.Defaults != nil {
+		defaultTargetNode = config.Defaults.TargetNode
+	}
+	if defaultTargetNode == "" {
+		// Try auto-selection based on resource usage
+		client, err := getRootGoProxmoxClient()
+		if err == nil {
+			selectedNode, err := SelectOptimalNode(client)
+			if err == nil {
+				defaultTargetNode = selectedNode
+			}
+		}
+	}
+
+	// If still empty, use the configured node
+	if defaultTargetNode == "" {
+		defaultTargetNode = ServerConfiguration.ProxmoxNode
+	}
+
+	// Build per-VM target node map
+	// Priority: Existing VM's node >VM target_node > Range default
+	for _, vm := range config.Ludus {
+		node, err := getNodeForVMByName(e, vm.VMName)
+		if err == nil && node != "" {
+			logger.Debug(fmt.Sprintf("VM %s is already running on node %s", vm.VMName, node))
+			vmTargetNodes[vm.VMName] = node
+		} else if vm.TargetNode != "" {
+			logger.Debug(fmt.Sprintf("VM %s target node is %s", vm.VMName, vm.TargetNode))
+			vmTargetNodes[vm.VMName] = vm.TargetNode
+		} else {
+			logger.Debug(fmt.Sprintf("VM %s target node is default node %s", vm.VMName, defaultTargetNode))
+			vmTargetNodes[vm.VMName] = defaultTargetNode
+		}
+	}
+
+	// Router: always set target node when we have a router VM name. Priority: existing node > router.target_node > range default
+	usersRange, err := GetRange(e)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Failed to get range for target node computation: %v", err))
+		return defaultTargetNode, vmTargetNodes
+	}
+	routerVMName, err := GetRouterVMName(usersRange)
+	if err == nil && routerVMName != "" {
+		if node, err := getNodeForVMByName(e, routerVMName); err == nil && node != "" {
+			logger.Debug(fmt.Sprintf("Router %s is running on node %s", routerVMName, node))
+			vmTargetNodes[routerVMName] = node
+		} else if config.Router != nil && config.Router.TargetNode != "" {
+			logger.Debug(fmt.Sprintf("Router %s target node is %s", routerVMName, config.Router.TargetNode))
+			vmTargetNodes[routerVMName] = config.Router.TargetNode
+		} else {
+			logger.Debug(fmt.Sprintf("Router %s target node is default node %s", routerVMName, defaultTargetNode))
+			vmTargetNodes[routerVMName] = defaultTargetNode
+		}
+	}
+
+	logger.Debug(fmt.Sprintf("Computed target nodes for range %s: default=%s, per-vm=%v", rangeID, defaultTargetNode, vmTargetNodes))
+	return defaultTargetNode, vmTargetNodes
 }

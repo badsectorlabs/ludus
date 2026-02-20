@@ -74,7 +74,8 @@ The available tags are listed below:
 - `[start-at post-deploy-admin]` - run all test starting after the admin range has deployed
 - `[start-at range-user]` - run all test starting at the deployment of the standard user range
 - `[start-at post-deploy-user]` - run all test starting after the deployment of the standard user range
-- `[start-at integration]` - just run the final integration test
+- `[start-at integration]` - run the final integration test and cluster tests
+- `[start-at cluster-tests]` - only run the cluster tests
 
 ## Releases
 
@@ -103,8 +104,8 @@ resize2fs /dev/vda1
 
 # Install Go
 apt install curl wget ca-certificates
-wget https://go.dev/dl/go1.25.1.linux-amd64.tar.gz
-rm -rf /usr/local/go && tar -C /usr/local -xzf go1.25.1.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.26.0.linux-amd64.tar.gz
+rm -rf /usr/local/go && tar -C /usr/local -xzf go1.26.0.linux-amd64.tar.gz
 # This is required since gitlab-runner ignores .bashrc
 echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
 
@@ -121,7 +122,7 @@ curl -s 'https://packagecloud.io/install/repositories/github/git-lfs/script.deb.
 apt install gitlab-runner git git-lfs build-essential vim tmux htop jq python3-debian
 
 # Install node/yarn for documentation building
-curl -fsSL https://deb.nodesource.com/setup_21.x | bash - && apt-get install -y nodejs
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs
 npm install --global yarn
 npm install --global bun
 

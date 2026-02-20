@@ -6,3 +6,7 @@ proxmox_token_secret: "{{ lookup('env', 'PROXMOX_SECRET') }}"
 node_name: "{{ lookup('env', 'PROXMOX_NODE') }}"
 proxmox_default_behavior: compatibility
 ansible_remote_tmp: "{{ '/opt/ludus/ansible/tmp' if (lookup('env', 'USER') != 'root') else '/tmp/.ansible/tmp' }}"
+
+# SDN-aware bridge/VNet naming
+# In cluster mode (SDN), use 'r{range_number}' VNet; in non-cluster mode, use 'vmbr{1000+range_number}'
+range_bridge_name: "{{ 'r' + (range_second_octet | string) if ludus_cluster_mode else 'vmbr' + ((range_second_octet | int) + 1000) | string }}"

@@ -413,14 +413,14 @@ func migrateRangesToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 			// Look up the user from SQLite to get their proxmox username
 			var sqliteUser SQLiteUserObject
 			if err := sqliteDB.Table("user_objects").Where("user_id = ?", sqliteRange.UserID).First(&sqliteUser).Error; err == nil {
-				err = giveUserAccessToPool(sqliteUser.ProxmoxUsername, "pam", sqliteRange.UserID)
+				err = giveUserAccessToRange(sqliteUser.ProxmoxUsername, "pam", sqliteRange.UserID, int(sqliteRange.RangeNumber))
 				if err != nil {
 					logger.Error(fmt.Sprintf("Error granting pool access to user %s for pool %s: %v", sqliteUser.ProxmoxUsername, sqliteRange.UserID, err))
 					// Don't fail the migration if pool access fails, but log it
 				} else {
 					logger.Info(fmt.Sprintf("Granted pool access to user %s for pool %s", sqliteUser.ProxmoxUsername, sqliteRange.UserID))
 				}
-				err = grantGroupAccessToRangeInProxmox("ludus_admins", sqliteRange.UserID)
+				err = grantGroupAccessToRangeInProxmox("ludus_admins", sqliteRange.UserID, int(sqliteRange.RangeNumber))
 				if err != nil {
 					logger.Error(fmt.Sprintf("Error granting group access to user %s for pool %s: %v", sqliteUser.ProxmoxUsername, sqliteRange.UserID, err))
 					// Don't fail the migration if group access fails, but log it

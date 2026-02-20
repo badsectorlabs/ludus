@@ -25,23 +25,23 @@ import (
 )
 
 const (
-	licenseURL                              = "https://license.ludus.cloud"
-	licenseAPIVersion                       = "1.7"
-	licenseAPIPrefix                        = "v1"
+	LicenseURL                              = "https://license.ludus.cloud"
+	LicenseAPIVersion                       = "1.7"
+	LicenseAPIPrefix                        = "v1"
 	LicenseProductLudus                     = "5722ca04-715d-4969-9130-a051532b7579"
-	licenseProductSubscriptionRolesMetadata = "7b75d702-0448-4d82-9963-2b1f1f460022"
+	LicenseProductSubscriptionRolesMetadata = "7b75d702-0448-4d82-9963-2b1f1f460022"
 	LicensePackageLudusEnterprisePlugin     = "a8ecdfa4-6cf7-4a7c-93cc-95fe44c94d14"
 	LicensePackageLudusAntisandboxPlugin    = "a335f37d-e603-405c-8c99-0bb3185a87e8"
-	licenseAccount                          = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
-	licensePublicKey                        = "70cb26141f38840b8f3f499d4875a829a9d251bd3337278995832b9ea4e39d12"
-	binaryPublicKey                         = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
+	LicenseAccount                          = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
+	LicensePublicKey                        = "70cb26141f38840b8f3f499d4875a829a9d251bd3337278995832b9ea4e39d12"
+	BinaryPublicKey                         = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
 )
 
 func (s *Server) checkLicense() {
-	keygen.Account = licenseAccount
+	keygen.Account = LicenseAccount
 	keygen.Product = LicenseProductLudus
 	keygen.LicenseKey = s.LicenseKey
-	keygen.APIURL = licenseURL
+	keygen.APIURL = LicenseURL
 	keygen.UserAgent = "Ludus-Server/" + s.Version
 
 	if os.Getenv("LUDUS_DEBUG_LICENSE") == "1" {
@@ -180,7 +180,7 @@ func GetSubscriptionRolesMetadata(e *core.RequestEvent) ([]dto.GetSubscriptionRo
 	}
 
 	// First get the version of the role from latest
-	err := DownloadFileUsingLicenseKey("roles.json", "roles.json", "/tmp", server.Version, server.LicenseKey, licenseProductSubscriptionRolesMetadata)
+	err := DownloadFileUsingLicenseKey("roles.json", "roles.json", "/tmp", server.Version, server.LicenseKey, LicenseProductSubscriptionRolesMetadata)
 	if err != nil {
 		return nil, err
 	}
@@ -242,11 +242,11 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 	}
 
 	client := keygen.NewClientWithOptions(&keygen.ClientOptions{
-		Account:    licenseAccount,
-		APIURL:     licenseURL,
-		PublicKey:  licensePublicKey,
-		APIPrefix:  licenseAPIPrefix,
-		APIVersion: licenseAPIVersion,
+		Account:    LicenseAccount,
+		APIURL:     LicenseURL,
+		PublicKey:  LicensePublicKey,
+		APIPrefix:  LicenseAPIPrefix,
+		APIVersion: LicenseAPIVersion,
 		UserAgent:  "Ludus-Server/" + version,
 		LicenseKey: licenseKey,
 	})
@@ -296,7 +296,7 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 	}
 
 	// Verify the signature
-	if err := VerifySignature(targetPath, artifact.Signature, binaryPublicKey, packageUUID); err != nil {
+	if err := VerifySignature(targetPath, artifact.Signature, BinaryPublicKey, packageUUID); err != nil {
 		logger.Error(fmt.Sprintf("LICENSE: unable to verify signature for %s target file: %v", fileName, err))
 		return err
 	}

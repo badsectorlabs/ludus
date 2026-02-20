@@ -63,6 +63,35 @@ func automatedConfigGenerator(writeToFile bool) {
 			if isIPv4 != nil && !localhost.Contains(ipv4) {
 				// TODO clean this up/do it in Go. Since we know we will be on a Debian 12 box, it's ok for now
 				gateway := strings.Trim(Run("ip route show | grep default | grep -Po '(?<=via )[^ ]*'", false, true), "\n")
+				config.ProxmoxNode = nodeName
+				config.ProxmoxInterface = inter.Name
+				config.ProxmoxLocalIP = ipv4.String()
+				config.ProxmoxPublicIP = ipv4.String()
+				config.ProxmoxGateway = gateway
+				config.ProxmoxNetmask = fmt.Sprintf("%d.%d.%d.%d", ipnet.Mask[0], ipnet.Mask[1], ipnet.Mask[2], ipnet.Mask[3])
+				config.ProxmoxVMStoragePool = "local"
+				config.ProxmoxVMStorageFormat = "qcow2"
+				config.ProxmoxISOStoragePool = "local"
+				if inCluster {
+					config.LudusNATInterface = "ludusnat"
+				} else {
+					config.LudusNATInterface = "vmbr1000"
+				}
+				config.PreventUserAnsibleAdd = false
+				config.ProxmoxInvalidCert = true
+				config.ProxmoxURL = "https://127.0.0.1:8006"
+				config.LicenseKey = "community"
+				config.ExposeAdminPort = false
+				config.DataDirectory = fmt.Sprintf("%s/db", ludusInstallPath)
+				config.DatabaseEncryptionKey = security.RandomString(32)
+				config.WireguardPort = 51820
+				if inCluster {
+					config.ClusterMode = true
+					config.SDNZone = "ludus"
+					config.VXLANTagBase = 0
+				} else {
+					config.ClusterMode = false
+				}
 				if writeToFile {
 					f, err := os.Create(fmt.Sprintf("%s/config.yml", ludusPath))
 					if err != nil {
@@ -73,7 +102,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					if err != nil {
 						log.Fatal(err)
 					}
-					f.WriteString(fmt.Sprintf("proxmox_node: %s\n", nodeName))
+					f.WriteString(fmt.Sprintf("proxmox_node: %s\n", config.ProxmoxNode))
 					f.WriteString(fmt.Sprintf("proxmox_interface: %s\n", inter.Name))
 					f.WriteString(fmt.Sprintf("proxmox_local_ip: %s\n", ipv4.String()))
 					f.WriteString(fmt.Sprintf("proxmox_public_ip: %s\n", ipv4.String()))
@@ -87,27 +116,15 @@ func automatedConfigGenerator(writeToFile bool) {
 					f.WriteString("license_key: community\n")
 					f.WriteString("expose_admin_port: false\n")
 					f.WriteString(fmt.Sprintf("data_directory: %s/db\n", ludusInstallPath))
-					f.WriteString(fmt.Sprintf("database_encryption_key: %s\n", security.RandomString(32)))
+					f.WriteString(fmt.Sprintf("database_encryption_key: %s\n", config.DatabaseEncryptionKey))
 					f.WriteString(fmt.Sprintf("wireguard_port: %d\n", 51820))
+					if inCluster {
+						f.WriteString(fmt.Sprintf("cluster_mode: %t\n", config.ClusterMode))
+						f.WriteString(fmt.Sprintf("sdn_zone: %s\n", config.SDNZone))
+						f.WriteString(fmt.Sprintf("vxlan_tag_base: %d\n", config.VXLANTagBase))
+					}
 				} else {
-					config.ProxmoxNode = nodeName
-					config.ProxmoxInterface = inter.Name
-					config.ProxmoxLocalIP = ipv4.String()
-					config.ProxmoxPublicIP = ipv4.String()
-					config.ProxmoxGateway = gateway
-					config.ProxmoxNetmask = fmt.Sprintf("%d.%d.%d.%d", ipnet.Mask[0], ipnet.Mask[1], ipnet.Mask[2], ipnet.Mask[3])
-					config.ProxmoxVMStoragePool = "local"
-					config.ProxmoxVMStorageFormat = "qcow2"
-					config.ProxmoxISOStoragePool = "local"
-					config.LudusNATInterface = "vmbr1000"
-					config.PreventUserAnsibleAdd = false
-					config.ProxmoxInvalidCert = true
-					config.ProxmoxURL = "https://127.0.0.1:8006"
-					config.LicenseKey = "community"
-					config.ExposeAdminPort = false
-					config.DataDirectory = fmt.Sprintf("%s/db", ludusInstallPath)
-					config.DatabaseEncryptionKey = security.RandomString(32)
-					config.WireguardPort = 51820
+
 				}
 				return
 			}

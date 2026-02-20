@@ -19,12 +19,22 @@ The WireGuard interface, `198.51.100.0/24` on `wg0`, is set up during Ludus inst
 
 The user's router VM only allows traffic in from the user's WireGuard IP. Additionally, the router VM always allows related or established traffic back out to the user's WireGuard IP, regardless of any user defined rules or testing status. This allows a user to RDP, SSH, VNC, or otherwise access VMs at all times.
 
-### NAT'd Network (vmbr1000)
+### NAT'd Network
 
-There is a single default network for VMs created during install: `192.0.2.0/24`, on interface `vmbr1000` (or other interface as specified in the ludus config with `ludus_nat_interface`). This network has DHCP and DNS thanks to a `dnsmasq` service running on the Ludus host.
+There is a single default network for VMs created during install: `192.0.2.0/24`. This network has DHCP and DNS thanks to a `dnsmasq` service running on the Ludus host.
 This network's "router" is at `.254` and offers DHCP IPs in the range of `.50` to `.100`. This DHCP pool is used for template creation.
 
 Ludus user routers are assigned a static IP in this network where their range number + 100 is the last octet. If a user has range number 2, their router has a "WAN" interface at `192.0.2.102`. This is what limits Ludus to 153 concurrent users, because each user will take one IP from this pool of 100-253. Ludus sets up a static route for the user's /16 through this "WAN" interface, allowing ansible and wireguard clients to access the range VMs.
+
+#### SDN Mode (used in clusters)
+
+In SDN mode, the NAT network is implemented as a Proxmox SDN VNet named `ludusnat` in the configured SDN zone (default: `ludus`). This provides:
+- Centralized network management through Proxmox SDN
+- Support for Proxmox clusters via VXLAN overlay
+
+:::note Cluster Mode
+For Proxmox cluster deployments, the SDN zone must be manually created in Proxmox with correct VXLAN peer IPs before installing Ludus. See the [Proxmox Cluster](./deployment-options/cluster.md) documentation for details.
+:::
 
 #### Reserved IPs in the NAT'd Network
 
@@ -42,8 +52,22 @@ If the Ludus admin has set up [CI/CD](./developers/cicd.md), the CI/CD network i
 
 ## User Networks
 
-Ludus assigns a unique Linux bridge interface in Proxmox to each user which is capable of supporting 255 VLANs (1-255). The user's `vmbr` number is 1000 + their Ludus range number (e.g. a Ludus user with range number 2 would have `vmbr1002`).
+Each Ludus range gets its own isolated network capable of supporting 255 VLANs (1-255).
+
+### VMBR Mode (Standalone)
+
+In legacy mode, Ludus assigns a unique Linux bridge interface in Proxmox to each user. The user's `vmbr` number is 1000 + their Ludus range number (e.g. a Ludus user with range number 2 would have `vmbr1002`).
+
+### SDN Mode (Clusters)
+
+In SDN mode, each range gets a Proxmox SDN VNet named `r{range_number}` (e.g., `r1`, `r2`) in the configured SDN zone. This VNet:
+- Supports VXLAN for Proxmox cluster deployments (requires pre-configured zone with correct peer IPs)
+- Has an automatically configured subnet of `10.{range_number}.0.0/16`
+- Is managed through the Proxmox SDN interface
+
 This interface can be thought of conceptually as a virtual switch. If you wish to capture packets on this interface see [Packet Capture](#packet-capture).
+
+### Network Addressing
 
 All user networks are /16 with VLANs of /24 in the format `10.{{ ludus range number }}.{{ VLAN }}.{{ ip_last_octet }}`. Because all user networks are within 10.0.0.0/8, admins deploying Ludus into a network within 10.0.0.0/8 will need to avoid issuing users with a range number that overlaps the existing range. Ludus admins should set the `reserved_range_numbers` array in `/opt/ludus/config.yml` for any networks that would conflict. For example, if the Ludus server itself has an IP of 10.10.0.123, the tenth created user will cause routing issues if the user is also on the 10.10.0.0/16 network. The admin should set `reserved_range_numbers: [10]` to prevent this.
 
@@ -197,6 +221,8 @@ When testing mode is enabled, and the user has allowed `example.com` and `8.8.8.
 ## Packet Capture
 
 By default, the bridge interfaces in Proxmox are MAC aware, which means they will "learn" which MACs are on which "ports" and only send traffic for a MAC to its "port." This means that VMs on the same VLAN only see traffic destined for their MAC (and broadcast) by default. If you wish to use some type of packet capture appliance like Zeek or Suricata, the `bridge-ageing` parameter needs to be set to `0` on the Proxmox host for the bridge interface of the range. This effectively turns the bridge interface into a hub, where all traffic on a VLAN is sent to all machines.
+
+### Legacy Mode (vmbr bridges)
 
 To complete this step, open up a shell to your proxmox host and enter the following commands:
 
