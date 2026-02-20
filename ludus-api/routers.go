@@ -15,7 +15,6 @@ import (
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/ui"
 )
@@ -42,6 +41,7 @@ var PB *pocketbase.PocketBase
 var app core.App
 var LudusPluginHandlerManager *HandlerManager
 var DebugProxmox bool
+var UseSDN bool
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
@@ -80,19 +80,31 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	PB = pocketbase.NewWithConfig(pbConfig)
 	app = PB.App
 
-	migratecmd.MustRegister(app, PB.RootCmd, migratecmd.Config{
-		// enable auto creation of migration files when making collection changes in the Dashboard
-		Automigrate: false,
-	})
-
 	// We must bootstrap PocketBase before we can use it, and it creates the DB that is used by InitDb()
 	if err := app.Bootstrap(); err != nil {
 		logger.Error(fmt.Sprintf("Error bootstrapping PocketBase: %v", err))
 		os.Exit(1)
 	}
 
+	var err error
+	UseSDN, err = IsClusterMode()
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error checking if cluster mode is enabled: %v", err))
+		UseSDN = false
+	}
+
+	// Run migrations before InitDb(); PocketBase normally runs them on Serve, but we use the app
+	// before starting the HTTP server (e.g. root user creation), so we must run them here.
+	if err := app.RunAllMigrations(); err != nil {
+		logger.Error(fmt.Sprintf("Error running migrations: %v", err))
+		os.Exit(1)
+	}
+
 	InitDb()
 	LudusVersion = ludusVersion
+
+	// Setup NAT VNet for cluster mode, this function checks if we are in cluster mode first
+	setupNATVNet()
 
 	docsAvailable := checkEmbeddedDocs()
 	webUIAvailable := checkEmbeddedWebUI()
@@ -222,17 +234,19 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		return se.Next()
 	})
 
-	// Serve the console test from the embedded filesystem
-	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		logger.Debug("Serving console test page at /console_test")
-		consolePageFSRoot, err := fs.Sub(consolePage, "console_page")
-		if err != nil {
-			logger.Error(fmt.Sprintf("Error serving docs: %v", err))
-			return err
-		}
-		se.Router.GET("/console_test/{path...}", apis.Static(consolePageFSRoot, true))
-		return se.Next()
-	})
+	if os.Getenv("LUDUS_DEBUG") == "1" {
+		// Serve the console test from the embedded filesystem
+		app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+			logger.Debug("Serving console test page at /console_test")
+			consolePageFSRoot, err := fs.Sub(consolePage, "console_page")
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error serving docs: %v", err))
+				return err
+			}
+			se.Router.GET("/console_test/{path...}", apis.Static(consolePageFSRoot, true))
+			return se.Next()
+		})
+	}
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		RegisterRoutesWithPocketBase(se, routes)
@@ -821,6 +835,27 @@ var routes = PocketBaseRoutes{
 		http.MethodPost,
 		"/migrate/sqlite",
 		MigrateSQLiteToPocketBaseHandler,
+	},
+
+	{
+		"GetSDNMigrationStatus",
+		http.MethodGet,
+		"/migrate/sdn/status",
+		GetSDNMigrationStatus,
+	},
+
+	{
+		"MigrateToSDN",
+		http.MethodPost,
+		"/migrate/sdn",
+		MigrateToSDN,
+	},
+
+	{
+		"SetupSDNInfrastructure",
+		http.MethodPost,
+		"/sdn/setup",
+		SetupSDNInfrastructure,
 	},
 
 	// Diagnostics route

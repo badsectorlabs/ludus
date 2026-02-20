@@ -136,9 +136,9 @@ func deleteRangeResources(targetRange *models.Range, force bool, e *core.Request
 		return fmt.Errorf("failed to remove pool: %w", err)
 	}
 
-	err = manageVmbrInterfaceLocally(targetRange.RangeNumber(), false)
+	err = manageRangeNetwork(targetRange.RangeId(), targetRange.RangeNumber(), false)
 	if err != nil {
-		return fmt.Errorf("failed to manage vmbr interface: %w", err)
+		return fmt.Errorf("failed to manage range network: %w", err)
 	}
 
 	// Remove the range directory
@@ -718,11 +718,11 @@ func CreateRange(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusConflict, "Unable to create resource pool: "+err.Error())
 	}
 
-	// Create the vmbr interface for the range
-	err = manageVmbrInterfaceLocally(rangeNumber, true)
+	// Create the network interface for the range (SDN VNet or legacy vmbr)
+	err = manageRangeNetwork(payload.RangeID, rangeNumber, true)
 	if err != nil {
 		removePool(payload.RangeID)
-		return JSONError(e, http.StatusConflict, "Unable to create vmbr interface: "+err.Error())
+		return JSONError(e, http.StatusConflict, "Unable to create range network: "+err.Error())
 	}
 
 	// Create the range config file
@@ -749,13 +749,13 @@ func CreateRange(e *core.RequestEvent) error {
 	err = e.App.Save(rangeRecord)
 	if err != nil {
 		removePool(payload.RangeID)
-		manageVmbrInterfaceLocally(rangeNumber, false)
+		manageRangeNetwork(payload.RangeID, rangeNumber, false)
 		os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID))
 		return JSONError(e, http.StatusConflict, "Unable to save range: "+err.Error())
 	}
 
 	// Always give access to the ludus_admins group
-	err = grantGroupAccessToRangeInProxmox("ludus_admins", payload.RangeID)
+	err = grantGroupAccessToRangeInProxmox("ludus_admins", payload.RangeID, rangeNumber)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Unable to give group access to pool: "+err.Error())
 	}
@@ -773,7 +773,7 @@ func CreateRange(e *core.RequestEvent) error {
 			errorArray = append(errorArray, dto.CreateRangeResponseErrorItem{UserID: userID, Error: fmt.Sprintf("Unable to save user: %v", err)})
 		}
 		// Give the user in proxmox permissions to the pool
-		err = giveUserAccessToPool(userRecord.GetString("proxmoxUsername"), userRecord.GetString("proxmoxRealm"), payload.RangeID)
+		err = giveUserAccessToRange(userRecord.GetString("proxmoxUsername"), userRecord.GetString("proxmoxRealm"), payload.RangeID, rangeNumber)
 		if err != nil {
 			errorArray = append(errorArray, dto.CreateRangeResponseErrorItem{UserID: userID, Error: fmt.Sprintf("Unable to give user access to pool: %v", err)})
 		}
@@ -842,7 +842,7 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 		}
 
 		// Give the user access to the proxmox pool for the range
-		err = giveUserAccessToPool(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId())
+		err = giveUserAccessToRange(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId(), rangeNumber)
 		if err != nil {
 			sourceUserObject.Set("ranges-", targetRange.Id)
 			e.App.Save(sourceUserObject)
@@ -866,7 +866,7 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
 		}
 
-		err = removeUserAccessFromPool(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId())
+		err = removeUserAccessFromRange(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId(), rangeNumber)
 		if err != nil {
 			sourceUserObject.Set("ranges+", targetRange.Id)
 			e.App.Save(sourceUserObject)

@@ -11,13 +11,15 @@ ludus range rm --user <USER ID>
 export LUDUS_API_KEY=$(cat /opt/ludus/install/root-api-key)
 ludus users list all
 # Repeat the next command for all users
-ludus --url https://127.0.0.1:8081 user rm -i <USER ID>
-systemctl stop ludus
-systemctl stop ludus-admin
+ludus user rm -i <USER ID>
+systemctl stop ludus ludus-admin
+systemctl stop dnsmasq # assuming dnsmasq was only used for Ludus
+rm -rf /etc/dnsmasq.d  # assuming dnsmasq was only used for Ludus
+apt purge dnsmasq      # assuming dnsmasq was only used for Ludus
 pveum group delete ludus_users
 pveum group delete ludus_admins
 pvesh delete /pools/SHARED
 pvesh delete /pools/ADMIN # if created
 rm -rf /opt/ludus
-# Remove vmbr1000 (and any other vmbr1000+ interfaces) using the Proxmox GUI
+# Remove vmbr1000 (and any other vmbr1000+ interfaces) using the Proxmox GUI or by editing /etc/network/interfaces
 ```

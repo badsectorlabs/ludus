@@ -45,12 +45,12 @@
                 },
                 "ad_domain_functional_level": {
                     "type": "string",
-                    "enum": [ "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold", "Win2025"],
+                    "enum": [ "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold", "Win2025" ],
                     "description": "The functional level of each Windows domain created by Ludus"
                 },
                 "ad_forest_functional_level": {
                     "type": "string",
-                    "enum": [ "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold", "Win2025"],
+                    "enum": [ "Win2003", "Win2008", "Win2008R2", "Win2012", "Win2012R2", "WinThreshold", "Win2025" ],
                     "description": "The functional level of each Windows forest created by Ludus"
                 },
                 "ad_domain_admin": {
@@ -81,6 +81,10 @@
                     "type": "boolean",
                     "description": "Enable dynamic wallpaper for all Windows VMs in the range",
                     "default": true
+                },
+                "target_node": {
+                    "type": "string",
+                    "description": "The Proxmox node to deploy this range to. If not specified, Ludus will select the node with the most available resources (for cluster mode) or use the default node."
                 }
             },
             "required": [
@@ -415,6 +419,10 @@
                 "secondary_dns_server": {
                     "type": "string",
                     "description": "A secondary DNS server to set for the VM"
+                },
+                "target_node": {
+                    "type": "string",
+                    "description": "Proxmox node to deploy this specific VM to. Overrides the range-level target_node. If not specified, uses the range-level target_node or auto-selects based on available resources."
                 }
             },
             "required": [
@@ -695,6 +703,10 @@
                         "type": "string",
                         "description": "A full iptables command to run at the end of router setup; example: iptables -I LUDUS_DEFAULTS -i ens18 -s 192.0.2.103 -j ACCEPT" 
                     }
+                },
+                "target_node": {
+                    "type": "string",
+                    "description": "Proxmox node to deploy the router VM to. Overrides the range-level target_node. Cluster only. If not specified, uses the range-level target_node or auto-selects based on available resources."
                 }
             },
             "dependentRequired": {

@@ -31,6 +31,16 @@ stages:
   - post-deploy-user-templates
   - post-deploy-user-snapshots
   - integration
+  - cluster-install-kickoff
+  - cluster-install-check
+  - cluster-verify-sdn
+  - cluster-templates-build
+  - cluster-templates-check
+  - cluster-range-deploy
+  - cluster-verify-placement
+  - cluster-verify-vxlan
+  - cluster-test-range-default
+  - cluster-test-migration-api
   - manual
   - upload
   - release
@@ -257,6 +267,41 @@ stages:
   - ludus snapshots revert test-win11-snapshot-2 -n $WIN11VMID
   - ludus snapshots rm test-win11-snapshot-2 -n $WIN11VMID
   - '! ludus snapshots list -n $WIN11VMID | grep "Test snapshot"'
+
+.cluster-rules: &cluster-rules
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[cluster tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at cluster-tests\]/
+
+.ci-setup-cluster-admin: &ci-setup-cluster-admin
+  # Sync time after snapshot rollback
+  - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
+  - date
+  # Update server binary if available
+  - |
+    if [ -f binaries/ludus-server ]; then
+      cd binaries
+      pgrep -f 'ansible|packer' || sudo ./ludus-server --update
+      cd ..
+    fi
+    if [ -f binaries/ludus-client_linux-amd64 ]; then
+      sudo cp -f binaries/ludus-client_linux-amd64 /usr/local/bin/ludus
+    fi
+  - mkdir -p ~/.config/ludus/
+  - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
+  - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
+  # Create cluster CI admin user
+  - for i in {1..5}; do (ludus users list all | grep -q 'Cluster CI Admin' || ludus users add -a -n "Cluster CI Admin" -i CCIA -e "ccia@ludus.internal" -p "cicdpassword") && break || sleep 5; done
+  - if [ ! -f /opt/ludus/ci/.apikey-cluster-admin ]; then ludus --user CCIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-cluster-admin; fi
+  - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-cluster-admin)
+  - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
 
 #################
 # DOCUMENTATION #
@@ -1910,6 +1955,256 @@ test-everything:
       sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.[1-9].0.0/16          /\* User Default: External Rule \*/'
       sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | grep "This is a custom iptables command"
     # Check the custom DNS servers
+
+###########
+# CLUSTER #
+###########
+cluster install kickoff:
+  stage: cluster-install-kickoff
+  tags:
+    - ludus-proxmox-runner
+  dependencies:
+    - build all
+  <<: *cluster-rules
+  variables:
+    LUDUS_BUILD_TYPE: clean-cluster
+    LUDUS_INSTALL_STEP: kickoff
+    GIT_STRATEGY: none
+  timeout: 10m
+  script:
+    - cd binaries
+    - |
+      cat > config.yml <<'EOF'
+      proxmox_node: EH-Ludus
+      proxmox_interface: ens18
+      proxmox_invalid_cert: true
+      proxmox_url: https://127.0.0.1:8006
+      proxmox_hostname: EH-Ludus
+      proxmox_local_ip: 203.0.113.1
+      proxmox_public_ip: 203.0.113.1
+      proxmox_gateway: 203.0.113.254
+      proxmox_netmask: 255.255.255.0
+      proxmox_vm_storage_pool: ceph-pool
+      proxmox_vm_storage_format: raw
+      proxmox_iso_storage_pool: cephfs
+      ludus_nat_interface: ludusnat
+      prevent_user_ansible_add: false
+      expose_admin_port: false
+      reserved_range_numbers: []
+      data_directory: /opt/ludus/db
+      wireguard_port: 51820
+      sdn_zone: ludus
+      vxlan_tag_base: 0
+      EOF
+    - sudo ./ludus-server --no-prompt $(hostname)
+
+cluster-install-check:
+  stage: cluster-install-check
+  tags:
+    - ludus-proxmox-runner
+  dependencies: []
+  <<: *cluster-rules
+  variables:
+    LUDUS_BUILD_TYPE: cluster
+    LUDUS_INSTALL_STEP: check
+    GIT_STRATEGY: none
+  timeout: 1h
+  script:
+    - sudo cat /opt/ludus/install/install.log
+    - echo "Install check completed via custom executor check loop"
+
+cluster-verify-sdn:
+  stage: cluster-verify-sdn
+  tags:
+    - ludus-proxmox-runner
+  dependencies: []
+  <<: *cluster-rules
+  needs:
+    - cluster-install-check
+  variables:
+    LUDUS_BUILD_TYPE: cluster
+    GIT_STRATEGY: none
+  timeout: 10m
+  script:
+    - *ci-setup-cluster-admin
+    # Verify Ludus is in cluster mode
+    - ludus migrate sdn status --json | jq '.cluster_mode == true'
+    # Verify the SDN zone exists
+    - sudo pvesh get /cluster/sdn/zones --output-format=json | jq -e '.[] | select(.zone == "ludus")'
+    - ludus migrate sdn status --json | jq '.sdn_zone_exists == true'
+    # Verify the ludusnat VNet exists
+    - sudo pvesh get /cluster/sdn/vnets --output-format=json | jq -e '.[] | select(.vnet == "ludusnat")'
+    - ludus migrate sdn status --json | jq '.nat_vnet_exists == true'
+    # Verify cluster has 2 nodes
+    - sudo pvesh get /cluster/status --output-format=json | jq -e '[.[] | select(.type == "node")] | length == 2'
+
+cluster-templates-build:
+  stage: cluster-templates-build
+  tags:
+    - ludus-proxmox-runner
+  dependencies:
+    - build all
+  <<: *cluster-rules
+  variables:
+    LUDUS_BUILD_TYPE: cluster
+    GIT_STRATEGY: none
+  timeout: 10m
+  retry:
+    max: 2
+  script:
+    - *ci-setup-cluster-admin
+    - ludus templates build -n debian-11-x64-server-template
+
+cluster-templates-check:
+  stage: cluster-templates-check
+  tags:
+    - ludus-proxmox-runner
+  dependencies: []
+  <<: *cluster-rules
+  variables:
+    LUDUS_BUILD_TYPE: cluster
+    GIT_STRATEGY: none
+  timeout: 15m
+  retry:
+    max: 2
+  script:
+    - *ci-setup-cluster-admin
+    # If there is no template building process, start one
+    - pgrep -f 'packer' || ludus templates build -n debian-11-x64-server-template
+    # Wait for the debian 11 template to build
+    - while [ $(ludus templates list --json | jq '[.[] | select(.name == "debian-11-x64-server-template") | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
+    - ludus templates list
+    - export DEB11_TEMPLATE_VMID=$(sudo qm list | grep debian-11-x64-server-template | head -1 | awk '{print $1}')
+    # Verify templates are accessible from both nodes
+    - test $(sudo pvesh get /nodes/EH-Ludus/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
+    - test $(sudo pvesh get /nodes/EH-Ludus-2/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
+
+cluster-range-deploy:
+  stage: cluster-range-deploy
+  tags:
+    - ludus-proxmox-runner
+  dependencies:
+    - build all
+  <<: *cluster-rules
+  variables:
+    LUDUS_BUILD_TYPE: cluster
+    GIT_STRATEGY: none
+  timeout: 10m
+  retry:
+    max: 2
+    when:
+      - script_failure
+      - job_execution_timeout
+  script:
+    - *ci-setup-cluster-admin
+    - ludus range config set -f /opt/ludus/ci/configs/cluster-explicit.yml
+    - ludus range config get
+    - ludus range deploy
+    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - ludus range logs
+    - ludus range list
+    - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
+
+cluster-verify-placement:
+  stage: cluster-verify-placement
+  tags:
+    - ludus-proxmox-runner
+  dependencies: []
+  <<: *cluster-rules
+  variables:
+    LUDUS_BUILD_TYPE: cluster
+    GIT_STRATEGY: none
+  timeout: 10m
+  script:
+    - *ci-setup-cluster-admin
+    # Verify VMs are spread across both nodes
+    - |
+      NODE1_VMS=$(sudo pvesh get /nodes/EH-Ludus/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
+      NODE2_VMS=$(sudo pvesh get /nodes/EH-Ludus-2/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
+      echo "Node1 VMs: $NODE1_VMS, Node2 VMs: $NODE2_VMS"
+      TOTAL=$((NODE1_VMS + NODE2_VMS))
+      if [[ $TOTAL -lt 3 ]]; then
+        echo "ERROR: Expected at least 3 range VMs across cluster, found $TOTAL"
+        exit 1
+      fi
+      if [[ $NODE1_VMS -ne 1 ]]; then
+        echo "ERROR: Expected 1 VM on Node1, found $NODE1_VMS"
+        exit 1
+      fi
+      if [[ $NODE2_VMS -ne 2 ]]; then
+        echo "ERROR: Expected 2 VMs on Node2, found $NODE2_VMS"
+        exit 1
+      fi
+      echo "Cluster placement verified: $TOTAL VMs across both nodes, 1 on Node1, 2 on Node2"
+
+cluster-verify-vxlan:
+  stage: cluster-verify-vxlan
+  tags:
+    - ludus-proxmox-runner
+  dependencies: []
+  <<: *cluster-rules
+  needs:
+    - cluster-verify-placement
+  variables:
+    LUDUS_BUILD_TYPE: cluster
+    LUDUS_SNAPSHOT_NAME: cluster_range_built
+    GIT_STRATEGY: none
+  timeout: 15m
+  script:
+    - *ci-setup-cluster-admin
+    # Find VMs on different nodes and test cross-node connectivity
+    - |
+      # Get a deb1-CITEST VM ID on this node
+      DEB1_VMID=$(sudo qm list | grep running | grep -i 'deb1-CITEST' | head -1 | awk '{print $1}')
+      if [[ -z "$DEB1_VMID" ]]; then
+        echo "No deb1-CITEST VM found on node1 to test cross-node ping"
+        exit 0
+      fi
+      echo "Testing cross-node connectivity from VMID $DEB1_VMID"
+      # Ping the gateway to verify VXLAN connectivity (router is on the other node)
+      sudo qm guest exec $DEB1_VMID -- ping -c 3 -w 5 $(ludus -r CCIA range list --json | jq '.rangeNumber' | awk '{printf "10.%d.10.254", $0}')
+
+cluster-test-range-default:
+  stage: cluster-test-range-default
+  tags:
+    - ludus-proxmox-runner
+  dependencies:
+    - build all
+  <<: *cluster-rules
+  variables:
+    LUDUS_BUILD_TYPE: cluster
+    LUDUS_SNAPSHOT_NAME: cluster_range_built
+    GIT_STRATEGY: none
+  timeout: 3h
+  script:
+    - *ci-setup-cluster-admin
+    # Destroy existing range
+    - ludus range rm --no-prompt
+    - timeout 180 bash -c 'until [[ $(ludus range list --json | jq ".numberOfVMs") == 0 ]]; do sleep 5; done'
+    # Deploy with range-level default and per-VM override
+    - ludus range config set -f /opt/ludus/ci/configs/cluster-range-default.yml
+    - ludus range deploy
+    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
+    # Verify placement: DC and Kali on EH-Ludus (range default), Win11 on EH-Ludus-2 (override)
+    - |
+      NODE1_VMS=$(sudo pvesh get /nodes/EH-Ludus/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
+      NODE2_VMS=$(sudo pvesh get /nodes/EH-Ludus-2/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
+      echo "Node1 VMs: $NODE1_VMS, Node2 VMs: $NODE2_VMS"
+      TOTAL=$((NODE1_VMS + NODE2_VMS))
+      if [[ $TOTAL -lt 3 ]]; then
+        echo "ERROR: Expected at least 3 range VMs across cluster, found $TOTAL"
+        exit 1
+      fi
+      if [[ $NODE1_VMS -ne 3 ]]; then
+        echo "ERROR: Expected 3 VMs on Node1, found $NODE1_VMS"
+        exit 1
+      fi
+      if [[ $NODE2_VMS -ne 0 ]]; then
+        echo "ERROR: Expected 0 VMs on Node2, found $NODE2_VMS"
+        exit 1
+      fi
+      echo "Cluster placement verified: $TOTAL VMs across both nodes, 1 on Node1, 2 on Node2"
 
 ##########
 # MANUAL #

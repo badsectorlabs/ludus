@@ -341,7 +341,7 @@ func HasRangeAccess(e *core.RequestEvent, userID string, rangeNumber int) bool {
 		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
 		return false
 	}
-	logger.Debug(fmt.Sprintf("Found %d groups for user %s", len(groupRecords), userRecord.GetString("userID")))
+	//logger.Debug(fmt.Sprintf("Found %d groups for user %s", len(groupRecords), userRecord.GetString("userID")))
 	for _, groupRecord := range groupRecords {
 		app.ExpandRecord(groupRecord, []string{"ranges"}, nil)
 		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
@@ -418,7 +418,76 @@ func CreateDefaultUserRange(e *core.RequestEvent, txApp core.App, user *models.U
 		manageVmbrInterfaceLocally(rangeNumber, false)
 		return err
 	}
-	return err
+	return nil
+}
+
+// GrantUserProxmoxAccessToDefaultRange grants the user and ludus_admins Proxmox pool/SDN
+// permissions on the user's default range. Call after the user exists in Proxmox (e.g. after
+// add-user playbook and API token creation). Required for range deployment in cluster (SDN) mode.
+func GrantUserProxmoxAccessToDefaultRange(txApp core.App, user *models.User) error {
+	rangeID := user.DefaultRangeId()
+	if rangeID == "" {
+		return fmt.Errorf("user has no default range")
+	}
+	rawRangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeID", rangeID)
+	if err != nil {
+		return fmt.Errorf("finding default range: %w", err)
+	}
+	rangeRecord := &models.Range{}
+	rangeRecord.SetProxyRecord(rawRangeRecord)
+	rangeNumber := rangeRecord.RangeNumber()
+
+	if err := grantGroupAccessToRangeInProxmox("ludus_admins", rangeID, rangeNumber); err != nil {
+		return fmt.Errorf("granting ludus_admins access to range: %w", err)
+	}
+	if err := giveUserAccessToRange(user.ProxmoxUsername(), user.ProxmoxRealm(), rangeID, rangeNumber); err != nil {
+		return fmt.Errorf("granting user SDN/pool access to range: %w", err)
+	}
+	return nil
+}
+
+// CreateDefaultUserRangeForBootstrap creates a default range for a user without a request event.
+// Used when creating the initial admin user during InstallDb (no HTTP request context).
+func CreateDefaultUserRangeForBootstrap(txApp core.App, user *models.User) error {
+	rangeNumber := findNextAvailableRangeNumber(txApp)
+
+	rangeCollection, err := txApp.FindCollectionByNameOrId("ranges")
+	if err != nil {
+		return err
+	}
+	rawRangeRecord := core.NewRecord(rangeCollection)
+	rangeRecord := &models.Range{}
+	rangeRecord.SetProxyRecord(rawRangeRecord)
+	rangeRecord.SetRangeNumber(rangeNumber)
+	rangeRecord.SetRangeId(user.UserId())
+	rangeRecord.SetName(fmt.Sprintf("Default Range for %s", user.Name()))
+	rangeRecord.SetDescription("Default range created automatically for user")
+	rangeRecord.SetPurpose("General testing and development")
+	rangeRecord.SetNumberOfVms(0)
+	rangeRecord.SetRangeState(LudusRangeStateNeverDeployed)
+	if err := txApp.Save(rangeRecord); err != nil {
+		return err
+	}
+	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), 0755)
+	copyFileContents(fmt.Sprintf("%s/ansible/user-files/range-config.example.yml", ludusInstallPath), fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, rangeRecord.RangeId()))
+	chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), "ludus")
+
+	user.SetDefaultRangeId(rangeRecord.RangeId())
+	user.Set("ranges+", rangeRecord.Id)
+
+	err = manageVmbrInterfaceLocally(rangeNumber, true)
+	if err != nil {
+		txApp.Delete(rangeRecord)
+		return err
+	}
+
+	err = createPool(user.UserId())
+	if err != nil {
+		txApp.Delete(rangeRecord)
+		manageVmbrInterfaceLocally(rangeNumber, false)
+		return err
+	}
+	return nil
 }
 
 // GetRangeObjectByNumber gets a range object by range number (for multi-range support)
@@ -442,7 +511,7 @@ func GetUserDefaultRange(userID string) (*models.Range, error) {
 	if defaultRangeID == "" {
 		return nil, fmt.Errorf("user %s has no default range", userID)
 	}
-	rawRangeRecord, err := app.FindFirstRecordByData("ranges", "rangeId", defaultRangeID)
+	rawRangeRecord, err := app.FindFirstRecordByData("ranges", "rangeID", defaultRangeID)
 	if err != nil {
 		return nil, fmt.Errorf("error finding default range: %w", err)
 	}
@@ -462,8 +531,8 @@ func AppendIfMissing(slice []string, elem string) []string {
 }
 
 func GetRangeNumberFromRangeID(rangeID string) (int, error) {
-	rangeRecord, err := app.FindFirstRecordByData("ranges", "rangeId", rangeID)
-	if err != nil && err != sql.ErrNoRows {
+	rangeRecord, err := app.FindFirstRecordByData("ranges", "rangeID", rangeID)
+	if err != nil && err == sql.ErrNoRows {
 		return 0, fmt.Errorf("not in database")
 	} else if err != nil {
 		return 0, fmt.Errorf("error finding range: %w", err)

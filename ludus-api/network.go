@@ -1,5 +1,32 @@
 package ludusapi
 
+/*
+Network Management for Ludus Ranges
+
+Ludus uses two different networking approaches depending on the deployment mode:
+
+# Cluster Mode (SDN)
+
+When Ludus detects that the Proxmox host is part of a cluster (more than one node),
+it uses Proxmox SDN (Software-Defined Networking) for range network management:
+
+  - Range networks use VNets named 'r{N}' (e.g., 'r1', 'r2') in the configured SDN zone
+  - NAT network uses a VNet named 'ludusnat'
+  - VXLAN overlay networking allows VMs to communicate across cluster nodes
+  - Network configuration is managed via Proxmox API
+
+# Non-Cluster Mode
+
+When Ludus is running on a standalone Proxmox host (single node), it uses vmbr management:
+
+  - Range networks use bridges named 'vmbr{1000+N}' (e.g., 'vmbr1001', 'vmbr1002')
+  - NAT network uses the bridge configured as 'ludus_nat_interface' (default: vmbr1000)
+  - Network configuration is managed by editing /etc/network/interfaces directly
+
+The mode is automatically detected by checking if the Proxmox host has more than
+one node in its cluster. The UseSDNNetworking() function in sdn.go provides this check.
+*/
+
 import (
 	"bytes"
 	"fmt"
@@ -7,9 +34,25 @@ import (
 	"os/exec"
 )
 
-// manageVmbrInterfaceLocally directly edits /etc/network/interfaces
+// manageVmbrInterfaceLocally manages network interfaces for a range.
+// In cluster mode, this delegates to manageRangeVNet for SDN-based networking.
+// In non-cluster mode, it directly edits /etc/network/interfaces.
 // This function MUST be run as root on the Proxmox host.
 func manageVmbrInterfaceLocally(rangeNumber int, present bool) error {
+	// Check if we're in cluster mode (SDN networking)
+	if UseSDN {
+		// Use SDN VNet management for cluster mode
+		rangeID := fmt.Sprintf("r%d", rangeNumber) // Generate a placeholder range ID
+		return manageRangeVNet(rangeID, rangeNumber, present)
+	}
+
+	// Standalone mode: directly edit /etc/network/interfaces for non-cluster hosts
+	return manageVmbrInterfaceStandalone(rangeNumber, present)
+}
+
+// manageVmbrInterfaceStandalone directly edits /etc/network/interfaces
+// This is the standalone approach for backward compatibility with existing installations.
+func manageVmbrInterfaceStandalone(rangeNumber int, present bool) error {
 	interfacesPath := "/etc/network/interfaces"
 	ifaceName := fmt.Sprintf("vmbr1%03d", rangeNumber)
 
@@ -70,4 +113,19 @@ func runNetworkCommand(command string, args ...string) {
 		logger.Debug(fmt.Sprintf("Warning: Command '%s' failed (ignoring error): %v\n", cmd.String(), err))
 		logger.Debug(fmt.Sprintf("Stderr: %s\n", stderr.String()))
 	}
+}
+
+// manageRangeNetwork manages network resources for a range.
+// This is the primary entry point for range network management.
+// In cluster mode, it uses SDN VNets.
+// In non-cluster mode, it falls back to /etc/network/interfaces editing.
+func manageRangeNetwork(rangeID string, rangeNumber int, present bool) error {
+	// Check if we're in cluster mode (SDN networking)
+	if UseSDN {
+		// Use SDN VNet management for cluster mode
+		return manageRangeVNet(rangeID, rangeNumber, present)
+	}
+
+	// Standalone mode: directly edit /etc/network/interfaces for non-cluster hosts
+	return manageVmbrInterfaceStandalone(rangeNumber, present)
 }
