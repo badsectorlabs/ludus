@@ -333,7 +333,8 @@ func applyBlockInFile(originalContent, marker, block string, present bool) (stri
 	finalContent := strings.Join(newLines, "\n")
 
 	// If the original content ended with a newline, add one to the final content if the final content does not already end with a newline
-	if originalContent[len(originalContent)-1] == '\n' && finalContent[len(finalContent)-1] != '\n' {
+	if len(originalContent) > 0 && len(finalContent) > 0 &&
+		originalContent[len(originalContent)-1] == '\n' && finalContent[len(finalContent)-1] != '\n' {
 		finalContent += "\n"
 	}
 

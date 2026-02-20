@@ -466,7 +466,7 @@ func AddRangesToGroup(e *core.RequestEvent) error {
 		}
 
 		// Grant group access to range in proxmox
-		err = grantGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId())
+		err = grantGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId(), rangeObj.RangeNumber())
 		if err != nil {
 			errors = append(errors, dto.BulkGroupOperationErrorItem{
 				Item:   rangeID,
@@ -552,7 +552,7 @@ func RemoveRangesFromGroup(e *core.RequestEvent) error {
 		rangeObj.SetProxyRecord(rangeRecord)
 
 		// Remove group access to range in proxmox
-		err = revokeGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId())
+		err = revokeGroupAccessToRangeInProxmox(group.Name(), rangeObj.RangeId(), rangeObj.RangeNumber())
 		if err != nil {
 			errors = append(errors, dto.BulkGroupOperationErrorItem{
 				Item:   rangeID,

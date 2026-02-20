@@ -46,6 +46,7 @@ ludus:
     domain:               # Define this key to put this machine in a domain
       fqdn: ludus.network # The FQDN of the domain
       role: primary-dc    # The role of the VM in the domain (primary-dc|alt-dc|member)
+    target_node: pve1     # Optional; cluster only. Proxmox node for this VM (overrides range default). See Cluster Support.
     linux: false          # Set this to true for linux VMs - leave undefined or false for Windows/macOS VMs
     macOS : false         # Set this to true for macOS VMs - leave undefined or false for Windows/Linux VMs
     testing:                # This key controls the behavior of the VM in testing mode. If undefined, both values are set to true
@@ -145,6 +146,7 @@ router:
       - 10
   iptables_commands: # These commands are run after the firewall is configured. Make sure you understand what these commands do as they could allow traffic that should otherwise be blocked by Ludus features!
     - iptables -I LUDUS_DEFAULTS -i ens18 -s 192.0.2.103 -j ACCEPT # A full iptables command to run at the end of router setup
+  target_node: pve1  # Optional; cluster only. Proxmox node for the router (overrides range default). See Cluster Support.
 
 # This key defines network rules in your range. It is optional, and by default all traffic is allowed
 network: 
@@ -185,6 +187,7 @@ defaults:
   ad_domain_safe_mode_password: password   # The domain safe mode password for every Windows domain
   timezone: America/New_York               # The timezone for all VMs, use the TZ identifier format from https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
   enable_dynamic_wallpaper: true           # Enable dynamic wallpaper (red/green) for all Windows VMs in the range
+  target_node: pve1                        # Optional: cluster node placement (see Cluster Support). Default Proxmox node for all VMs in this range; omit for auto-selection.
 
 # Use the notify key to send a notification when a range deployment finishes or fails.
 # Notification "urls" look like the following. For more information about service specific configuration see

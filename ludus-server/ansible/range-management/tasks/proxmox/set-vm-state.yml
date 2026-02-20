@@ -30,7 +30,7 @@
     api_token_id: "{{ proxmox_token_id }}"
     api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
-    node: "{{ node_name }}"
+    node: "{{ vm_target_nodes[vm_name] | default(range_default_target_node) | default(node_name) }}"
     state: "{{ new_vm_state }}"
     vmid: "{{ item }}"
     force: "{{ true if new_vm_state == 'stopped' or new_vm_state == 'absent' else omit }}"

@@ -48,7 +48,7 @@
 
 - name: Get the interface with a 192.0.2.x ip (WAN)
   ansible.builtin.shell: |
-    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
   delegate_to: localhost
   become: false
   register: wan_interface_command

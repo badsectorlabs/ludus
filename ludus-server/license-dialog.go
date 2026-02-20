@@ -568,11 +568,12 @@ func showLicenseDialog() {
 
 ## The Short Version (In Plain English)
 
-We, Bad Sector Labs, Inc., have created Ludus to be a powerful tool. A significant portion of Ludus is built on open-source software and we believe in the power of community-driven development. Here's the deal:
+We, Bad Sector Labs, Inc., have created Ludus to be a powerful tool. A significant portion of Ludus is built on open-source software and we believe in the power of community-driven development.
+Here's the deal:
 
 - You get a license to use our Ludus software, and we're using the "open core" model.
 - The core open-source parts of Ludus are licensed under the **GNU Affero General Public License version 3 (AGPLv3)**. This means you are free to use, modify, and distribute these parts as long as you adhere to the terms of the AGPLv3.
-- However, the enterprise plugins and any other features we've developed that are not explicitly licensed as open-source are our proprietary, closed-source code. You do not own them, and your license gives you the right to use them but not to modify, redistribute, or reverse engineer them. We have to pay the bills somehow!
+- However, the pro/enterprise plugins and any other features we've developed that are not explicitly licensed as open-source are our proprietary, closed-source code. You do not own them, and your license gives you the right to use them but not to redistribute them. We have to pay the bills somehow!
 
 ## The Details (The Legal Stuff)
 
@@ -590,7 +591,7 @@ The core Ludus software and any components explicitly identified as "open source
 
 ### 3. The Closed-Source Enterprise Plugins and Features
 
-Ludus also includes proprietary, closed-source enterprise plugins and features ("Enterprise Components"). These are owned exclusively by Bad Sector Labs, Inc. and are not licensed under the AGPLv3. Your license to use the Enterprise Components is limited to their use as part of the Ludus software.
+Ludus also includes proprietary, closed-source enterprise and pro plugins and features ("Enterprise Components"). These are owned exclusively by Bad Sector Labs, Inc. and are not licensed under the AGPLv3. Your license to use the Enterprise Components is limited to their use as part of the Ludus software.
 
 You agree that you will **not**:
 

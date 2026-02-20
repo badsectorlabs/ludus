@@ -208,16 +208,12 @@
         mode: '0644'
       vars:
         issue_message: |-2
-              This is a Ludus host.
+              This is a Ludus host. Learn more at https://ludus.cloud
 
-              Ludus is a project to enable teams to quickly and
-              safely deploy test environments (ranges) to test tools and
-              techniques against representative virtual machines.
-
-              Ludus leverages Proxmox which is licensed under APGLv3.
-
-              Docs:   https://{{ proxmox_public_ip }}:8080/ludus
-              Web UI: https://{{ proxmox_public_ip }}:8006
+              Web UI:  https://{{ proxmox_public_ip }}:8080/ui
+              API:     https://{{ proxmox_public_ip }}:8080/api/v2
+              Docs:    https://{{ proxmox_public_ip }}:8080/ludus
+              Proxmox: https://{{ proxmox_public_ip }}:8006
 
     # These two service starts are required to fix the shutdown bug in qemu-server 8.3.14
     # https://gitlab.com/badsectorlabs/ludus/-/issues/106

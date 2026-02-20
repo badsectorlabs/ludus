@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/tls"
 	"embed"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	ludusapi "ludusapi"
 
@@ -137,6 +140,49 @@ func serve() {
 
 }
 
+// runBootstrapOnly runs the API bootstrap (config load, PocketBase init, migrations, InitDb)
+// without starting the HTTP server. Used after install playbook to create ROOT and initial admin.
+func runBootstrapOnly() {
+	server := &ludusapi.Server{
+		Version:          LudusVersion,
+		VersionString:    VersionString,
+		LudusInstallPath: ludusInstallPath,
+		Logger:           logger,
+	}
+	_ = ludusapi.NewRouter(LudusVersion, server)
+}
+
+// parseInitialAdminCredentials reads install/initial-admin-credentials (format: key:value per line).
+func parseInitialAdminCredentials(path string) (email, username, apiKey, password string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", "", ""
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		idx := strings.Index(line, ":")
+		if idx <= 0 {
+			continue
+		}
+		k, v := strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+1:])
+		switch k {
+		case "email":
+			email = v
+		case "username":
+			username = v
+		case "api_key":
+			apiKey = v
+		case "password":
+			password = v
+		}
+	}
+	return email, username, apiKey, password
+}
+
 func main() {
 
 	// Remove date and time from log output
@@ -154,6 +200,7 @@ func main() {
 	checkDebian12or13()
 	checkForVirtualizationSupport()
 	generateConfigIfAutomatedInstall()
+	inCluster = isInCluster()
 
 	// If we're done installing, serve the API
 	if fileExists(fmt.Sprintf("%s/install/.stage-3-complete", ludusInstallPath)) && !fileExists("/etc/systemd/system/ludus-install.service") {
@@ -176,5 +223,45 @@ func main() {
 	installAnsibleRequirements()
 	// Run the install playbooks with ansible now that it is installed
 	runInstallPlaybook(existingProxmox)
+	// Display credentials if the install was interactive and successful (after a short delay)
+	time.Sleep(3 * time.Second)
+	if interactiveInstall && fileExists(fmt.Sprintf("%s/install/root-web-password", ludusInstallPath)) {
+		// If initial-admin.yml was provided, run bootstrap to create ROOT + initial admin, then show both
+		initialAdminPath := fmt.Sprintf("%s/install/initial-admin.yml", ludusInstallPath)
+		if fileExists(initialAdminPath) {
+			runBootstrapOnly()
+		}
 
+		rootAPIKey, err := os.ReadFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath))
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+
+		initialAdminCredsPath := fmt.Sprintf("%s/install/initial-admin-credentials", ludusInstallPath)
+		adminEmail, adminUsername, adminAPIKey, adminPassword := parseInitialAdminCredentials(initialAdminCredsPath)
+
+		fmt.Println("\n\n================================================")
+		if adminEmail != "" && adminAPIKey != "" {
+			fmt.Println("Ludus install completed successfully.")
+			fmt.Println("================================================")
+			fmt.Println()
+			fmt.Println("--- ROOT (for recovery and creating users only) ---")
+			fmt.Printf("Root API key: %s\n", string(rootAPIKey))
+			fmt.Println()
+			fmt.Println("--- Your admin user (use this to get started) ---")
+			fmt.Printf("Web UI: https://%s:8080/ui\n", config.ProxmoxNode)
+			fmt.Printf("Web UI Username: %s\n", adminEmail)
+			fmt.Printf("Web UI Password: %s\n", adminPassword)
+			fmt.Printf("API key: %s\n", adminAPIKey)
+			if adminUsername != "" {
+				fmt.Printf("Proxmox username: %s\n", adminUsername)
+				fmt.Printf("Proxmox password: %s\n", adminPassword)
+			}
+			fmt.Println()
+		} else {
+			fmt.Println("You can use the root API key with the Ludus CLI to create your first user")
+			fmt.Println("The root API key is: " + string(rootAPIKey))
+		}
+		fmt.Println("================================================")
+	}
 }

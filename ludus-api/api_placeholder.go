@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -37,12 +38,18 @@ func (hm *HandlerManager) GetHandler(path string) (func(*core.RequestEvent) erro
 }
 
 func PlaceholderHandler(e *core.RequestEvent) error {
-	handler, exists := LudusPluginHandlerManager.GetHandler(e.Request.URL.Path)
+	path := e.Request.URL.Path
+	if strings.HasPrefix(path, APIBasePath) {
+		path = strings.TrimPrefix(path, APIBasePath)
+		if path == "" {
+			path = "/"
+		}
+	}
+	handler, exists := LudusPluginHandlerManager.GetHandler(path)
 	if exists {
 		return handler(e)
-	} else {
-		return JSONError(e, http.StatusNotFound, "This endpoint is implemented in a plugin that is not loaded")
 	}
+	return JSONError(e, http.StatusNotFound, "This endpoint is implemented in a plugin that is not loaded")
 }
 
 func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
@@ -71,6 +78,37 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 			Name:        "GetAntisandboxStatus",
 			Method:      http.MethodGet,
 			Pattern:     "/antisandbox/status",
+			HandlerFunc: PlaceholderHandler,
+		},
+		// Enterprise plugin routes
+		PocketBaseRoute{
+			Name:        "GetWireGuard",
+			Method:      http.MethodGet,
+			Pattern:     "/range/wireguard",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "GetWireGuardConfigForOctet",
+			Method:      http.MethodPost,
+			Pattern:     "/range/wireguard",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "SetupKMS",
+			Method:      http.MethodPost,
+			Pattern:     "/kms/install",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "CheckKMSStatus",
+			Method:      http.MethodGet,
+			Pattern:     "/kms/status",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "LicenseWindows",
+			Method:      http.MethodPost,
+			Pattern:     "/kms/license",
 			HandlerFunc: PlaceholderHandler,
 		},
 	}

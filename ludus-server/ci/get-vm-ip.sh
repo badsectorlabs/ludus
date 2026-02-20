@@ -9,6 +9,21 @@ if [[ -z "$PROXMOX_USERNAME" || -z "$PROXMOX_PASSWORD" ]]; then
   exit 1
 fi
 
+if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"cluster"* ]]; then
+  VM_ID=$NODE1_VMID
+  VM_IP=$CLUSTER_NODE1
+  export VM_ID
+  export VM_IP
+  echo "Cluster build type, using VM ID: $VM_ID ($VM_IP)"
+  return 0
+fi
+
+# If we already have a VM_ID defined and a VM_IP defined, return
+if [[ ! -z "$VM_ID" && ! -z "$VM_IP" ]]; then
+  echo "VM ID and IP already defined, returning: $VM_ID ($VM_IP)"
+  return 0
+fi
+
 # Authenticate to Proxmox API and get PVEAuthCookie
 LOGIN_DATA="username=$PROXMOX_USERNAME&password=$PROXMOX_PASSWORD"
 TICKET_RESPONSE=$(curl -s -k -d "username=${PROXMOX_USERNAME}" --data-urlencode "password=$PROXMOX_PASSWORD" https://127.0.0.1:8006/api2/json/access/ticket)
@@ -29,7 +44,9 @@ fi
 # This is the case if we are not testing install related changes
 if [[ -z "$VM_ID" ]]; then
   # Use jq to find the runner VM with the lowest uptime that isn't 0 (the template has 0 as its uptime)
-  VM_ID=$(curl -s -k -b "PVEAuthCookie=$COOKIE" https://127.0.0.1:8006/api2/json/nodes/$PROXMOX_NODE/qemu | jq -r '.data | map(select(.uptime > 0)) | min_by(.uptime).vmid')
+  echo "No runner VM found, using jq to find the most recent runner VM"
+  VM_ID=$(curl -s -k -b "PVEAuthCookie=$COOKIE" https://127.0.0.1:8006/api2/json/nodes/$PROXMOX_NODE/qemu | jq -r --arg c1 "${NODE1_VMID:-}" --arg c2 "${NODE2_VMID:-}" '.data | map(select(.uptime > 0 and (.vmid|tostring) != $c1 and (.vmid|tostring) != $c2)) | min_by(.uptime).vmid')
+  echo "Found VM ID: $VM_ID"
 fi
 
 # If we didn't find any VM, error

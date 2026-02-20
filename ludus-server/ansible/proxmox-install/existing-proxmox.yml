@@ -85,10 +85,17 @@
         name: dnsmasq
         enabled: true
 
-    - name: Add 'ludus' interface
+    - name: Check for a cluster
+      ansible.builtin.shell:
+        cmd: |
+          pvesh get /cluster/status --output-format=json | jq -e '[.[] | select(.type == "node")] | length > 1'
+      register: cluster_status
+      ignore_errors: true
+
+    - name: Add 'vmbr1000' interface
       ansible.builtin.blockinfile:
         path: /etc/network/interfaces
-        marker: "# LUDUS INTERFACE {mark}"
+        marker: "# LUDUS NAT INTERFACE {mark}"
         block: |
           auto {{ ludus_nat_interface }}
           iface {{ ludus_nat_interface }} inet static
@@ -103,6 +110,38 @@
               post-down iptables -t nat -D POSTROUTING -s '192.0.2.254/24' -o {{ pve_interface }} -j MASQUERADE
         state: present
       register: interfaces_status
+      when: cluster_status.stdout | trim == "false"
+
+    - name: Check for existing VXLAN Zone
+      ansible.builtin.shell: |
+        pvesh get /cluster/sdn/zones --output-format=json | jq -e '.[] | select(.type == "vxlan" and .zone == "{{ sdn_zone | default("ludus") }}") | length > 0'
+      register: vxlan_zone_status
+      ignore_errors: true
+      when: cluster_status.stdout | trim == "true"
+
+    - name: Alert if VXLAN Zone is not set up
+      ansible.builtin.fail:
+        msg: "VXLAN Zone is not set up. Please create a VXLAN Zone with the name '{{ sdn_zone | default(\"ludus\") }}' and the correct VXLAN peer IPs."
+      when: 
+        - cluster_status.stdout | trim == "true"
+        - vxlan_zone_status.stdout | trim == "false"
+
+    - name: Create ludusnat VNet (cluster mode only)
+      ansible.builtin.shell: |
+        pvesh create /cluster/sdn/vnets --zone ludus --vnet {{ ludus_nat_interface | default("ludusnat") }} --tag 16777215 --vlanaware 1 && pvesh set /cluster/sdn
+
+    - name: Add the ludusnat interface
+      ansible.builtin.blockinfile:
+        path: /etc/network/interfaces
+        marker: "# LUDUS NAT INTERFACE {mark}"
+        block: |
+          iface {{ ludus_nat_interface | default("ludusnat") }}
+              address 192.0.2.254
+              netmask 255.255.255.0
+              post-up echo 1 > /proc/sys/net/ipv4/ip_forward
+              post-up   iptables -t nat -A POSTROUTING -s '192.0.2.254/24' -o {{ pve_interface }} -j MASQUERADE
+              post-down iptables -t nat -D POSTROUTING -s '192.0.2.254/24' -o {{ pve_interface }} -j MASQUERADE
+      when: cluster_status.stdout | trim == "true"
 
     - name: Enable new ludus NAT interface
       ansible.builtin.shell: ADDRFAM=inet ifup {{ ludus_nat_interface }}
@@ -180,6 +219,9 @@
           roles: ["PVEVMAdmin", "PVEPoolUser", "PVESDNAdmin"] # ["PVETemplateUser"] only allows using templates, not creating
           groups: ["ludus_users"]
         - path: /sdn/zones/localnetwork
+          roles: ["PVESDNUser"]
+          groups: ["ludus_users"]
+        - path: /sdn/zones/{{ sdn_zone | default("ludus") }}/{{ ludus_nat_interface | default("ludusnat") }}
           roles: ["PVESDNUser"]
           groups: ["ludus_users"]
         - path: /pool/ADMIN

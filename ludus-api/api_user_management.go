@@ -126,7 +126,7 @@ func AddUser(e *core.RequestEvent) error {
 				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
 				removePool(user.UserId())
 				// Remove the default range
-				defaultRangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeId", user.DefaultRangeId())
+				defaultRangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
 				if err == nil {
 					txApp.Delete(defaultRangeRecord)
 				}
@@ -188,6 +188,13 @@ func AddUser(e *core.RequestEvent) error {
 
 		user.SetProxmoxTokenId(tokenID)
 		user.SetProxmoxTokenSecret(encryptedTokenSecret)
+
+		// Grant user and ludus_admins Proxmox pool/SDN access to the user's default range
+		// (required for range deployment, especially SDN.Use in cluster mode)
+		if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
+			wasError = true
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error granting Proxmox access to default range: %v", err))
+		}
 
 		err = txApp.Save(user)
 		if err != nil {
@@ -271,7 +278,7 @@ func DeleteUser(e *core.RequestEvent) error {
 		if err != nil {
 			return JSONError(e, http.StatusInternalServerError, err.Error())
 		}
-		targetRangeRaw, err := app.FindFirstRecordByData("ranges", "rangeId", user.DefaultRangeId())
+		targetRangeRaw, err := app.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
 		if err != nil {
 			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding range: %v", err))
 		}

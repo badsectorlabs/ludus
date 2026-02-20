@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"ludusapi/commandmanager"
 	"ludusapi/dto"
 	"ludusapi/models"
@@ -224,20 +223,18 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user *models.Us
 	// Create a semaphore (buffered channel of empty structs) to limit the number of concurrent goroutines.
 	semaphoreChannel := make(chan struct{}, parallel)
 
-	// Iterate over the array of template statuses.
-	for _, templateStatus := range templateStatusArray {
-		// Check the canary file before launching a new goroutine.
-		if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername()), 10) {
-			log.Println("Canary check failed")
-			break
-		}
+	username := user.ProxmoxUsername()
+	canaryPath := fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, username)
 
-		// Determine whether a VM should be built from the template.
-		// Check that:
-		// 1. The template is not already built (proxmox returns this)
-		// 2. The user asked to build this specific template (by including it in the templateNames array or by specifying "all")
-		// 3. This template is not already in progress - the user could call this method twice with a parallel value > number of templates,
-		//    and longer running templates would then be built a second time as the have not finished building to return .Built by proxmox
+	// Helper to determine if a template should be built.
+	// Determine whether a VM should be built from the template.
+	// Check that:
+	// 1. The template is not already built (proxmox returns this)
+	// 2. The user asked to build this specific template (by including it in the templateNames array or by specifying "all")
+	// 3. This template is not already in progress - the user could call this method twice with a parallel value > number of templates,
+	//    and longer running templates would then be built a second time as the have not finished building to return .Built by proxmox
+	//    This step is handled by the templateProgressStore sync map in the first pass of the templateStatusArray loop.
+	shouldBuild := func(templateStatus TemplateStatus) bool {
 		shouldBuildTemplate := !templateStatus.Built
 		if len(templateNames) > 0 {
 			// Check if "all" is specified, which means build all templates
@@ -248,12 +245,7 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user *models.Us
 					break
 				}
 			}
-
-			if buildAll {
-				// If "all" is specified, build all templates that aren't already built
-				// shouldBuildTemplate is already set to !templateStatus.Built above
-			} else {
-				// Otherwise, only build templates that are explicitly in the list
+			if !buildAll {
 				found := false
 				for _, name := range templateNames {
 					if templateStatus.Name == name {
@@ -264,64 +256,69 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user *models.Us
 				shouldBuildTemplate = shouldBuildTemplate && found
 			}
 		}
-
-		if shouldBuildTemplate {
-			_, ok := templateProgressStore.Load(templateStatus.Name)
-			if ok {
-				// This template is already building or in the queue to be built by a user
-				// skip to the next template instead of queuing this one again
-				continue
-			}
-
-			// If a VM should be built, increment the WaitGroup counter
-			wg.Add(1)
-
-			// Add this template name to the sync map and set its value to true to indicate that it is building or in the queue to build
-			// Have to get a little tricky here, since if two users are building templates and one aborts
-			// we don't want to remove queued templates for the other user
-			// To accomplish this, we store the username of the building user as the value to the key of the template.
-			templateProgressStore.Store(templateStatus.Name, user.ProxmoxUsername())
-
-			// Launch a go routine to build the VM.
-			go func(templateStatus TemplateStatus, username string) {
-				// Send an empty struct into the channel, if it is full this will block and we will wait our turn
-				semaphoreChannel <- struct{}{}
-
-				// Ensure that the WaitGroup counter is decremented and remove one struct from the channel by reading it when the goroutine finishes.
-				// Since all structs are the same (empty), reading one is the same as removing the one we put in - it frees up a slot for another go routine
-				defer wg.Done()
-				defer func() { <-semaphoreChannel }()
-				// When we finish, delete our entry from the sync map
-				defer func() {
-					templateProgressStore.Range(func(key, value interface{}) bool {
-						// If the key matches this template and the value matches this user, delete the key
-						if key == templateStatus.Name && value == username {
-							templateProgressStore.Delete(key)
-						}
-						return true // continue iteration
-					})
-				}()
-
-				// Check the canary file before starting the VM build.
-				if modifiedTimeLessThan(fmt.Sprintf("%s/users/%s/.stop-template-build", ludusInstallPath, user.ProxmoxUsername()), 10) {
-					logger.Error("Canary check failed - not building template " + templateStatus.Name)
-					return
-				}
-
-				// Build the VM from the template.
-				buildVMFromTemplateWithPacker(user, templateStatus.FilePath, verbose)
-
-			}(templateStatus, user.ProxmoxUsername())
-
-			// Sleep for 3 seconds so the server isn't flooded with builds all at exactly the same time if the user gives a high number for parallel
-			time.Sleep(3 * time.Second)
-
-		}
+		return shouldBuildTemplate
 	}
 
-	// Wait for all goroutines to finish.
-	wg.Wait()
+	// First pass: pre-populate the progress store for all templates that will be built.
+	// This ensures Abort can clear the store immediately, even if called before goroutines
+	// have started or between the 3s delays. Without this, the store is filled one entry
+	// per 3 seconds inside the loop, so Abort often sees an empty or partial store.
+	var templatesToBuild []TemplateStatus
+	for _, templateStatus := range templateStatusArray {
+		if modifiedTimeLessThan(canaryPath, 10) {
+			logger.Debug("Canary check failed for template: " + templateStatus.Name)
+			break
+		}
+		if !shouldBuild(templateStatus) {
+			continue
+		}
+		if _, ok := templateProgressStore.Load(templateStatus.Name); ok {
+			continue // already building or queued (e.g. duplicate Build request)
+		}
+		// Add this template name to the sync map and set its value to true to indicate that it is building or in the queue to build
+		// Have to get a little tricky here, since if two users are building templates and one aborts
+		// we don't want to remove queued templates for the other user
+		// To accomplish this, we store the username of the building user as the value to the key of the template.
+		templateProgressStore.Store(templateStatus.Name, username)
+		templatesToBuild = append(templatesToBuild, templateStatus)
+	}
 
+	// Second pass: launch a goroutine per template (same semantics as before, with 3s stagger).
+	for _, templateStatus := range templatesToBuild {
+		// If a VM should be built, increment the WaitGroup counter
+		wg.Add(1)
+		// Launch a go routine to build the VM.
+		go func(templateStatus TemplateStatus, username string) {
+			// Send an empty struct into the channel, if it is full this will block and we will wait our turn
+			semaphoreChannel <- struct{}{}
+
+			// Ensure that the WaitGroup counter is decremented and remove one struct from the channel by reading it when the goroutine finishes.
+			// Since all structs are the same (empty), reading one is the same as removing the one we put in - it frees up a slot for another go routine
+			defer wg.Done()
+			defer func() { <-semaphoreChannel }()
+			// When we finish, delete our entry from the sync map
+			defer func() {
+				templateProgressStore.Range(func(key, value interface{}) bool {
+					// If the key matches this template and the value matches this user, delete the key
+					if key == templateStatus.Name && value == username {
+						templateProgressStore.Delete(key)
+					}
+					return true // continue iteration
+				})
+			}()
+			// Check the canary file before starting the VM build.
+			if modifiedTimeLessThan(canaryPath, 10) {
+				logger.Debug("Canary check failed - not building template " + templateStatus.Name)
+				return
+			}
+			buildVMFromTemplateWithPacker(user, templateStatus.FilePath, verbose)
+		}(templateStatus, username)
+
+		// Sleep for 3 seconds so the server isn't flooded with builds all at exactly the same time if the user gives a high number for parallel
+		time.Sleep(3 * time.Second)
+	}
+
+	wg.Wait()
 	return nil
 }
 
@@ -690,6 +687,7 @@ func AbortPacker(e *core.RequestEvent) error {
 
 	// Empty the sync map (queue) of any templates this user was building
 	templateProgressStore.Range(func(key, value interface{}) bool {
+		logger.Debug(fmt.Sprintf("Template progress store key: %v, value: %v", key, value))
 		// If the value matches this user, delete the key
 		if value == user.ProxmoxUsername() {
 			templateProgressStore.Delete(key)
