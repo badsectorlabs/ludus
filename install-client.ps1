@@ -212,7 +212,7 @@ function Setup-AutoCompletion {
         Write-Output "[+] Ludus autocompletion is already configured in your profile."
         Write-Output "[+] Ludus CLI Installation complete!"
     } else {
-        "$binaryPath completion powershell >> $PROFILE | Select-Object CurrentUserCurrentHost" | Out-File -Append -FilePath $PROFILE
+        & $binaryPath completion powershell | Out-File -Append -FilePath $PROFILE
         Write-Output "[+] PowerShell autocompletion script added to your profile."
         Write-Output "[+] Ludus CLI Installation complete!"
     }
