@@ -6,7 +6,7 @@ sidebar_position: 1
 
 :::warning
 
-Ludus will be installed directly on the host. Docker should not be installed on the host as it interferes with networking.
+Ludus will completely take over the machine! It should not be used for other tasks (i.e. Docker).
 
 :::
 
@@ -33,7 +33,7 @@ At the screen below during install, uncheck `Debian desktop environment` and che
 
 ![A screenshot of the Debian 12 install page with SSH Server and standard system utilities checked](/img/intro/debian-12-install.png)
 
-To install ludus, use the installer script on a Debian machine as shown below. It will extract files into /opt/ludus and walk through the configuration
+To install ludus, use the installer script on a Debian 12 machine as shown below. It will extract files into /opt/ludus and walk through the configuration
 values during install.
 
 :::tip[Don't trust the binaries?]
@@ -44,21 +44,21 @@ values during install.
 
 ```shell
 # terminal-command-local
-ssh user@debian
+ssh user@debian12
 
 # terminal-command-user-at-debian
 su -
-# Enter root password to elevate to root, then install the prerequisites
+# Enter root password to elevate to root
 # terminal-command-root-at-debian
-apt update && apt install curl sudo ca-certificates python-debian
+apt update && apt install curl sudo git ca-certificates python3-debian
 
 # All-in-one command
 # terminal-command-root-at-debian
-curl --proto '=https' --tlsv1.2 -sSf https://ludus.cloud/install-beta | bash
+curl -s https://ludus.cloud/install | bash
 
 # If you want to check out the install script
 # terminal-command-root-at-debian
-curl https://ludus.cloud/install-beta > install.sh
+curl https://ludus.cloud/install > install.sh
 # terminal-command-root-at-debian
 cat install.sh
 # terminal-command-root-at-debian
@@ -106,10 +106,4 @@ prevent_user_ansible_add: false   # Set this to true to prevent non-admin users 
 license_key: community            # Set this to your license key if you have one, or leave as community for community edition
 expose_admin_port: false          # Set this to true to expose the admin API globally
 reserved_range_numbers:           # An array of range numbers that should not be used by users (see networking docs for more info), example: [1,2,3,4]
-data_directory: /opt/ludus/db     # The directory to store the ludus database and some ludus data
-database_encryption_key: abc12... # The key used to encrypt data in the database. DO NOT CHANGE AFTER INSTALL
-wireguard_port: 51820             # The port WireGuard listens on
-cluster_mode: false               # Override cluster detection and for cluster mode on (true) or off (false)
-sdn_zone: ludus                   # The SDN Zone name Ludus will use for the `ludusnat` VNet and range VNets in cluster mode
-vxlan_tag_base: 0                 # The number that will be added to the VXLAN tag used for each range's VNet (vxlan_tag_base + range_number = Range VNet VXLAN tag)
 ```

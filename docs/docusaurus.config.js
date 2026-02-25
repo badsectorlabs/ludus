@@ -24,10 +24,12 @@ const config = {
   projectName: 'ludus', // Usually your repo name.
 
   onBrokenLinks: 'throw',
-  onBrokenMarkdownLinks: 'warn',
 
   markdown: {
     mermaid: true,
+    hooks: {
+      onBrokenMarkdownLinks: 'warn',
+    },
   },
 
 
@@ -48,10 +50,16 @@ const config = {
       ({
         docs: {
           sidebarPath: './sidebars.js',
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
-         // editUrl:
-          //  'https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/',
+          editUrl: 'https://gitlab.com/badsectorlabs/ludus/-/edit/main/docs/',
+          lastVersion: '1',
+          includeCurrentVersion: true,
+          versions: {
+            current: {
+              label: 'Ludus 2 (beta)',
+              badge: false,
+            },
+          },
+    
         },
         blog: {
           showReadingTime: true,
@@ -111,6 +119,13 @@ const config = {
             label: 'API',
             position: 'left',
             href: 'pathname:///api/index.html'
+          },
+          {
+            type: 'docsVersionDropdown',
+            versions: {
+              current: {label: 'Ludus 2 (beta)'},
+              '1': {label: 'Ludus 1'}
+            }
           },
           {
             label: 'GitLab',

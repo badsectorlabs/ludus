@@ -17,7 +17,6 @@ While Ludus is free and open source, Ludus Enterprise is a paid service that pro
 | Command line client | ✅ | ✅ |
 | Fully documented API | ✅ | ✅ |
 | Up to 255 VLANs per range | ✅ | ✅ |
-| Cluster support | ✅ | ✅ |
 | Support | Community | Professional |
 | Roles on the router | ❌ | ✅ |
 | Inbound WireGuard Server per range | ❌ | ✅ |
@@ -25,10 +24,9 @@ While Ludus is free and open source, Ludus Enterprise is a paid service that pro
 | [Private Role Catalog](./private-roles.md) | ❌ | ✅ |
 | [Outbound WireGuard](./outbound-wireguard.md) | ❌ | ✅ |
 | [Windows Licensing](./kms.md) | ❌ | ✅ |
-| Web Interface | ❌ | ✅  |
 | [Anti-Sandbox](./anti-sandbox.md) | ❌ | 🔌 Add-on |
 | Arbitrary credential support | ❌ | 🚧 In development |   
-
+| Web Interface | ❌ | 🚧 In development |
 
 Ludus Enterprise directly supports the development of the free and open source core Ludus product that helps thousands of cybersecurity professionals around the world every day.
 
