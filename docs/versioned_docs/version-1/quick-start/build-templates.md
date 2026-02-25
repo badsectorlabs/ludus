@@ -1,5 +1,5 @@
 ---
-sidebar_position: 2
+sidebar_position: 3
 ---
 
 # Build Templates
@@ -13,40 +13,18 @@ This focus on infrastructure as code allows Ludus users to create fresh, up to d
 
 The first step is to start the template build process. First, we can view the available templates.
 
-:::tip
-
-Adding a space at the beginning of the `export LUDUS_API_KEY=..` command will prevent it from being written to the
-shell's history file in most common shells.
-
-:::
-
 ```shell-session
 #terminal-command-ludus
-su -
-#terminal-command-ludus-root
-ludus-install-status
-Ludus install completed successfully
-
-Initial admin credentials:
-  email:john.doe@example.com
-  username:john-doe
-  api_key:JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
-  password:password
-#terminal-command-ludus-root
-exit
-#terminal-command-ludus
- export LUDUS_API_KEY=JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
-#terminal-command-ludus
 ludus templates list
-+------------------------------------+--------------+
-|              TEMPLATE              |    STATUS    |
-+------------------------------------+--------------+
-| debian-11-x64-server-template      | ❌ NOT BUILT |
-| debian-12-x64-server-template      | ❌ NOT BUILT |
-| kali-x64-desktop-template          | ❌ NOT BUILT |
-| win11-22h2-x64-enterprise-template | ❌ NOT BUILT |
-| win2022-server-x64-template        | ❌ NOT BUILT |
-+------------------------------------+--------------+
++------------------------------------+-------+
+|              TEMPLATE              | BUILT |
++------------------------------------+-------+
+| debian-11-x64-server-template      | FALSE |
+| debian-12-x64-server-template      | FALSE |
+| kali-x64-desktop-template          | FALSE |
+| win11-22h2-x64-enterprise-template | FALSE |
+| win2022-server-x64-template        | FALSE |
++------------------------------------+-------+
 ```
 
 On a fresh install, no templates are built. Ludus will build them from ISO files (with checksums) with the following command.
@@ -87,7 +65,7 @@ If multiple VMs time out without getting created, there may be a [network issue]
 
 Use `control+c` to stop following the logs.
 
-You can also monitor template builds using the Proxmox web UI. It is available at `https://<ludus IP>:8006` and the credentials for the Proxmox web UI can be retrieved with `ludus user creds get`.
+You can also monitor template builds using the Proxmox web GUI. It is available at `https://<ludus IP>:8006` and the credentials for the web GUI can be retrieved with `ludus user creds get`.
 
 Once all the templates have been built, you can deploy a range.
 

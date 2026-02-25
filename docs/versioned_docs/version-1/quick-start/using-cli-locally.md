@@ -163,4 +163,83 @@ You can manage your range, enter/exit testing mode, and more from your local mac
 
 `ludus -h` will show you all the options.
 
+## Using the Ludus client to create a Ludus user locally
+
+To perform user related actions, which modify the Ludus host as root, we must connect to the
+admin service which only listens on localhost of the Ludus server. To do this we will create an SSH tunnel.
+
+```plain title="Terminal 1 (Linux/macOS/Windows)"
+ssh -L 8081:127.0.0.1:8081 user@<Ludus IP>
+```
+
+Open a second terminal.
+
+Now create a ludus user! This user will be an admin as we specify `--admin`.
+Initials are commonly used for the userID.
+
+:::warning
+
+If the user name you specify (converted to lowercase and spaces replaced with `-`) exists
+on the system already, it's PAM password will be changed by Ludus! This user's groups will be modified (i.e. removed from sudoers) as well. You should use a username that is not present on the system when installing Ludus.
+
+:::
+
+Prepend the LUDUS_API_KEY variable to the command to authenticate properly.
+
+<Tabs groupId="operating-systems">
+  <TabItem value="linux" label="Linux">
+:::tip
+
+Adding a space at the beginning of this command will prevent it from being written to the
+shell's history file in most common shells.
+
+:::
+
+```shell-session title="Terminal 2 (Linux)"
+#terminal-command-local
+ludus user add --name "Jane Smith" --userid JS --admin --url https://127.0.0.1:8081
++--------+------------------+-------+---------------------------------------------+
+| USERID | PROXMOX USERNAME | ADMIN |                   API KEY                   |
++--------+------------------+-------+---------------------------------------------+
+| JS     | jane-smith       | true  | JS._8Bx2T5kTXMR*uTWZ%lFi^Os6MpFR=OrH+yT96Dq |
++--------+------------------+-------+---------------------------------------------+
+```
+
+  </TabItem>
+  <TabItem value="macos" label="macOS">
+:::tip
+
+Adding a space at the beginning of this command will prevent it from being written to the
+shell's history file in most common shells.
+
+:::
+
+```shell-session title="Terminal 2 (macOS)"
+#terminal-command-local
+ludus user add --name "Jane Smith" --userid JS --admin --url https://127.0.0.1:8081
++--------+------------------+-------+---------------------------------------------+
+| USERID | PROXMOX USERNAME | ADMIN |                   API KEY                   |
++--------+------------------+-------+---------------------------------------------+
+| JS     | jane-smith       | true  | JS._8Bx2T5kTXMR*uTWZ%lFi^Os6MpFR=OrH+yT96Dq |
++--------+------------------+-------+---------------------------------------------+
+```
+
+  </TabItem>
+  <TabItem value="windows" label="Windows">
+```shell-session title="Terminal 2 (Windows)"
+#terminal-command-powershell
+ludus user add --name "Jane Smith" --userid JS --admin --url https://127.0.0.1:8081
++--------+------------------+-------+---------------------------------------------+
+| USERID | PROXMOX USERNAME | ADMIN |                   API KEY                   |
++--------+------------------+-------+---------------------------------------------+
+| JS     | jane-smith       | true  | JS._8Bx2T5kTXMR*uTWZ%lFi^Os6MpFR=OrH+yT96Dq |
++--------+------------------+-------+---------------------------------------------+
+```
+  </TabItem>
+</Tabs>
+:::info
+
+This command construct is only required for user add and delete actions. Normal user actions don't require the SSH tunnel or url parameter
+
+:::
 
