@@ -71,7 +71,7 @@ func serve() {
 	if info, err := os.Stat(pluginsDir); err == nil && info.IsDir() {
 		entries, err := os.ReadDir(pluginsDir)
 		if err != nil {
-			logger.Error("Error reading plugins directory: %v", err)
+			logger.Error(fmt.Sprintf("Error reading plugins directory: %v", err))
 		}
 
 		for _, entry := range entries {
@@ -115,6 +115,9 @@ func serve() {
 		e.Server.TLSConfig = &tls.Config{
 			Certificates: []tls.Certificate{certificate},
 		}
+		// PocketBase defaults to 5 min Read/WriteTimeout; extend for long-running requests (e.g. antisandbox enable)
+		e.Server.ReadTimeout = 30 * time.Minute
+		e.Server.WriteTimeout = 30 * time.Minute
 		return e.Next()
 	})
 
@@ -231,37 +234,5 @@ func main() {
 		if fileExists(initialAdminPath) {
 			runBootstrapOnly()
 		}
-
-		rootAPIKey, err := os.ReadFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath))
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-
-		initialAdminCredsPath := fmt.Sprintf("%s/install/initial-admin-credentials", ludusInstallPath)
-		adminEmail, adminUsername, adminAPIKey, adminPassword := parseInitialAdminCredentials(initialAdminCredsPath)
-
-		fmt.Println("\n\n================================================")
-		if adminEmail != "" && adminAPIKey != "" {
-			fmt.Println("Ludus install completed successfully.")
-			fmt.Println("================================================")
-			fmt.Println()
-			fmt.Println("--- ROOT (for recovery and creating users only) ---")
-			fmt.Printf("Root API key: %s\n", string(rootAPIKey))
-			fmt.Println()
-			fmt.Println("--- Your admin user (use this to get started) ---")
-			fmt.Printf("Web UI: https://%s:8080/ui\n", config.ProxmoxNode)
-			fmt.Printf("Web UI Username: %s\n", adminEmail)
-			fmt.Printf("Web UI Password: %s\n", adminPassword)
-			fmt.Printf("API key: %s\n", adminAPIKey)
-			if adminUsername != "" {
-				fmt.Printf("Proxmox username: %s\n", adminUsername)
-				fmt.Printf("Proxmox password: %s\n", adminPassword)
-			}
-			fmt.Println()
-		} else {
-			fmt.Println("You can use the root API key with the Ludus CLI to create your first user")
-			fmt.Println("The root API key is: " + string(rootAPIKey))
-		}
-		fmt.Println("================================================")
 	}
 }
