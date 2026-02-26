@@ -205,7 +205,6 @@ func NewModel() Model {
 				}).
 				Title("What is the public IP of this host").
 				Description("This is used as the WireGuard endpoint").
-				Suggestions([]string{"ludus"}).
 				Value(&config.ProxmoxPublicIP),
 		),
 		// Page 2
