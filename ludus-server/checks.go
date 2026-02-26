@@ -103,8 +103,8 @@ func checkDebian12or13() {
 
 func isInCluster() bool {
 	clusterStatus, err := RunWithOutput("ls -1 /etc/pve/nodes | wc -l")
-	if err != nil {
-		logger.Error(fmt.Sprintf("Could not get cluster status: %v", err))
+	if err != nil || strings.Contains(clusterStatus, "ls: cannot access '/etc/pve/nodes'") {
+		logger.Info("No cluster detected")
 		return false
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(clusterStatus))
