@@ -195,6 +195,11 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		return se.Next()
 	})
 
+	// Hook the OAuth2 user creation to populate the userID and userNumber fields
+	app.OnRecordAuthWithOAuth2Request("users").BindFunc(func(e *core.RecordAuthWithOAuth2RequestEvent) error {
+		return populateUserFieldsFromOAuth2Provider(e)
+	})
+
 	// Make /admin serve the same content as /_ (the pocketbase admin UI)
 	// This code is copied from the PocketBase codebase with just the path changed, https://github.com/pocketbase/pocketbase/blob/1dc5e061b8bbc7374e99c3fe6f153db25e71f860/apis/serve.go#L80-L94
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
@@ -474,6 +479,13 @@ var routes = PocketBaseRoutes{
 		http.MethodPost,
 		"/user",
 		AddUser,
+	},
+
+	{
+		"ProvisionOAuth2User",
+		http.MethodPost,
+		"/user/provision-oauth2",
+		ProvisionOAuth2User,
 	},
 
 	{

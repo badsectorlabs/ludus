@@ -3,11 +3,15 @@ package ludusapi
 import (
 	"database/sql"
 	"fmt"
+	"math"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"ludusapi/dto"
 	"ludusapi/models"
@@ -18,6 +22,64 @@ import (
 )
 
 var UserIDRegex = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
+
+// provisionNewUser handles the common provisioning steps for a new Ludus user:
+// assigns a user number, creates a default range, runs the add-user ansible playbook,
+// generates an API key, creates a Proxmox API token, grants Proxmox access,
+// and saves the user record. The caller must set Name, UserId, Email, Password,
+// ProxmoxUsername, ProxmoxRealm, and ProxmoxPassword on the user before calling.
+// Returns the plaintext API key on success.
+func provisionNewUser(txApp core.App, user *models.User, plaintextPassword string) (string, error) {
+	user.SetUserNumber(findNextAvailableUserNumber(txApp))
+	if user.UserNumber() > 150 {
+		return "", fmt.Errorf("cannot create more than 150 users")
+	}
+
+	if err := CreateDefaultUserRangeForBootstrap(txApp, user); err != nil {
+		return "", fmt.Errorf("creating default range: %w", err)
+	}
+
+	extraVars := map[string]interface{}{
+		"username":          user.ProxmoxUsername(),
+		"user_id":           user.UserId(),
+		"user_number":       user.UserNumber(),
+		"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
+		"user_is_admin":     user.IsAdmin(),
+		"proxmox_password":  plaintextPassword,
+	}
+	output, err := RunAddUserPlaybookStandalone(extraVars)
+	if err != nil {
+		return "", fmt.Errorf("running add-user playbook: %w (output: %s)", err, output)
+	}
+
+	apiKey := GenerateAPIKey(user.UserId())
+	hashedAPIKey, err := HashString(apiKey)
+	if err != nil {
+		return "", fmt.Errorf("hashing API key: %w", err)
+	}
+	user.SetHashedApikey(hashedAPIKey)
+
+	tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm(), plaintextPassword)
+	if err != nil {
+		return "", fmt.Errorf("creating Proxmox API token: %w", err)
+	}
+	encryptedTokenSecret, err := EncryptStringForDatabase(tokenSecret)
+	if err != nil {
+		return "", fmt.Errorf("encrypting Proxmox token secret: %w", err)
+	}
+	user.SetProxmoxTokenId(tokenID)
+	user.SetProxmoxTokenSecret(encryptedTokenSecret)
+
+	if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
+		return "", fmt.Errorf("granting Proxmox access to default range: %w", err)
+	}
+
+	if err := txApp.Save(user); err != nil {
+		return "", fmt.Errorf("saving user: %w", err)
+	}
+
+	return apiKey, nil
+}
 
 // AddUser - adds a user to the system
 func AddUser(e *core.RequestEvent) error {
@@ -121,88 +183,22 @@ func AddUser(e *core.RequestEvent) error {
 		wasError := false
 		defer func() {
 			if wasError {
-				// Remove the user from the host system - we validated the user did not exist on the host system before running the playbook, so this is safe to do
 				removeUserFromHostSystem(user.ProxmoxUsername())
 				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
 				removePool(user.UserId())
-				// Remove the default range
 				defaultRangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
 				if err == nil {
 					txApp.Delete(defaultRangeRecord)
 				}
-				// Remove the user from the database
 				txApp.Delete(user)
 			}
 		}()
 
-		// Create a default range for the user using the new utility function, also add the range to the user's ranges relationship and sets the user's default range ID
-		err := CreateDefaultUserRange(e, txApp, user)
+		apiKey, err := provisionNewUser(txApp, user, addUserJSON.Password)
 		if err != nil {
 			wasError = true
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error creating user's default range: %v", err))
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error provisioning user: %v", err))
 		}
-
-		// Get the next available user number
-		user.SetUserNumber(findNextAvailableUserNumber(txApp))
-
-		// Refuse to create more than 150 users
-		if user.UserNumber() > 150 {
-			wasError = true
-			return JSONError(e, http.StatusBadRequest, "Cannot create more than 150 users per Ludus due to networking constraints")
-		}
-
-		playbook := []string{ludusInstallPath + "/ansible/user-management/add-user.yml"}
-		extraVars := map[string]interface{}{
-			"username":          user.ProxmoxUsername(),
-			"user_id":           user.UserId(),
-			"user_number":       user.UserNumber(),
-			"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
-			"user_is_admin":     user.IsAdmin(),
-			"proxmox_password":  addUserJSON.Password,
-		}
-		output, err := server.RunAnsiblePlaybookWithVariables(e, playbook, []string{}, extraVars, "", false, "")
-		if err != nil {
-			wasError = true
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running ansible playbook: %v", output))
-		}
-
-		apiKey := GenerateAPIKey(user.UserId())
-		hashedAPIKey, err := HashString(apiKey)
-		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error hashing API key: %v", err))
-		}
-		user.SetHashedApikey(hashedAPIKey)
-
-		// Create a Proxmox API Token for the user
-		tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm(), addUserJSON.Password)
-		if err != nil {
-			wasError = true
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error creating Proxmox API token: %v", err))
-		}
-
-		encryptedTokenSecret, err := EncryptStringForDatabase(tokenSecret)
-		if err != nil {
-			wasError = true
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error encrypting Proxmox API token secret: %v", err))
-		}
-
-		user.SetProxmoxTokenId(tokenID)
-		user.SetProxmoxTokenSecret(encryptedTokenSecret)
-
-		// Grant user and ludus_admins Proxmox pool/SDN access to the user's default range
-		// (required for range deployment, especially SDN.Use in cluster mode)
-		if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
-			wasError = true
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error granting Proxmox access to default range: %v", err))
-		}
-
-		err = txApp.Save(user)
-		if err != nil {
-			wasError = true
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving user record: %v", err))
-		}
-
-		// Add the plaintext API Key to this response only
 
 		response := dto.AddUserResponse{
 			Name:            user.Name(),
@@ -212,6 +208,147 @@ func AddUser(e *core.RequestEvent) error {
 			IsAdmin:         user.IsAdmin(),
 			ProxmoxUsername: user.ProxmoxUsername(),
 			ApiKey:          apiKey,
+		}
+		return e.JSON(http.StatusCreated, response)
+	})
+	return nil
+}
+
+// validateInternalToken decrypts the X-Internal-Token header and verifies that
+// the userID and isAdmin fields match the request body, and that the token was
+// created within the last 30 seconds. The token payload format is "userID|isAdmin|unixTimestamp".
+func validateInternalToken(token string, expectedUserID string, expectedIsAdmin bool) error {
+	decrypted, err := DecryptStringFromDatabase(token)
+	if err != nil {
+		return fmt.Errorf("invalid internal token: %w", err)
+	}
+
+	parts := strings.SplitN(decrypted, "|", 3)
+	if len(parts) != 3 {
+		return fmt.Errorf("malformed internal token")
+	}
+
+	tokenUserID := parts[0]
+	tokenIsAdmin := parts[1]
+	tokenTimestamp := parts[2]
+
+	if tokenUserID != expectedUserID {
+		return fmt.Errorf("token userID mismatch")
+	}
+
+	if tokenIsAdmin != strconv.FormatBool(expectedIsAdmin) {
+		return fmt.Errorf("token isAdmin mismatch")
+	}
+
+	ts, err := strconv.ParseInt(tokenTimestamp, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid timestamp in token")
+	}
+
+	if math.Abs(float64(time.Now().Unix()-ts)) > 30 {
+		return fmt.Errorf("token expired")
+	}
+
+	return nil
+}
+
+// ProvisionOAuth2User is an internal endpoint called by the non-root API (port 8080)
+// to delegate user provisioning to the root API (port 8081). It is protected by
+// a localhost check, root euid check, and an encrypted internal token.
+func ProvisionOAuth2User(e *core.RequestEvent) error {
+	if os.Geteuid() != 0 {
+		return JSONError(e, http.StatusForbidden, "This endpoint is only available on the admin API")
+	}
+
+	host, _, err := net.SplitHostPort(e.Request.RemoteAddr)
+	if err != nil || (host != "127.0.0.1" && host != "::1") {
+		return JSONError(e, http.StatusForbidden, "This endpoint is only available from localhost")
+	}
+
+	var req dto.ProvisionOAuth2UserRequest
+	if err := e.BindBody(&req); err != nil {
+		return JSONError(e, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+	}
+
+	if req.Name == "" || req.Email == "" || req.UserID == "" || req.Password == "" || req.ProxmoxUsername == "" {
+		return JSONError(e, http.StatusBadRequest, "name, email, userID, password, and proxmoxUsername are required")
+	}
+
+	token := e.Request.Header.Get("X-Internal-Token")
+	if token == "" {
+		return JSONError(e, http.StatusForbidden, "Missing internal token")
+	}
+	if err := validateInternalToken(token, req.UserID, req.IsAdmin); err != nil {
+		return JSONError(e, http.StatusForbidden, fmt.Sprintf("Token validation failed: %v", err))
+	}
+
+	matchingUsers, err := app.CountRecords("users", dbx.HashExp{"userID": req.UserID})
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking if user already exists: %v", err))
+	}
+	if matchingUsers > 0 {
+		return JSONError(e, http.StatusBadRequest, "User with that ID already exists")
+	}
+
+	matchingUsers, err = app.CountRecords("users", dbx.HashExp{"proxmoxUsername": req.ProxmoxUsername})
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking if username already exists: %v", err))
+	}
+	if matchingUsers > 0 {
+		return JSONError(e, http.StatusBadRequest, "User with that proxmox username already exists")
+	}
+
+	if userExistsOnHostSystem(req.ProxmoxUsername) {
+		return JSONError(e, http.StatusBadRequest, "User with that name already exists on the host system")
+	}
+
+	if poolExists(req.UserID) {
+		return JSONError(e, http.StatusBadRequest, fmt.Sprintf("Pool with the name %s already exists", req.UserID))
+	}
+
+	userCollection, err := app.FindCollectionByNameOrId("users")
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding user collection: %v", err))
+	}
+	userRecord := core.NewRecord(userCollection)
+	user := &models.User{}
+	user.SetProxyRecord(userRecord)
+	user.SetName(req.Name)
+	user.SetUserId(req.UserID)
+	user.SetEmail(req.Email)
+	user.SetPassword(req.Password)
+	user.SetIsAdmin(req.IsAdmin)
+	user.SetProxmoxUsername(req.ProxmoxUsername)
+	user.SetProxmoxRealm("pam")
+	encryptedPassword, err := EncryptStringForDatabase(req.Password)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error encrypting password: %v", err))
+	}
+	user.SetProxmoxPassword(encryptedPassword)
+
+	app.RunInTransaction(func(txApp core.App) error {
+		wasError := false
+		defer func() {
+			if wasError {
+				removeUserFromHostSystem(user.ProxmoxUsername())
+				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
+				removePool(user.UserId())
+				defaultRangeRecord, findErr := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
+				if findErr == nil && defaultRangeRecord != nil {
+					txApp.Delete(defaultRangeRecord)
+				}
+				txApp.Delete(user)
+			}
+		}()
+
+		_, err := provisionNewUser(txApp, user, req.Password)
+		if err != nil {
+			wasError = true
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error provisioning user: %v", err))
+		}
+
+		response := dto.ProvisionOAuth2UserResponse{
+			RecordID: user.Record.Id,
 		}
 		return e.JSON(http.StatusCreated, response)
 	})

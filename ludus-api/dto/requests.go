@@ -77,6 +77,14 @@ type KmsLicenseRequest struct {
 type PasswordResetRequest struct {
 	UserID string `json:"userID,omitempty"`
 }
+type ProvisionOAuth2UserRequest struct {
+	Name            string `json:"name"`
+	Email           string `json:"email"`
+	UserID          string `json:"userID"`
+	Password        string `json:"password"`
+	ProxmoxUsername string `json:"proxmoxUsername"`
+	IsAdmin         bool   `json:"isAdmin"`
+}
 type PostCredentialsRequest struct {
 	ProxmoxPassword string `json:"proxmoxPassword,omitempty"`
 	UserID          string `json:"userID,omitempty"`

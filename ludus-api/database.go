@@ -1,19 +1,28 @@
 package ludusapi
 
 import (
+	"bytes"
+	"crypto/tls"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
+	"unicode"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/security"
 	"gopkg.in/yaml.v2"
 
+	"ludusapi/dto"
 	_ "ludusapi/migrations"
 	"ludusapi/models"
 )
@@ -421,4 +430,150 @@ func findNextAvailableUserNumber(txApp core.App) int {
 			return i
 		}
 	}
+}
+
+func generateUserIDFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEvent) string {
+	// Prefer Name, then Username from OAuth2 response
+	source := strings.TrimSpace(e.OAuth2User.Name)
+	if source == "" {
+		source = strings.TrimSpace(e.OAuth2User.Username)
+	}
+
+	var base string
+	if source != "" {
+		words := strings.Fields(source)
+		if len(words) >= 2 {
+			// First initial + last initial, capitalized
+			first := string(unicode.ToUpper(rune(words[0][0])))
+			last := string(unicode.ToUpper(rune(words[len(words)-1][0])))
+			base = first + last
+		} else if len(words) == 1 {
+			// Single name: first two letters uppercase
+			word := words[0]
+			if len(word) >= 2 {
+				base = strings.ToUpper(word[:2])
+			} else {
+				base = strings.ToUpper(word) + strings.ToUpper(security.RandomString(2))
+			}
+		}
+	}
+	if base == "" {
+		// No username or name: random 3 uppercase characters
+		base = strings.ToUpper(security.RandomString(3))
+	}
+
+	userIDInUse := func(candidate string) bool {
+		existing, err := e.App.FindFirstRecordByData("users", "userID", candidate)
+		if err != nil && err != sql.ErrNoRows {
+			return true // treat errors as in-use to avoid overwriting
+		}
+		return existing != nil
+	}
+
+	candidate := base
+	for n := 2; ; n++ {
+		if !userIDInUse(candidate) && !slices.Contains(reservedInitialAdminUserIDs, candidate) {
+			return candidate
+		}
+		candidate = base + strconv.Itoa(n)
+	}
+}
+
+func populateUserFieldsFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEvent) error {
+	if e.Record != nil {
+		return e.Next()
+	}
+
+	name := strings.TrimSpace(e.OAuth2User.Name)
+	if name == "" {
+		name = strings.TrimSpace(e.OAuth2User.Username)
+	}
+	if name == "" {
+		name = "OAuth2 User"
+	}
+
+	email := e.OAuth2User.Email
+	if email == "" {
+		return fmt.Errorf("OAuth2 provider did not return an email address")
+	}
+
+	userID := generateUserIDFromOAuth2Provider(e)
+	password := security.RandomString(15)
+	proxmoxUsername := strings.ReplaceAll(strings.ToLower(name), " ", "-")
+
+	matchingUsers, err := e.App.CountRecords("users", dbx.HashExp{"proxmoxUsername": proxmoxUsername})
+	if err != nil {
+		return fmt.Errorf("checking if proxmox username exists: %w", err)
+	}
+	if matchingUsers > 0 {
+		return fmt.Errorf("user with proxmox username %s already exists", proxmoxUsername)
+	}
+	if userExistsOnHostSystem(proxmoxUsername) {
+		return fmt.Errorf("username %s already exists on the host system", proxmoxUsername)
+	}
+	if poolExists(userID) {
+		return fmt.Errorf("pool %s already exists", userID)
+	}
+
+	// Running as non-root: proxy the provisioning request to the root API
+	isAdmin := false
+	tokenPayload := fmt.Sprintf("%s|%s|%d", userID, strconv.FormatBool(isAdmin), time.Now().Unix())
+	encryptedToken, err := EncryptStringForDatabase(tokenPayload)
+	if err != nil {
+		return fmt.Errorf("encrypting internal token: %w", err)
+	}
+
+	reqBody := dto.ProvisionOAuth2UserRequest{
+		Name:            name,
+		Email:           email,
+		UserID:          userID,
+		Password:        password,
+		ProxmoxUsername: proxmoxUsername,
+		IsAdmin:         isAdmin,
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshalling provision request: %w", err)
+	}
+
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+	httpReq, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:8081/api/v2/user/provision-oauth2", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("creating provision request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Internal-Token", encryptedToken)
+
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("calling admin API for provisioning: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("reading provision response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("admin API returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var provResp dto.ProvisionOAuth2UserResponse
+	if err := json.Unmarshal(respBody, &provResp); err != nil {
+		return fmt.Errorf("parsing provision response: %w", err)
+	}
+
+	record, err := e.App.FindRecordById("users", provResp.RecordID)
+	if err != nil {
+		return fmt.Errorf("loading provisioned user record: %w", err)
+	}
+	e.Record = record
+
+	logger.Debug(fmt.Sprintf("Successfully provisioned OAuth2 user %s (%s)", userID, proxmoxUsername))
+	return e.Next()
 }

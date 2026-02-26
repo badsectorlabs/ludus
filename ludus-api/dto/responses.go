@@ -372,6 +372,9 @@ type ListUserResponseItem struct {
 	IsAdmin         bool      `json:"isAdmin"`
 	ProxmoxUsername string    `json:"proxmoxUsername,omitempty"`
 }
+type ProvisionOAuth2UserResponse struct {
+	RecordID string `json:"recordID"`
+}
 type PostCredentialsResponse struct {
 	Result string `json:"result,omitempty"`
 }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"ludusapi/models"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -182,11 +183,25 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 
 }
 
+// auth is only bypassed when all three conditions are met: exact path match, root process, localhost origin. Every other request on the admin API still requires authentication.
+func isInternalProvisionRequest(e *core.RequestEvent) bool {
+	if e.Request.URL.Path != APIBasePath+"/user/provision-oauth2" || os.Geteuid() != 0 {
+		return false
+	}
+	host, _, err := net.SplitHostPort(e.Request.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	return host == "127.0.0.1" || host == "::1"
+}
+
+// Check auth for all endpoints in our base path except the console view endpoint and the internal provision request
+// /vm/console/view is used for a WebSocket connection and requires a valid ticket
+// The JS websocket library doesn't support custom headers, so we exempt it from the auth check
 func requireAuth(e *core.RequestEvent) error {
-	// Check auth for all endpoints in our base path except the console view endpoint
-	// /vm/console/view is used for a WebSocket connection and requires a valid ticket
-	// The JS websocket library doesn't support custom headers, so we exempt it from the auth check
-	if e.Auth == nil && strings.HasPrefix(e.Request.URL.Path, APIBasePath) && !strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/vm/console/view") {
+	if e.Auth == nil && strings.HasPrefix(e.Request.URL.Path, APIBasePath) &&
+		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/vm/console/view") &&
+		!isInternalProvisionRequest(e) {
 		return JSONError(e, http.StatusUnauthorized, "Authentication failed. Provide a valid API key in the X-API-KEY header or a valid JWT token in the Authorization header.")
 	}
 	return e.Next()
