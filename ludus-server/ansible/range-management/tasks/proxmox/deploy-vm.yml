@@ -91,7 +91,7 @@
     balloon: "{{ ((balloon_size | default('0') | float) * 1024) | int }}" # Default to no balloon
     ide: {} # remove install CD
     tablet: "{{ use_tablet_pointer | default('false') }}" # Set this to 'true' for windows and macOS VMs
-    memory: "{{ (ram | default('8') | int) * 1024 }}"
+    memory: "{{ ((ram | default('8') | float) * 1024) | int }}"
     cores: "{{ cpu_cores | default('4') }}" # how how many host threads each socket should be allocated
     vcpus: "{{ num_vcpus | default('4') }}" # how many virtual CPUs are presented to the VM
     update: true
