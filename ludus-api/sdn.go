@@ -548,14 +548,16 @@ func routeForRangeNetworkInVNetAction(rangeNumber int, present bool) error {
 	if !FileExists(sdnRoutesFile) {
 		touch(sdnRoutesFile)
 		os.Chmod(sdnRoutesFile, 0755)
+		// The file must start with a shebang or it will throw an `exec format error`
+		os.WriteFile(sdnRoutesFile, []byte("#!/bin/sh\n"), 0755)
 	}
 
 	block := fmt.Sprintf(`
-	if [ "$IFACE" = "r%d" ]; then
-		ip route add 10.%d.0.0/16 via 192.0.2.%d dev %s
-	fi
+if [ "$IFACE" = "r%d" ]; then
+	ip route add 10.%d.0.0/16 via 192.0.2.%d dev %s
+fi
 	`, rangeNumber, rangeNumber, 100+rangeNumber, NATVNetName)
-	_, err := applyBlockInFileAtPath(sdnRoutesFile, fmt.Sprintf("# LUDUS MANAGED BLOCK FOR RANGE %d", rangeNumber), block, present)
+	_, err := applyBlockInFileAtPath(sdnRoutesFile, fmt.Sprintf("# LUDUS MANAGED BLOCK FOR RANGE %d {mark}", rangeNumber), block, present)
 	if err != nil {
 		return fmt.Errorf("failed to apply block in file: %w", err)
 	}
