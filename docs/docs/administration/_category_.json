@@ -1,0 +1,9 @@
+{
+    "label": "👨‍💻 Administration",
+    "position": 7,
+    "link": {
+        "type": "generated-index",
+        "description": "Admin-only: access, security, and SSO",
+        "slug": "category/administration"
+    }
+}

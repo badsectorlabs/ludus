@@ -43,6 +43,35 @@ const config = {
 
   themes: ["docusaurus-json-schema-plugin", "@docusaurus/theme-mermaid"],
 
+  plugins: [
+    [
+      '@docusaurus/plugin-client-redirects',
+      {
+        redirects: [
+          // Legacy root doc URLs -> current version (Ludus 2) paths under /docs/next/
+          { from: '/docs/cli', to: '/docs/next/using-ludus/cli' },
+          { from: '/docs/blueprints', to: '/docs/next/using-ludus/blueprints' },
+          { from: '/docs/templates', to: '/docs/next/using-ludus/templates' },
+          { from: '/docs/snapshots', to: '/docs/next/using-ludus/snapshots' },
+          { from: '/docs/roles', to: '/docs/next/using-ludus/roles' },
+          { from: '/docs/tags', to: '/docs/next/using-ludus/tags' },
+          { from: '/docs/sharing', to: '/docs/next/using-ludus/sharing' },
+          { from: '/docs/file-share', to: '/docs/next/using-ludus/file-share' },
+          { from: '/docs/passwords', to: '/docs/next/using-ludus/passwords' },
+          { from: '/docs/cluster', to: '/docs/next/infrastructure-operations/cluster' },
+          { from: '/docs/storage', to: '/docs/next/infrastructure-operations/storage' },
+          { from: '/docs/networking', to: '/docs/next/infrastructure-operations/networking' },
+          { from: '/docs/DNS', to: '/docs/next/infrastructure-operations/DNS' },
+          { from: '/docs/nexus-cache', to: '/docs/next/infrastructure-operations/nexus-cache' },
+          { from: '/docs/updating', to: '/docs/next/infrastructure-operations/updating' },
+          { from: '/docs/admin', to: '/docs/next/administration/admin' },
+          { from: '/docs/security', to: '/docs/next/administration/security' },
+          { from: '/docs/sso', to: '/docs/next/administration/sso' },
+        ],
+      },
+    ],
+  ],
+
   presets: [
     [
       'classic',

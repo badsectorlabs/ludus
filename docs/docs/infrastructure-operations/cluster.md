@@ -1,5 +1,5 @@
 ---
-sidebar_position: 6
+sidebar_position: 1
 title: "🏘️ Cluster Support"
 ---
 
@@ -22,6 +22,12 @@ Ludus can't automatically create a working VXLAN SDN Zone for your cluster. Do t
 - **SDN zone**: In cluster mode, Ludus does not create the SDN zone. **You must create a VXLAN-type zone in Proxmox (Datacenter → SDN) and set the VXLAN peer IPs so that range traffic can cross nodes**. The zone name must match `sdn_zone` (default `ludus`).
 - **VNets**: Ludus creates one VNet per range (e.g. `r1`, `r2`) and a NAT VNet (`ludusnat`) in that zone. Range VNets are VLAN-aware and use the VXLAN tag derived from `vxlan_tag_base` and the range number. Note that Ludus will create the `ludusnat` zone with VXLAN tag `16777215`. You can change this value after the `ludusnat` VNet is created in Proxmox (Datacenter → SDN → VNets → ludusnat → Edit → Tag).
 - **Shared Storage**: In order for templates to be cloned across the cluster, all nodes must have access to shared storage and that storage must be set as `proxmox_vm_storage_pool` in `/opt/ludus/config.yml`. Ludus will build all the templates on the node set as `proxmox_node` in the config.
+
+## Create a VXLAN Zone
+
+![creating a VXLAN Zone](/img/cluster/create-vxlan.png)
+
+For `ID` use `ludus` unless you have changed the value of `sdn_zone` in `/opt/ludus/config.yml`.
 
 ## Range configuration: node placement
 
@@ -94,3 +100,42 @@ sdn_zone: ludus
 # Base VXLAN tag; range 1 gets tag 1, range 2 gets tag 2, etc.
 vxlan_tag_base: 0
 ```
+
+## Migrating an existing install on a cluster to cluster mode
+
+To migrate an existing Ludus install on a node in a cluster to cluster mode, do the following:
+
+1. Create the `ludus` VXLAN zone in Proxmox (see image above)
+2. Edit the `/opt/ludus/config.yml` and add the following values:
+
+```yaml
+cluster_mode: true
+sdn_zone: ludus
+vxlan_tag_base: 0
+```
+
+3. Restart the ludus services with `systemctl restart ludus ludus-admin`
+4. Edit `/etc/network/interfaces` on the host running Ludus. Remove the `vmbr1000` interface block and replace it with the below
+
+```
+iface ludusnat
+    address 192.0.2.254
+    netmask 255.255.255.0
+    post-up echo 1 > /proc/sys/net/ipv4/ip_forward
+    post-up   iptables -t nat -A POSTROUTING -s '192.0.2.254/24' -o <YOUR INTERFACE WITH INTERNET ACCESS> -j MASQUERADE
+    post-down iptables -t nat -D POSTROUTING -s '192.0.2.254/24' -o <YOUR INTERFACE WITH INTERNET ACCESS> -j MASQUERADE
+```
+
+5. Run `ifup ludusnat` to bring up the interface
+6. Edit `/etc/dnsmasq.d/dnsmasq-<interface>.conf` and change `interface=vmbr1000` to `interface=ludusnat`
+7. Run `systemctl restart dnsmasq`
+8. Run `ifdown vmbr1000`
+9. Run `ludus migrate sdn run`
+10. Manually edit the Hardware tab of any existing range routers and change the first network interface from `vmbr1000` to `ludusnat`
+11. Check the routing table with `ip route show` and make sure all `10.x.0.0/16` routes end in `dev ludusnat`. If not remove them and re-add them
+
+```
+ip route del 10.1.0.0/16 via 192.0.2.101 dev vmbr1000
+ip route add 10.1.0.0/16 via 192.0.2.101 dev ludusnat
+```
+

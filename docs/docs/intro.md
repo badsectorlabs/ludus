@@ -19,7 +19,7 @@ Ludus is a system to build easy to use cyber environments, or "ranges" for testi
 
 Built on [Proxmox](https://www.proxmox.com/en/), Ludus enables advanced automation while still allowing easy manual modifications or setup of virtual machines and networks.
 
-Ludus is implemented as a server that runs [Packer](https://www.packer.io/) and [Ansible](https://www.ansible.com/) to create templates and deploy complex cyber environments from a single configuration file. Ludus is accessed via the [Ludus CLI](./cli) (client) or the Proxmox web interface. Normal users should not need to access Ludus via SSH.
+Ludus is implemented as a server that runs [Packer](https://www.packer.io/) and [Ansible](https://www.ansible.com/) to create templates and deploy complex cyber environments from a single configuration file. Ludus is accessed via the [Ludus CLI](./using-ludus/cli) (client) or the Proxmox web interface. Normal users should not need to access Ludus via SSH.
 
 As a user, you can *always* make manual changes or set up manual environments via Proxmox instead of/in addition to Ludus managed VMs/networks.
 Ludus is an automation overlay on top of Proxmox, not a 100% replacement for manual configuration - just most of the common setup tasks!
@@ -50,4 +50,4 @@ If you are a Ludus user and your Ludus server has already been installed, gettin
 2. Download or compile the Ludus client
 3. Import and connect the WireGuard VPN
 4. Run `ludus apikey` and give it your API key
-5. Use the **[Ludus CLI](./cli.md)** to manage your range!
+5. Use the **[Ludus CLI](./using-ludus/cli)** to manage your range!

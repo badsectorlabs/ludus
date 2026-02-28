@@ -1,5 +1,5 @@
 ---
-sidebar_position: 14
+sidebar_position: 6
 title: "🆙 Updating"
 ---
 
@@ -10,7 +10,7 @@ import TabItem from '@theme/TabItem';
 
 :::tip[Don't trust the binaries?]
 
-    Ludus binaries are built in CI, but you can always [build them from source](./developers/building-from-source.md) yourself.
+    Ludus binaries are built in CI, but you can always [build them from source](../developers/building-from-source) yourself.
 
 :::
 
