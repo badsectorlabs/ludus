@@ -1,5 +1,5 @@
 ---
-sidebar_position: 11
+sidebar_position: 8
 title: "📂 File Share"
 ---
 
@@ -38,7 +38,7 @@ On the file share server, the shares are at `/srv/samba/readonlyshare` and `/srv
 
 Windows won't allow anonymous share access by default. To allow anonymous access to the shares you can do either of the following:
 
-1. Add the `anon_share_access` GPO to the primary domain controller of the range (if the Windows machines are in the domain). See [Configuration](./configuration.mdx) for more information.
+1. Add the `anon_share_access` GPO to the primary domain controller of the range (if the Windows machines are in the domain). See [Configuration](../configuration) for more information.
 2. Run `ludus range deploy -t allow-share-access` which will run the following commands on each Windows VM:
 
 ```

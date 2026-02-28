@@ -13,9 +13,9 @@ Ansible roles should follow the [standard structure](https://docs.ansible.com/an
 Use the [ludus role template](https://github.com/badsectorlabs/ludus_ansible_role_template) to quickly get started.
 :::
 
-Example roles can be found in the table on the [roles page](../roles)
+Example roles can be found in the table on the [roles page](../using-ludus/roles)
 
-If you've build a cool role you'd like to share with us, let us know [via email](mailto:info@badsectorlabs.com), ping us on X ([@badsectorlabs](https://twitter.com/badsectorlabs)), or in our [Discord](https://discord.gg/HryzhdUSYT) server and submit a pull request to have it added to the [roles page](../roles).
+If you've build a cool role you'd like to share with us, let us know [via email](mailto:info@badsectorlabs.com), ping us on X ([@badsectorlabs](https://twitter.com/badsectorlabs)), or in our [Discord](https://discord.gg/HryzhdUSYT) server and submit a pull request to have it added to the [roles page](../using-ludus/roles).
 
 ## Testing roles
 

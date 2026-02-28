@@ -1,5 +1,5 @@
 ---
-sidebar_position: 8
+sidebar_position: 5
 title: "🎭 Roles"
 ---
 
@@ -7,7 +7,7 @@ title: "🎭 Roles"
 
 :::tip
 
-Looking to create your own roles? Check out the [role developer](./developers/ansible-roles.md) page!
+Looking to create your own roles? Check out the [role developer](../developers/ansible-roles) page!
 
 :::
 
@@ -67,13 +67,13 @@ While most existing ansible roles will work with Ludus, this page contains a tab
 
 | Role | Description | Author | Notes |
 | ---- | ----------- | ------ | ----- |
-| [badsectorlabs.ludus_vulhub](https://github.com/badsectorlabs/ludus_vulhub) | Runs [Vulhub](https://vulhub.org/) environments on a Linux system. | Bad Sector Labs | See [the env guide](./environment-guides/vulhub.md) |
-| [badsectorlabs.ludus_adcs](https://github.com/badsectorlabs/ludus_adcs) | Installs ADCS on Windows Server and optionally configures Certified Preowned templates. | Bad Sector Labs | See [the env guide](./environment-guides/adcs.md) |
+| [badsectorlabs.ludus_vulhub](https://github.com/badsectorlabs/ludus_vulhub) | Runs [Vulhub](https://vulhub.org/) environments on a Linux system. | Bad Sector Labs | See [the env guide](../environment-guides/vulhub) |
+| [badsectorlabs.ludus_adcs](https://github.com/badsectorlabs/ludus_adcs) | Installs ADCS on Windows Server and optionally configures Certified Preowned templates. | Bad Sector Labs | See [the env guide](../environment-guides/adcs) |
 | [badsectorlabs.ludus_bloodhound_ce](https://github.com/badsectorlabs/ludus_bloodhound_ce) | Installs Bloodhound CE on a Debian based system. | Bad Sector Labs ||
 | [badsectorlabs.ludus_mssql](https://github.com/badsectorlabs/ludus_mssql) | Installs MSSQL on Windows systems. | Bad Sector Labs ||
-| [badsectorlabs.ludus_elastic_container](https://github.com/badsectorlabs/ludus_elastic_container) | Installs "The Elastic Container Project" on a Linux system. | Bad Sector Labs | See [the env guide](./environment-guides/elastic.md) |
-| [badsectorlabs.ludus_elastic_agent](https://github.com/badsectorlabs/ludus_elastic_agent) | Installs an Elastic Agent on a Windows, Debian, or Ubuntu system | Bad Sector Labs | See [the env guide](./environment-guides/elastic.md) |
-| [badsectorlabs.ludus_xz_backdoor](https://github.com/badsectorlabs/ludus_xz_backdoor) | Installs the xz backdoor (CVE-2024-3094) on a Debian host and optionally installs the xzbot tool. | Bad Sector Labs | See [the env guide](./environment-guides/malware-lab.md) |
+| [badsectorlabs.ludus_elastic_container](https://github.com/badsectorlabs/ludus_elastic_container) | Installs "The Elastic Container Project" on a Linux system. | Bad Sector Labs | See [the env guide](../environment-guides/elastic) |
+| [badsectorlabs.ludus_elastic_agent](https://github.com/badsectorlabs/ludus_elastic_agent) | Installs an Elastic Agent on a Windows, Debian, or Ubuntu system | Bad Sector Labs | See [the env guide](../environment-guides/elastic) |
+| [badsectorlabs.ludus_xz_backdoor](https://github.com/badsectorlabs/ludus_xz_backdoor) | Installs the xz backdoor (CVE-2024-3094) on a Debian host and optionally installs the xzbot tool. | Bad Sector Labs | See [the env guide](../environment-guides/malware-lab) |
 | [badsectorlabs.ludus_commandovm](https://github.com/badsectorlabs/ludus_commandovm) | Sets up Commando VM on Windows >= 10 hosts | Bad Sector Labs | Available as a [template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates/commando-vm?ref_type=heads) |
 | [badsectorlabs.ludus_flarevm](https://github.com/badsectorlabs/ludus_flarevm) | Installs Flare VM on Windows >= 10 hosts | Bad Sector Labs | Available as a [template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates/flare-vm?ref_type=heads) |
 | [badsectorlabs.ludus_remnux](https://github.com/badsectorlabs/ludus_remnux) | Installs REMnux on Ubuntu 20.04 systems | Bad Sector Labs | Available as a [template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates/remnux?ref_type=heads) |

@@ -1,5 +1,5 @@
 ---
-sidebar_position: 13
+sidebar_position: 6
 title: "🏷️ Deploy Tags"
 ---
 
@@ -27,7 +27,7 @@ This is useful after an initial deployment to skip steps that are not needed on 
 | install-office | Install Microsoft Office on Windows VMs |
 | install-visual-studio | Install Visual Studio on Windows VMs |
 | network | Setup all VLANs and network rules on the router, including any firewall rules, inbound, and outbound WireGuard. Does **not** setup DNS rewrites (use `dns-rewrites` for that) |
-| nexus | Deploy [Nexus cache](./nexus-cache.md) VM |
+| nexus | Deploy [Nexus cache](../infrastructure-operations/nexus-cache) VM |
 | share | Deploy Ludus Share VM - exposes `readonlyshare` and `readwriteshare`. Consider using the `anaon_share_access` gpo to allow anonymous access to SMB shares on all Windows VMs |
 | sysprep | Run Sysprep on Windows VMs with a sysprep key set to `true` |
 | user-defined-roles | Apply all user defined roles to VMs |

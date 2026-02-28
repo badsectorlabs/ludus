@@ -1,5 +1,5 @@
 ---
-sidebar_position: 6
+sidebar_position: 3
 title: "🌐 Networking"
 ---
 
@@ -30,15 +30,15 @@ Ludus user routers are assigned a static IP in this network where their range nu
 
 | IP | Description |
 | --- | --- |
-| 192.0.2.1 | [KMS server](./enterprise/kms.md) |
-| 192.0.2.2 | [Nexus cache server](./nexus-cache.md) |
-| 192.0.2.3 | [File share server](./file-share.md) |
+| 192.0.2.1 | [KMS server](../enterprise/kms) |
+| 192.0.2.2 | [Nexus cache server](./nexus-cache) |
+| 192.0.2.3 | [File share server](../using-ludus/file-share) |
 
 The remaining 49 IPs in the `.1 - .50` range are reserved for future use.
 
 ### CI/CD Network (ludusci)
 
-If the Ludus admin has set up [CI/CD](./developers/cicd.md), the CI/CD network is `203.0.113.0/24` on interface `ludusci`. This network is necessary because the CI/CD Ludus VMs will themselves set up a `vmbr1000` with a range of `192.0.2.0/24` which would conflict with the "public" IP of the CI/CD Ludus VM if it was in the host's `vmbr1000` (a DHCP'd `192.0.2.50-100` IP).
+If the Ludus admin has set up [CI/CD](../developers/cicd), the CI/CD network is `203.0.113.0/24` on interface `ludusci`. This network is necessary because the CI/CD Ludus VMs will themselves set up a `vmbr1000` with a range of `192.0.2.0/24` which would conflict with the "public" IP of the CI/CD Ludus VM if it was in the host's `vmbr1000` (a DHCP'd `192.0.2.50-100` IP).
 
 ## User Networks
 
@@ -174,7 +174,7 @@ network:
       action: REJECT
 ```
 
-See more details about the range config schema (which includes the network object) [here](./configuration.mdx).
+See more details about the range config schema (which includes the network object) [here](../configuration).
 
 ## Testing Mode
 
@@ -186,7 +186,7 @@ This is a "deny by default" policy, and prevents accidental traffic from leaving
 
 !['iptables diagram'](/img/network/iptables.png)
 
-For the default [basic AD network](./environment-guides/basic-ad-network), when not in testing mode the iptables filter table has the following rules.
+For the default [basic AD network](../environment-guides/basic-ad-network), when not in testing mode the iptables filter table has the following rules.
 
 !['iptables not in testing'](/img/network/iptables-screenshot-not-testing.png)
 
