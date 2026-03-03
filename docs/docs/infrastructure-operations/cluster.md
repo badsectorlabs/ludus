@@ -59,8 +59,11 @@ ludus:
     cpus: 4
     # This VM is pinned to pve2
     target_node: pve2
-    windows: {}
-    domain: { fqdn: ludus.network, role: primary-dc }
+    windows:
+      sysprep: false
+    domain:
+      fqdn: ludus.network
+      role: primary-dc
 
   - vm_name: "{{ range_id }}-workstation-1"
     hostname: "{{ range_id }}-WIN11-1"
@@ -70,8 +73,11 @@ ludus:
     ram_gb: 8
     cpus: 4
     # No target_node: uses range default (pve1)
-    windows: {}
-    domain: { fqdn: ludus.network, role: member }
+    windows:
+      sysprep: false
+    domain:
+      fqdn: ludus.network
+      role: member
 ```
 
 You can also set `target_node` for the `router` key.
@@ -131,8 +137,7 @@ iface ludusnat
 7. Run `systemctl restart dnsmasq`
 8. Run `ifdown vmbr1000`
 9. Run `ludus migrate sdn run`
-10. Manually edit the Hardware tab of any existing range routers and change the first network interface from `vmbr1000` to `ludusnat`
-11. Check the routing table with `ip route show` and make sure all `10.x.0.0/16` routes end in `dev ludusnat`. If not remove them and re-add them
+10. Check the routing table with `ip route show` and make sure all `10.x.0.0/16` routes end in `dev ludusnat`. If not remove them and re-add them
 
 ```
 ip route del 10.1.0.0/16 via 192.0.2.101 dev vmbr1000
