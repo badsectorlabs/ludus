@@ -23,7 +23,7 @@ func genericPowerCmd(value string) *cobra.Command {
 
 	return &cobra.Command{
 		Use:   value,
-		Short: fmt.Sprintf("Power %s range VMs (all, comma separated list, or specific VM name)", value),
+		Short: fmt.Sprintf("Power %s all range VMs", value),
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
@@ -45,11 +45,7 @@ func genericPowerCmd(value string) *cobra.Command {
 
 			var responseJSON []byte
 			var success bool
-			if userID != "" {
-				responseJSON, success = rest.GenericJSONPut(client, fmt.Sprintf("/range/power%s?userID=%s", value, userID), string(payload))
-			} else {
-				responseJSON, success = rest.GenericJSONPut(client, "/range/power"+value, string(payload))
-			}
+			responseJSON, success = rest.GenericJSONPut(client, buildURLWithRangeAndUserID(fmt.Sprintf("/range/power%s", value)), string(payload))
 			if didFailOrWantJSON(success, responseJSON) {
 				return
 			}

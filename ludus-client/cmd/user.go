@@ -1,25 +1,101 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"ludus/logger"
 	"ludus/rest"
 	"os"
 	"strconv"
 	"strings"
 
+	"ludusapi/dto"
+
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
-	userName             string
-	newUserID            string
-	userIsAdmin          bool
-	proxmoxPassword      string
-	enablePortforwarding bool
+	userName        string
+	newUserID       string
+	email           string
+	userIsAdmin     bool
+	proxmoxPassword string
+	password        string
+	deleteRange     bool
+	valueOnly       bool
 )
+
+// readPasswordWithAsterisks reads a password from stdin, displaying asterisks for each character typed
+func readPasswordWithAsterisks() (string, error) {
+	fd := int(os.Stdin.Fd())
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return "", err
+	}
+
+	var password strings.Builder
+	reader := bufio.NewReader(os.Stdin)
+	newlinePrinted := false
+
+	// Ensure terminal is restored and newline is printed on exit
+	defer func() {
+		term.Restore(fd, oldState)
+		if !newlinePrinted && password.Len() > 0 {
+			fmt.Println()
+		}
+	}()
+
+	for {
+		char, err := reader.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				// EOF reached - will be handled by defer
+				break
+			}
+			return "", err
+		}
+
+		// Handle Enter/Return (CR or LF)
+		if char == '\r' || char == '\n' {
+			// Restore terminal state before printing newline
+			term.Restore(fd, oldState)
+			fmt.Println()
+			newlinePrinted = true
+			break
+		}
+
+		// Handle backspace/delete
+		if char == 127 || char == 8 { // DEL or BS
+			if password.Len() > 0 {
+				// Remove last character from password
+				currentPassword := password.String()
+				password.Reset()
+				password.WriteString(currentPassword[:len(currentPassword)-1])
+				// Move cursor back, print space, move cursor back again
+				fmt.Print("\b \b")
+			}
+			continue
+		}
+
+		// Handle Ctrl+C
+		if char == 3 {
+			term.Restore(fd, oldState)
+			fmt.Println() // Print newline even on interrupt
+			newlinePrinted = true
+			return "", fmt.Errorf("interrupted")
+		}
+
+		// Regular character - add to password and print asterisk
+		password.WriteByte(char)
+		fmt.Print("*")
+	}
+
+	return password.String(), nil
+}
 
 // usersCmd represents the users command
 var usersCmd = &cobra.Command{
@@ -99,24 +175,13 @@ var usersCredsGetsCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/user/credentials?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/user/credentials")
-		}
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/credentials"))
 		if !success {
 			return
 		}
 
-		type Data struct {
-			Result struct {
-				ProxmoxPassword string `json:"proxmoxPassword"`
-				ProxmoxUsername string `json:"proxmoxUsername"`
-			} `json:"result"`
-		}
-
 		// Unmarshal JSON data
-		var data Data
+		var data dto.GetCredentialsResponse
 		err := json.Unmarshal([]byte(responseJSON), &data)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
@@ -129,10 +194,12 @@ var usersCredsGetsCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Proxmox Username", "Proxmox Password"})
+		table.SetHeader([]string{"Ludus Email", "Proxmox Username", "Proxmox Realm", "Proxmox/Ludus Password"})
 
 		// Add data to table
-		table.Append([]string{data.Result.ProxmoxUsername,
+		table.Append([]string{data.Result.LudusEmail,
+			data.Result.ProxmoxUsername,
+			data.Result.ProxmoxRealm,
 			data.Result.ProxmoxPassword,
 		})
 
@@ -169,33 +236,21 @@ Do you want to continue? (y/N): `, userID)
 
 		var responseJSON []byte
 		var success bool
-		responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/user/apikey?userID=%s", userID))
-		if !success {
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/apikey"))
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
-		type Data struct {
-			Result struct {
-				ApiKey          string `json:"apiKey"`
-				DateCreated     string `json:"dateCreated"`
-				DateLastActive  string `json:"dateLastActive"`
-				HashedAPIKey    string `json:"hashedAPIKey"`
-				IsAdmin         bool   `json:"isAdmin"`
-				Name            string `json:"name"`
-				ProxmoxUsername string `json:"proxmoxUsername"`
-				UserID          string `json:"userID"`
-			} `json:"result"`
-		}
-
 		// Unmarshal JSON data
-		var data Data
+		var data dto.GetAPIKeyResponse
 		err := json.Unmarshal([]byte(responseJSON), &data)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
 		}
 
-		if jsonFormat {
-			fmt.Printf("%s\n", responseJSON)
+		// If valueOnly flag is set, print just the API key
+		if valueOnly {
+			fmt.Println(data.Result.ApiKey)
 			return
 		}
 
@@ -216,6 +271,7 @@ Do you want to continue? (y/N): `, userID)
 
 func setupAPIKeyCmd(command *cobra.Command) {
 	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
+	command.Flags().BoolVar(&valueOnly, "value", false, "output only the API key value without table formatting")
 }
 
 var usersWireguardCmd = &cobra.Command{
@@ -228,23 +284,13 @@ var usersWireguardCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/user/wireguard?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/user/wireguard")
-		}
-		if !success {
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/wireguard"))
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
-		type Data struct {
-			Result struct {
-				WireGuardConfig string `json:"wireGuardConfig"`
-			} `json:"result"`
-		}
-
 		// Unmarshal JSON data
-		var data Data
+		var data dto.GetWireguardConfigResponse
 		err := json.Unmarshal([]byte(responseJSON), &data)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
@@ -266,34 +312,38 @@ var usersAddCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
+		// If no password provided via -p flag, prompt for it
+		if password == "" {
+			fmt.Print("Enter password for the user (leave empty to generate a random password): ")
+			passwordInput, err := readPasswordWithAsterisks()
+			if err != nil {
+				logger.Logger.Fatal("Failed to read password: " + err.Error())
+			}
+			password = passwordInput
+		}
+
+		// Check that the password is at least 8 characters long if it is not blank
+		if password != "" && len(password) < 8 {
+			logger.Logger.Fatal("Password must be at least 8 characters long")
+		}
+
 		logger.Logger.Info("Adding user to Ludus, this can take up to a minute. Please wait.")
 
-		requestBody := fmt.Sprintf(`{
-			"name": "%s",
-			"userID": "%s",
-			"isAdmin": %s,
-			"portforwardingEnabled": %s
-		  }`, userName, newUserID, strconv.FormatBool(userIsAdmin), strconv.FormatBool(enablePortforwarding))
-		responseJSON, success = rest.GenericJSONPost(client, "/user", requestBody)
+		requestBody := &dto.AddUserRequest{
+			Name:     userName,
+			Password: password,
+			Email:    email,
+			UserID:   newUserID,
+			IsAdmin:  userIsAdmin,
+		}
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/user"), requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
-		type Data struct {
-			Result struct {
-				ApiKey          string `json:"apiKey"`
-				DateCreated     string `json:"dateCreated"`
-				DateLastActive  string `json:"dateLastActive"`
-				IsAdmin         bool   `json:"isAdmin"`
-				Name            string `json:"name"`
-				ProxmoxUsername string `json:"proxmoxUsername"`
-				UserID          string `json:"userID"`
-			} `json:"result"`
-		}
-
 		// Unmarshal JSON data
-		var data Data
+		var data dto.AddUserResponse
 		err := json.Unmarshal([]byte(responseJSON), &data)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
@@ -302,10 +352,10 @@ var usersAddCmd = &cobra.Command{
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"UserID", "Proxmox Username", "Admin", "API Key"})
 
-		table.Append([]string{data.Result.UserID,
-			data.Result.ProxmoxUsername,
-			strconv.FormatBool(data.Result.IsAdmin),
-			data.Result.ApiKey,
+		table.Append([]string{data.UserID,
+			data.ProxmoxUsername,
+			strconv.FormatBool(data.IsAdmin),
+			data.ApiKey,
 		})
 
 		table.Render()
@@ -317,8 +367,9 @@ func setupUsersAddCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the new user (2-20 chars, typically capitalized initials)")
 	command.Flags().StringVarP(&userName, "name", "n", "", "the name of the user (typically 'first last')")
 	command.Flags().BoolVarP(&userIsAdmin, "admin", "a", false, "set this flag to make the user an admin of Ludus")
-	command.Flags().BoolVarP(&enablePortforwarding, "portforward", "p", false, "set this flag to portfoward UDP port 51000+range_number to the range's router for inbound WireGuard support (Enterprise)")
-
+	command.Flags().StringVarP(&password, "password", "p", "", "the password for the user (must be at least 8 characters long, omit to prompt and generate a random password)")
+	command.Flags().StringVarP(&email, "email", "e", "", "the email for the user")
+	_ = command.MarkFlagRequired("email")
 	_ = command.MarkFlagRequired("userid")
 	_ = command.MarkFlagRequired("name")
 }
@@ -334,8 +385,46 @@ var usersDeleteCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
+		deleteURL := buildURLWithRangeAndUserID(fmt.Sprintf("/user/%s", newUserID))
 
-		responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/user/%s", newUserID))
+		// If --delete-range flag is set, try to get the user's default range and confirm deletion
+		if deleteRange {
+			// Get the default range for the user being deleted, set the userID to the new userID to get the default range for the user being deleted
+			originalUserID := userID
+			userID = newUserID
+			responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/default-range"))
+			userID = originalUserID
+
+			var defaultRangeID string
+			if success {
+				// Unmarshal JSON data
+				var data dto.GetOrPostDefaultRangeIDResponse
+				err := json.Unmarshal([]byte(responseJSON), &data)
+				if err == nil {
+					defaultRangeID = data.DefaultRangeID
+				}
+			}
+
+			// Show warning and ask for confirmation
+			var choice string
+			if defaultRangeID != "" {
+				logger.Logger.Warnf(`
+!!! WARNING: If you continue the range %s and any VMs it contains will be permanently deleted !!!
+
+Do you want to continue? (y/N): `, defaultRangeID)
+			} else {
+				logger.Logger.Fatalf("No default range found for user %s", newUserID)
+			}
+			fmt.Scanln(&choice)
+			if choice != "Y" && choice != "y" {
+				logger.Logger.Fatal("Bailing!")
+			}
+
+			// Add deleteDefaultRange=true to the URL
+			deleteURL = addQueryParameterToURL(deleteURL, "deleteDefaultRange", "true")
+		}
+
+		responseJSON, success = rest.GenericDelete(client, deleteURL)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -346,6 +435,7 @@ var usersDeleteCmd = &cobra.Command{
 
 func setupUsersDeleteCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the user to remove")
+	command.Flags().BoolVar(&deleteRange, "delete-range", false, "also delete the user's default range and any VMs it contains")
 	_ = command.MarkFlagRequired("userid")
 }
 
@@ -357,11 +447,15 @@ var usersCredsSetCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		requestBody := fmt.Sprintf(`{
-			"userID": "%s",
-			"proxmoxPassword": "%s"
-		  }`, newUserID, proxmoxPassword)
-		responseJSON, success := rest.GenericJSONPost(client, "/user/credentials", requestBody)
+		if newUserID == "" {
+			newUserID = strings.Split(apiKey, ".")[0]
+		}
+
+		requestBody := &dto.PostCredentialsRequest{
+			UserID:          newUserID,
+			ProxmoxPassword: proxmoxPassword,
+		}
+		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/user/credentials"), requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -371,7 +465,7 @@ var usersCredsSetCmd = &cobra.Command{
 }
 
 func setupUsersCredsSetCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the user")
+	command.Flags().StringVarP(&newUserID, "userid", "i", "", "the UserID of the user (default: the user ID of the API key)")
 	command.Flags().StringVarP(&proxmoxPassword, "password", "p", "", "the proxmox password of the user")
 
 	_ = command.MarkFlagRequired("password")

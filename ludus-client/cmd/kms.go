@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"ludus/rest"
 
 	"github.com/spf13/cobra"
@@ -43,11 +42,7 @@ var licenseWindowsCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/kms/license?userID=%s", userID), requestBody)
-		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/kms/license", requestBody)
-		}
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/kms/license"), requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return

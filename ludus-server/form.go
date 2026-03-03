@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
+
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/list"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v2"
 
 	ludusapi "ludusapi"
 )
@@ -27,7 +31,22 @@ var (
 	finalConfirm              = false
 	shouldShowAnsibleField    = false
 	shouldShowAdminPortExpose = false
+	initialAdmin              initialAdminConfig
 )
+
+// initialAdminConfig holds the initial admin user details collected during interactive install.
+type initialAdminConfig struct {
+	Name     string `yaml:"name"`
+	Email    string `yaml:"email"`
+	UserID   string `yaml:"userID"`
+	Password string `yaml:"password"`
+}
+
+// reservedUserIDs are not allowed for the initial admin (same as AddUser in ludus-api).
+var reservedUserIDs = []string{"ADMIN", "ROOT", "CICD", "SHARED", "0"}
+
+// initialAdminUserIDRegex matches valid user IDs: ^[A-Za-z0-9]{1,20}$
+var initialAdminUserIDRegex = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
 
 type Styles struct {
 	Base,
@@ -108,7 +127,7 @@ type state int
 const (
 	statusNormal state = iota
 	stateDone
-	numberOfFields = 14 // 13 fields + 1 confirm, update this if you add any new fields
+	numberOfFields = 16 // 11 config + 4 initial admin + 1 confirm, update this if you add any new fields
 )
 
 type Model struct {
@@ -186,7 +205,6 @@ func NewModel() Model {
 				}).
 				Title("What is the public IP of this host").
 				Description("This is used as the WireGuard endpoint").
-				Suggestions([]string{"ludus"}).
 				Value(&config.ProxmoxPublicIP),
 		),
 		// Page 2
@@ -261,18 +279,6 @@ func NewModel() Model {
 				Description("The default is 'local'").
 				Value(&config.ProxmoxISOStoragePool),
 
-			huh.NewInput().
-				Key("ludus_nat_interface").
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("Ludus NAT Interface cannot be empty")
-					}
-					return nil
-				}).
-				Title(fmt.Sprintf("What new interface will be used to NAT out of %s", config.ProxmoxInterface)).
-				Description("Default is 'vmbr1000' - don't change without a reason").
-				Value(&config.LudusNATInterface),
-
 			huh.NewConfirm().
 				Key("prevent_user_ansible_add").
 				Title("Should users be allowed to add ansible roles?").
@@ -283,19 +289,65 @@ func NewModel() Model {
 		),
 
 		huh.NewGroup(
-			huh.NewConfirm().
-				Key("expose_admin_port").
-				Title("Expose the admin API globally?").
-				Description("Default is 'deny' to listen on 127.0.0.1:8081").
-				Affirmative("Allow").
-				Negative("Deny").
-				Value(&config.ExposeAdminPort),
-
 			huh.NewInput().
 				Key("license_key").
 				Title("Do you have a Ludus license key?").
 				Description("Leave 'community' for community edition").
 				Value(&config.LicenseKey),
+		),
+
+		huh.NewGroup(
+			huh.NewInput().
+				Key("initial_admin_name").
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("Initial admin name cannot be empty")
+					}
+					return nil
+				}).
+				Title("Initial admin display name").
+				Description("e.g. John Doe - used for the first admin user").
+				Value(&initialAdmin.Name),
+			huh.NewInput().
+				Key("initial_admin_email").
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("Initial admin email cannot be empty")
+					}
+					return nil
+				}).
+				Title("Initial admin email").
+				Description("Used for web UI login").
+				Value(&initialAdmin.Email),
+			huh.NewInput().
+				Key("initial_admin_userid").
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("User ID cannot be empty")
+					}
+					if !initialAdminUserIDRegex.MatchString(s) {
+						return fmt.Errorf("User ID must match ^[A-Za-z0-9]{1,20}$")
+					}
+					if slices.Contains(reservedUserIDs, strings.ToUpper(s)) {
+						return fmt.Errorf("%s is a reserved user ID", s)
+					}
+					return nil
+				}).
+				Title("Initial admin user ID").
+				Description("Short ID for CLI/API (e.g. JD). Letters and numbers only, 1-20 chars").
+				Value(&initialAdmin.UserID),
+			huh.NewInput().
+				Key("initial_admin_password").
+				Validate(func(s string) error {
+					if len(s) < 8 {
+						return fmt.Errorf("Password must be at least 8 characters long")
+					}
+					return nil
+				}).
+				Title("Initial admin password").
+				Description("At least 8 characters - for web UI and Proxmox").
+				Value(&initialAdmin.Password).
+				EchoMode(huh.EchoModePassword),
 		),
 
 		huh.NewGroup(
@@ -323,13 +375,6 @@ func NewModel() Model {
 
 func (m Model) Init() tea.Cmd {
 	return m.form.Init()
-}
-
-func min(x, y int) int {
-	if x > y {
-		return y
-	}
-	return x
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -387,9 +432,7 @@ func (m Model) View() string {
 			proxmox_vm_storage_pool   string
 			proxmox_vm_storage_format string
 			proxmox_iso_storage_pool  string
-			ludus_nat_interface       string
 			prevent_user_ansible_add  string
-			expose_admin_port         string
 			license_key               string
 		)
 		if m.form.GetString("proxmox_node") != "" {
@@ -419,16 +462,9 @@ func (m Model) View() string {
 		if m.form.GetString("proxmox_iso_storage_pool") != "" {
 			proxmox_iso_storage_pool = "proxmox_iso_storage_pool: " + m.form.GetString("proxmox_iso_storage_pool")
 		}
-		if m.form.GetString("ludus_nat_interface") != "" {
-			ludus_nat_interface = "ludus_nat_interface: " + m.form.GetString("ludus_nat_interface")
-		}
 		if m.currentFieldIndex >= 11 || shouldShowAnsibleField {
 			prevent_user_ansible_add = "prevent_user_ansible_add: " + strconv.FormatBool(m.form.GetBool("prevent_user_ansible_add"))
 			shouldShowAnsibleField = true
-		}
-		if m.currentFieldIndex >= 12 || shouldShowAdminPortExpose {
-			expose_admin_port = "expose_admin_port: " + strconv.FormatBool(m.form.GetBool("expose_admin_port"))
-			shouldShowAdminPortExpose = true
 		}
 		if m.form.GetString("license_key") != "" {
 			license_key = "license_key: " + m.form.GetString("license_key")
@@ -459,9 +495,7 @@ func (m Model) View() string {
 					proxmox_vm_storage_pool + "\n" +
 					proxmox_vm_storage_format + "\n" +
 					proxmox_iso_storage_pool + "\n" +
-					ludus_nat_interface + "\n" +
 					prevent_user_ansible_add + "\n" +
-					expose_admin_port + "\n" +
 					license_key + "\n")
 		}
 
@@ -517,11 +551,11 @@ func runInteractiveInstall(existingProxmox bool) {
 	}
 
 	if !existingProxmox {
-		showWarning("Only run Ludus install on a clean Debian 12 machine that will be dedicated to Ludus",
+		showWarning("Only run Ludus install on a clean Debian machine that will be dedicated to Ludus",
 			"I Understand", "Bail", 50, 11)
 	} else {
 		uglyWarning := `
-    ~~~ You are installing Ludus on an existing Proxmox 8 host ~~~
+    ~~~ You are installing Ludus on an existing Proxmox host ~~~
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!! Ludus will install: ansible, packer, dnsmasq, sshpass, curl, jq, iptables-persistent !!!
 !!!                     gpg-agent, dbus, dbus-user-session, and vim                      !!!
@@ -547,6 +581,11 @@ to function. The Ludus install process will not reboot your host.
 			"I have read and accept the above statement", "Bail", 93, 40)
 	}
 
+	showLicenseDialog()
+
+	// Clear the terminal before showing the interactive installer
+	fmt.Print("\033[H\033[2J")
+
 	if fileExists(fmt.Sprintf("%s/config.yml", ludusInstallPath)) {
 		loadConfig()
 	} else {
@@ -564,6 +603,20 @@ to function. The Ludus install process will not reboot your host.
 	// Now that the form is done, write the config
 	config.ProxmoxHostname = config.ProxmoxNode
 	writeConfigToFile(config, fmt.Sprintf("%s/config.yml", ludusInstallPath))
+
+	// Write initial admin details for creation after ROOT is created in InitDb
+	installDir := fmt.Sprintf("%s/install", ludusInstallPath)
+	if err := os.MkdirAll(installDir, 0700); err != nil {
+		fmt.Printf("Warning: could not create install dir: %v\n", err)
+	} else {
+		initialAdminPath := fmt.Sprintf("%s/initial-admin.yml", installDir)
+		data, err := yaml.Marshal(&initialAdmin)
+		if err != nil {
+			fmt.Printf("Warning: could not marshal initial admin config: %v\n", err)
+		} else if err := os.WriteFile(initialAdminPath, data, 0600); err != nil {
+			fmt.Printf("Warning: could not write %s: %v\n", initialAdminPath, err)
+		}
+	}
 }
 
 func generateFinalMessage() string {

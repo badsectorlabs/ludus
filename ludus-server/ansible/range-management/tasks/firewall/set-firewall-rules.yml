@@ -35,7 +35,7 @@
 
 - name: Get the VM id of the router via Proxmox API
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ router.vm_name | default(range_id + '-router-debian11-x64') }}").vmid'
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" https://127.0.0.1:8006/api2/json/cluster/resources 'type:vm' | jq '.[] | .[] | select(.name=="{{ router.vm_name | default(range_id + '-router-debian11-x64') }}").vmid'
   delegate_to: localhost
   become: false
   register: router_id_command
@@ -48,7 +48,7 @@
 
 - name: Get the interface with a 192.0.2.x ip (WAN)
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
   delegate_to: localhost
   become: false
   register: wan_interface_command
@@ -85,19 +85,19 @@
 # which prevents the next task's loop from failing with a template error, despite being set to an empty array by default...
 - name: Set range_access_grants_array from access_grants_array
   ansible.builtin.set_fact:
-    range_access_grants_array: "{{ access_grants_array | default([], true) }}"
+    range_access_grants_array: "{{ access_grants_array | default([]) }}"
 
 # Make sure any existing access grants are set up (in the event the range is destroyed and then rebuilt after an access grant)
 - name: Modify router firewall to allow WireGuard IP's for access grants to this range
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
-    source: "198.51.100.{{ item.second_octet }}"
+    source: "198.51.100.{{ item.userNumber }}"
     in_interface: "{{ router_external_interface }}"
     protocol: all
     jump: ACCEPT
     state: present
     action: insert
-    comment: "Access Grant: WireGuard client access rule for {{ item.username }}"
+    comment: "Access Grant: WireGuard client access rule for {{ item.userID }}"
     numeric: true
   loop: "{{ range_access_grants_array | default([]) | list }}"
 

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proxmox Secure VNC</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #333;
+            color: #fff;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        #controls {
+            padding: 10px;
+            background: #222;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        #screen {
+            flex-grow: 1;
+            background: #000;
+            position: relative;
+            overflow: hidden;
+        }
+
+        input {
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #555;
+        }
+
+        button {
+            padding: 5px 15px;
+            cursor: pointer;
+            background: #E55024;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+
+        button:hover {
+            background: #bf3f1b;
+        }
+
+        button.disconnect {
+            background: #666;
+        }
+
+        #status {
+            margin-left: auto;
+            font-size: 0.9em;
+            color: #aaa;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="controls">
+        <label>VMID:</label>
+        <input type="number" id="vmidInput" value="169" placeholder="169">
+        <label>API Key:</label>
+        <input type="text" id="apiKeyInput" value="" placeholder="API Key">
+        <button id="connectBtn" onclick="connect()">Connect</button>
+        <button id="disconnectBtn" class="disconnect" onclick="disconnect()" disabled>Disconnect</button>
+        <span id="status">Ready</span>
+    </div>
+
+    <div id="screen"></div>
+
+    <!-- Using noVNC from jsDelivr CDN -->
+    <script type="module">
+        import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
+        import * as Log from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/util/logging.js';
+
+        Log.initLogging('debug');
+
+        let rfb;
+        const statusSpan = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+
+        window.connect = async function () {
+            const vmid = document.getElementById('vmidInput').value;
+            if (!vmid) return alert("Please enter a VMID");
+
+            const apiKey = document.getElementById('apiKeyInput').value;
+            if (!apiKey) return alert("Please enter an API Key");
+
+            statusSpan.textContent = "Requesting Ticket...";
+
+            try {
+                const res = await fetch(`/api/v2/vm/console/ticket?VMID=${vmid}`, {
+                    headers: {
+                        'X-API-KEY': apiKey
+                    }
+                });
+                if (!res.ok) throw new Error(await res.text());
+                const data = await res.json();
+                const ticket = data.ticket;
+                const password = data.password;
+                console.log(data);
+
+                statusSpan.textContent = "Connecting...";
+
+                // Force WSS because server is TLS
+                const host = window.location.hostname;
+                const port = window.location.port;
+                const url = `wss://${host}:${port}/api/v2/vm/console/view?ticket=${encodeURIComponent(ticket)}`;
+
+                rfb = new RFB(document.getElementById('screen'), url, {
+                    credentials: { password: password },
+                    wsProtocols: ['binary'],
+                });
+
+                rfb.addEventListener("connect", () => {
+                    statusSpan.textContent = "Connected";
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                });
+
+                rfb.addEventListener("disconnect", (e) => {
+                    statusSpan.textContent = "Disconnected: " + (e.detail.clean ? "Clean" : "Error");
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    rfb = null;
+                });
+
+                rfb.addEventListener("credentialsrequired", (e) => {
+                    statusSpan.textContent = "Credentials Required (Password)";
+                    console.log("Credentials required", e);
+                });
+
+                rfb.addEventListener("securityfailure", (e) => {
+                    statusSpan.textContent = "Security Failure: " + JSON.stringify(e.detail);
+                });
+
+            } catch (e) {
+                console.error(e);
+                statusSpan.textContent = "Connection Error: " + e.message;
+            }
+        }
+
+        window.disconnect = function () {
+            if (rfb) {
+                rfb.disconnect();
+            }
+        }
+    </script>
+</body>
+
+</html>

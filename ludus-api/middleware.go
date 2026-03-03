@@ -1,0 +1,224 @@
+package ludusapi
+
+import (
+	"database/sql"
+	"fmt"
+	"ludusapi/models"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/types"
+)
+
+func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
+	apiKey := e.Request.Header.Get("X-API-KEY")
+
+	// If no API key is present, pass the request to the next handler
+	// without interfering. This allows standard JWT auth to proceed.
+	if apiKey == "" {
+		return e.Next()
+	}
+
+	parts := strings.Split(apiKey, ".")
+	if len(parts) != 2 {
+		return JSONError(e, http.StatusUnauthorized, "Malformed API Key provided")
+	}
+
+	userID := parts[0]
+
+	record, err := e.App.FindFirstRecordByData("users", "userID", userID)
+	if err != nil {
+		return JSONError(e, http.StatusUnauthorized, fmt.Sprintf("User %s from API key not found", userID))
+	}
+
+	storedHash := record.GetString("hashedAPIKey")
+	if !CheckHash(apiKey, storedHash) {
+		return JSONError(e, http.StatusUnauthorized, "Invalid API key")
+	}
+
+	// Set this request as authenticated
+	// Note: The user record will be expanded in userAndRangesLookupMiddleware
+	e.Auth = record
+
+	return e.Next()
+}
+
+// Updates the date_last_active column in the database for the user making the API call
+// Also logs the API action to a file
+func updateLastActiveTimeAndLog(e *core.RequestEvent) error {
+	// Prevent locking issues with proxied requests, don't log the last active time for ludus-admin requests
+	// as they are already logged by the regular ludus service proxy
+	// Also skip logging for requests to the PocketBase web UI or unauthenticated requests
+	if os.Geteuid() == 0 || e.Auth == nil || e.Get("user") == nil || e.Auth.IsSuperuser() {
+		return e.Next()
+	}
+
+	user := e.Get("user").(*models.User)
+	now, err := types.ParseDateTime(time.Now().UTC().Round(time.Duration(time.Millisecond)))
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error parsing now: %v", err))
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error parsing now: %v", err))
+	}
+	user.SetLastActive(now)
+	err = e.App.Save(user)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error saving user: %v", err))
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving user: %v", err))
+	}
+	return e.Next()
+}
+
+func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
+	// If the user is not authenticated, pass the request to the next handler, don't try to populate the user and ranges context
+	if e.Auth == nil || e.Auth.IsSuperuser() {
+		return e.Next()
+	}
+
+	// By default, use the user record from the authentication token
+	userRecord := e.Auth
+
+	// If there is a userID query parameter, and the userID is different from the userID of the authenticated user,
+	// use the userID to set the user in the context if the authenticated user is an admin
+	requestedUserID := e.Request.URL.Query().Get("userID")
+	if requestedUserID != "" && requestedUserID != e.Auth.GetString("userID") {
+		if e.Auth.GetBool("isAdmin") {
+			var err error
+			userRecord, err = e.App.FindFirstRecordByData("users", "userID", requestedUserID)
+			if err != nil {
+				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("User %s from query parameter not found", requestedUserID))
+			}
+		} else {
+			return JSONError(e, http.StatusUnauthorized, "You are not an admin and cannot impersonate other users")
+		}
+	}
+
+	// Create a User proxy record and save it to the context
+	user := &models.User{}
+	user.SetProxyRecord(userRecord)
+	e.App.ExpandRecord(userRecord, []string{"ranges", "groups"}, nil)
+	e.Set("user", user)
+
+	// Check if the user is requesting a specific range
+	rangeID := e.Request.URL.Query().Get("rangeID")
+	if rangeID != "" {
+		rangeNumber, err := GetRangeNumberFromRangeID(rangeID)
+		if err != nil {
+			return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", rangeID, err))
+		}
+		if !HasRangeAccess(e, user.UserId(), rangeNumber) && !e.Auth.GetBool("isAdmin") {
+			return JSONError(e, http.StatusForbidden, fmt.Sprintf("User %s does not have access to range %s", e.Auth.GetString("userID"), rangeID))
+		}
+	} else {
+		rangeID = e.Auth.GetString("defaultRangeID")
+		// Allow ROOT to bypass the default range check
+		if rangeID == "" && e.Auth.GetString("userID") != "ROOT" {
+			return JSONError(e, http.StatusNotFound, "User has no default range and no rangeID was provided in the request")
+		} else if rangeID == "" && e.Auth.GetString("userID") == "ROOT" {
+			rangeCollection, err := e.App.FindCollectionByNameOrId("ranges")
+			if err != nil {
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding ranges collection: %v", err))
+			}
+			dummyRangeRecord := core.NewRecord(rangeCollection)
+			dummyRange := &models.Range{}
+			dummyRange.SetProxyRecord(dummyRangeRecord)
+			dummyRange.SetRangeId("ROOT")
+			dummyRange.SetName("ROOT")
+			dummyRange.SetTestingEnabled(false)
+			dummyRange.SetRangeNumber(1)
+			e.Set("range", dummyRange)
+			return e.Next()
+		}
+	}
+
+	// Get the range object to use for the remainder of the request
+	rawRangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
+	if err != nil && err != sql.ErrNoRows {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding range: %v", err))
+	} else if err == sql.ErrNoRows {
+		logger.Debug(fmt.Sprintf("Range %s not found during middleware lookup, continuing with no range", rangeID))
+	} else {
+		rangeRecord := &models.Range{}
+		rangeRecord.SetProxyRecord(rawRangeRecord)
+		e.Set("range", rangeRecord)
+	}
+
+	return e.Next()
+}
+
+// This function makes sure the request is to a user endpoint if the server is running as root (i.e. :8081)
+func limitRootEndpoints(e *core.RequestEvent) error {
+	logger.Debug(fmt.Sprintf("Request: %s %s", e.Request.Method, e.Request.URL.Path))
+	if os.Geteuid() == 0 &&
+		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") &&
+		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") &&
+		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") &&
+		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) &&
+		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) &&
+		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") &&
+		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/migrate/") {
+		return JSONError(e, http.StatusInternalServerError, "The :8081 endpoint can only be used for user, range creation/deletion, migrations, and anti-sandbox actions. Use the :8080 endpoint for all other actions.")
+	} else if os.Geteuid() != 0 &&
+		(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") ||
+			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") ||
+			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") ||
+			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) ||
+			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) ||
+			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") ||
+			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/migrate/")) {
+		// First clear all the headers to prevent sending 2x of each header
+		for k := range e.Response.Header() {
+			e.Response.Header().Del(k)
+		}
+		// Reverse proxy to the admin API
+		adminProxy.ServeHTTP(e.Response, e.Request)
+
+		// Abort the middleware chain to prevent the user-facing server
+		// from also handling the request and writing a second response.
+		return nil
+	}
+
+	return e.Next()
+
+}
+
+// auth is only bypassed when all three conditions are met: exact path match, root process, localhost origin. Every other request on the admin API still requires authentication.
+func isInternalProvisionRequest(e *core.RequestEvent) bool {
+	if e.Request.URL.Path != APIBasePath+"/user/provision-oauth2" || os.Geteuid() != 0 {
+		return false
+	}
+	host, _, err := net.SplitHostPort(e.Request.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	return host == "127.0.0.1" || host == "::1"
+}
+
+// Check auth for all endpoints in our base path except the console view endpoint and the internal provision request
+// /vm/console/view is used for a WebSocket connection and requires a valid ticket
+// The JS websocket library doesn't support custom headers, so we exempt it from the auth check
+func requireAuth(e *core.RequestEvent) error {
+	if e.Auth == nil && strings.HasPrefix(e.Request.URL.Path, APIBasePath) &&
+		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/vm/console/view") &&
+		!isInternalProvisionRequest(e) {
+		return JSONError(e, http.StatusUnauthorized, "Authentication failed. Provide a valid API key in the X-API-KEY header or a valid JWT token in the Authorization header.")
+	}
+	return e.Next()
+}
+
+func redirectBaseURLToUI(e *core.RequestEvent) error {
+	if e.Request.URL.Path == "/" {
+		return e.Redirect(http.StatusTemporaryRedirect, "/ui")
+	}
+	return e.Next()
+}
+
+func restrictPocketBaseEndpoints(e *core.RequestEvent) error {
+	if strings.HasPrefix(e.Request.URL.Path, "/_") && os.Getenv("LUDUS_ENABLE_SUPERADMIN") != "ill-be-careful" {
+		return JSONError(e, http.StatusForbidden, "Superadmin access is disabled. Enable it by setting the LUDUS_ENABLE_SUPERADMIN environment variable to 'ill-be-careful'.")
+	}
+	return e.Next()
+}

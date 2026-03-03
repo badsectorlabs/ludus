@@ -11,6 +11,7 @@ type VmObject struct {
 	Name        string `json:"name"`
 	PoweredOn   bool   `json:"poweredOn"`
 	Ip          string `json:"ip,omitempty"`
+	IsRouter    bool   `json:"isRouter"`
 }
 
 type AnsibleItem struct {
@@ -21,8 +22,11 @@ type AnsibleItem struct {
 }
 
 type RangeObject struct {
-	UserID         string     `json:"userID"`
+	RangeID        string     `json:"rangeID"`
 	RangeNumber    int32      `json:"rangeNumber"`
+	Name           string     `json:"name"`
+	Description    string     `json:"description"`
+	Purpose        string     `json:"purpose"`
 	LastDeployment time.Time  `json:"lastDeployment"`
 	NumberOfVMs    int32      `json:"numberOfVMs"`
 	TestingEnabled bool       `json:"testingEnabled"`
@@ -35,6 +39,7 @@ type RangeObject struct {
 type UserObject struct {
 	Name            string    `json:"name"`
 	UserID          string    `json:"userID"`
+	UserNumber      int32     `json:"userNumber"`
 	DateCreated     time.Time `json:"dateCreated"`
 	DateLastActive  time.Time `json:"dateLastActive"`
 	IsAdmin         bool      `json:"isAdmin"`

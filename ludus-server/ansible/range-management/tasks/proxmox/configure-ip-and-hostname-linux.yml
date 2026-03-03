@@ -130,9 +130,9 @@
 
 # Get the data needed for all Linux
 # I tried to do this with uri and json_query, but JMESPath is a mess.
-- name: get MAC for vlan interface (Linux)
+- name: Get MAC for vlan interface (Linux)
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ proxmox_vmid }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ vlan }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ proxmox_vmid }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ vlan }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
   register: vlan_mac_command
   delegate_to: localhost
   become: false
@@ -141,9 +141,9 @@
   ansible.builtin.set_fact:
     vlan_mac: "{{ vlan_mac_command.stdout }}"
 
-- name: get interface for MAC of vlan interface (Linux)
+- name: Get interface for MAC of vlan interface (Linux)
   ansible.builtin.shell: |
-    curl -s -k -b "PVEAuthCookie={{ hostvars['localhost']['proxmox_ticket'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ hostvars['localhost']['node_name'] }}/qemu/{{ proxmox_vmid }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
+    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ proxmox_vmid }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
   register: interface_name_command
   delegate_to: localhost
   become: false
@@ -151,6 +151,10 @@
 - name: Set the interface_name variable
   ansible.builtin.set_fact:
     interface_name: "{{ interface_name_command.stdout }}"
+
+- name: Debug node name
+  ansible.builtin.debug:
+    msg: "Node name: {{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}"
 
 - name: Assert we found the interface name
   ansible.builtin.assert:
@@ -261,6 +265,7 @@
     port: 22
     delay: 3
     state: started
+    timeout: 900 # Router/host reboot and network rebind can take longer than the default timeout
   delegate_to: localhost
   become: false
   register: wait_result

@@ -5,13 +5,21 @@
 package main
 
 import (
+	"bufio"
+	"crypto/tls"
 	"embed"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	ludusapi "ludusapi"
+
+	"github.com/pocketbase/pocketbase/apis"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 const ludusInstallPath string = "/opt/ludus"
@@ -22,6 +30,7 @@ var GitCommitHash string
 var VersionString string
 var LudusVersion string = VersionString + "+" + GitCommitHash
 var existingProxmox bool
+var logger *slog.Logger
 
 // Embed the ansible directory into the binary for simple distribution
 //
@@ -40,13 +49,14 @@ func serve() {
 		Version:          LudusVersion,
 		VersionString:    VersionString,
 		LudusInstallPath: ludusInstallPath,
+		Logger:           logger,
 	}
 
-	// Setup Gin router
-	router := ludusapi.NewRouter(LudusVersion, server)
+	// Setup PocketBase app
+	app := ludusapi.NewRouter(LudusVersion, server)
 
-	if server.LicenseType == "community" {
-		fmt.Println("LICENSE: Community Edition")
+	if len(server.Entitlements) == 0 {
+		logger.Info("LICENSE: Community (no entitlements)")
 	}
 
 	// Load plugins
@@ -61,7 +71,7 @@ func serve() {
 	if info, err := os.Stat(pluginsDir); err == nil && info.IsDir() {
 		entries, err := os.ReadDir(pluginsDir)
 		if err != nil {
-			log.Printf("Error reading plugins directory: %v", err)
+			logger.Error(fmt.Sprintf("Error reading plugins directory: %v", err))
 		}
 
 		for _, entry := range entries {
@@ -78,7 +88,7 @@ func serve() {
 	server.InitializePlugins()
 
 	// Register plugin routes
-	server.RegisterPluginRoutes(router)
+	server.RegisterPluginRoutes(app)
 
 	certPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.pem"
 	keyPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.key"
@@ -90,22 +100,90 @@ func serve() {
 		certPath = "/opt/ludus/cert.pem"
 		keyPath = "/opt/ludus/key.pem"
 	}
+
+	// Setup the server to use the certificate/key found above
+	serveConfig := apis.ServeConfig{
+		ShowStartBanner: false,
+		AllowedOrigins:  []string{"*"},
+	}
+	ludusApp := *app
+	ludusApp.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		certificate, err := tls.LoadX509KeyPair(certPath, keyPath)
+		if err != nil {
+			return err
+		}
+		e.Server.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{certificate},
+		}
+		// PocketBase defaults to 5 min Read/WriteTimeout; extend for long-running requests (e.g. antisandbox enable)
+		e.Server.ReadTimeout = 30 * time.Minute
+		e.Server.WriteTimeout = 30 * time.Minute
+		return e.Next()
+	})
+
 	// If we're running as a non-root user, bind to all interfaces, else (running as root) bind to localhost unless the user has opted to expose the admin API globally
-	var err error
 	if os.Geteuid() != 0 {
-		err = router.RunTLS("0.0.0.0:8080", certPath, keyPath)
+		serveConfig.HttpsAddr = "0.0.0.0:8080"
+		logger.Debug("Starting server on 0.0.0.0:8080")
+		if err := apis.Serve(ludusApp, serveConfig); err != nil {
+			logger.Error(fmt.Sprintf("Failed to start the server: %v", err))
+		}
 	} else {
 		if config.ExposeAdminPort {
-			err = router.RunTLS("0.0.0.0:8081", certPath, keyPath)
+			serveConfig.HttpsAddr = "0.0.0.0:8081"
 		} else {
-			err = router.RunTLS("127.0.0.1:8081", certPath, keyPath)
+			serveConfig.HttpsAddr = "127.0.0.1:8081"
+		}
+		logger.Debug("Starting server on " + serveConfig.HttpsAddr)
+		if err := apis.Serve(ludusApp, serveConfig); err != nil {
+			logger.Error(fmt.Sprintf("Failed to start the server: %v", err))
 		}
 	}
 	server.ShutdownPlugins()
-	if err != nil {
-		log.Fatalf("Error in Ludus API server: %v", err)
-	}
 
+}
+
+// runBootstrapOnly runs the API bootstrap (config load, PocketBase init, migrations, InitDb)
+// without starting the HTTP server. Used after install playbook to create ROOT and initial admin.
+func runBootstrapOnly() {
+	server := &ludusapi.Server{
+		Version:          LudusVersion,
+		VersionString:    VersionString,
+		LudusInstallPath: ludusInstallPath,
+		Logger:           logger,
+	}
+	_ = ludusapi.NewRouter(LudusVersion, server)
+}
+
+// parseInitialAdminCredentials reads install/initial-admin-credentials (format: key:value per line).
+func parseInitialAdminCredentials(path string) (email, username, apiKey, password string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", "", ""
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		idx := strings.Index(line, ":")
+		if idx <= 0 {
+			continue
+		}
+		k, v := strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+1:])
+		switch k {
+		case "email":
+			email = v
+		case "username":
+			username = v
+		case "api_key":
+			apiKey = v
+		case "password":
+			password = v
+		}
+	}
+	return email, username, apiKey, password
 }
 
 func main() {
@@ -125,6 +203,7 @@ func main() {
 	checkDebian12or13()
 	checkForVirtualizationSupport()
 	generateConfigIfAutomatedInstall()
+	inCluster = isInCluster()
 
 	// If we're done installing, serve the API
 	if fileExists(fmt.Sprintf("%s/install/.stage-3-complete", ludusInstallPath)) && !fileExists("/etc/systemd/system/ludus-install.service") {
@@ -147,5 +226,13 @@ func main() {
 	installAnsibleRequirements()
 	// Run the install playbooks with ansible now that it is installed
 	runInstallPlaybook(existingProxmox)
-
+	// Display credentials if the install was interactive and successful (after a short delay)
+	time.Sleep(3 * time.Second)
+	if interactiveInstall && fileExists(fmt.Sprintf("%s/install/root-web-password", ludusInstallPath)) {
+		// If initial-admin.yml was provided, run bootstrap to create ROOT + initial admin, then show both
+		initialAdminPath := fmt.Sprintf("%s/install/initial-admin.yml", ludusInstallPath)
+		if fileExists(initialAdminPath) {
+			runBootstrapOnly()
+		}
+	}
 }

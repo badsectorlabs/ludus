@@ -1,7 +1,12 @@
 # proxmox_kvm options
 api_user: "{{ lookup('env', 'PROXMOX_USERNAME') }}"
-api_password: "{{ lookup('env', 'PROXMOX_PASSWORD') }}"
 api_host: "{{ lookup('env', 'PROXMOX_HOSTNAME') | default('127.0.0.1') }}"
+proxmox_full_token_id: "{{ lookup('env', 'PROXMOX_TOKEN') }}"
+proxmox_token_secret: "{{ lookup('env', 'PROXMOX_SECRET') }}"
 node_name: "{{ lookup('env', 'PROXMOX_NODE') }}"
 proxmox_default_behavior: compatibility
 ansible_remote_tmp: "{{ '/opt/ludus/ansible/tmp' if (lookup('env', 'USER') != 'root') else '/tmp/.ansible/tmp' }}"
+
+# SDN-aware bridge/VNet naming
+# In cluster mode (SDN), use 'r{range_number}' VNet; in non-cluster mode, use 'vmbr{1000+range_number}'
+range_bridge_name: "{{ 'r' + (range_second_octet | string) if ludus_cluster_mode else 'vmbr' + ((range_second_octet | int) + 1000) | string }}"
