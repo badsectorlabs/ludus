@@ -135,7 +135,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 
 	// Serve the docs from PocketBase if available
 	if docsAvailable && os.Geteuid() != 0 {
-		logger.Debug("Serving docs at /docs")
+		logger.Debug("Serving docs at /ludus")
 		app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 			docsFSRoot, err := fs.Sub(embeddedDocs, "docs")
 			if err != nil {

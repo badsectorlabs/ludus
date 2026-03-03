@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goforj/godump"
 	goproxmox "github.com/luthermonson/go-proxmox"
 	"github.com/spf13/viper"
 )
@@ -481,8 +480,7 @@ func setupNATVNet() error {
 		Propagate: goproxmox.IntOrBool(true),
 		Delete:    goproxmox.IntOrBool(false),
 	}
-	logger.Debug(fmt.Sprintf("Attempting to set permissions for group 'ludus_users' to SDN VNet '%s'\n", NATVNetName))
-	logger.Debug(godump.DumpStr(SDNVNetACL))
+	logger.Debug(fmt.Sprintf("Setting permissions for group 'ludus_users' to SDN VNet '%s'\n", NATVNetName))
 	err = proxmoxClient.UpdateACL(context.Background(), SDNVNetACL)
 	if err != nil {
 		return errors.New("unable to set permissions for group: " + err.Error())

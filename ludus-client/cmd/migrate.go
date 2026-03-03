@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"ludus/logger"
 	"ludus/rest"
+	"ludusapi/dto"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -90,18 +91,7 @@ This command displays:
 			return
 		}
 
-		type Status struct {
-			SDNZoneExists      bool   `json:"sdn_zone_exists"`
-			NATVNetExists      bool   `json:"nat_vnet_exists"`
-			NeedsMigration     bool   `json:"needs_migration"`
-			ClusterMode        bool   `json:"cluster_mode"`
-			RequiresManualZone bool   `json:"requires_manual_zone"`
-			CurrentSDNZone     string `json:"current_sdn_zone"`
-			LudusNATInterface  string `json:"ludus_nat_interface"`
-			Message            string `json:"message"`
-		}
-
-		var status Status
+		var status dto.SDNStatus
 		err := json.Unmarshal(responseJSON, &status)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
@@ -151,13 +141,7 @@ In cluster mode, the SDN zone must be pre-configured with correct VXLAN peer IPs
 			return
 		}
 
-		type Status struct {
-			NeedsMigration     bool   `json:"needs_migration"`
-			RequiresManualZone bool   `json:"requires_manual_zone"`
-			Message            string `json:"message"`
-		}
-
-		var status Status
+		var status dto.SDNStatus
 		err := json.Unmarshal(responseJSON, &status)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
@@ -167,9 +151,10 @@ In cluster mode, the SDN zone must be pre-configured with correct VXLAN peer IPs
 			fmt.Println("================================================================")
 			fmt.Println("NO MIGRATION NEEDED")
 			fmt.Println("================================================================")
-			fmt.Println("Your Ludus installation already has SDN infrastructure configured.")
 			if status.Message != "" {
 				fmt.Printf("\n%s\n", status.Message)
+			} else {
+				fmt.Println("No migration status message returned from the API.")
 			}
 			fmt.Println("================================================================")
 			return
@@ -192,16 +177,11 @@ In cluster mode, the SDN zone must be pre-configured with correct VXLAN peer IPs
 			fmt.Println("SDN MIGRATION")
 			fmt.Println("================================================================")
 			fmt.Println("This will migrate your Ludus installation from bridge-based")
-			fmt.Println("networking to SDN VNets.")
-			fmt.Println("")
-			fmt.Println("This is recommended for:")
-			fmt.Println("- Proxmox cluster deployments")
-			fmt.Println("- New installations")
-			fmt.Println("- Systems where you want centralized SDN management")
+			fmt.Println("networking to SDN VXLAN VNets.")
 			fmt.Println("")
 			fmt.Println("After migration:")
 			fmt.Println("- Range VNets will be created as SDN VNets (r1, r2, etc.)")
-			fmt.Println("- The NAT network will use the 'ludus-nat' VNet")
+			fmt.Println("- The NAT network will use the 'ludusnat' VNet")
 			fmt.Println("- Old vmbr interfaces can be manually removed after verification")
 			fmt.Println("")
 			fmt.Print("Press ENTER to continue or Ctrl+C to abort: ")
@@ -211,7 +191,7 @@ In cluster mode, the SDN zone must be pre-configured with correct VXLAN peer IPs
 
 		// Run migration
 		responseJSON, success = rest.GenericJSONPost(client, "/migrate/sdn", nil)
-		if !success {
+		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
@@ -240,7 +220,6 @@ In cluster mode, the SDN zone must be pre-configured with correct VXLAN peer IPs
 		fmt.Println("3. Once verified, remove old bridge entries from /etc/network/interfaces:")
 		fmt.Println("   - Look for lines containing \"vmbr1XXX\" where XXX is 001-254")
 		fmt.Println("   - Remove the associated \"auto\", \"iface\", and route entries")
-		fmt.Println("4. Reboot the Proxmox host to fully apply changes")
 		fmt.Println("================================================================")
 	},
 }

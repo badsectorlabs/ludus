@@ -509,3 +509,16 @@ type BulkBlueprintOperationErrorItem struct {
 	Item   string `json:"item"`
 	Reason string `json:"reason"`
 }
+
+// SDNStatus represents the SDN migration status returned by the API
+// and consumed by the ludus client.
+type SDNStatus struct {
+	SDNZoneExists      bool   `json:"sdn_zone_exists"`
+	NATVNetExists      bool   `json:"nat_vnet_exists"`
+	NeedsMigration     bool   `json:"needs_migration"`
+	ClusterMode        bool   `json:"cluster_mode"`
+	RequiresManualZone bool   `json:"requires_manual_zone"`
+	CurrentSDNZone     string `json:"current_sdn_zone"`
+	LudusNATInterface  string `json:"ludus_nat_interface"`
+	Message            string `json:"message"`
+}

@@ -3,8 +3,10 @@ package ludusapi
 import (
 	"context"
 	"fmt"
+	"ludusapi/dto"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	goproxmox "github.com/luthermonson/go-proxmox"
@@ -36,15 +38,15 @@ func GetSDNMigrationStatus(e *core.RequestEvent) error {
 
 	// Non-cluster hosts don't use SDN - they use vmbr management
 	if !clusterMode {
-		status := map[string]interface{}{
-			"sdn_zone_exists":      false,
-			"nat_vnet_exists":      false,
-			"needs_migration":      false,
-			"cluster_mode":         false,
-			"requires_manual_zone": false,
-			"current_sdn_zone":     "",
-			"ludus_nat_interface":  ServerConfiguration.LudusNATInterface,
-			"message":              "Not in cluster mode. Using vmbr network management - no SDN migration needed.",
+		status := dto.SDNStatus{
+			SDNZoneExists:      false,
+			NATVNetExists:      false,
+			NeedsMigration:     false,
+			ClusterMode:        false,
+			RequiresManualZone: false,
+			CurrentSDNZone:     "",
+			LudusNATInterface:  ServerConfiguration.LudusNATInterface,
+			Message:            "Not in cluster mode. Using vmbr network management - no SDN migration needed.",
 		}
 		return e.JSON(http.StatusOK, status)
 	}
@@ -61,25 +63,26 @@ func GetSDNMigrationStatus(e *core.RequestEvent) error {
 	// Check if NAT VNet exists
 	natVNetExists, _ := VNetExists(client, ServerConfiguration.LudusNATInterface)
 
-	// System needs migration if SDN zone doesn't exist
-	needsMigration := !zoneExists
+	// System needs migration if NAT VNet hasn't been created yet
+	needsMigration := !natVNetExists
 
 	// In cluster mode, users must manually create the zone with correct VXLAN peer IPs
 	requiresManualZone := !zoneExists
 
-	status := map[string]interface{}{
-		"sdn_zone_exists":      zoneExists,
-		"nat_vnet_exists":      natVNetExists,
-		"needs_migration":      needsMigration,
-		"cluster_mode":         clusterMode,
-		"requires_manual_zone": requiresManualZone,
-		"current_sdn_zone":     zoneName,
-		"ludus_nat_interface":  ServerConfiguration.LudusNATInterface,
+	status := dto.SDNStatus{
+		SDNZoneExists:      zoneExists,
+		NATVNetExists:      natVNetExists,
+		NeedsMigration:     needsMigration,
+		ClusterMode:        clusterMode,
+		RequiresManualZone: requiresManualZone,
+		CurrentSDNZone:     zoneName,
+		LudusNATInterface:  ServerConfiguration.LudusNATInterface,
+		Message:            fmt.Sprintf("SDN migration status: %t, NAT VNet exists: %t, Zone exists: %t", needsMigration, natVNetExists, zoneExists),
 	}
 
 	// Add helpful message when manual zone creation is required
 	if requiresManualZone {
-		status["message"] = fmt.Sprintf("Cluster mode requires a pre-configured SDN zone. Create zone '%s' in Proxmox with correct VXLAN peer IPs before running migration.", zoneName)
+		status.Message = fmt.Sprintf("Cluster mode requires a pre-configured SDN zone. Create zone '%s' in Proxmox with correct VXLAN peer IPs before running migration.", zoneName)
 	}
 
 	return e.JSON(http.StatusOK, status)
@@ -177,7 +180,7 @@ func MigrateToSDN(e *core.RequestEvent) error {
 			fmt.Sprintf("Migration completed with errors: %s. Manual cleanup of old bridge interfaces may be required.", strings.Join(migrationErrors, "; ")))
 	}
 
-	return JSONResult(e, http.StatusOK, "Migration to SDN VNets completed successfully. Reboot recommended to clean up old bridge interfaces.")
+	return JSONResult(e, http.StatusOK, "Migration to SDN VNets completed successfully.")
 }
 
 // migrateRangeVMsToVNet updates all VM network interfaces to use the new VNet
@@ -187,6 +190,15 @@ func migrateRangeVMsToVNet(client *goproxmox.Client, ctx context.Context, rangeI
 	if err != nil {
 		return fmt.Errorf("failed to get pool: %w", err)
 	}
+	parts := strings.Split(vnetName, "r")
+	if len(parts) != 2 {
+		return fmt.Errorf("failed to get range number: %w", err)
+	}
+	rangeNumber, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return fmt.Errorf("failed to get range number: %w", err)
+	}
+	rangeBridgeName := fmt.Sprintf("vmbr%d", 1000+rangeNumber)
 
 	for _, member := range pool.Members {
 		if member.Type != "qemu" {
@@ -212,14 +224,28 @@ func migrateRangeVMsToVNet(client *goproxmox.Client, ctx context.Context, rangeI
 			continue
 		}
 
-		// Update network interface to use VNet
-		// This uses the Proxmox API to update VM config
-		netOption := goproxmox.VirtualMachineOption{
-			Name:  "net0",
-			Value: fmt.Sprintf("virtio,bridge=%s", vnetName),
+		var netOptions []goproxmox.VirtualMachineOption
+		vmInterfaces := vm.VirtualMachineConfig.Nets
+		if len(vmInterfaces) > 0 {
+			for ifaceName, ifaceData := range vmInterfaces {
+				logger.Debug(fmt.Sprintf("VM %d, interface %s: %s", member.VMID, ifaceName, ifaceData))
+
+				// Replace the NAT bridge with the SDN NAT bridge
+				ifaceData = strings.ReplaceAll(ifaceData, "bridge=vmbr1000", "bridge=ludusnat")
+				// Replace the range bridge with the new VNet interface
+				logger.Debug(fmt.Sprintf("Replacing bridge %s with %s", rangeBridgeName, vnetName))
+				ifaceData = strings.ReplaceAll(ifaceData, fmt.Sprintf("bridge=%s", rangeBridgeName), fmt.Sprintf("bridge=%s", vnetName))
+
+				logger.Debug(fmt.Sprintf("VM %d, updated interface %s: %s", member.VMID, ifaceName, ifaceData))
+
+				netOptions = append(netOptions, goproxmox.VirtualMachineOption{
+					Name:  ifaceName,
+					Value: ifaceData,
+				})
+			}
 		}
 
-		_, err = vm.Config(ctx, netOption)
+		_, err = vm.Config(ctx, netOptions...)
 		if err != nil {
 			logger.Error(fmt.Sprintf("Failed to update VM %d network config: %v", member.VMID, err))
 		} else {

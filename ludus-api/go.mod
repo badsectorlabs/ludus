@@ -92,3 +92,5 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.45.0 // indirect
 )
+
+replace github.com/luthermonson/go-proxmox => github.com/badsectorlabs/go-proxmox v0.0.0-20260303215057-cd64a83c582b

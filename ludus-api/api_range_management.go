@@ -820,6 +820,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 
 	// Get the source user object by looking up the user ID in the database
 	sourceUserRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
+	if err != nil && err == sql.ErrNoRows {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("User %s not found", userID))
+	}
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting user object: %v", err))
 	}
