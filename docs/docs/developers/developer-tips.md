@@ -30,9 +30,12 @@ Usage: ./dev.sh [-h] [-l] [-a] [-t target] [-n lines] [-c] [-d] [-p] [-w] [-s] [
   -L  Enable debug mode for license requests
 
 Examples:
-  ./dev.sh -t ludus-dev-hostname -C -d -s # Build and install client remotely, Build and install Ludus server with debug mode, skip plugins
+  # Build and install client remotely; Build and install Ludus server with debug mode, skip plugins
+  ./dev.sh -t ludus-dev-hostname -C -d -s 
 ```
 This script copies your current code to the target machine via rsync at `~/ludus-dev` then calls the `dev.sh` scripts in `ludus-server` or `ludus-client` respectively with appropriate options.
+
+The script **always** sets the `LUDUS_ENABLE_SUPERADMIN` variable to enable the [PocketBase web interface](../administration/pocketbase.md).
 
 ## DEBUG logging
 

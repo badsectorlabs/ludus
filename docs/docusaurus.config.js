@@ -79,7 +79,7 @@ const config = {
       ({
         docs: {
           sidebarPath: './sidebars.js',
-          editUrl: 'https://gitlab.com/badsectorlabs/ludus/-/edit/main/docs/',
+          //editUrl: 'https://gitlab.com/badsectorlabs/ludus/-/edit/main/docs/',
           lastVersion: '1',
           includeCurrentVersion: true,
           versions: {

@@ -7,22 +7,9 @@ title: "🆔 SSO"
 
 ## Configure an OAuth2 Provider
 
-The Ludus Web UI supports SSO, powered by pocketbase.
+The Ludus Web UI supports SSO, powered by PocketBase.
 
-To configure SSO, you must first enable the pocketbase UI by running the following commands on your Ludus host.
-
-```shell-session
-#terminal-command-ludus-root
-set-environment LUDUS_ENABLE_SUPERADMIN=ill-be-careful
-#terminal-command-ludus-root
-systemctl restart ludus
-```
-
-You can then browse to the pocketbase admin page at `https://<Ludus IP>:8080/admin`
-
-Log in with the username `root@ludus.internal` and the password the full ROOT API key from `/opt/ludus/install/root-api-key`
-
-![The pocketbase login screen](/img/sso/pocketbase-login.png)
+To configure SSO, you must first [enable the PocketBase UI](./pocketbase).
 
 Click the gear icon next to the `users` table header
 
