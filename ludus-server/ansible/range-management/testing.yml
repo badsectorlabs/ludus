@@ -120,7 +120,7 @@
   hosts: "{{ range_id }}_windows_endpoints"
   ignore_unreachable: true
   vars:
-    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+    dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan }}.254"
   tasks:
     - name: Try to set the NTP server to NIST
       ansible.windows.win_shell: |
