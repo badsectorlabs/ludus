@@ -9,6 +9,19 @@ import (
 
 func init() {
 	m.Register(func(app core.App) error {
+
+		// Check if the collection already exists
+		// This allows the migrations to run successfully on a dev machine that
+		// previously ran the pre-optimized migrations
+		// Should never effect a fresh install or a 1.x to 2.x upgrade
+		existingBlueprintsCollection, err := app.FindCollectionByNameOrId("blueprints")
+		if err != nil {
+			return err
+		}
+		if existingBlueprintsCollection != nil {
+			return nil
+		}
+
 		blueprintsCollection := core.NewBaseCollection("blueprints")
 
 		usersCollection, err := app.FindCollectionByNameOrId("users")

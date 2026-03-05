@@ -2,7 +2,6 @@ package migrations
 
 import (
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/tools/types"
 
 	m "github.com/pocketbase/pocketbase/migrations"
 )
@@ -12,49 +11,11 @@ func init() {
 		// init a new auth collection with the default system fields and auth options
 		rangesCollection := core.NewBaseCollection("ranges")
 
-		// Allow access if the user is authenticated and is either directly assigned the range,
-		// or is a member/manager of a group that is assigned the range. Or if they are an Admin.
-		hasAccessRule := types.Pointer(`
-		@request.auth.id != "" && (
-			@request.auth.isAdmin = true ||
-			@request.auth.ranges.id ?= id ||
-			(
-				@collection.groups.ranges.id ?= id &&
-				(
-					@collection.groups.members.id ?= @request.auth.id ||
-					@collection.groups.managers.id ?= @request.auth.id
-				)
-			)
-		)`)
-
-		// Allow access if the user is authenticated and directly assigned the range
-		// or a manager of a group that is assigned the range. Admins always have access.
-		// We also check explicitly that the only fields that are allowed to be changed are: name, description, purpose and thumbnail
-		// This is to prevent users from changing other fields that are not allowed to be changed directly via the API
-		isManagerOrDirectlyAssignedRule := types.Pointer(`
-		@request.auth.id != "" && (
-			@request.auth.isAdmin = true ||
-			@request.auth.ranges.id ?= id ||
-			(
-				@collection.groups.ranges.id ?= id &&
-				@collection.groups.managers.id ?= @request.auth.id
-			)
-		) &&
-		@request.body.rangeNumber:changed = false &&
-		@request.body.rangeID:changed = false &&
-		@request.body.lastDeployment:changed = false &&
-		@request.body.numberOfVMs:changed = false &&
-		@request.body.testingEnabled:changed = false &&
-		@request.body.allowedDomains:changed = false &&
-		@request.body.allowedIPs:changed = false &&
-		@request.body.rangeState:changed = false &&
-		@request.body.created:changed = false &&
-		@request.body.updated:changed = false
-		`)
-
-		rangesCollection.ListRule = hasAccessRule
-		rangesCollection.ViewRule = hasAccessRule
-		rangesCollection.UpdateRule = isManagerOrDirectlyAssignedRule
+		// Only superusers can list, view, update, and delete ranges
+		rangesCollection.ListRule = nil
+		rangesCollection.ViewRule = nil
+		rangesCollection.UpdateRule = nil
+		rangesCollection.DeleteRule = nil
 
 		rangesCollection.Fields.Add(
 			&core.NumberField{
