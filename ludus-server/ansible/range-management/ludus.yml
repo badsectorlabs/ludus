@@ -728,6 +728,28 @@
         - ludus_domain_fqdn is defined
     # End set standard Ludus variables
 
+    - name: Ensure /etc/docker directory exists if host is Linux and MTU is less than 1500
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        mode: '0755'
+      when:
+        - ansible_system == 'Linux'
+        - ansible_default_ipv4 is defined
+        - ansible_default_ipv4.mtu | int < 1500
+
+    # Dynamically inject the host's MTU (e.g., 1450) into the docker config
+    # This is needed in cluster deployments where the VXLAN network MTU is 1450 but Docker sets the MTU to 1500 by default
+    - name: Pre-configure Docker MTU to match host default interface if host is Linux and MTU is less than 1500
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: "{{ {'mtu': ansible_default_ipv4.mtu} | to_nice_json }}"
+        mode: '0644'
+      when:
+        - ansible_system == 'Linux'
+        - ansible_default_ipv4 is defined
+        - ansible_default_ipv4.mtu | int < 1500
+
 - name: Run the user-defined roles playbook
   tags: [user-defined-roles]
   ansible.builtin.import_playbook: "{{ ludus_install_path }}/ranges/{{ range_id }}/user-defined-roles.yml"
