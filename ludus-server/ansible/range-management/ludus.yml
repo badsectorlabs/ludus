@@ -228,13 +228,13 @@
     - name: Configure IP and Hostname
       ansible.builtin.include_tasks: tasks/proxmox/configure-ip-and-hostname.yml
   vars:
-    vlan: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}"
-    static_ip: "10.{{ range_second_octet }}.{{ vlan }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).ip_last_octet }}"
+    vlan: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan }}"
+    static_ip: "10.{{ range_second_octet }}.{{ vlan }}.{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).ip_last_octet }}"
     cidr_netmask: "24"
-    default_gateway: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
-    vm_hostname: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).hostname }}"
-    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan | string + '.254') }}"
-    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
+    default_gateway: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan }}.254"
+    vm_hostname: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).hostname }}"
+    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan | string + '.254') }}"
+    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
 
 # ==========================================================
 # Set up DNS on the router for range hosts
@@ -288,7 +288,7 @@
     - name: Sysprep a VM
       ansible.builtin.include_tasks: tasks/windows/sysprep.yml
   vars:
-    vm_hostname: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).hostname }}"
+    vm_hostname: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).hostname }}"
 
 - name: Collect DC VM names
   tags: [always, dcs]
@@ -322,27 +322,27 @@
     - name: Configure GPOs
       ansible.builtin.include_tasks: tasks/windows/gpo/gpo.yml
   vars:
-    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan | string + '.254') }}"
-    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
+    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan | string + '.254') }}"
+    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
     dc_ip: "{{ ansible_host }}"
     # The autologon user should be the user defined user (if defined) or the domain admin
     autologon_user: |-
       {{
-        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user
-          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
+        (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_user
+          if ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
         else
           defaults.ad_domain_admin
       }}
     autologon_password: |-
       {{
-        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password
-          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
+        (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_password
+          if ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
         else
           defaults.ad_domain_admin_password
       }}
-    netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
-    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
-    enabled_gpos: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].windows.gpos | default([]) }}"
+    netbios_name: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
+    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
+    enabled_gpos: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].windows.gpos | default([]) }}"
 
 - name: Configure additional DCs
   tags: [dcs]
@@ -350,7 +350,7 @@
   tasks:
     - name: Set FQDN
       ansible.builtin.set_fact:
-        domain_fqdn: "{{ ((ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn) }}"
+        domain_fqdn: "{{ ((ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn) }}"
     - name: Set primary DC VM name fact
       ansible.builtin.set_fact:
         dc_vm_name: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
@@ -368,25 +368,25 @@
     - name: Configure additional Domain Controllers
       ansible.builtin.include_tasks: tasks/windows/configure-additional-dc.yml
   vars:
-    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan | string + '.254') }}"
-    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
-    netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
-    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
+    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan | string + '.254') }}"
+    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
+    netbios_name: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
+    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
     domain_admin: "{{ defaults.ad_domain_admin }}"
     domain_admin_password: "{{ defaults.ad_domain_admin_password }}"
     domain_safe_mode_password: "{{ defaults.ad_domain_safe_mode_password }}"
     # The autologon user should be the user defined user (if defined) or the domain admin
     autologon_user: |-
       {{
-        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user
-          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
+        (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_user
+          if ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
         else
           defaults.ad_domain_admin
       }}
     autologon_password: |-
       {{
-        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password
-          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
+        (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_password
+          if ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
         else
           defaults.ad_domain_admin_password
       }}
@@ -421,23 +421,23 @@
     - name: Enable Network Sharing
       ansible.builtin.include_tasks: tasks/windows/enable-network-sharing.yml
   vars:
-    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan | string + '.254') }}"
-    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
+    primary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan | string + '.254') }}"
+    secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
     # The autologon user should be the user defined user (if defined) or the domain user (if a domain is defined) otherwise localuser
     autologon_user: |-
       {{
-        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user
-          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
+        (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_user
+          if ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
         else
-          defaults.ad_domain_user if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain | default('')) | length > 0
+          defaults.ad_domain_user if ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).domain | default('')) | length > 0
           else 'localuser'
       }}
     autologon_password: |-
       {{
-        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password
-          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
+        (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_password
+          if ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
         else
-          defaults.ad_domain_user_password if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).domain | default('')) | length > 0
+          defaults.ad_domain_user_password if ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).domain | default('')) | length > 0
           else 'password'
       }}
 
@@ -460,7 +460,7 @@
     - name: Add additional tools to Windows VMs
       ansible.builtin.include_tasks: tasks/windows/add-additional-windows-tools.yml
       vars:
-        ignore_chocolatey_checksums: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.chocolatey_ignore_checksums | default(false) }}"
+        ignore_chocolatey_checksums: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.chocolatey_ignore_checksums | default(false) }}"
 
 - name: Collect Windows VMs to install custom chocolatey packages
   tags: [custom-choco]
@@ -481,8 +481,8 @@
     - name: Install extra chocolatey packages
       ansible.builtin.include_tasks: tasks/windows/install-extra-choco-packages.yml
       vars:
-        chocolatey_packages: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.chocolatey_packages }}"
-        ignore_chocolatey_checksums: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.chocolatey_ignore_checksums | default(false) }}"
+        chocolatey_packages: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.chocolatey_packages }}"
+        ignore_chocolatey_checksums: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.chocolatey_ignore_checksums | default(false) }}"
 
 - name: Collect Windows VMs to join to the domain
   tags: [domain-join]
@@ -502,7 +502,7 @@
   tasks:
     - name: Find FQDN for role member
       ansible.builtin.set_fact:
-        domain_fqdn: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn }}"
+        domain_fqdn: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn }}"
     - name: Set dc_vm_name for the primary-dc with the same FQDN
       ansible.builtin.set_fact:
         dc_vm_name: "{{ item.vm_name }}"
@@ -525,24 +525,24 @@
     - name: Join VMs to the domain
       ansible.builtin.include_tasks: tasks/windows/join-domain.yml
   vars:
-    netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
-    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
-    template_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].template | string }}"
+    netbios_name: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
+    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
+    template_name: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].template | string }}"
     domain_admin: "{{ defaults.ad_domain_admin }}"
     domain_admin_password: "{{ defaults.ad_domain_admin_password }}"
     ou_name: "{{ 'Servers' if template_name is defined and 'server' in (template_name | lower) else 'Workstations' }}"
     # The autologon user should be the user defined user (if defined) or the domain user
     autologon_user: |-
       {{
-        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user
-          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
+        (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_user
+          if ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_user | default('')) | length > 0
         else
           defaults.ad_domain_user
       }}
     autologon_password: |-
       {{
-        (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password
-          if ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
+        (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_password
+          if ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.autologon_password | default('')) | length > 0
         else
           defaults.ad_domain_user_password
       }}
@@ -570,8 +570,8 @@
         - name: Install Office
           ansible.builtin.include_tasks: tasks/windows/install-office.yml
           vars:
-            office_version: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.office_version | string }}"
-            office_arch: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.office_arch | string }}"
+            office_version: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.office_version | string }}"
+            office_arch: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.office_arch | string }}"
             office_installer_version_lookback: "1"
       # Sometimes the latest office installer fails - fall back to the last version and try again
       rescue:
@@ -580,8 +580,8 @@
             - name: Install Office
               ansible.builtin.include_tasks: tasks/windows/install-office.yml
               vars:
-                office_version: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.office_version | string }}"
-                office_arch: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.office_arch | string }}"
+                office_version: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.office_version | string }}"
+                office_arch: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.office_arch | string }}"
                 office_installer_version_lookback: "2"
           # If Mircosoft has pulled the previous office install binary, it will fail with 404. Move on but warn the user at the end of the deploy
           rescue:
@@ -613,7 +613,7 @@
     - name: Install Visual Studio
       ansible.builtin.include_tasks: tasks/windows/install-visual-studio.yml
       vars:
-        visual_studio_version: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).windows.visual_studio_version | string }}"
+        visual_studio_version: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.visual_studio_version | string }}"
 
 # ==========================================================
 # Linux packages
@@ -640,7 +640,7 @@
         name: "{{ item }}"
         state: present
         update_cache: true # Passed down to the package manager of the system, but they all seem to support this option https://stackoverflow.com/a/70650223/3006990
-      loop: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).linux.packages }}"
+      loop: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).linux.packages }}"
 
 # ==========================================================
 # User-Defined Roles
@@ -676,35 +676,35 @@
 
     - name: Get roles for this VM
       ansible.builtin.set_fact:
-        custom_roles_list: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).roles }}"
+        custom_roles_list: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).roles }}"
 
     - name: Check type of role_vars
       ansible.builtin.assert:
-        that: (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).role_vars | type_debug == 'dict'
+        that: (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).role_vars | type_debug == 'dict'
         fail_msg: "'role_vars' must be a dictionary. Remove the leading `-` from each value!"
         success_msg: "'role_vars' is a dictionary"
-      when: (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).role_vars is defined
+      when: (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).role_vars is defined
 
     # This is required because you cannot simply add vars to include_role, see https://github.com/ansible/ansible/issues/19084
     - name: Set all role variables for non-arrays
       ansible.builtin.set_fact:
         "{{ role_item.key }}": "{{ role_item.value }}"
-      loop: "{{ ((ludus | selectattr('vm_name', 'match', inventory_hostname) | first).role_vars | dict2items) if (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).role_vars is defined else [] }}"
+      loop: "{{ ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).role_vars | dict2items) if (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).role_vars is defined else [] }}"
       loop_control:
         loop_var: role_item
 
     # Set standard Ludus variables
     - name: Set standard Ludus variables
       ansible.builtin.set_fact:
-        ludus_dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', inventory_hostname) | first).vlan }}.254"
+        ludus_dns_server: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan }}.254"
 
     - name: Set Ludus domain variables
       ansible.builtin.set_fact:
-        ludus_domain_fqdn: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn | default('') }}"
-        ludus_domain_netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] | default('') }}"
-        ludus_domain_fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') | default('') }}"
+        ludus_domain_fqdn: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn | default('') }}"
+        ludus_domain_netbios_name: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[0] | default('') }}"
+        ludus_domain_fqdn_tail: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') | default('') }}"
       when:
-        - (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain is defined
+        - (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain is defined
 
     - name: Set ludus_dc_vm_name for the primary-dc with the same FQDN as this VM
       ansible.builtin.set_fact:
@@ -746,7 +746,7 @@
     firstname: "{{ first }}"
     lastname: "{{ last }}"
     password: "{{ pass }}"
-    netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
+    netbios_name: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
     ad_dc_vm_name: "{{ (ludus | selectattr('domain', 'defined') | selectattr('domain.fqdn', 'match', domain_fqdn) | selectattr('domain.role', 'match', 'primary-dc'))[0].vm_name }}"
 
 # ==========================================================
