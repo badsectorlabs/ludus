@@ -129,6 +129,7 @@
     - name: Create ludusnat VNet (cluster mode only)
       ansible.builtin.shell: |
         pvesh create /cluster/sdn/vnets --zone ludus --vnet {{ ludus_nat_interface | default("ludusnat") }} --tag 16777215 --vlanaware 1 && pvesh set /cluster/sdn
+      when: cluster_status.stdout | trim == "true"
 
     - name: Add the ludusnat interface
       ansible.builtin.blockinfile:
