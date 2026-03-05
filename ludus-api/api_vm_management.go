@@ -30,7 +30,7 @@ func DestroyVM(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, "Unable to get proxmox client: "+err.Error())
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	err = destroyVM(ctx, proxmoxClient, vmID)
