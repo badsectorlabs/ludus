@@ -63,8 +63,21 @@ func GetSDNMigrationStatus(e *core.RequestEvent) error {
 	// Check if NAT VNet exists
 	natVNetExists, _ := VNetExists(client, ServerConfiguration.LudusNATInterface)
 
-	// System needs migration if NAT VNet hasn't been created yet
-	needsMigration := !natVNetExists
+	// System needs migration if there are ranges in the database but no range VNets for each existing range
+	needsMigration := false
+	ranges, err := app.FindAllRecords("ranges")
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, "Failed to get ranges: "+err.Error())
+	}
+	if len(ranges) > 0 && !natVNetExists {
+		for _, rangeRecord := range ranges {
+			vnetName := fmt.Sprintf("r%d", rangeRecord.GetInt("rangeNumber"))
+			vnetExists, _ := VNetExists(client, vnetName)
+			if !vnetExists {
+				needsMigration = true
+			}
+		}
+	}
 
 	// In cluster mode, users must manually create the zone with correct VXLAN peer IPs
 	requiresManualZone := !zoneExists
