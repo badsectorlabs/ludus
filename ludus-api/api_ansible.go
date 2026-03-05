@@ -230,7 +230,12 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 	}
 
 	// Save the file to the server
-	roleTarPath := fmt.Sprintf("%s/users/%s/.ansible/tmp/%s", ludusInstallPath, user.ProxmoxUsername(), fileHeader.Filename)
+	ansibleTmpPath := fmt.Sprintf("%s/users/%s/.ansible/tmp", ludusInstallPath, user.ProxmoxUsername())
+
+	// Make sure the file name is escaped
+	fileHeader.Filename = shellescape.Quote(fileHeader.Filename)
+
+	roleTarPath := fmt.Sprintf("%s/%s", ansibleTmpPath, fileHeader.Filename)
 
 	// Go strips all directory information from the file name, no issue with path traversal here. See: https://go-review.googlesource.com/c/go/+/313809 and https://github.com/golang/go/issues/45789
 
@@ -242,20 +247,29 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Unable to save the file: "+err.Error())
 	}
-	defer os.Remove(roleTarPath)
 
-	// Make sure the file name is escaped
-	fileHeader.Filename = shellescape.Quote(fileHeader.Filename)
+	// Remove all extensions from the uploaded file name. Ansible Galaxy uses this as the role name, so we need to format it
+	roleName := filepath.Base(roleTarPath)
+	for {
+		ext := filepath.Ext(roleName)
+		if ext == "" {
+			break // No more extensions found
+		}
+		roleName = strings.TrimSuffix(roleName, ext)
+	}
+	newPath := fmt.Sprintf("%s/%s", ansibleTmpPath, roleName)
+	os.Rename(roleTarPath, newPath)
+	defer os.Remove(newPath)
 
 	var cmd *exec.Cmd
 	if global && force {
-		cmd = exec.Command("ansible-galaxy", "role", "install", fileHeader.Filename, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
+		cmd = exec.Command("ansible-galaxy", "role", "install", roleName, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
 	} else if global {
-		cmd = exec.Command("ansible-galaxy", "role", "install", fileHeader.Filename, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
+		cmd = exec.Command("ansible-galaxy", "role", "install", roleName, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
 	} else if force {
-		cmd = exec.Command("ansible-galaxy", "role", "install", fileHeader.Filename, "-f")
+		cmd = exec.Command("ansible-galaxy", "role", "install", roleName, "-f")
 	} else {
-		cmd = exec.Command("ansible-galaxy", "role", "install", fileHeader.Filename)
+		cmd = exec.Command("ansible-galaxy", "role", "install", roleName)
 	}
 	cmd.Dir = fmt.Sprintf("%s/users/%s/.ansible/tmp", ludusInstallPath, user.ProxmoxUsername()) // If you try to install a tar'd role with the full path, it will fail to extract. Bug in ansible-galaxy?
 	cmd.Env = os.Environ()
@@ -267,7 +281,6 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 	if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), fileHeader.Filename+" was installed successfully") {
 		return JSONError(e, http.StatusInternalServerError, string(cmdOutput))
 	}
-	roleName := strings.TrimSuffix(fileHeader.Filename, ".tar.gz")
 	_, err = parseRoleVersion(roleName, user, global)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
