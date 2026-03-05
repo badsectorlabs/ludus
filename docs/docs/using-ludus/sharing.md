@@ -5,7 +5,7 @@ title: "🤝 Sharing"
 
 # 🤝 Sharing
 
-Ranges can be shared between users in two ways, either with direct access (assigned to the user by an admin) or as a result of group access (range and user assigned to group by manager or admin).
+Ranges can be shared between users in two ways, either with direct access (assigned to the user by an admin) or as a result of group access (range and user assigned to group by group manager or admin).
 
 
 ## Direct Access
