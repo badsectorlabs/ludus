@@ -37,6 +37,8 @@ ludus ansible role add -d ./ludus_child_domain
 ludus ansible role add badsectorlabs.luds_adcs --user USER2
 ```
 
+Roles added from a directory will be listed as the directory name, regardless of what is in `meta/main.yml`. This is how `ansible-galaxy` works when installing roles.
+
 After roles have been added to Ludus, you can modify the range config to use them:
 
 ```yaml title="range-config.yml"

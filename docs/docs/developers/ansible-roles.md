@@ -77,4 +77,4 @@ ludus_dc_ip               # The IP of the VM that is the primary DC for this VM'
 ludus_dc_hostname         # The hostname of the VM that is the primary DC for this VM's domain, if the VM has a domain defined
 ```
 
-All other ansible variables (i.e. `ansible_hostname`) and Ludus variables are also available to custom roles, such as `defaults`, `ludus`, or `network` as defined in the user's config.
+All other [ansible variables](https://docs.ansible.com/projects/ansible/latest/playbook_guide/playbooks_vars_facts.html) (i.e. `ansible_hostname`) and Ludus variables are also available to custom roles, such as `defaults`, `ludus`, or `network` as defined in the user's config.
