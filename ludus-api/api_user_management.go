@@ -438,6 +438,49 @@ func DeleteUser(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing user from host system: %v", err))
 	}
+
+	// Reassign any blueprints owned by this user to ROOT so the foreign key constraint doesn't block deletion
+	rootUserRecord, err := app.FindFirstRecordByData("users", "userID", "ROOT")
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding ROOT user to reassign blueprints: %v", err))
+	}
+	ownedBlueprints, err := app.FindRecordsByFilter(
+		"blueprints",
+		"owner = {:owner_id}",
+		"",
+		0,
+		0,
+		map[string]any{"owner_id": userRecord.Id},
+	)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding blueprints owned by user: %v", err))
+	}
+	for _, bp := range ownedBlueprints {
+		bp.Set("owner", rootUserRecord.Id)
+		if saveErr := app.Save(bp); saveErr != nil {
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error reassigning blueprint %s to ROOT: %v", bp.Id, saveErr))
+		}
+	}
+
+	// Remove the user from the sharedUsers list on any blueprints
+	sharedBlueprints, err := app.FindRecordsByFilter(
+		"blueprints",
+		"sharedUsers.id ?= {:user_id}",
+		"",
+		0,
+		0,
+		map[string]any{"user_id": userRecord.Id},
+	)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding blueprints shared with user: %v", err))
+	}
+	for _, bp := range sharedBlueprints {
+		bp.Set("sharedUsers-", userRecord.Id)
+		if saveErr := app.Save(bp); saveErr != nil {
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing user from shared blueprint %s: %v", bp.Id, saveErr))
+		}
+	}
+
 	err = app.Delete(userRecord)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error deleting user: %v", err))
