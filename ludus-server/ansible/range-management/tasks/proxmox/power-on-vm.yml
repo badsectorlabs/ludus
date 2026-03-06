@@ -1,0 +1,9 @@
+- name: Power on the VM
+  community.general.proxmox_kvm:
+    api_user: "{{ api_user }}"
+    api_token_id: "{{ proxmox_token_id }}"
+    api_token_secret: "{{ proxmox_token_secret }}"
+    api_host: "{{ api_host }}"
+    name: "{{ vm_name | default((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first)) }}"
+    state: started
+    timeout: 300

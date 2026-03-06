@@ -1,0 +1,13 @@
+- name: Wait for the host's control interface (SSH) to come up
+  ansible.builtin.wait_for:
+    host: "{{ target_ip }}"
+    port: 22
+    delay: 3
+    state: started
+    timeout: 900 # Router/host reboot and network rebind can take longer than the default timeout
+  delegate_to: localhost
+  become: false
+
+# Required to get the new IP address into the inventory
+- name: Refresh inventory
+  ansible.builtin.meta: refresh_inventory
