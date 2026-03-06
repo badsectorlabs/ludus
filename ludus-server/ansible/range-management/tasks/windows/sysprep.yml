@@ -82,11 +82,11 @@
   when: res.reboot_required
 
 - name: Wait for the host's control interface (WinRM via HTTPS) to come up
-  local_action:
-    module: wait_for
-    host: "{{ ansible_host }}"
+  ansible.builtin.wait_for:
+    host: "{{ inventory_hostname }}"
     port: 5986
     delay: 10
     state: started
+  delegate_to: localhost
   register: wait_result
   when: res.reboot_required
