@@ -8,12 +8,12 @@
   tasks:
     - name: Validate router host pattern will match a host
       ansible.builtin.fail:
-        msg: "Target router is not up. Router host pattern '{{ router.vm_name | default(range_id + '-router-debian11-x64') }}' will not match any hosts. This usually means the router VM name is incorrect or the range has not been deployed yet."
-      when: (router.vm_name | default(range_id + '-router-debian11-x64')) not in groups['all'] and (router.vm_name | default(range_id + '-router-debian11-x64')) not in groups['ungrouped']
+        msg: "Target router is not up. Router host pattern '{{ router.vm_name | default(default_router_vm_name) }}' will not match any hosts. This usually means the router VM name is incorrect or the range has not been deployed yet."
+      when: (router.vm_name | default(default_router_vm_name)) not in groups['all'] and (router.vm_name | default(default_router_vm_name)) not in groups['ungrouped']
 
 - name: Apply all user defined network rules to the router
   tags: [always]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
     - name: Set any user defined firewall rules
