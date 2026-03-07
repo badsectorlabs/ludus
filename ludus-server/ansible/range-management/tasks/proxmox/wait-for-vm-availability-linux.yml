@@ -1,3 +1,7 @@
+- name: Skip checking for SSH availability if the VM was just cloned
+  ansible.builtin.meta: end_host
+  when: vm_name in cloned_vms
+
 - name: Wait for the host's control interface (SSH) to come up
   ansible.builtin.wait_for:
     host: "{{ target_ip }}"

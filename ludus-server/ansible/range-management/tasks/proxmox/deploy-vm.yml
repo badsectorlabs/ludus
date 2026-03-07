@@ -215,3 +215,8 @@
   delegate_to: localhost
   register: wait_result
   when: ((is_linux is defined and is_linux) or (is_macos is defined and is_macos)) and clone_vm is changed and not unmanaged
+
+- name: Set a fact to indicate that this VM was just cloned, so wait-for-vm-availability-linux.yml can be skipped
+  ansible.builtin.set_fact:
+    cloned_vms: "{{ (cloned_vms | default([])) + [vm_name] }}"
+  when: clone_vm is changed and not unmanaged
