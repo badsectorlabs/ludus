@@ -25,6 +25,7 @@ const (
 func IsClusterMode() (bool, error) {
 	// Check if user has explicitly set cluster_mode in config
 	if viper.IsSet("cluster_mode") {
+		logger.Debug(fmt.Sprintf("Cluster mode explicitly set in config to: %t", ServerConfiguration.ClusterMode))
 		return ServerConfiguration.ClusterMode, nil
 	}
 

@@ -89,7 +89,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	var err error
 	UseSDN, err = IsClusterMode()
 	if err != nil {
-		logger.Error(fmt.Sprintf("Error checking if cluster mode is enabled: %v", err))
+		logger.Debug(fmt.Sprintf("Unable to check for cluster mode: %v", err))
 		UseSDN = false
 	}
 
