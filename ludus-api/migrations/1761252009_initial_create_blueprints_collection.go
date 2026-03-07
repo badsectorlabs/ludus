@@ -1,6 +1,8 @@
 package migrations
 
 import (
+	"database/sql"
+
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
 
@@ -15,7 +17,7 @@ func init() {
 		// previously ran the pre-optimized migrations
 		// Should never effect a fresh install or a 1.x to 2.x upgrade
 		existingBlueprintsCollection, err := app.FindCollectionByNameOrId("blueprints")
-		if err != nil {
+		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
 		if existingBlueprintsCollection != nil {
