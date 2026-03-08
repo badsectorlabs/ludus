@@ -367,6 +367,8 @@ documentation:
     max: 2
   script:
     - cd docs
+    # Replace the API link to a local link
+    - "sed -i \"s|https://api-docs.ludus.cloud/|pathname:///api/index.html|\" docusaurus.config.js"
     - yarn install
     - yarn build
     - rm -f ./build/video/*
