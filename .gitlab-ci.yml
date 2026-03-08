@@ -279,6 +279,13 @@ stages:
     - if: $CI_COMMIT_MESSAGE =~ /\[cluster tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at cluster-tests\]/
+    # If we start-at any of these, we need to run cluster test as well
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
 
 .ci-setup-cluster-admin: &ci-setup-cluster-admin
   # Sync time after snapshot rollback
