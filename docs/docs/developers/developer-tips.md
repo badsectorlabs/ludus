@@ -44,7 +44,9 @@ Ludus logs at the INFO level by default, but you can get DEBUG logging from diff
 The `dev.sh` script can set these automatically with flags `-d`, `-D`, `-P` and `-L`, but you can set them manually as well.
 
 ```shell-session
+# terminal-command-ludus-root
 set-environment LUDUS_DEBUG=1
+# terminal-command-ludus-root
 systemctl restart ludus ludus-admin
 ```
 
@@ -58,7 +60,9 @@ The following environment variables can be used to enable DEBUG level logging fo
 To unset the variables, use
 
 ```shell-session
+# terminal-command-ludus-root
 unset-environment LUDUS_DEBUG
+# terminal-command-ludus-root
 systemctl restart ludus ludus-admin
 ```
 

@@ -68,7 +68,7 @@ Ludus updated to v1.5.0+2d39950
 
 :::note
 
-    If you are updating from < 1.3.0 see [UPDATING.md](https://gitlab.com/badsectorlabs/ludus/-/blob/main/UPDATING.md?ref_type=heads)
+    Upgrading from Ludus 1.x? See the [Upgrading from Ludus 1.x](../upgrading-from-v1) guide for database migration details.
 
 :::
 
