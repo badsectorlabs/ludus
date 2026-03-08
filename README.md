@@ -1,12 +1,7 @@
-# Ludus
-
 <div align="center">
   <a href="https://ludus.cloud"><img width="500px" src="docs/static/img/ludus-social-card.png" alt="Ludus"></a>
 </div>
 
-<div align="center">
-    <em>🏛️ self-hosted, 🤖 automated, 🚀 fast deployments, 🤯 complex networks, 👥 multi-user, 🧑‍💻 API driven</em>
-</div>
 
 ## 🏟️ Ludus
 
@@ -23,11 +18,11 @@ Built on [Proxmox](https://www.proxmox.com/en/), Ludus enables advanced automati
 </div>
 
 
-## 📚 Docs
+## Docs
 
 All documentation can be found at [docs.ludus.cloud](https://docs.ludus.cloud) (and `https://<ludus IP>:8080/ludus` once your Ludus server is installed).
 
-## 🌟 Features
+## Features
 
 - **Automation**: From a Debian 12 install to a deployed virtual Active Directory network with a few simple commands
 - **Complex Networks**: Users can define up to 254 arbitrary /24 networks and control traffic flow between them
@@ -36,13 +31,13 @@ All documentation can be found at [docs.ludus.cloud](https://docs.ludus.cloud) (
 - **Templates**: Use Packer HCL or json files to create your own templates (13 included!)
 - **Multi-User**: Collaborate with your team, or keep your environment to yourself
 
-## ⚡️ Quick start
+## Quick start
 
 1. Grab the [`ludus-server`](https://gitlab.com/badsectorlabs/ludus/-/releases) binary and copy it to a clean Debian 12 host
 2. Run the `ludus-server` binary to convert the Debian 12 host into a Ludus host
 3. Follow the [Quick Start](https://docs.ludus.cloud/docs/category/quick-start) documentation to get templates built and a range deployed
 
-## 📷 Screenshots
+## Screenshots
 
 ### Help
 

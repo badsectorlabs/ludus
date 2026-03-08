@@ -33,8 +33,8 @@ systemctl restart ludus
 
 ## Promoting/Demoting a user to/from admin
 
-Enable the Pocketbase web UI as detailed above and log in. You can select a user in the `users` table and toggle the `isAdmin` toggle. Remember to click `Save changes`.
-
+1. Enable the Pocketbase web UI as detailed above and log in. You can select a user in the `users` table and toggle the `isAdmin` toggle. Remember to click `Save changes`.
+2. Add the user to the `ludus_admins` group in the Proxmox Web UI or run `pveum user modify <username>@pam --groups ludus_admins`
 
 ## Forcing a range out of testing mode
 
@@ -43,5 +43,5 @@ Enable the Pocketbase web UI as detailed above and log in. Select the `ranges` t
 ## Get the total resources for a range config
 
 ```
-yq '{"Total VMs": (.ludus.[] as $vm_item ireduce (0; . + 1)),"Total CPUs": (.ludus.[] as $vm_item ireduce (0; . + $vm_item.cpus)),"Total RAM (GB)": (.ludus.[] as $vm_item ireduce (0; . + $vm_item.ram_gb))}' range-config.yml
+yq '{"Total VMs": (.ludus.[] as $vm_item ireduce (0; . + 1)),"Total CPUs": (.ludus.[] as $vm_item ireduce (0; . + $vm_item.cpus)),"Total RAM (GB)": (.ludus.[] as $vm_item ireduce (0; . + $vm_item.ram_gb))}' /opt/ludus/range/<rangeID>/range-config.yml
 ```

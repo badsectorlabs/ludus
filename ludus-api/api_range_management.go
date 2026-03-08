@@ -1,8 +1,13 @@
 package ludusapi
 
 import (
-	"errors"
+	"context"
+	"database/sql"
 	"fmt"
+	"io"
+	"ludusapi/commandmanager"
+	"ludusapi/dto"
+	"ludusapi/models"
 	"net/http"
 	"os"
 	"os/exec"
@@ -12,25 +17,30 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
+	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
-var ansibleTags = []string{"all", "additional-tools", "allow-share-access", "assign-ip", "custom-choco", "custom-groups", "dcs", "debug", "dns-rewrites",
+const (
+	LudusRangeStateDeploying     = "DEPLOYING"
+	LudusRangeStateError         = "ERROR"
+	LudusRangeStateAborted       = "ABORTED"
+	LudusRangeStateDestroying    = "DESTROYING"
+	LudusRangeStateDestroyed     = "DESTROYED"
+	LudusRangeStateNeverDeployed = "NEVER DEPLOYED"
+	LudusRangeStateSuccess       = "SUCCESS"
+	ProxmoxPoolNameRegexString   = `^[A-Za-z][A-Za-z0-9_\-]*(\/[A-Za-z0-9_\-]+){0,2}$`
+)
+
+var ansibleTags = []string{"all", "access-control", "additional-tools", "allow-share-access", "assign-ip", "custom-choco", "custom-groups", "dcs", "debug", "dns-rewrites",
 	"domain-join", "install-office", "install-visual-studio", "network", "nexus", "share", "sysprep", "user-defined-roles", "vm-deploy", "windows"}
 
 // DeployRange - deploys the range according to the range config
-func DeployRange(c *gin.Context) {
+func DeployRange(e *core.RequestEvent) error {
 
-	type DeployBody struct {
-		Tags      string   `json:"tags"`
-		Force     bool     `json:"force"`
-		Verbose   bool     `json:"verbose"`
-		OnlyRoles []string `json:"only_roles"`
-		Limit     string   `json:"limit"`
-	}
-	var deployBody DeployBody
-	c.Bind(&deployBody)
+	var deployBody dto.DeployRangeRequest
+	e.BindBody(&deployBody)
 
 	var tags string
 	if deployBody.Tags == "" {
@@ -41,542 +51,891 @@ func DeployRange(c *gin.Context) {
 		tagsArray := strings.Split(deployBody.Tags, ",")
 		for _, tag := range tagsArray {
 			if !slices.Contains(ansibleTags, tag) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The tag '%s' does not exist on the Ludus server", tag)})
-				return
+				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("The tag '%s' does not exist on the Ludus server", tag))
 			}
 		}
 		tags = deployBody.Tags
 	}
 
-	usersRange, err := GetRangeObject(c)
+	usersRange, err := GetRange(e)
 	if err != nil {
-		return // JSON set in getRangeObject
+		return err
 	}
+	user := e.Get("user").(*models.User)
 
 	// Make sure we aren't already in a "DEPLOYING" state
-	if usersRange.RangeState == "DEPLOYING" && !deployBody.Force {
-		c.JSON(http.StatusConflict, gin.H{"error": "The range has an active deployment running. Try `range abort` to stop the deployment or run with --force if you really want to try a deploy"})
-		return
+	if usersRange.RangeState() == LudusRangeStateDeploying && !deployBody.Force {
+		return JSONError(e, http.StatusConflict, "The range has an active deployment running. Try `range abort` to stop the deployment or run with --force if you really want to try a deploy")
 	}
 
-	if usersRange.TestingEnabled && !deployBody.Force {
-		c.JSON(http.StatusConflict, gin.H{"error": "Testing enabled; deploy requires internet access to succeed; run with --force if you really want to try a deploy with testing enabled"})
-		return
+	if usersRange.RangeState() == LudusRangeStateDestroying && !deployBody.Force {
+		return JSONError(e, http.StatusConflict, "The range is currently being destroyed. Wait for it to finish or run with --force if you really want to try a deploy")
+	}
+
+	if usersRange.TestingEnabled() && !deployBody.Force {
+		return JSONError(e, http.StatusConflict, "Testing enabled; deploy requires internet access to succeed; run with --force if you really want to try a deploy with testing enabled")
 	}
 
 	// If the user specified roles, make sure they exist on the server before trying to use them
 	if len(deployBody.OnlyRoles) > 0 {
 		for _, role := range deployBody.OnlyRoles {
 			if role != "" { // Ignore empty strings
-				exists, err := checkRoleExists(c, role)
+				exists, err := checkRoleExists(e, role)
 				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-					return
+					return JSONError(e, http.StatusInternalServerError, err.Error())
 				}
 				if !exists {
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The role '%s' does not exist on the Ludus server for user %s", role, usersRange.UserID)})
-					return
+					return JSONError(e, http.StatusBadRequest, fmt.Sprintf("The role '%s' does not exist on the Ludus server for user %s", role, user.UserId()))
 				}
 			}
 		}
 	}
 
 	// Set range state to "DEPLOYING"
-	db.Model(&usersRange).Update("range_state", "DEPLOYING")
-
-	// This can take a long time, so run as a go routine and have the user check the status via another endpoint
-	go RunRangeManagementAnsibleWithTag(c, tags, deployBody.Verbose, deployBody.OnlyRoles, deployBody.Limit)
-
-	// Update the deployment time in the DB
-	db.Model(&usersRange).Update("last_deployment", time.Now())
-
-	c.JSON(http.StatusOK, gin.H{"result": "Range deploy started"})
-}
-
-// DeleteRange - stops and deletes all range VMs
-func DeleteRange(c *gin.Context) {
-	usersRange, err := GetRangeObject(c)
-	if err != nil {
-		return // JSON set in getRangeObject
+	usersRange.SetRangeState(LudusRangeStateDeploying)
+	usersRange.SetLastDeployment(types.NowDateTime())
+	if err := e.App.Save(usersRange); err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving range: %v", err))
 	}
 
-	// Set range state to "DESTROYING"
-	db.Model(&usersRange).Update("range_state", "DESTROYING")
-
 	// This can take a long time, so run as a go routine and have the user check the status via another endpoint
-	go func(c *gin.Context) {
-		_, err = RunPlaybookWithTag(c, "power.yml", "destroy-range", false)
-		if err != nil {
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "Error with destroy-range\n")
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), fmt.Sprintf("%v\n", c))
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), fmt.Sprintf("%s\n", err.Error()))
-			writeStringToFile(fmt.Sprintf("%s/users/ansible-debug.log", ludusInstallPath), "==================\n")
-			db.Model(&usersRange).Update("range_state", "ERROR")
-			return // Don't reset testing if destroy fails
-		}
-		// The user is rm-ing their range with testing enabled, so after all VMs are destroyed exit testing
-		if usersRange.TestingEnabled {
-			// Update the testing state in the DB as well as allowed domains and ips
-			usersRange.TestingEnabled = false
-			usersRange.AllowedDomains = []string{}
-			usersRange.AllowedIPs = []string{}
-			db.Save(&usersRange)
-		}
-		// Set range state to "DESTROYED"
-		db.Model(&usersRange).Update("range_state", "DESTROYED")
-	}(c)
+	go RunRangeManagementAnsibleWithTag(e, tags, deployBody.Force, deployBody.OnlyRoles, deployBody.Limit)
 
-	c.JSON(http.StatusOK, gin.H{"result": "Range destroy in progress"})
+	return JSONResult(e, http.StatusOK, "Range deploy started")
+}
+
+// deleteRangeResources - performs the actual deletion of range resources (VMs, pool, vmbr, directory, database record)
+// This function can be reused in other places that need to delete a range.
+// It assumes the range object has already been updated with the latest VM data via updateRangeVMData.
+func deleteRangeResources(targetRange *models.Range, force bool, e *core.RequestEvent) error {
+	var err error
+
+	// Get the proxmox client
+	proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// If range has VMs and force is true, destroy VMs first
+	if targetRange.NumberOfVms() > 0 && force {
+		// Get the VMs for the range
+		vms, err := getVMsForPool(e, ctx, targetRange.RangeId(), proxmoxClient)
+		if err != nil {
+			return fmt.Errorf("failed to get VMs for range: %w", err)
+		}
+		for _, vm := range vms {
+			destroyVM(ctx, proxmoxClient, int(vm.VMID))
+		}
+	}
+
+	// Remove the Resource Pool from Proxmox (also removes all ACLs for the pool)
+	err = removePool(targetRange.RangeId())
+	if err != nil {
+		return fmt.Errorf("failed to remove pool: %w", err)
+	}
+
+	err = manageRangeNetwork(targetRange.RangeId(), targetRange.RangeNumber(), false)
+	if err != nil {
+		return fmt.Errorf("failed to manage range network: %w", err)
+	}
+
+	// Remove the range directory
+	err = os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, targetRange.RangeId()))
+	if err != nil {
+		return fmt.Errorf("failed to remove range directory: %w", err)
+	}
+
+	// Delete the range object from the database
+	err = e.App.Delete(targetRange)
+	if err != nil {
+		return fmt.Errorf("failed to delete range from database: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteRange - deletes a range object from the database and proxmox host
+func DeleteRange(e *core.RequestEvent) error {
+
+	if os.Geteuid() != 0 {
+		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus range rm command with --url https://127.0.0.1:8081")
+	}
+
+	// Check if force parameter is provided
+	forceStr := e.Request.URL.Query().Get("force")
+	force := false
+	var err error
+	if forceStr != "" {
+		force, err = strconv.ParseBool(forceStr)
+		if err != nil {
+			return JSONError(e, http.StatusBadRequest, "Invalid force parameter")
+		}
+	}
+
+	// Get proxmox client and range object
+	proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
+
+	// Check if range has VMs (before updating VM data to avoid unnecessary work)
+	// We need to update VM data first to get accurate count
+	err = updateRangeVMData(e, targetRange, proxmoxClient)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
+	if targetRange.NumberOfVms() > 0 && !force {
+		return JSONError(e, http.StatusConflict, "Range has VMs. Use --force to delete anyway")
+	}
+
+	// Perform the actual deletion
+	err = deleteRangeResources(targetRange, force, e)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
+	return JSONResult(e, http.StatusOK, fmt.Sprintf("Range %s deleted", targetRange.RangeId()))
+}
+
+// DeleteRangeVMs - stops and deletes all range VMs (keeps range object in database)
+func DeleteRangeVMs(e *core.RequestEvent) error {
+	rangeIDToDelete := e.Request.PathValue("rangeID")
+	rangeRecordRaw, err := app.FindFirstRecordByData("ranges", "rangeID", rangeIDToDelete)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+	rangeRecord := &models.Range{}
+	rangeRecord.SetProxyRecord(rangeRecordRaw)
+
+	logger.Debug("DeleteRangeVMs for range ID: " + rangeRecord.RangeId())
+
+	// Set range state to "DESTROYING"
+	rangeRecord.SetRangeState(LudusRangeStateDestroying)
+	err = e.App.Save(rangeRecord)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Get the proxmox client
+	proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
+	// Destroy the VMs for the range
+	vms, err := getVMsForPool(e, ctx, rangeRecord.RangeId(), proxmoxClient)
+	if err != nil {
+		return fmt.Errorf("failed to get VMs for range: %w", err)
+	}
+	logger.Debug(fmt.Sprintf("Destroying %d VMs for range %s", len(vms), rangeRecord.RangeId()))
+	for _, vm := range vms {
+		logger.Debug(fmt.Sprintf("Destroying VM %d", int(vm.VMID)))
+		err = destroyVM(ctx, proxmoxClient, int(vm.VMID))
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error destroying VM %d: %s", int(vm.VMID), err.Error()))
+		}
+	}
+
+	// The user is rm-ing their range with testing enabled, so after all VMs are destroyed exit testing
+	if rangeRecord.TestingEnabled() {
+		// Update the testing state in the DB as well as allowed domains and ips
+		rangeRecord.SetTestingEnabled(false)
+		rangeRecord.SetAllowedDomains([]string{})
+		rangeRecord.SetAllowedIps([]string{})
+		err = e.App.Save(rangeRecord)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
+		}
+	}
+	// Set range state to "DESTROYED"
+	rangeRecord.SetRangeState(LudusRangeStateDestroyed)
+	err = e.App.Save(rangeRecord)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
+	}
+
+	return JSONResult(e, http.StatusOK, "Range VMs Destroyed")
 }
 
 // GetConfig - retrieves the current configuration of the range
-func GetConfig(c *gin.Context) {
-	user, err := GetUserObject(c)
+func GetConfig(e *core.RequestEvent) error {
+	usersRange, err := GetRange(e)
 	if err != nil {
-		return // JSON set in GetUserObject
+		return err
 	}
-	rangeConfig, err := GetFileContents(fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername))
+	rangeConfig, err := GetFileContents(fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId()))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-	c.JSON(http.StatusOK, gin.H{"result": rangeConfig})
+	return JSONResult(e, http.StatusOK, rangeConfig)
 }
 
 // GetConfigExample - retrieves an example range configuration
-func GetConfigExample(c *gin.Context) {
+func GetConfigExample(e *core.RequestEvent) error {
 	rangeConfig, err := GetFileContents(ludusInstallPath + "/ansible/user-files/range-config.example.yml")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-	c.JSON(http.StatusOK, gin.H{"result": rangeConfig})
+	return JSONResult(e, http.StatusOK, rangeConfig)
 }
 
 // GetEtcHosts - retrieves an /etc/hosts file for the range
-func GetEtcHosts(c *gin.Context) {
-	user, err := GetUserObject(c)
+func GetEtcHosts(e *core.RequestEvent) error {
+	user := e.Get("user").(*models.User)
+	etcHosts, err := GetFileContents(fmt.Sprintf("%s/users/%s/etc-hosts", ludusInstallPath, user.ProxmoxUsername()))
 	if err != nil {
-		return // JSON set in GetUserObject
+		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-	etcHosts, err := GetFileContents(fmt.Sprintf("%s/users/%s/etc-hosts", ludusInstallPath, user.ProxmoxUsername))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"result": etcHosts})
+	return JSONResult(e, http.StatusOK, etcHosts)
 }
 
 // GetRDP - retrieves RDP files as a zip for the range
-func GetRDP(c *gin.Context) {
-	user, err := GetUserObject(c)
-	if err != nil {
-		return // JSON set in GetUserObject
-	}
-
+func GetRDP(e *core.RequestEvent) error {
+	user := e.Get("user").(*models.User)
 	playbook := []string{ludusInstallPath + "/ansible/range-management/ludus.yml"}
 	extraVars := map[string]interface{}{
-		"username": user.ProxmoxUsername,
+		"username": user.ProxmoxUsername(),
 	}
-	output, err := server.RunAnsiblePlaybookWithVariables(c, playbook, []string{}, extraVars, "generate-rdp", false, "")
+	output, err := server.RunAnsiblePlaybookWithVariables(e, playbook, []string{}, extraVars, "generate-rdp", false, "")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": output})
-		return
+		return JSONError(e, http.StatusInternalServerError, output)
 	}
 
-	filePath := fmt.Sprintf("%s/users/%s/rdp.zip", ludusInstallPath, user.ProxmoxUsername)
-	c.Header("Content-Disposition", "attachment; filename=rdp.zip")
-	c.Header("Content-Type", "application/zip")
-	// Serve the file
-	c.File(filePath)
+	filePath := fmt.Sprintf("%s/users/%s/rdp.zip", ludusInstallPath, user.ProxmoxUsername())
+	fileContents, err := os.ReadFile(filePath)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+	e.Response.Header().Set("Content-Disposition", "attachment; filename=rdp.zip")
+	e.Response.Header().Set("Content-Type", "application/zip")
+	e.Response.Write(fileContents)
+	return nil
 }
 
 // GetLogs - retrieves the latest range logs
-func GetLogs(c *gin.Context) {
-	user, err := GetUserObject(c)
+func GetLogs(e *core.RequestEvent) error {
+	targetRange, err := GetRange(e)
 	if err != nil {
-		return // JSON set in GetUserObject
+		return err
 	}
-
-	ansibleLogPath := fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername)
-	GetLogsFromFile(c, ansibleLogPath)
+	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId())
+	GetLogsFromFile(e, ansibleLogPath)
+	return nil
 }
 
 // GetSSHConfig - retrieves a ssh config file for the range
-func GetSSHConfig(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"result": "Not implemented"})
+func GetSSHConfig(e *core.RequestEvent) error {
+	return JSONError(e, http.StatusNotImplemented, "Not implemented")
 }
 
 // ListRange - lists range VMs, their power state, and their testing state
-func ListRange(c *gin.Context) {
-	err := updateUsersRangeVMData(c)
+func ListRange(e *core.RequestEvent) error {
+	usersRange, err := GetRange(e)
 	if err != nil {
-		return // JSON error set in updateUsersRangeVMData
+		return err
 	}
-	// Get the updated range
-	usersRange, err := GetRangeObject(c)
+
+	proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
 	if err != nil {
-		return // JSON error is set in getRangeObject
+		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-	var allVMs []VmObject
-	db.Where("range_number = ?", usersRange.RangeNumber).Find(&allVMs)
-	// the range we got back from getRangeObject is a cached object from the first lookup
-	// so update the values we care about for this ListRange call and return the updated
-	// object to the user
-	usersRange.VMs = allVMs
-	usersRange.NumberOfVMs = int32(len(allVMs))
-	c.JSON(http.StatusOK, usersRange)
+
+	err = updateRangeVMData(e, usersRange, proxmoxClient)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+	logger.Debug(fmt.Sprintf("ListRange: Listing range %s with range number %d", usersRange.RangeId(), usersRange.RangeNumber()))
+
+	rangeVMs, err := app.FindAllRecords("vms", dbx.NewExp("range = {:rangeID}", dbx.Params{"rangeID": usersRange.Id}))
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
+	response := dto.ListRangeResponse{
+		RangeState:     usersRange.RangeState(),
+		RangeNumber:    int32(usersRange.RangeNumber()),
+		Description:    usersRange.Description(),
+		Purpose:        usersRange.Purpose(),
+		ThumbnailUrl:   rangeThumbnailURL(usersRange),
+		LastDeployment: usersRange.LastDeployment().Time(),
+		TestingEnabled: usersRange.TestingEnabled(),
+		VMs:            make([]dto.ListRangeResponseVMsItem, 0),
+		RangeID:        usersRange.RangeId(),
+		Name:           usersRange.Name(),
+		NumberOfVMs:    int32(usersRange.NumberOfVms()),
+		AllowedIPs:     usersRange.AllowedIps(),
+		AllowedDomains: usersRange.AllowedDomains(),
+	}
+
+	for _, vm := range rangeVMs {
+		vmRecord := &models.VMs{}
+		vmRecord.SetProxyRecord(vm)
+		response.VMs = append(response.VMs, dto.ListRangeResponseVMsItem{
+			ProxmoxID:   int32(vmRecord.ProxmoxId()),
+			RangeNumber: int32(usersRange.RangeNumber()),
+			Name:        vmRecord.Name(),
+			PoweredOn:   vmRecord.PoweredOn(),
+			Ip:          vmRecord.Ip(),
+			IsRouter:    vmRecord.IsRouter(),
+			CPU:         int32(vmRecord.Cpu()),
+			RAM:         int32(vmRecord.Ram()),
+		})
+	}
+
+	return e.JSON(http.StatusOK, response)
 }
 
-func ListAllRanges(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
-	}
+func ListAllRanges(e *core.RequestEvent) error {
 
-	// Make sure the range table is up to date by looping over all ranges and updating them
-	var usersRanges []RangeObject
-	result := db.Find(&usersRanges)
-	if result.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, result.Error)
-		return
-	}
+	var ranges []*models.Range
 
-	// The calling user is an admin can can see all VMs
-	proxmoxClient, err := GetProxmoxClientForUser(c)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Unable to get proxmox client for user: %s", err.Error())})
-		return
-	}
-
-	rawVMs, err := proxmoxClient.GetVmList()
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Unable to list VMs: %s", err.Error())})
-		return
-	}
-
-	// Loop over all users and update their range data
-	for _, rangeObject := range usersRanges {
-		// Update the VM data for this range
-		var rangeVMCount = 0
-		vms := rawVMs["data"].([]interface{})
-		for vmCounter := range vms {
-			vm := vms[vmCounter].(map[string]interface{})
-			// Skip shared templates
-			if vm["pool"] == nil || vm["name"] == nil || vm["template"] == nil {
-				continue // A vm with these values as nil will cause the conversions to panic
-			}
-			if vm["pool"].(string) != rangeObject.UserID ||
-				strings.HasSuffix(vm["name"].(string), "-template") ||
-				int(vm["template"].(float64)) == 1 {
-				continue
-			}
-			rangeVMCount += 1
+	user := e.Get("user").(*models.User)
+	if !user.IsAdmin() {
+		// Get range details for each accessible range
+		ranges = user.Ranges()
+	} else {
+		// Admin gets all ranges
+		rangeRecords, err := app.FindAllRecords("ranges")
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, err.Error())
 		}
-		db.Model(&rangeObject).Update("number_of_vms", rangeVMCount)
+		for _, rangeRecord := range rangeRecords {
+			rangeObj := &models.Range{}
+			rangeObj.SetProxyRecord(rangeRecord)
+			ranges = append(ranges, rangeObj)
+		}
 	}
 
-	var ranges []RangeObject
-	result = db.Find(&ranges)
-	if result.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, result.Error)
+	// Get Proxmox client and VM data for updating counts
+	proxmoxClient, err := GetGoProxmoxClientForUserUsingToken(e)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-	c.JSON(http.StatusOK, ranges)
+
+	response := make([]dto.ListAllRangeResponseItem, 0)
+
+	// Sort the ranges by range number
+	slices.SortFunc(ranges, func(a, b *models.Range) int {
+		return int(a.RangeNumber() - b.RangeNumber())
+	})
+
+	// Update VM data for all ranges
+	for _, rangeRecord := range ranges {
+		err = updateRangeVMData(e, rangeRecord, proxmoxClient)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error updating VM data for range %s: %s", rangeRecord.RangeId(), err.Error()))
+			continue
+		}
+		responseItem := dto.ListAllRangeResponseItem{
+			VMs:            make([]dto.ListAllRangeResponseItemVMsItem, 0),
+			RangeID:        rangeRecord.RangeId(),
+			Name:           rangeRecord.Name(),
+			NumberOfVMs:    int32(rangeRecord.NumberOfVms()),
+			AllowedIPs:     rangeRecord.AllowedIps(),
+			AllowedDomains: rangeRecord.AllowedDomains(),
+			LastDeployment: rangeRecord.LastDeployment().Time(),
+			RangeState:     rangeRecord.RangeState(),
+			RangeNumber:    int32(rangeRecord.RangeNumber()),
+			Description:    rangeRecord.Description(),
+			Purpose:        rangeRecord.Purpose(),
+			ThumbnailUrl:   rangeThumbnailURL(rangeRecord),
+			TestingEnabled: rangeRecord.TestingEnabled(),
+		}
+		vmRecords, err := app.FindAllRecords("vms", dbx.NewExp("range = {:rangeID}", dbx.Params{"rangeID": rangeRecord.Id}))
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error finding VMs for range %s: %s", rangeRecord.RangeId(), err.Error()))
+			continue
+		}
+		for _, vmRecord := range vmRecords {
+			vmRecordObj := &models.VM{}
+			vmRecordObj.SetProxyRecord(vmRecord)
+
+			// Use rangeRecord from outer loop rather than expanding VM's range relation
+			// for efficiency. We already queried VMs by range ID, so they must belong to this range.
+			responseItem.VMs = append(responseItem.VMs, dto.ListAllRangeResponseItemVMsItem{
+				Ip:          vmRecordObj.Ip(),
+				IsRouter:    vmRecordObj.IsRouter(),
+				ProxmoxID:   int32(vmRecordObj.ProxmoxId()),
+				RangeNumber: int32(rangeRecord.RangeNumber()),
+				Name:        vmRecordObj.Name(),
+				PoweredOn:   vmRecordObj.PoweredOn(),
+				CPU:         int32(vmRecordObj.Cpu()),
+				RAM:         int32(vmRecordObj.Ram()),
+			})
+		}
+		response = append(response, responseItem)
+	}
+
+	return e.JSON(http.StatusOK, response)
 }
 
 // PutConfig - updates the range config
-func PutConfig(c *gin.Context) {
-	user, err := GetUserObject(c)
+func PutConfig(e *core.RequestEvent) error {
+	targetRange, err := GetRange(e)
 	if err != nil {
-		return // JSON set in GetUserObject
-	}
-
-	usersRange, err := GetRangeObject(c)
-	if err != nil {
-		return // JSON set in getRangeObject
+		return err
 	}
 
 	// Retrieve the 'force' field and convert it to boolean
-	var force = false
-	forceStr := c.Request.FormValue("force")
-	force, err = strconv.ParseBool(forceStr)
+	forceStr := e.Request.FormValue("force")
+	force, err := strconv.ParseBool(forceStr)
 	if forceStr != "" && err != nil { // Empty string (unset) => force is false
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid boolean value"})
-		return
+		return JSONError(e, http.StatusBadRequest, "Invalid boolean value")
 	}
 
-	if usersRange.TestingEnabled && !force {
-		c.JSON(http.StatusConflict, gin.H{"error": "Testing is enabled; to prevent conflicts, the config cannot be updated while testing is enabled. Use --force to override."})
-		return
+	if targetRange.TestingEnabled() && !force {
+		return JSONError(e, http.StatusConflict, "Testing is enabled; to prevent conflicts, the config cannot be updated while testing is enabled. Use --force to override.")
 	}
 
-	file, err := c.FormFile("file")
+	file, _, err := e.Request.FormFile("file")
 
 	// The file cannot be received.
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "No file is received"})
-		return
+		return JSONError(e, http.StatusBadRequest, "Error retrieving file from request: "+err.Error())
 	}
 
 	// The file is received, so let's save it
-	filePath := fmt.Sprintf("%s/users/%s/.tmp-range-config.yml", ludusInstallPath, user.ProxmoxUsername)
-	err = c.SaveUploadedFile(file, filePath)
+	filePath := fmt.Sprintf("%s/ranges/%s/.tmp-range-config.yml", ludusInstallPath, targetRange.RangeId())
+	fileContents, err := io.ReadAll(file)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to save the range config"})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Unable to read file contents: "+err.Error())
 	}
-
-	// Validate the uploaded range-config - return an error if it isn't valid
-	err = validateFile(c, filePath, ludusInstallPath+"/ansible/user-files/range-config.jsonschema")
+	err = os.WriteFile(filePath, fileContents, 0644)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Configuration error: " + err.Error()})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Unable to save the range config: "+err.Error())
+	}
+	// Validate the uploaded range-config - return an error if it isn't valid
+	err = validateFile(e, filePath, ludusInstallPath+"/ansible/user-files/range-config.jsonschema")
+	if err != nil {
+		return JSONError(e, http.StatusBadRequest, "Configuration error: "+err.Error())
 	}
 
 	// Check the roles and dependencies
-	userHasRoles, exists := c.Get("userHasRoles")
-	if exists && userHasRoles.(bool) {
-		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), "Resolving dependencies for user-defined roles..\n", false)
-		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(c, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
-		logToFile(fmt.Sprintf("%s/users/%s/ansible.log", ludusInstallPath, user.ProxmoxUsername), rolesOutput, true)
+	rangeHasRoles := e.Get("rangeHasRoles")
+	logger.Debug(fmt.Sprintf("Range has roles: %v", rangeHasRoles))
+	if rangeHasRoles != nil && rangeHasRoles.(bool) {
+		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), "Resolving dependencies for user-defined roles..\n", false)
+		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(e, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
+		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), rolesOutput, true)
 		if err != nil {
-			db.Model(&usersRange).Update("range_state", "ERROR")
+			targetRange.SetRangeState(LudusRangeStateError)
+			err = e.App.Save(targetRange)
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
+			}
 			// Find the 'ERROR' line in the output and return it to the user
 			errorLine := regexp.MustCompile(`ERROR[^"]*`)
 			errorMatch := errorLine.FindString(rolesOutput)
 			if errorMatch != "" {
-				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Configuration error: " + errorMatch})
-				return
+				return JSONError(e, http.StatusBadRequest, "Configuration error: "+errorMatch)
 			} else {
-				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error generating ordered roles: %s %s", rolesOutput, err)})
-				return
+				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("Error generating ordered roles: %s %s", rolesOutput, err))
 
 			}
 		}
 	}
 
 	// The file is valid, so let's move it to the range-config
-	err = os.Rename(filePath, fmt.Sprintf("%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername))
+	err = os.Rename(filePath, fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, targetRange.RangeId()))
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to save the range config"})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Unable to save the range config")
 	}
 
 	// File saved successfully. Return proper result
-	c.JSON(http.StatusOK, gin.H{"result": "Your range config has been successfully updated."})
+	return JSONResult(e, http.StatusOK, "Your range config has been successfully updated.")
 }
 
-func GetAnsibleInventoryForRange(c *gin.Context) {
-	user, err := GetUserObject(c)
+func GetAnsibleInventoryForRange(e *core.RequestEvent) error {
+	targetRange, err := GetRange(e)
 	if err != nil {
-		return // JSON set in GetUserObject
+		return err
 	}
-	proxmoxPassword := getProxmoxPasswordForUser(user, c)
-	if proxmoxPassword == "" {
-		return // JSON set in getProxmoxPasswordForUser
-	}
+	targetUser := e.Get("user").(*models.User)
 
-	usersRange, err := GetRangeObject(c)
+	proxmoxTokenSecret, err := DecryptStringFromDatabase(targetUser.ProxmoxTokenSecret())
 	if err != nil {
-		return // JSON set in getRangeObject
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Could not decrypt proxmox token secret: %s", err))
 	}
 
 	// Check for allranges parameter
-	allRanges := c.Query("allranges") == "true"
+	allRanges := e.Request.URL.Query().Get("allranges") == "true"
 
 	cmd := exec.Command("ansible-inventory", "-i", ludusInstallPath+"/ansible/range-management/proxmox.py", "--list", "-y")
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, targetUser.ProxmoxUsername()))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_NODE=%s", ServerConfiguration.ProxmoxNode))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_INVALID_CERT=%s", strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert)))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_URL=%s", ServerConfiguration.ProxmoxURL))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_HOSTNAME=%s", ServerConfiguration.ProxmoxHostname))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_USERNAME=%s", user.ProxmoxUsername+"@pam"))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_PASSWORD=%s", proxmoxPassword))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_CONFIG=%s/users/%s/range-config.yml", ludusInstallPath, user.ProxmoxUsername))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_NUMBER=%s", strconv.Itoa(int(usersRange.RangeNumber))))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_ID=%s", user.UserID))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_USERNAME=%s", targetUser.ProxmoxUsername()+"@"+targetUser.ProxmoxRealm()))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_TOKEN=%s", targetUser.ProxmoxTokenId()))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_SECRET=%s", proxmoxTokenSecret))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_CONFIG=%s/ranges/%s/range-config.yml", ludusInstallPath, targetRange.RangeId()))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_NUMBER=%s", strconv.Itoa(int(targetRange.RangeNumber()))))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RANGE_ID=%s", targetRange.RangeId()))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_RETURN_ALL_RANGES=%s", strconv.FormatBool(allRanges)))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_USER_IS_ADMIN=%s", strconv.FormatBool(user.IsAdmin)))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LUDUS_USER_IS_ADMIN=%s", strconv.FormatBool(targetUser.IsAdmin())))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to get the ansible inventory: " + string(out)})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Unable to get the ansible inventory: "+string(out))
 	}
-	c.JSON(http.StatusOK, gin.H{"result": string(out)})
+	return JSONResult(e, http.StatusOK, string(out))
 }
 
-func GetAnsibleTagsForDeployment(c *gin.Context) {
+func GetAnsibleTagsForDeployment(e *core.RequestEvent) error {
+	// returns a comma-separated string of tags
 	cmd := fmt.Sprintf("grep 'tags:' %s/ansible/range-management/ludus.yml | cut -d ':' -f 2 | tr -d '[]' | tr ',' '\\n' | egrep -v 'always|never' | sort -u | paste -sd ',' -", ludusInstallPath)
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to get the ansible tags: " + err.Error()})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Unable to get the ansible tags: "+err.Error())
 	}
-	c.JSON(http.StatusOK, gin.H{"result": string(out)})
+
+	// Parse comma-separated string into array
+	tagsString := strings.TrimSpace(string(out))
+	var tags []string
+	if tagsString != "" {
+		tagList := strings.Split(tagsString, ",")
+		for _, tag := range tagList {
+			tag = strings.TrimSpace(tag)
+			if tag != "" {
+				tags = append(tags, tag)
+			}
+		}
+	}
+
+	// Return structured JSON response
+	response := dto.ListRangeTagsResponse{Tags: tags}
+	return e.JSON(http.StatusOK, response)
 }
 
 // Find the ansible process for this user and kill it
-func AbortAnsible(c *gin.Context) {
-	user, err := GetUserObject(c)
+func AbortAnsible(e *core.RequestEvent) error {
+	targetRange, err := GetRange(e)
 	if err != nil {
-		return // JSON set in GetUserObject
+		return err
 	}
-	ansiblePid, err := findAnsiblePidForUser(user.ProxmoxUsername)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	killProcessAndChildren(ansiblePid)
+	targetUser := e.Get("user").(*models.User)
 
-	usersRange, err := GetRangeObject(c)
+	ansiblePidString, err := findAnsiblePidForUser(targetUser.ProxmoxUsername())
 	if err != nil {
-		return // JSON set in getRangeObject
+		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
+
+	ansiblePid, err := strconv.Atoi(ansiblePidString)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+	commandmanager.KillProcessAndChildren(ansiblePid)
 
 	// Set range state to "ABORTED"
-	db.Model(&usersRange).Update("range_state", "ABORTED")
+	targetRange.SetRangeState(LudusRangeStateAborted)
+	err = e.App.Save(targetRange)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
 
-	c.JSON(http.StatusOK, gin.H{"result": "Ansible process aborted"})
+	return JSONResult(e, http.StatusOK, "Ansible process aborted")
 }
 
-// Grant or revoke access to a range - admin only endpoint
-func RangeAccessAction(c *gin.Context) {
+// CreateRange allows users to create ranges not tied to a specific user
+func CreateRange(e *core.RequestEvent) error {
 
-	type RangeAccessActionPayload struct {
-		AccessActionVerb string `json:"action"`
-		TargetUserID     string `json:"targetUserID"`
-		SourceUserID     string `json:"sourceUserID"`
-		Force            bool   `json:"force"`
-	}
-	var thisRangeAccessActionPayload RangeAccessActionPayload
-
-	err := c.BindJSON(&thisRangeAccessActionPayload)
-	if err != nil {
-		c.JSON(http.StatusNoContent, gin.H{"error": "Improperly formatted range access payload"})
-		return
+	// Make sure this is the admin server (root) as we need to create a vmbr interface for the range
+	if os.Geteuid() != 0 {
+		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus range create command with --url https://127.0.0.1:8081")
 	}
 
-	if !isAdmin(c, true) {
-		return
+	var payload dto.CreateRangeRequest
+	if err := e.BindBody(&payload); err != nil {
+		return JSONError(e, http.StatusBadRequest, "Invalid request body: "+err.Error())
 	}
 
-	if thisRangeAccessActionPayload.AccessActionVerb != "grant" && thisRangeAccessActionPayload.AccessActionVerb != "revoke" {
-		c.JSON(http.StatusNoContent, gin.H{"error": "Only 'grant' and 'revoke' are supported as actions"})
-		return
-	}
-
-	var tarGetUserObject UserObject
-	targetResult := db.First(&tarGetUserObject, "user_id = ?", thisRangeAccessActionPayload.TargetUserID)
-	if errors.Is(targetResult.Error, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s user not found", thisRangeAccessActionPayload.TargetUserID)})
-		return
-	}
-
-	var sourceUserObject UserObject
-	sourceResult := db.First(&sourceUserObject, "user_id = ?", thisRangeAccessActionPayload.SourceUserID)
-	if errors.Is(sourceResult.Error, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s user not found", thisRangeAccessActionPayload.SourceUserID)})
-		return
-	}
-
-	// Check if this is a revoke for access that doesn't exist
-	var rangeAccessObject RangeAccessObject
-	noRangeAccessResultFound := false
-	rangeAccessResult := db.First(&rangeAccessObject, "target_user_id = ?", thisRangeAccessActionPayload.TargetUserID)
-	if errors.Is(rangeAccessResult.Error, gorm.ErrRecordNotFound) {
-		noRangeAccessResultFound = true
-	}
-	if noRangeAccessResultFound && thisRangeAccessActionPayload.AccessActionVerb == "revoke" {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s has no existing access grants", thisRangeAccessActionPayload.TargetUserID)})
-		return
-	}
-	if thisRangeAccessActionPayload.AccessActionVerb == "revoke" && !slices.Contains(rangeAccessObject.SourceUserIDs, thisRangeAccessActionPayload.SourceUserID) {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s does not have access to %s", thisRangeAccessActionPayload.SourceUserID, thisRangeAccessActionPayload.TargetUserID)})
-		return
-	}
-	// Check if the user already has access
-	if thisRangeAccessActionPayload.AccessActionVerb == "grant" && slices.Contains(rangeAccessObject.SourceUserIDs, thisRangeAccessActionPayload.SourceUserID) {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s already has access to %s", thisRangeAccessActionPayload.SourceUserID, thisRangeAccessActionPayload.TargetUserID)})
-		return
-	}
-
-	var targetUserRangeObject RangeObject
-	db.First(&targetUserRangeObject, "user_id = ?", thisRangeAccessActionPayload.TargetUserID)
-
-	var sourceUserRangeObject RangeObject
-	db.First(&sourceUserRangeObject, "user_id = ?", thisRangeAccessActionPayload.SourceUserID)
-
-	extraVars := map[string]interface{}{
-		"target_username":           tarGetUserObject.ProxmoxUsername,
-		"target_range_id":           tarGetUserObject.UserID,
-		"target_range_second_octet": targetUserRangeObject.RangeNumber,
-		"source_username":           sourceUserObject.ProxmoxUsername,
-		"source_range_id":           sourceUserObject.UserID,
-		"source_range_second_octet": sourceUserRangeObject.RangeNumber,
-	}
-	output, err := server.RunAnsiblePlaybookWithVariables(c, []string{ludusInstallPath + "/ansible/range-management/range-access.yml"}, nil, extraVars, thisRangeAccessActionPayload.AccessActionVerb, false, "")
-	if err != nil {
-		routerWANFatalRegex := regexp.MustCompile(`fatal:.*?192\.0\.2\\"`)
-		if strings.Contains(output, "Target router is not up") && thisRangeAccessActionPayload.AccessActionVerb == "grant" {
-			c.JSON(http.StatusOK, gin.H{"result": `WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!
-The target range router VM is inaccessible!
-If the target range router is deployed, no firewall changes have taken place.
-If the VM is not deployed yet, the rule will be added when it is deployed and you can ignore this.
-WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!`})
-		} else if routerWANFatalRegex.MatchString(output) && !thisRangeAccessActionPayload.Force {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "The target range router is inaccessible. To revoke access, the target range router must be up and accessible. Use --force to override this protection."})
-			return
-		} else if routerWANFatalRegex.MatchString(output) && thisRangeAccessActionPayload.Force {
-			// pass
-		} else { // Some other error we want to fail on
-			c.JSON(http.StatusInternalServerError, gin.H{"error": output})
-			return
+	// If UserID array is provided, verify the users exist
+	for _, userID := range payload.UserID {
+		_, err := e.App.FindFirstRecordByData("users", "userID", userID)
+		if err != nil {
+			return e.JSON(http.StatusInternalServerError, dto.CreateRangeResponseError{Errors: []dto.CreateRangeResponseErrorItem{{UserID: userID, Error: fmt.Sprintf("Error finding user: %v", err)}}})
 		}
 	}
 
-	if thisRangeAccessActionPayload.AccessActionVerb == "grant" {
-		// If this is the first grant, create a record
-		if noRangeAccessResultFound {
-			rangeAccessObject.TargetUserID = tarGetUserObject.UserID
-			rangeAccessObject.SourceUserIDs = []string{sourceUserObject.UserID}
-			db.Create(&rangeAccessObject)
-		} else {
-			// Not the first grant for this range, update the record
-			rangeAccessObject.SourceUserIDs = append(rangeAccessObject.SourceUserIDs, sourceUserObject.UserID)
-			db.Save(&rangeAccessObject)
+	if payload.RangeID == "" {
+		return JSONError(e, http.StatusBadRequest, "Range ID is required")
+	}
+
+	if poolExists(payload.RangeID) {
+		return JSONError(e, http.StatusConflict, fmt.Sprintf("Pool with the name %s already exists", payload.RangeID))
+	}
+
+	// Determine range number
+	var rangeNumber int
+	if payload.RangeNumber > 0 {
+		// Check if range number is already in use
+		rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeNumber", payload.RangeNumber)
+		if err != nil && err != sql.ErrNoRows {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Error checking if range number %d is already in use: %v", payload.RangeNumber, err))
 		}
-		// Response may have been set by 'target router not up' warning
-		if !c.Writer.Written() {
-			c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Range access to %s's range granted to %s. Have %s pull an updated wireguard config.",
-				tarGetUserObject.ProxmoxUsername,
-				sourceUserObject.ProxmoxUsername,
-				sourceUserObject.ProxmoxUsername)})
+		if rangeRecord != nil {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Range number %d already in use", payload.RangeNumber))
 		}
+		// Make sure the range number is not a reserved range number
+		if slices.Contains(ServerConfiguration.ReservedRangeNumbers, int32(payload.RangeNumber)) {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Range number %d is a reserved range number. Edit the reserved_range_numbers array in /opt/ludus/config.yml to use this range number.", payload.RangeNumber))
+		}
+		rangeNumber = int(payload.RangeNumber)
 	} else {
-		rangeAccessObject.SourceUserIDs = removeStringExact(rangeAccessObject.SourceUserIDs, sourceUserObject.UserID)
-		db.Save(&rangeAccessObject)
+		// Find next available range number
+		rangeNumber = findNextAvailableRangeNumber(app)
+	}
 
-		// If we have removed the last access, leaving the entry empty, remove the record from the DB to prevent confusion
-		// with empty records
-		if len(rangeAccessObject.SourceUserIDs) == 0 {
-			db.Delete(&rangeAccessObject)
+	// Check if name is already in use
+	existingRange, err := e.App.FindFirstRecordByData("ranges", "rangeID", payload.RangeID)
+	if err != nil && err != sql.ErrNoRows {
+		return JSONError(e, http.StatusConflict, fmt.Sprintf("Error checking if range ID %s is already in use: %v", payload.RangeID, err))
+	}
+	if existingRange != nil {
+		return JSONError(e, http.StatusConflict, fmt.Sprintf("Range ID %s already in use", payload.RangeID))
+	}
+
+	// Validate the name is a valid proxmox pool name using regex
+	proxmoxPoolNameRegex := regexp.MustCompile(ProxmoxPoolNameRegexString)
+	if !proxmoxPoolNameRegex.MatchString(payload.RangeID) {
+		return JSONError(e, http.StatusConflict, "Range ID name must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or 'New_Range'). Use only letters, numbers, hyphens, and underscores. Must start with a letter.")
+	}
+
+	// Create a new resource pool for the range
+	err = createPool(payload.RangeID)
+	if err != nil {
+		return JSONError(e, http.StatusConflict, "Unable to create resource pool: "+err.Error())
+	}
+
+	// Create the network interface for the range (SDN VNet or legacy vmbr)
+	err = manageRangeNetwork(payload.RangeID, rangeNumber, true)
+	if err != nil {
+		removePool(payload.RangeID)
+		return JSONError(e, http.StatusConflict, "Unable to create range network: "+err.Error())
+	}
+
+	// Create the range config file
+	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), 0755)
+	copyFileContents(fmt.Sprintf("%s/ansible/user-files/range-config.example.yml", ludusInstallPath), fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, payload.RangeID))
+	chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), "ludus")
+
+	// Create the range
+	rangeCollection, err := e.App.FindCollectionByNameOrId("ranges")
+	if err != nil {
+		return JSONError(e, http.StatusConflict, "Unable to find ranges collection: "+err.Error())
+	}
+	rawRangeRecord := core.NewRecord(rangeCollection)
+	rangeRecord := &models.Ranges{}
+	rangeRecord.SetProxyRecord(rawRangeRecord)
+	rangeRecord.SetName(payload.Name)
+	rangeRecord.SetRangeId(payload.RangeID)
+	rangeRecord.SetDescription(payload.Description)
+	rangeRecord.SetPurpose(payload.Purpose)
+	rangeRecord.SetRangeNumber(rangeNumber)
+	rangeRecord.SetNumberOfVms(0)
+	rangeRecord.SetRangeState(LudusRangeStateNeverDeployed)
+
+	err = e.App.Save(rangeRecord)
+	if err != nil {
+		removePool(payload.RangeID)
+		manageRangeNetwork(payload.RangeID, rangeNumber, false)
+		os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID))
+		return JSONError(e, http.StatusConflict, "Unable to save range: "+err.Error())
+	}
+
+	// Always give access to the ludus_admins group
+	err = grantGroupAccessToRangeInProxmox("ludus_admins", payload.RangeID, rangeNumber)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to give group access to pool: "+err.Error())
+	}
+
+	// If UserID was provided, create direct access record
+	errorArray := []dto.CreateRangeResponseErrorItem{}
+	for _, userID := range payload.UserID {
+		userRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
+		if err != nil {
+			errorArray = append(errorArray, dto.CreateRangeResponseErrorItem{UserID: userID, Error: fmt.Sprintf("Error finding user: %v", err)})
 		}
-		c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Range access to %s's range revoked from %s.",
-			tarGetUserObject.ProxmoxUsername,
-			sourceUserObject.ProxmoxUsername)})
+		userRecord.Set("ranges+", rangeRecord.Id)
+		err = e.App.Save(userRecord)
+		if err != nil {
+			errorArray = append(errorArray, dto.CreateRangeResponseErrorItem{UserID: userID, Error: fmt.Sprintf("Unable to save user: %v", err)})
+		}
+		// Give the user in proxmox permissions to the pool
+		err = giveUserAccessToRange(userRecord.GetString("proxmoxUsername"), userRecord.GetString("proxmoxRealm"), payload.RangeID, rangeNumber)
+		if err != nil {
+			errorArray = append(errorArray, dto.CreateRangeResponseErrorItem{UserID: userID, Error: fmt.Sprintf("Unable to give user access to pool: %v", err)})
+		}
+	}
+
+	if len(errorArray) > 0 {
+		return e.JSON(http.StatusInternalServerError, dto.CreateRangeResponseError{Errors: errorArray})
+	}
+
+	return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s created successfully", payload.RangeID))
+}
+
+func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bool) error {
+	actingUser := e.Get("user").(*models.User)
+	if !actingUser.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "You must be an admin to use this endpoint")
+	}
+
+	rangeID := e.Request.PathValue("rangeID")
+	rangeNumber, err := GetRangeNumberFromRangeID(rangeID)
+	if err != nil {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", rangeID, err))
+	}
+
+	userID := e.Request.PathValue("userID")
+	if userID == "" {
+		return JSONError(e, http.StatusBadRequest, "User ID is required")
+	}
+
+	// Check if user already has access to this range
+	if actionVerb == "grant" && HasRangeAccess(e, userID, rangeNumber) {
+		return JSONError(e, http.StatusConflict, fmt.Sprintf("User %s already has access to range %s", userID, rangeID))
+	}
+
+	if actionVerb == "revoke" && !HasRangeAccess(e, userID, rangeNumber) {
+		return JSONError(e, http.StatusConflict, fmt.Sprintf("User %s does not have access to range %s", userID, rangeID))
+	}
+
+	// Get the target range object
+	targetRange, err := GetRangeObjectByNumber(rangeNumber)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting range object: %v", err))
+	}
+
+	// Get the source user object by looking up the user ID in the database
+	sourceUserRecord, err := e.App.FindFirstRecordByData("users", "userID", userID)
+	if err != nil && err == sql.ErrNoRows {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("User %s not found", userID))
+	}
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting user object: %v", err))
+	}
+	sourceUserObject := &models.User{}
+	sourceUserObject.SetProxyRecord(sourceUserRecord)
+
+	if actionVerb == "grant" || actionVerb == "assign" {
+
+		sourceUserObject.Set("ranges+", targetRange.Id)
+		err = e.App.Save(sourceUserObject)
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+err.Error())
+		}
+
+		err := RunAccessControlPlaybook(e, targetRange)
+		if err != nil {
+			sourceUserObject.Set("ranges-", targetRange.Id)
+			e.App.Save(sourceUserObject)
+			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
+		}
+
+		// Give the user access to the proxmox pool for the range
+		err = giveUserAccessToRange(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId(), rangeNumber)
+		if err != nil {
+			sourceUserObject.Set("ranges-", targetRange.Id)
+			e.App.Save(sourceUserObject)
+			return JSONError(e, http.StatusInternalServerError, "Unable to give user access to pool: "+err.Error())
+		}
+
+		return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s assigned to user %s successfully", rangeID, userID))
+
+	} else if actionVerb == "revoke" {
+
+		sourceUserObject.Set("ranges-", targetRange.Id)
+		err = e.App.Save(sourceUserObject)
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, "Unable to save user: "+err.Error())
+		}
+
+		err := RunAccessControlPlaybook(e, targetRange)
+		if err != nil {
+			sourceUserObject.Set("ranges+", targetRange.Id)
+			e.App.Save(sourceUserObject)
+			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
+		}
+
+		err = removeUserAccessFromRange(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId(), rangeNumber)
+		if err != nil {
+			sourceUserObject.Set("ranges+", targetRange.Id)
+			e.App.Save(sourceUserObject)
+			return JSONError(e, http.StatusInternalServerError, "Unable to remove user access from pool: "+err.Error())
+		}
+
+		return JSONResult(e, http.StatusOK, fmt.Sprintf("Range %s access revoked from user %s successfully", rangeID, userID))
+	} else {
+		return JSONError(e, http.StatusBadRequest, "Invalid action verb")
 	}
 }
 
-// Return the current state of range access grants - admin only endpoint
-func RangeAccessList(c *gin.Context) {
-	if !isAdmin(c, true) {
-		return
+// AssignRangeToUser directly assigns a range to a user (admin only)
+func AssignRangeToUser(e *core.RequestEvent) error {
+	return AssignOrRevokeRangeAccess(e, "grant", false)
+}
+
+// RevokeRangeFromUser revokes direct range access from a user (admin only)
+func RevokeRangeFromUser(e *core.RequestEvent) error {
+	forceStr := e.Request.URL.Query().Get("force")
+	force := false
+	var err error
+	if forceStr != "" {
+		force, err = strconv.ParseBool(forceStr)
+		if err != nil {
+			return JSONError(e, http.StatusBadRequest, "Invalid force parameter")
+		}
 	}
-	var rangeAccessObjects []RangeAccessObject
-	result := db.Find(&rangeAccessObjects)
-	if result.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, result.Error)
+	return AssignOrRevokeRangeAccess(e, "revoke", force)
+}
+
+// ListRangeUsers lists all users with access to a range (admins and users with access to the range only)
+func ListRangeUsers(e *core.RequestEvent) error {
+
+	rangeID := e.Request.PathValue("rangeID")
+	if rangeID == "" {
+		return JSONError(e, http.StatusBadRequest, "Range ID is required")
 	}
-	c.JSON(http.StatusOK, rangeAccessObjects)
+	rangeNumber, err := GetRangeNumberFromRangeID(rangeID)
+	if err != nil {
+		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", rangeID, err))
+	}
+
+	user := e.Get("user").(*models.User)
+	userHasAccess := HasRangeAccess(e, user.UserId(), rangeNumber)
+	if !userHasAccess && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You (%s) do not have access to range %s and cannot list users with access to it", user.UserId(), rangeID))
+	}
+
+	// Get all users with access to this range
+	result := GetRangeAccessibleUsers(rangeNumber)
+
+	return e.JSON(http.StatusOK, result)
+}
+
+// ListUserAccessibleRanges lists all ranges the current user can access
+func ListUserAccessibleRanges(e *core.RequestEvent) error {
+	user := e.Get("user").(*models.User)
+	if user == nil {
+		return JSONError(e, http.StatusUnauthorized, "User not found")
+	}
+
+	result, err := GetAccessibleRangesForUser(user)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting accessible ranges: %v", err))
+	}
+
+	return e.JSON(http.StatusOK, result)
 }

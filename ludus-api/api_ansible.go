@@ -5,14 +5,19 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"ludusapi/dto"
+	"ludusapi/models"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/gin-gonic/gin"
+	"github.com/alessio/shellescape"
+	"github.com/pocketbase/pocketbase/core"
 	yaml "sigs.k8s.io/yaml"
 )
 
@@ -27,20 +32,16 @@ type AnsibleItem struct {
 var coreAnsibleRoles = []string{"lae.proxmox", "geerlingguy.packer", "ansible-thoteam.nexus3-oss"}
 
 // GetRolesAndCollections - retrieves the available Ansible roles and collections for the user
-func GetRolesAndCollections(c *gin.Context) {
-	user, err := GetUserObject(c)
-	if err != nil {
-		return // JSON set in GetUserObject
-	}
+func GetRolesAndCollections(e *core.RequestEvent) error {
+	user := e.Get("user").(*models.User)
 	cmd := exec.Command("ansible-galaxy", "role", "list") // no --format json for roles...
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_ROLES_PATH=%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername, ludusInstallPath))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_ROLES_PATH=%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath))
 
 	roleOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to get the ansible roles: " + err.Error() + "; Output was: " + string(roleOutput)})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Unable to get the ansible roles: "+err.Error()+"; Output was: "+string(roleOutput))
 	}
 
 	// Create a scanner to read the input
@@ -66,7 +67,7 @@ func GetRolesAndCollections(c *gin.Context) {
 		// Split the line into role name and version
 		parts := strings.SplitN(line[2:], ", ", 2)
 		if len(parts) != 2 {
-			fmt.Println("Invalid line format:", line)
+			logger.Error("Invalid line format: " + line)
 			continue
 		}
 
@@ -84,25 +85,23 @@ func GetRolesAndCollections(c *gin.Context) {
 
 	// Check for errors during scanning
 	if err := scanner.Err(); err != nil {
-		fmt.Println("Error reading input:", err)
+		logger.Error("Error reading input: " + err.Error())
 	}
 
 	// Collections
 	collectionCmd := exec.Command("ansible-galaxy", "collection", "list", "--format", "json")
 	collectionCmd.Env = os.Environ()
-	collectionCmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
+	collectionCmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 	collectionOutput, err := collectionCmd.CombinedOutput()
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to get the ansible collections: " + err.Error()})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Unable to get the ansible collections: "+err.Error())
 	}
 
 	// Unmarshal the JSON into a suitable Go data structure
 	var data map[string]map[string]map[string]string
 	err = json.Unmarshal(collectionOutput, &data)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Unable to get parse ansible collections JSON: " + err.Error()})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Unable to get parse ansible collections JSON: "+err.Error())
 	}
 
 	// Iterate through the data
@@ -119,33 +118,31 @@ func GetRolesAndCollections(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, ansibleItems)
+	var ansibleResponseItems []dto.GetRolesAndCollectionsResponseItem
+	for _, ansibleItem := range ansibleItems {
+		ansibleResponseItems = append(ansibleResponseItems, dto.GetRolesAndCollectionsResponseItem{
+			Global:  ansibleItem.Global,
+			Name:    ansibleItem.Name,
+			Version: ansibleItem.Version,
+			Type:    ansibleItem.Type,
+		})
+	}
+
+	return e.JSON(http.StatusOK, ansibleResponseItems)
 }
 
 // ActionRoleFromInternet - installs an ansible role from ansible galaxy or publicly available source control
-func ActionRoleFromInternet(c *gin.Context) {
-	type RoleBody struct {
-		Role    string `json:"role"`
-		Version string `json:"version"`
-		Force   bool   `json:"force"`
-		Action  string `json:"action"`
-		Global  bool   `json:"global"`
-	}
-	var roleBody RoleBody
-	c.Bind(&roleBody)
+func ActionRoleFromInternet(e *core.RequestEvent) error {
+	var roleBody dto.InstallRoleRequest
+	e.BindBody(&roleBody)
 
-	user, err := GetUserObject(c)
-	if err != nil {
-		return // JSON set in GetUserObject
-	}
-	if user.ProxmoxUsername == "root" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Don't use the ROOT API key for ansible actions, use a user API key instead."})
-		return
+	user := e.Get("user").(*models.User)
+	if user.ProxmoxUsername() == "root" {
+		return JSONError(e, http.StatusForbidden, "Don't use the ROOT API key for ansible actions, use a user API key instead.")
 	}
 
-	if !isAdmin(c, false) && ServerConfiguration.PreventUserAnsibleAdd {
-		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to perform this ansible action"})
-		return
+	if !user.IsAdmin() && ServerConfiguration.PreventUserAnsibleAdd {
+		return JSONError(e, http.StatusForbidden, "You are not authorized to perform this ansible action")
 	}
 
 	var roleString = roleBody.Role
@@ -154,14 +151,15 @@ func ActionRoleFromInternet(c *gin.Context) {
 	}
 
 	if roleBody.Action != "install" && roleBody.Action != "remove" {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "action must be one of 'install' or 'remove'"})
-		return
+		return JSONError(e, http.StatusInternalServerError, "action must be one of 'install' or 'remove'")
 	}
 
 	if roleBody.Action == "remove" && slices.Contains(coreAnsibleRoles, roleBody.Role) {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "You cannot remove this core Ludus role as it is required for Ludus to function"})
-		return
+		return JSONError(e, http.StatusBadRequest, "You cannot remove this core Ludus role as it is required for Ludus to function")
 	}
+
+	// Make sure the role string is escaped
+	roleString = shellescape.Quote(roleString)
 
 	var cmd *exec.Cmd
 	if roleBody.Global && roleBody.Force {
@@ -174,113 +172,131 @@ func ActionRoleFromInternet(c *gin.Context) {
 		cmd = exec.Command("ansible-galaxy", roleBody.Action, roleString)
 	}
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 	cmdOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to %s the ansible role %s: %s; Output was: %s", roleBody.Action, roleString, err.Error(), string(cmdOutput))})
-		return
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to %s the ansible role %s: %s; Output was: %s", roleBody.Action, roleString, err.Error(), string(cmdOutput)))
 	}
 	if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), roleBody.Role+" was installed successfully") {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": string(cmdOutput)})
-		return
+		return JSONError(e, http.StatusInternalServerError, string(cmdOutput))
 	}
 	if strings.Contains(string(cmdOutput), "is not installed, skipping.") {
-		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": string(cmdOutput)})
-		return
+		return JSONError(e, http.StatusConflict, string(cmdOutput))
 	}
 	if roleBody.Action != "install" {
-		c.JSON(http.StatusCreated, gin.H{"result": "Successfully removed: " + roleString})
+		return JSONResult(e, http.StatusCreated, "Successfully removed: "+roleString)
 	} else {
-		c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed: " + roleString})
+		return JSONResult(e, http.StatusCreated, "Successfully installed: "+roleString)
 	}
 
 }
 
 // InstallRoleFromTar - installs an ansible role from a user uploaded tar file
-func InstallRoleFromTar(c *gin.Context) {
-	if !isAdmin(c, false) && ServerConfiguration.PreventUserAnsibleAdd {
-		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to perform this ansible action"})
-		return
+func InstallRoleFromTar(e *core.RequestEvent) error {
+	user := e.Get("user").(*models.User)
+	if !user.IsAdmin() && ServerConfiguration.PreventUserAnsibleAdd {
+		return JSONError(e, http.StatusForbidden, "You are not authorized to perform this ansible action")
 	}
 
 	// Parse the multipart form
-	if err := c.Request.ParseMultipartForm(1073741824); err != nil { // allow 1GB
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if err := e.Request.ParseMultipartForm(1073741824); err != nil { // allow 1GB
+		return JSONError(e, http.StatusBadRequest, err.Error())
 	}
 
 	// Retrieve the 'force' field and convert it to boolean
-	forceStr := c.Request.FormValue("force")
+	forceStr := e.Request.FormValue("force")
 	if forceStr == "" {
 		forceStr = "false"
 	}
 	force, err := strconv.ParseBool(forceStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid boolean value for 'force': " + err.Error()})
-		return
+		return JSONError(e, http.StatusBadRequest, "Invalid boolean value for 'force': "+err.Error())
 	}
 
 	// Retrieve the 'global' field and convert it to boolean
-	globalStr := c.Request.FormValue("global")
+	globalStr := e.Request.FormValue("global")
 	if globalStr == "" {
 		globalStr = "false"
 	}
 	global, err := strconv.ParseBool(globalStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid boolean value for 'global': " + err.Error()})
-		return
+		return JSONError(e, http.StatusBadRequest, "Invalid boolean value for 'global': "+err.Error())
 	}
 
 	// Retrieve the file
-	file, err := c.FormFile("file")
+	file, fileHeader, err := e.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File retrieval failed"})
-		return
-	}
-
-	user, err := GetUserObject(c)
-	if err != nil {
-		return // JSON set in GetUserObject
+		return JSONError(e, http.StatusBadRequest, "File retrieval failed")
 	}
 
 	// Save the file to the server
-	roleTarPath := fmt.Sprintf("%s/users/%s/.ansible/tmp/%s", ludusInstallPath, user.ProxmoxUsername, file.Filename)
-	err = c.SaveUploadedFile(file, roleTarPath)
+	ansibleTmpPath := fmt.Sprintf("%s/users/%s/.ansible/tmp", ludusInstallPath, user.ProxmoxUsername())
+
+	// Make sure the file name is escaped
+	fileHeader.Filename = shellescape.Quote(fileHeader.Filename)
+
+	roleTarPath := fmt.Sprintf("%s/%s", ansibleTmpPath, fileHeader.Filename)
+
+	// Go strips all directory information from the file name, no issue with path traversal here. See: https://go-review.googlesource.com/c/go/+/313809 and https://github.com/golang/go/issues/45789
+
+	fileContents, err := io.ReadAll(file)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Saving file failed"})
-		return
+		return JSONError(e, http.StatusInternalServerError, "Unable to read file contents: "+err.Error())
 	}
-	defer os.Remove(roleTarPath)
+	err = os.WriteFile(roleTarPath, fileContents, 0644)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to save the file: "+err.Error())
+	}
+
+	// Remove all extensions from the uploaded file name. Ansible Galaxy uses this as the role name, so we need to format it
+	roleName := filepath.Base(roleTarPath)
+	for {
+		ext := filepath.Ext(roleName)
+		if ext == "" {
+			break // No more extensions found
+		}
+		roleName = strings.TrimSuffix(roleName, ext)
+	}
+	newPath := fmt.Sprintf("%s/%s", ansibleTmpPath, roleName)
+	os.Rename(roleTarPath, newPath)
+	defer os.Remove(newPath)
 
 	var cmd *exec.Cmd
 	if global && force {
-		cmd = exec.Command("ansible-galaxy", "role", "install", file.Filename, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
+		cmd = exec.Command("ansible-galaxy", "role", "install", roleName, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
 	} else if global {
-		cmd = exec.Command("ansible-galaxy", "role", "install", file.Filename, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
+		cmd = exec.Command("ansible-galaxy", "role", "install", roleName, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
 	} else if force {
-		cmd = exec.Command("ansible-galaxy", "role", "install", file.Filename, "-f")
+		cmd = exec.Command("ansible-galaxy", "role", "install", roleName, "-f")
 	} else {
-		cmd = exec.Command("ansible-galaxy", "role", "install", file.Filename)
+		cmd = exec.Command("ansible-galaxy", "role", "install", roleName)
 	}
-	cmd.Dir = fmt.Sprintf("%s/users/%s/.ansible/tmp", ludusInstallPath, user.ProxmoxUsername) // If you try to install a tar'd role with the full path, it will fail to extract. Bug in ansible-galaxy?
+	cmd.Dir = fmt.Sprintf("%s/users/%s/.ansible/tmp", ludusInstallPath, user.ProxmoxUsername()) // If you try to install a tar'd role with the full path, it will fail to extract. Bug in ansible-galaxy?
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 	cmdOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to install the ansible role %s: %s; Output was: %s", roleTarPath, err.Error(), string(cmdOutput))})
-		return
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to install the ansible role %s: %s; Output was: %s", roleTarPath, err.Error(), string(cmdOutput)))
 	}
-	if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), file.Filename+" was installed successfully") {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": string(cmdOutput)})
-		return
+	if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), fileHeader.Filename+" was installed successfully") {
+		return JSONError(e, http.StatusInternalServerError, string(cmdOutput))
 	}
-	// Parse the version.yml file in the meta directory for this role, and set the value in meta/.galaxy_install_info
-	roleName := strings.TrimSuffix(file.Filename, ".tar.gz")
+	_, err = parseRoleVersion(roleName, user, global)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
+	return JSONResult(e, http.StatusCreated, "Successfully installed role")
+
+}
+
+// Parse the version.yml file in the meta directory for this role, and set the value in meta/.galaxy_install_info
+func parseRoleVersion(roleName string, user *models.User, global bool) (string, error) {
 	var roleMetaPath string
 	var galaxyInstallInfoPath string
 	if !global {
-		roleMetaPath = fmt.Sprintf("%s/users/%s/.ansible/roles/%s/meta", ludusInstallPath, user.ProxmoxUsername, roleName)
-		galaxyInstallInfoPath = fmt.Sprintf("%s/users/%s/.ansible/roles/%s/meta/.galaxy_install_info", ludusInstallPath, user.ProxmoxUsername, roleName)
+		roleMetaPath = fmt.Sprintf("%s/users/%s/.ansible/roles/%s/meta", ludusInstallPath, user.ProxmoxUsername(), roleName)
+		galaxyInstallInfoPath = fmt.Sprintf("%s/users/%s/.ansible/roles/%s/meta/.galaxy_install_info", ludusInstallPath, user.ProxmoxUsername(), roleName)
 	} else {
 		roleMetaPath = fmt.Sprintf("%s/resources/global-roles/%s/meta", ludusInstallPath, roleName)
 		galaxyInstallInfoPath = fmt.Sprintf("%s/resources/global-roles/%s/meta/.galaxy_install_info", ludusInstallPath, roleName)
@@ -289,21 +305,18 @@ func InstallRoleFromTar(c *gin.Context) {
 	if _, err := os.Stat(versionYmlPath); err == nil {
 		versionYmlContents, err := os.ReadFile(versionYmlPath)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to read version.yml in the role meta directory: %s", roleMetaPath)})
-			return
+			return "", fmt.Errorf("Unable to read version.yml in the role meta directory: %s", roleMetaPath)
 		}
 		// Parse the version.yml file
 		var versionYml map[string]string
 		err = yaml.Unmarshal(versionYmlContents, &versionYml)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to parse version.yml in the role meta directory: %s", roleMetaPath)})
-			return
+			return "", fmt.Errorf("Unable to parse version.yml in the role meta directory: %s", roleMetaPath)
 		}
 		// Write the version to the .galaxy_install_info file
 		fileContents, err := os.ReadFile(galaxyInstallInfoPath)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to read .galaxy_install_info: %s", err)})
-			return
+			return "", fmt.Errorf("Unable to read .galaxy_install_info: %s", err)
 		}
 
 		// Convert the contents to a string and split into lines
@@ -332,40 +345,31 @@ func InstallRoleFromTar(c *gin.Context) {
 		// Write the updated contents back to the file
 		err = os.WriteFile(galaxyInstallInfoPath, []byte(updatedContents), 0660)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to write to .galaxy_install_info in the role meta directory: %s", roleMetaPath)})
-			return
+			return "", fmt.Errorf("Unable to write to .galaxy_install_info in the role meta directory: %s", roleMetaPath)
 		}
 
+		return versionYml["version"], nil
 	}
-
-	c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed role"})
-
+	return "", nil
 }
 
 // ActionCollectionFromInternet - installs an ansible collection from ansible galaxy or publicly available source control
-func ActionCollectionFromInternet(c *gin.Context) {
-	type CollectionBody struct {
-		Collection string `json:"collection"`
-		Version    string `json:"version"`
-		Force      bool   `json:"force"`
-	}
-	var collectionBody CollectionBody
-	c.Bind(&collectionBody)
+func ActionCollectionFromInternet(e *core.RequestEvent) error {
+	var collectionBody dto.InstallCollectionRequest
+	e.BindBody(&collectionBody)
 
-	if !isAdmin(c, false) && ServerConfiguration.PreventUserAnsibleAdd {
-		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to perform this ansible action"})
-		return
-	}
-
-	user, err := GetUserObject(c)
-	if err != nil {
-		return // JSON set in GetUserObject
+	user := e.Get("user").(*models.User)
+	if !user.IsAdmin() && ServerConfiguration.PreventUserAnsibleAdd {
+		return JSONError(e, http.StatusForbidden, "You are not authorized to perform this ansible action")
 	}
 
 	var collectionString = collectionBody.Collection
 	if collectionBody.Version != "" {
 		collectionString = fmt.Sprintf("%s:==%s", collectionBody.Collection, collectionBody.Version)
 	}
+
+	// Make sure the collection string is escaped
+	collectionString = shellescape.Quote(collectionString)
 
 	var cmd *exec.Cmd
 	if collectionBody.Force {
@@ -374,20 +378,341 @@ func ActionCollectionFromInternet(c *gin.Context) {
 		cmd = exec.Command("ansible-galaxy", "collection", "install", collectionString)
 	}
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 	cmdOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to install the ansible collection %s: %s; Output was: %s", collectionString, err.Error(), string(cmdOutput))})
-		return
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to install the ansible collection %s: %s; Output was: %s", collectionString, err.Error(), string(cmdOutput)))
 	}
 	if strings.Contains(string(cmdOutput), "[WARNING]") {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": string(cmdOutput)})
-		return
+		return JSONError(e, http.StatusInternalServerError, string(cmdOutput))
 	}
 	if strings.Contains(string(cmdOutput), "Nothing to do. All requested collections are already installed. If you want to reinstall them, consider using `--force`.") {
-		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "Collection already installed. Collections from https://docs.ansible.com/ansible/latest/collections/index.html are installed globally. If you want to reinstall it, consider using `--force`."})
-		return
+		return JSONError(e, http.StatusConflict, "Collection already installed. Collections from https://docs.ansible.com/ansible/latest/collections/index.html are installed globally. If you want to reinstall it, consider using `--force`.")
 	}
-	c.JSON(http.StatusCreated, gin.H{"result": "Successfully installed: " + collectionString})
+	return JSONResult(e, http.StatusCreated, "Successfully installed: "+collectionString)
 
+}
+
+func GetSubscriptionRoles(e *core.RequestEvent) error {
+	subscriptionRoles, err := GetSubscriptionRolesMetadata(e)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to get subscription roles: "+err.Error())
+	}
+	return e.JSON(http.StatusOK, subscriptionRoles)
+}
+
+// InstallSubscriptionRoles - installs one or more subscription roles using the license key
+func InstallSubscriptionRoles(e *core.RequestEvent) error {
+	var requestBody dto.InstallSubscriptionRolesRequest
+	e.BindBody(&requestBody)
+
+	// Check if license is valid
+	if !server.LicenseValid || server.LicenseKey == "" {
+		return JSONError(e, http.StatusForbidden, "A valid Ludus license key is required to install subscription roles")
+	}
+
+	user := e.Get("user").(*models.User)
+	if user.ProxmoxUsername() == "root" {
+		return JSONError(e, http.StatusForbidden, "Don't use the ROOT API key for ansible actions, use a user API key instead.")
+	}
+
+	if !user.IsAdmin() && ServerConfiguration.PreventUserAnsibleAdd {
+		return JSONError(e, http.StatusForbidden, "You are not authorized to perform this ansible action")
+	}
+
+	var success []string
+	var errors []dto.InstallSubscriptionRolesResponseErrorsItem
+
+	// Create temp directory for role downloads
+	tempDir := fmt.Sprintf("%s/users/%s/.ansible/tmp", ludusInstallPath, user.ProxmoxUsername())
+	err := os.MkdirAll(tempDir, 0755)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to create temp directory: "+err.Error())
+	}
+
+	// Process each role
+	for _, roleName := range requestBody.Roles {
+
+		// Make sure the file name is escaped
+		escapedRoleName := shellescape.Quote(roleName)
+
+		// Download the role tar file from the license server
+		roleFileName, err := DownloadRoleUsingLicenseKey(e, escapedRoleName, tempDir)
+		if err != nil {
+			if strings.Contains(err.Error(), "resource was not found") {
+				errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
+					Role:   roleName,
+					Reason: "Role not found, it may not be available to your license level",
+				})
+				continue
+			}
+			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
+				Role:   roleName,
+				Reason: fmt.Sprintf("Failed to download role from server: %s", err.Error()),
+			})
+			continue
+		}
+
+		roleTarPath := fmt.Sprintf("%s/%s", tempDir, roleFileName)
+
+		os.Rename(roleTarPath, fmt.Sprintf("%s/%s", tempDir, escapedRoleName))
+		defer os.Remove(fmt.Sprintf("%s/%s", tempDir, escapedRoleName))
+
+		// Install the role using ansible-galaxy (globally or per-user based on request)
+		var cmd *exec.Cmd
+		if requestBody.Global && requestBody.Force {
+			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
+		} else if requestBody.Global {
+			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
+		} else if requestBody.Force {
+			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName, "-f")
+		} else {
+			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName)
+		}
+		cmd.Dir = tempDir // ansible-galaxy needs to be run from the directory containing the tar file
+		cmd.Env = os.Environ()
+		cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
+		cmdOutput, err := cmd.CombinedOutput()
+		if err != nil && !strings.Contains(string(cmdOutput), "was installed successfully") {
+			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
+				Role:   roleName,
+				Reason: fmt.Sprintf("Failed to install role: %s; Output was: %s", err.Error(), string(cmdOutput)),
+			})
+			continue
+		}
+
+		// Check for warnings that indicate failure
+		if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), roleFileName+" was installed successfully") {
+			logger.Warn("Installation warning for role %s: %s", roleName, string(cmdOutput))
+		}
+
+		_, err = parseRoleVersion(roleName, user, requestBody.Global)
+		if err != nil {
+			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
+				Role:   roleName,
+				Reason: fmt.Sprintf("Failed to parse role version: %s", err.Error()),
+			})
+		}
+
+		// Success - add to success list
+		success = append(success, roleName)
+	}
+
+	response := dto.InstallSubscriptionRolesResponse{
+		Success: success,
+		Errors:  errors,
+	}
+
+	return e.JSON(http.StatusOK, response)
+}
+
+// GetRoleVars - retrieves the variables for one or more Ansible roles
+func GetRoleVars(e *core.RequestEvent) error {
+	var requestBody dto.GetRoleVarsRequest
+	e.BindBody(&requestBody)
+
+	if len(requestBody.Roles) == 0 {
+		return JSONError(e, http.StatusBadRequest, "At least one role name is required")
+	}
+
+	user := e.Get("user").(*models.User)
+	var response dto.GetRoleVarsResponse
+
+	for _, roleName := range requestBody.Roles {
+		roleResponse := dto.GetRoleVarsResponseRole{
+			Name: roleName,
+			Vars: make(map[string]interface{}),
+		}
+
+		// Try user-specific role first
+		userRolePath := fmt.Sprintf("%s/users/%s/.ansible/roles/%s", ludusInstallPath, user.ProxmoxUsername(), roleName)
+		// Try global role
+		globalRolePath := fmt.Sprintf("%s/resources/global-roles/%s", ludusInstallPath, roleName)
+
+		var rolePath string
+		var roleFound bool
+
+		// Check if role exists in user-specific location
+		if _, err := os.Stat(userRolePath); err == nil {
+			rolePath = userRolePath
+			roleResponse.Global = false
+			roleFound = true
+		} else if _, err := os.Stat(globalRolePath); err == nil {
+			// Check if role exists in global location
+			rolePath = globalRolePath
+			roleResponse.Global = true
+			roleFound = true
+		}
+
+		// If role found, read user-configurable variables from defaults/main.yml
+		if roleFound {
+			// Read defaults/main.yml (user-configurable variables)
+			defaultsPath := fmt.Sprintf("%s/defaults/main.yml", rolePath)
+			if _, err := os.Stat(defaultsPath); err == nil {
+				defaultsContent, err := os.ReadFile(defaultsPath)
+				if err == nil {
+					var defaultsVars map[string]interface{}
+					if err := yaml.Unmarshal(defaultsContent, &defaultsVars); err == nil {
+						// Set defaults as vars (these are what users can configure via role_vars)
+						for k, v := range defaultsVars {
+							roleResponse.Vars[k] = v
+						}
+					}
+				}
+			}
+		}
+
+		response.Roles = append(response.Roles, roleResponse)
+	}
+
+	return e.JSON(http.StatusOK, response)
+}
+
+// copyDir recursively copies a directory from src to dst
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		dstPath := filepath.Join(dst, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+
+		srcFile, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer srcFile.Close()
+
+		dstFile, err := os.Create(dstPath)
+		if err != nil {
+			return err
+		}
+		defer dstFile.Close()
+
+		_, err = io.Copy(dstFile, srcFile)
+		return err
+	})
+}
+
+// MoveRoleScope - moves one or more roles between local and global installation paths
+func MoveRoleScope(e *core.RequestEvent) error {
+	var requestBody dto.MoveRoleScopeRequest
+	e.BindBody(&requestBody)
+
+	if len(requestBody.Roles) == 0 {
+		return JSONError(e, http.StatusBadRequest, "At least one role name is required")
+	}
+
+	user := e.Get("user").(*models.User)
+	if !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "Only administrators can move roles between scopes")
+	}
+
+	targetGlobal := requestBody.Global
+	var success []string
+	var errors []dto.MoveRoleScopeResponseErrorsItem
+
+	// Process each role
+	for _, roleName := range requestBody.Roles {
+		// Determine source and destination paths
+		userRolePath := fmt.Sprintf("%s/users/%s/.ansible/roles/%s", ludusInstallPath, user.ProxmoxUsername(), roleName)
+		globalRolePath := fmt.Sprintf("%s/resources/global-roles/%s", ludusInstallPath, roleName)
+
+		isCurrentlyGlobal := false
+		var currentPath string
+
+		// Find where role currently exists
+		if _, err := os.Stat(globalRolePath); err == nil {
+			isCurrentlyGlobal = true
+			currentPath = globalRolePath
+		} else if _, err := os.Stat(userRolePath); err == nil {
+			isCurrentlyGlobal = false
+			currentPath = userRolePath
+		} else {
+			errors = append(errors, dto.MoveRoleScopeResponseErrorsItem{
+				Role:  roleName,
+				Error: fmt.Sprintf("Role '%s' not found", roleName),
+			})
+			continue
+		}
+
+		// Check if we're already at target
+		if isCurrentlyGlobal == targetGlobal {
+			scope := "global"
+			if !targetGlobal {
+				scope = "local"
+			}
+			errors = append(errors, dto.MoveRoleScopeResponseErrorsItem{
+				Role:  roleName,
+				Error: fmt.Sprintf("Role is already installed in %s scope", scope),
+			})
+			continue
+		}
+
+		// Set destination path
+		var destPath string
+		if targetGlobal {
+			destPath = globalRolePath
+		} else {
+			destPath = userRolePath
+		}
+
+		// Check destination doesn't exist
+		if _, err := os.Stat(destPath); err == nil {
+			errors = append(errors, dto.MoveRoleScopeResponseErrorsItem{
+				Role:  roleName,
+				Error: "Role already exists at destination",
+			})
+			continue
+		}
+
+		// Create parent directory for destination if it doesn't exist
+		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			errors = append(errors, dto.MoveRoleScopeResponseErrorsItem{
+				Role:  roleName,
+				Error: fmt.Sprintf("Failed to create destination directory: %s", err.Error()),
+			})
+			continue
+		}
+
+		// Copy the role directory
+		if err := copyDir(currentPath, destPath); err != nil {
+			errors = append(errors, dto.MoveRoleScopeResponseErrorsItem{
+				Role:  roleName,
+				Error: fmt.Sprintf("Failed to copy role: %s", err.Error()),
+			})
+			continue
+		}
+
+		// Remove the source directory only if copy is false (move operation)
+		// If copy is true, keep the source (useful for global->local to keep global for others,
+		// or local->global to keep local override)
+		if !requestBody.Copy {
+			if err := os.RemoveAll(currentPath); err != nil {
+				// Best effort cleanup - log but don't fail if we can't remove source
+				logger.Warn("Failed to remove source role directory %s: %s", currentPath, err.Error())
+			}
+		}
+
+		// Update the role version in the new location
+		_, _ = parseRoleVersion(roleName, user, targetGlobal)
+
+		// Success - add to success list
+		success = append(success, roleName)
+	}
+
+	response := dto.MoveRoleScopeResponse{
+		Success: success,
+		Errors:  errors,
+	}
+
+	return e.JSON(http.StatusOK, response)
 }

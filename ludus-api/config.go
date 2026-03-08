@@ -1,7 +1,6 @@
 package ludusapi
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/spf13/viper"
@@ -29,6 +28,13 @@ type Configuration struct {
 	LicenseKey             string  `mapstructure:"license_key" yaml:"license_key"`
 	ExposeAdminPort        bool    `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
 	ReservedRangeNumbers   []int32 `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
+	DataDirectory          string  `mapstructure:"data_directory" yaml:"data_directory"`
+	DatabaseEncryptionKey  string  `mapstructure:"database_encryption_key" yaml:"database_encryption_key"`
+	WireguardPort          int     `mapstructure:"wireguard_port" yaml:"wireguard_port"`
+	// Cluster mode settings
+	ClusterMode  bool   `mapstructure:"cluster_mode" yaml:"cluster_mode"`     // Auto-detected via API during startup, can be overridden
+	SDNZone      string `mapstructure:"sdn_zone" yaml:"sdn_zone"`             // The SDN zone name for Ludus networking (default: "ludus")
+	VXLANTagBase int    `mapstructure:"vxlan_tag_base" yaml:"vxlan_tag_base"` // Base VXLAN tag (VNI) added to range number (default: 0)
 }
 
 var ServerConfiguration Configuration
@@ -48,13 +54,20 @@ func (s *Server) ParseConfig() {
 	// Set defaults
 	viper.SetDefault("proxmox_invalid_cert", true)
 	viper.SetDefault("proxmox_url", "https://127.0.0.1:8006")
-	viper.SetDefault("proxmox_public_ip", GetPublicIPviaAPI())
+	viper.SetDefault("proxmox_public_ip", "127.0.0.1")
 	viper.SetDefault("proxmox_vm_storage_pool", "local")
 	viper.SetDefault("proxmox_vm_storage_format", "qcow2")
 	viper.SetDefault("proxmox_iso_storage_pool", "local")
-	viper.SetDefault("ludus_nat_interface", "vmbr0") // Backwards compatibility for < v1.0.4
+	viper.SetDefault("ludus_nat_interface", "vmbr1000")
 	viper.SetDefault("prevent_user_ansible_add", false)
-
+	viper.SetDefault("data_directory", "/opt/ludus/db")
+	viper.SetDefault("database_encryption_key", "hZD6RwYxrcQ7CS4lRxjdKI7thWp3jg48")
+	viper.SetDefault("wireguard_port", 51820)
+	// Do not set a default for cluster_mode to force viper to leave it unset unless provided,
+	// so we can detect if user has explicitly set it or not and fallback to API if unset.
+	// (See IsClusterMode in sdn.go for logic)
+	viper.SetDefault("sdn_zone", "ludus") // Default SDN zone name
+	viper.SetDefault("vxlan_tag_base", 0) // Base VXLAN tag added to range number
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)
 	}
@@ -67,16 +80,19 @@ func (s *Server) ParseConfig() {
 	if ServerConfiguration.ProxmoxHostname == "" {
 		ServerConfiguration.ProxmoxHostname = ServerConfiguration.ProxmoxNode
 	}
+	// Make sure the database encryption key is 32 characters long
+	if len(ServerConfiguration.DatabaseEncryptionKey) != 32 {
+		log.Fatalf("Database encryption key must be 32 characters long")
+	}
 	// If there is no license in the config, set it to community
 	if ServerConfiguration.LicenseKey == "" || ServerConfiguration.LicenseKey == "community" {
-		s.LicenseType = "community"
+		s.Entitlements = []string{}
 		s.LicenseValid = true
 		s.LicenseMessage = "community license"
 	} else {
-		s.LicenseType = "enterprise"
 		s.LicenseMessage = ""
 		s.LicenseKey = ServerConfiguration.LicenseKey
 		s.checkLicense()
 	}
-	fmt.Println("Using configuration file: ", viper.ConfigFileUsed())
+	log.Println("Using configuration file: ", viper.ConfigFileUsed())
 }

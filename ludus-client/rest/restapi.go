@@ -19,6 +19,8 @@ type ErrorStruct struct {
 	Error string `json:"error"`
 }
 
+const APIBasePath = "/api/v2"
+
 var user string
 
 func InitClient(url string, apiKey string, proxy string, verify bool, debug bool, versionString string) *resty.Client {
@@ -61,7 +63,13 @@ func InitClient(url string, apiKey string, proxy string, verify bool, debug bool
 		var apiKeyMasked string
 		apiKey = r.Header.Get("X-API-KEY")
 		if len(apiKey) > 4 && strings.Contains(apiKey, ".") {
-			apiKeyMasked = strings.Split(apiKey, ".")[0] + ".***REDACTED***"
+			parts := strings.Split(apiKey, ".")
+			if len(parts) == 2 && len(parts[1]) >= 10 {
+				secondPart := parts[1]
+				apiKeyMasked = parts[0] + "." + secondPart[:3] + "***REDACTED***" + secondPart[len(secondPart)-3:]
+			} else {
+				apiKeyMasked = parts[0] + ".***Less than 10 characters?***"
+			}
 		} else {
 			apiKeyMasked = "API Key not set"
 		}
@@ -83,9 +91,33 @@ func prettyPrintError(errorString string) {
 	err := json.Unmarshal([]byte(errorString), &parsedError)
 	if err != nil {
 		logger.Logger.Fatalf("%s\nCheck the IP/hostname and port in the URL provided to ludus to ensure it is correct.", errorString)
+		return
 	}
 
 	logger.Logger.Error(parsedError.Error)
+}
+
+type PocketBaseErrorStruct struct {
+	Data    any    `json:"data"`
+	Message string `json:"message"`
+	Code    string `json:"code"`
+}
+
+func prettyPrintPocketBaseError(errorBytes []byte) error {
+	var parsedError PocketBaseErrorStruct
+	err := json.Unmarshal(errorBytes, &parsedError)
+	if err != nil {
+		return fmt.Errorf("failed to parse PocketBase error: %w", err)
+	}
+	if parsedError.Message == "Something went wrong while processing your request." {
+		logger.Logger.Error("Check the PocketBase logs for crash details")
+	} else if parsedError.Message == "" {
+		return fmt.Errorf("not an error from PocketBase")
+	} else {
+		logger.Logger.Error(parsedError.Message)
+	}
+
+	return nil
 }
 
 func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
@@ -99,24 +131,37 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 	}
 
 	if resp.StatusCode() == 403 || resp.StatusCode() == 409 || resp.StatusCode() == 404 {
-		prettyPrintError(resp.String())
+		// Try to parse as PocketBase error first, then fall back to simple error format
+		err := prettyPrintPocketBaseError(resp.Body())
+		if err != nil {
+			// Not a PocketBase error, try simple error format
+			prettyPrintError(resp.String())
+		}
 		error = true
 	}
 
 	if resp.StatusCode() == 400 {
-		logger.Logger.Error("Bad Request")
-		prettyPrintError(resp.String())
+		// Try to parse as PocketBase error first, then fall back to simple error format
+		err := prettyPrintPocketBaseError(resp.Body())
+		if err != nil {
+			// Not a PocketBase error, try simple error format
+			prettyPrintError(resp.String())
+		}
 		error = true
 	}
 
 	if resp.StatusCode() == 401 {
-		logger.Logger.Errorf("User %s is not authorized for this action! Check your API key.", user)
+		logger.Logger.Errorf("Error with request. Check your API key with --verbose")
+		prettyPrintError(resp.String())
 		error = true
 	}
 
 	if resp.StatusCode() == 500 {
 		logger.Logger.Error("Error from server!")
-		prettyPrintError(resp.String())
+		err := prettyPrintPocketBaseError(resp.Body())
+		if err != nil {
+			prettyPrintError(resp.String())
+		}
 		error = true
 	}
 
@@ -132,6 +177,10 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 }
 
 func GenericGet(client *resty.Client, apiPath string) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
+
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -144,6 +193,9 @@ func GenericGet(client *resty.Client, apiPath string) ([]byte, bool) {
 }
 
 func GenericJSONPost(client *resty.Client, apiPath string, data any) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -160,6 +212,9 @@ func GenericJSONPost(client *resty.Client, apiPath string, data any) ([]byte, bo
 }
 
 func GenericDelete(client *resty.Client, apiPath string) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -172,7 +227,28 @@ func GenericDelete(client *resty.Client, apiPath string) ([]byte, bool) {
 
 }
 
+func GenericDeleteWithBody(client *resty.Client, apiPath string, data any) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	s.Suffix = " Waiting for server..."
+	s.Start()
+
+	resp, err := client.R().
+		SetHeader("Content-Type", "application/json").
+		SetBody(data).
+		Delete(apiPath)
+
+	s.Stop()
+
+	return processRESTResult(resp, err)
+}
+
 func GenericPutFile(client *resty.Client, apiPath string, data []byte) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -187,6 +263,9 @@ func GenericPutFile(client *resty.Client, apiPath string, data []byte) ([]byte, 
 }
 
 func PostFileAndForce(client *resty.Client, apiPath string, data []byte, filename string, force bool) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -204,6 +283,9 @@ func PostFileAndForce(client *resty.Client, apiPath string, data []byte, filenam
 }
 
 func PostFileAndForceAndGlobal(client *resty.Client, apiPath string, data []byte, filename string, force bool, ansibleGlobal bool) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -222,6 +304,9 @@ func PostFileAndForceAndGlobal(client *resty.Client, apiPath string, data []byte
 }
 
 func GenericJSONPut(client *resty.Client, apiPath string, data string) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
@@ -237,7 +322,29 @@ func GenericJSONPut(client *resty.Client, apiPath string, data string) ([]byte, 
 
 }
 
+func GenericJSONPatch(client *resty.Client, apiPath string, data string) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	s.Suffix = " Waiting for server..."
+	s.Start()
+
+	resp, err := client.R().
+		SetHeader("Content-Type", "application/json").
+		SetBody(data).
+		Patch(apiPath)
+
+	s.Stop()
+
+	return processRESTResult(resp, err)
+
+}
+
 func FileGet(client *resty.Client, apiPath string, outputPath string) {
+	if !strings.HasPrefix(apiPath, APIBasePath) {
+		apiPath = APIBasePath + apiPath
+	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()

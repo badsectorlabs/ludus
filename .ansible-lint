@@ -6,6 +6,7 @@ skip_list:
 mock_roles:
   - ansible-thoteam.nexus3-oss
   - lae.proxmox
+  - geerlingguy.packer
 
 extra_vars:
   range_id: "JD"

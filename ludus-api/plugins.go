@@ -3,18 +3,20 @@ package ludusapi
 import (
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"plugin"
+	"slices"
+	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 type LudusPlugin interface {
 	Name() string
 	Initialize(server *Server) error
-	RegisterRoutes(router *gin.Engine)
+	RegisterRoutes(app *core.App)
 	GetEmbeddedFSs() []fs.FS
 	Shutdown() error
 	Initialized() bool
@@ -26,10 +28,13 @@ type Server struct {
 	Version          string
 	VersionString    string
 	LudusInstallPath string
-	LicenseType      string
+	Entitlements     []string
 	LicenseMessage   string
 	LicenseValid     bool
 	LicenseKey       string
+	LicenseName      string
+	LicenseExpiry    *time.Time
+	Logger           *slog.Logger
 }
 
 func (s *Server) LoadPlugin(path string) error {
@@ -52,13 +57,13 @@ func (s *Server) LoadPlugin(path string) error {
 	// Check if a plugin with the same name is already loaded
 	for _, existingPlugin := range s.plugins {
 		if existingPlugin.Name() == ludusPlugin.Name() {
-			log.Printf("Plugin %s is already loaded, skipping", ludusPlugin.Name())
+			logger.Info(fmt.Sprintf("Plugin %s is already loaded, skipping", ludusPlugin.Name()))
 			return nil
 		}
 	}
 
 	s.plugins = append(s.plugins, ludusPlugin)
-	log.Println("Loaded plugin: ", ludusPlugin.Name())
+	logger.Info(fmt.Sprintf("Loaded plugin: %s", ludusPlugin.Name()))
 	return nil
 }
 
@@ -73,17 +78,17 @@ func (s *Server) InitializePlugins() {
 		}
 
 		if err := p.Initialize(s); err != nil {
-			log.Printf("Failed to initialize plugin %s: %v", p.Name(), err)
+			logger.Error(fmt.Sprintf("Failed to initialize plugin %s: %v", p.Name(), err))
 		}
 
 		embeddedFSsFromPlugin := p.GetEmbeddedFSs()
 		for index, embeddedFSFromPlugin := range embeddedFSsFromPlugin {
 			if embeddedFSFromPlugin != nil {
 				if p.Name() == "Ludus Enterprise" && os.Geteuid() == 0 {
-					log.Println("Not dropping files for plugin: ", p.Name(), " (root)")
+					logger.Info(fmt.Sprintf("Not dropping files for plugin: %s (root)", p.Name()))
 					continue
 				}
-				log.Printf("Dropping embedded filesystem %d for plugin: %s\n", index+1, p.Name())
+				logger.Info(fmt.Sprintf("Dropping embedded filesystem %d for plugin: %s", index+1, p.Name()))
 				// Write out any files from the plugin FS to the host filesystem
 				err := fs.WalkDir(embeddedFSFromPlugin, ".", func(path string, d fs.DirEntry, err error) error {
 					if err != nil {
@@ -100,7 +105,7 @@ func (s *Server) InitializePlugins() {
 					return os.WriteFile(destPath, data, 0644)
 				})
 				if err != nil {
-					log.Printf("Error writing out plugin files: %v", err)
+					logger.Error(fmt.Sprintf("Error writing out plugin files: %v", err))
 				}
 			}
 		}
@@ -108,11 +113,11 @@ func (s *Server) InitializePlugins() {
 
 }
 
-func (s *Server) RegisterPluginRoutes(router *gin.Engine) {
+func (s *Server) RegisterPluginRoutes(app *core.App) {
 	for _, p := range s.plugins {
 		if !p.RoutesRegistered() {
-			log.Printf("Registering routes for plugin: %s\n", p.Name())
-			p.RegisterRoutes(router)
+			logger.Info(fmt.Sprintf("Registering routes for plugin: %s", p.Name()))
+			p.RegisterRoutes(app)
 		}
 
 	}
@@ -121,7 +126,12 @@ func (s *Server) RegisterPluginRoutes(router *gin.Engine) {
 func (s *Server) ShutdownPlugins() {
 	for _, p := range s.plugins {
 		if err := p.Shutdown(); err != nil {
-			log.Printf("Error shutting down plugin %s: %v", p.Name(), err)
+			logger.Info(fmt.Sprintf("Error shutting down plugin %s: %v", p.Name(), err))
 		}
 	}
+}
+
+// HasEntitlement checks if the server license has a specific entitlement
+func (s *Server) HasEntitlement(code string) bool {
+	return slices.Contains(s.Entitlements, code)
 }

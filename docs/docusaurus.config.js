@@ -80,11 +80,11 @@ const config = {
         docs: {
           sidebarPath: './sidebars.js',
           //editUrl: 'https://gitlab.com/badsectorlabs/ludus/-/edit/main/docs/',
-          lastVersion: '1',
+          lastVersion: 'current',
           includeCurrentVersion: true,
           versions: {
             current: {
-              label: 'Ludus 2 (beta)',
+              label: 'Ludus 2',
               badge: false,
             },
           },
@@ -147,12 +147,12 @@ const config = {
           {
             label: 'API',
             position: 'left',
-            href: 'pathname:///api/index.html'
+            href: 'https://api-docs.ludus.cloud/'
           },
           {
             type: 'docsVersionDropdown',
             versions: {
-              current: {label: 'Ludus 2 (beta)'},
+              current: {label: 'Ludus 2'},
               '1': {label: 'Ludus 1'}
             }
           },

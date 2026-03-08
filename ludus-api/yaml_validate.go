@@ -3,14 +3,15 @@ package ludusapi
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/gin-gonic/gin"
+	"github.com/goforj/godump"
+	goproxmox "github.com/luthermonson/go-proxmox"
+	"github.com/pocketbase/pocketbase/core"
 	"github.com/xeipuuv/gojsonschema"
 	yaml "sigs.k8s.io/yaml"
 )
@@ -82,13 +83,13 @@ func validateBytes(bytes []byte, schemabytes []byte) error {
 			return fmt.Errorf("invalid YAML: %s", report)
 		}
 	} else {
-		log.Println("Yaml validate: checking syntax only")
+		logger.Debug("Yaml validate: checking syntax only")
 	}
 
 	return nil
 }
 
-func validateFile(c *gin.Context, path string, schema string) error {
+func validateFile(e *core.RequestEvent, path string, schema string) error {
 	bytes, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("can't read %s: %v", path, err)
@@ -103,7 +104,7 @@ func validateFile(c *gin.Context, path string, schema string) error {
 	if err != nil {
 		return err
 	}
-	return validateRangeYAML(c, bytes)
+	return validateRangeYAML(e, bytes)
 
 }
 
@@ -126,6 +127,44 @@ func loadYaml(schema string) ([]byte, error) {
 	return yamlBytes, nil
 }
 
+// validateTargetNode checks if a target_node exists in the cluster
+// Returns nil if targetNode is empty (will be auto-selected) or if it exists
+func validateTargetNode(e *core.RequestEvent, targetNode string) error {
+	if targetNode == "" {
+		return nil // Will be auto-selected
+	}
+
+	// Check if we have cached the nodes for this request
+	cachedNodes := e.Get("clusterNodes")
+	if cachedNodes != nil {
+		for _, node := range cachedNodes.(goproxmox.NodeStatuses) {
+			if node.Node == targetNode {
+				return nil
+			}
+		}
+	}
+
+	client, err := getRootGoProxmoxClient()
+	if err != nil {
+		return fmt.Errorf("failed to get proxmox client: %w", err)
+	}
+
+	nodes, err := GetClusterNodes(client)
+	logger.Debug(fmt.Sprintf("Got cluster nodes: %s", godump.DumpStr(nodes)))
+	if err != nil {
+		return fmt.Errorf("failed to get cluster nodes: %w", err)
+	}
+
+	e.Set("clusterNodes", nodes)
+
+	for _, node := range nodes {
+		if node.Node == targetNode {
+			return nil
+		}
+	}
+	return fmt.Errorf("target_node '%s' does not exist in the cluster", targetNode)
+}
+
 // VM represents a virtual machine configuration
 // Why json tags for yaml? https://github.com/kubernetes-sigs/yaml#introduction
 // "it effectively reuses the JSON struct tags as well as the custom JSON methods MarshalJSON and UnmarshalJSON unlike go-yaml"
@@ -139,34 +178,60 @@ type VM struct {
 		FQDN string `json:"fqdn"`
 		Role string `json:"role"`
 	} `json:"domain"`
-	Roles   interface{} `yaml:"roles"`
-	ForceIP bool        `json:"force_ip,omitempty"`
+	Roles      interface{} `yaml:"roles"`
+	ForceIP    bool        `json:"force_ip,omitempty"`
+	TargetNode string      `json:"target_node,omitempty"` // Per-VM node selection for cluster deployments
+}
+
+// Router represents the router section of the range config.
+type Router struct {
+	TargetNode string `json:"target_node,omitempty"` // Proxmox node for the router VM; overrides range default (cluster only)
+}
+
+type Defaults struct {
+	TargetNode string `json:"target_node,omitempty"` // Range-level default node for cluster deployments
 }
 
 type LudusConfig struct {
-	Ludus []VM `json:"ludus"`
+	Ludus    []VM      `json:"ludus"`
+	Router   *Router   `json:"router,omitempty"`
+	Defaults *Defaults `json:"defaults,omitempty"`
 }
 
 // validateRangeYAML checks for duplicate vlan and ip_last_octet combinations, templates exist on the server, and unique hostname
 // also checks each role to see if it exists on the server and creates the user-defined-roles.yml file.
-func validateRangeYAML(c *gin.Context, yamlData []byte) error {
+// Additionally validates target_node settings for cluster deployments.
+func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 	var config LudusConfig
 	err := yaml.Unmarshal(yamlData, &config)
 	if err != nil {
 		return err
 	}
 
+	// Validate range-level target_node if specified
+	if config.Defaults != nil && config.Defaults.TargetNode != "" {
+		if err := validateTargetNode(e, config.Defaults.TargetNode); err != nil {
+			return fmt.Errorf("range-level target_node error: %w", err)
+		}
+	}
+
+	// Validate router target_node if specified
+	if config.Router != nil && config.Router.TargetNode != "" {
+		if err := validateTargetNode(e, config.Router.TargetNode); err != nil {
+			return fmt.Errorf("router target_node error: %w", err)
+		}
+	}
+
 	// Get a list of all the built templates on the system
-	templateSlice, err := getTemplateNameArray(c, true)
+	templateSlice, err := getTemplateNameArray(e, true)
 	if err != nil {
 		return err
 	}
 
-	usersRange, err := GetRangeObject(c)
+	targetRange, err := GetRange(e)
 	if err != nil {
 		return err
 	}
-
 	// Check for duplicate vlan and ip_last_octet combinations
 	seenVLANAndIP := make(map[string]bool)
 	// Check that all vm_names and hostnames are unique
@@ -177,6 +242,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
 
 	var NETBIOSnameKey string
+	e.Set("rangeHasRoles", false)
 	for _, vm := range config.Ludus {
 		vlanIPKey := fmt.Sprintf("vlan: %d, ip_last_octet: %d", vm.VLAN, vm.IPLastOctet)
 		vmNameKey := vm.VMName
@@ -195,7 +261,7 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 			// "Windows doesn't permit computer names that exceed 15 characters"
 			// https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/naming-conventions-for-computer-domain-site-ou
 			// First we have to replace any range_id template strings
-			hostname := rangeIDTemplateRegex.ReplaceAllString(vm.Hostname, usersRange.UserID)
+			hostname := rangeIDTemplateRegex.ReplaceAllString(vm.Hostname, targetRange.RangeId())
 			// If the hostname is more than 15 chars, chop it down
 			if len(hostname) >= 15 {
 				NETBIOSnameKey = hostname[:15]
@@ -216,6 +282,12 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 		if !slices.Contains(templateSlice, vm.Template) {
 			return fmt.Errorf("template not found or not built on this server: %s for VM: %s", vm.Template, vm.VMName)
 		}
+		// Validate VM-level target_node if specified
+		if vm.TargetNode != "" {
+			if err := validateTargetNode(e, vm.TargetNode); err != nil {
+				return fmt.Errorf("VM '%s' target_node error: %w", vm.VMName, err)
+			}
+		}
 		// Check the roles (if any)
 		if vm.Roles != nil {
 			switch roles := vm.Roles.(type) {
@@ -223,37 +295,37 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 				for _, role := range roles {
 					switch r := role.(type) {
 					case string:
-						exists, err := checkRoleExists(c, r)
+						exists, err := checkRoleExists(e, r)
 						if err != nil {
 							return fmt.Errorf("error checking if role exists on the server: %s", err)
 						}
 						if !exists {
-							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.UserID)
+							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, targetRange.RangeId())
 						} else {
-							c.Set("userHasRoles", true)
+							e.Set("rangeHasRoles", true)
 						}
 					case map[string]interface{}:
-						log.Println(role)
+						logger.Debug("Yaml validate: checking role: " + godump.DumpStr(role))
 						if name, ok := r["name"].(string); ok {
-							exists, err := checkRoleExists(c, name)
+							exists, err := checkRoleExists(e, name)
 							if err != nil {
 								return fmt.Errorf("error checking if role exists on the server: %s", err)
 							}
 							if !exists {
-								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, usersRange.UserID)
+								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, targetRange.RangeId())
 							} else {
-								c.Set("userHasRoles", true)
+								e.Set("rangeHasRoles", true)
 							}
 							if dependsOn, ok := r["depends_on"].([]interface{}); ok {
 								for _, dep := range dependsOn {
 									if depMap, ok := dep.(map[string]interface{}); ok {
 										if role, ok := depMap["role"].(string); ok {
-											exists, err := checkRoleExists(c, role)
+											exists, err := checkRoleExists(e, role)
 											if err != nil {
 												return fmt.Errorf("error checking if role exists on the server: %s", err)
 											}
 											if !exists {
-												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, usersRange.UserID)
+												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, targetRange.RangeId())
 											}
 										}
 									}
@@ -264,15 +336,10 @@ func validateRangeYAML(c *gin.Context, yamlData []byte) error {
 				}
 			}
 		} else {
-			// Remove the user-defined-roles.yml file in the event the user previously had a config with roles defined
-			user, err := GetUserObject(c)
-			if err != nil {
-				return fmt.Errorf("failed to get user object: %v", err)
-			}
-
-			_, err = os.Stat(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername))
+			// Remove the user-defined-roles.yml file in the event the range previously had a config with roles defined
+			_, err = os.Stat(fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, targetRange.RangeId()))
 			if err == nil {
-				err = os.Remove(fmt.Sprintf("%s/users/%s/.ansible/user-defined-roles.yml", ludusInstallPath, user.ProxmoxUsername))
+				err = os.Remove(fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, targetRange.RangeId()))
 				if err != nil {
 					return fmt.Errorf("failed to remove user-defined-roles.yml: %v", err)
 				}

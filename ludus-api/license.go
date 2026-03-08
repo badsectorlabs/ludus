@@ -6,36 +6,47 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"ludusapi/dto"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/denisbrodbeck/machineid"
 	"github.com/keygen-sh/keygen-go/v3"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 const (
-	licenseURL                     = "https://api.keygen.sh"
-	licenseAPIVersion              = "1.7"
-	licenseAPIPrefix               = "v1"
-	licenseProductEnterprisePlugin = "f258d15f-4fab-47ca-839c-fc2a85f55b71"
-	licenseAccount                 = "26f20308-539a-4d95-bdad-8edf70553cec"
-	licensePublicKey               = "a3d9ac19af50b558b22e634531caddfa6a41bbeaee3685d796c02bbcd93aef59"
-	binaryPublicKey                = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
+	LicenseURL                              = "https://license.ludus.cloud"
+	LicenseAPIVersion                       = "1.7"
+	LicenseAPIPrefix                        = "v1"
+	LicenseProductLudus                     = "5722ca04-715d-4969-9130-a051532b7579"
+	LicenseProductSubscriptionRolesMetadata = "7b75d702-0448-4d82-9963-2b1f1f460022"
+	LicensePackageLudusEnterprisePlugin     = "a8ecdfa4-6cf7-4a7c-93cc-95fe44c94d14"
+	LicensePackageLudusAntisandboxPlugin    = "a335f37d-e603-405c-8c99-0bb3185a87e8"
+	LicenseAccount                          = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
+	LicensePublicKey                        = "70cb26141f38840b8f3f499d4875a829a9d251bd3337278995832b9ea4e39d12"
+	BinaryPublicKey                         = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
 )
 
 func (s *Server) checkLicense() {
-	keygen.Account = licenseAccount
-	keygen.Product = licenseProductEnterprisePlugin
+	keygen.Account = LicenseAccount
+	keygen.Product = LicenseProductLudus
 	keygen.LicenseKey = s.LicenseKey
-	keygen.APIURL = licenseURL
+	keygen.APIURL = LicenseURL
 	keygen.UserAgent = "Ludus-Server/" + s.Version
+
+	if os.Getenv("LUDUS_DEBUG_LICENSE") == "1" {
+		keygen.Logger = keygen.NewLogger(keygen.LogLevelDebug)
+	}
 
 	fingerprint, err := machineid.ProtectedID(keygen.Product)
 	if err != nil {
@@ -53,12 +64,6 @@ func (s *Server) checkLicense() {
 		pluginsDir = fmt.Sprintf("%s/plugins/enterprise", ludusInstallPath)
 	}
 	enterpriseLoaded := false
-
-	licenseCheckBucket := NewLeakyBucket(fmt.Sprintf("%s/install/.license-check-bucket", ludusInstallPath), 6, 0.02)
-	if !licenseCheckBucket.Allow() {
-		log.Println("LICENSE: license check bucket is full, skipping license check")
-		return
-	}
 
 	// Validate the license for the current fingerprint
 	license, err := keygen.Validate(ctx, fingerprint)
@@ -109,42 +114,51 @@ func (s *Server) checkLicense() {
 	if license.Expiry != nil {
 		log.Printf("LICENSE: active, expires: %s, licensed to %s\n", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
 		s.LicenseMessage = fmt.Sprintf("License active, expires: %s, licensed to %s", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
+		s.LicenseName = license.Name
+		s.LicenseExpiry = license.Expiry
 	} else {
 		log.Println("LICENSE: active, does not expire, licensed to", license.Name)
 		s.LicenseMessage = fmt.Sprintf("License active, does not expire, licensed to %s", license.Name)
+		s.LicenseName = license.Name
+		s.LicenseExpiry = nil
 	}
 	s.LicenseValid = true
 
+	// Extract entitlements from license
+	entitlements, err := license.Entitlements(ctx)
+	if err != nil {
+		log.Printf("LICENSE: unable to get entitlements: %v", err)
+		s.Entitlements = []string{}
+	} else {
+		s.Entitlements = make([]string, len(entitlements))
+		for i, entitlement := range entitlements {
+			s.Entitlements[i] = string(entitlement.Code)
+		}
+		log.Printf("LICENSE: found entitlements: %s", strings.Join(s.Entitlements, ", "))
+	}
+
 	// Always load the enterprise plugin if it exists first
-	if FileExists(pluginsDir + "/ludus-enterprise.so") {
+	if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") && FileExists(pluginsDir+"/ludus-enterprise.so") {
 		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
 		if err != nil {
 			log.Printf("LICENSE: error loading enterprise plugin: %v", err)
 			log.Println("LICENSE: pulling compatible plugin from server (version: " + s.Version + ")")
 			// Pull down the enterprise plugin since we have a valid license, perhaps we had a old version
-			if !licenseCheckBucket.Allow() {
-				log.Println("LICENSE: license check bucket is full, skipping plugin download")
-				return
-			}
-			err = PullPlugin(fmt.Sprintf("/artifacts/ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey)
+			err = DownloadFileUsingLicenseKey(fmt.Sprintf("ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey, LicenseProductLudus)
 			if err != nil {
 				log.Printf("LICENSE: error getting enterprise plugin: %v", err)
 			}
 		} else {
 			enterpriseLoaded = true
 		}
-	} else {
+	} else if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") {
 		log.Println("LICENSE: no enterprise plugin found, pulling compatible plugin from server")
-		if !licenseCheckBucket.Allow() {
-			log.Println("LICENSE: license check bucket is full, skipping plugin download")
-			return
-		}
-		err = PullPlugin(fmt.Sprintf("/artifacts/ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey)
+		err = DownloadFileUsingLicenseKey(fmt.Sprintf("ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey, LicenseProductLudus)
 		if err != nil {
 			log.Printf("LICENSE: error getting enterprise plugin: %v", err)
 		}
 	}
-	if !enterpriseLoaded {
+	if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") && !enterpriseLoaded {
 		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
 		if err != nil {
 			log.Printf("LICENSE: error loading enterprise plugin: %v", err)
@@ -157,70 +171,136 @@ func (s *Server) checkLicense() {
 	// s.InitializePlugins()
 }
 
-func PullPlugin(path string, fileName string, pluginDir string, version string, licenseKey string) error {
-	// Check for a .local-testing file in the plugin directory
-	if _, err := os.Stat(pluginDir + "/.local-testing"); err == nil {
-		log.Printf("LICENSE: In local-testing mode (%s/.local-testing exists), skipping plugin download\n", pluginDir)
+func GetSubscriptionRolesMetadata(e *core.RequestEvent) ([]dto.GetSubscriptionRolesResponseItem, error) {
+
+	// Check the request cache first
+	subscriptionRolesFromCache := e.Get("rolesJSON")
+	if subscriptionRolesFromCache != nil {
+		return subscriptionRolesFromCache.([]dto.GetSubscriptionRolesResponseItem), nil
+	}
+
+	// First get the version of the role from latest
+	err := DownloadFileUsingLicenseKey("roles.json", "roles.json", "/tmp", server.Version, server.LicenseKey, LicenseProductSubscriptionRolesMetadata)
+	if err != nil {
+		return nil, err
+	}
+	rolesJSON, err := os.ReadFile("/tmp/roles.json")
+	if err != nil {
+		return nil, err
+	}
+	// Read the json into an array of GetSubscriptionRolesResponseItem
+	var subscriptionRoles []dto.GetSubscriptionRolesResponseItem
+	err = json.Unmarshal(rolesJSON, &subscriptionRoles)
+	if err != nil {
+		return nil, err
+	}
+	e.Set("rolesJSON", subscriptionRoles)
+	return subscriptionRoles, nil
+}
+
+func DownloadRoleUsingLicenseKey(e *core.RequestEvent, roleName string, targetDir string) (string, error) {
+
+	// Get the subscription roles metadata
+	subscriptionRoles, err := GetSubscriptionRolesMetadata(e)
+	if err != nil {
+		return "", err
+	}
+
+	// Find the version of the role
+	var roleVersion string
+	var rolePackageUUID string
+	for _, role := range subscriptionRoles {
+		if role.Role == roleName {
+			roleVersion = role.Version
+			rolePackageUUID = role.PackageUUID
+			break
+		}
+	}
+	if roleVersion == "" || rolePackageUUID == "" {
+		return "", errors.New("role " + roleName + " not found")
+	}
+
+	roleFileName := fmt.Sprintf("%s_v%s.tar.gz", roleName, roleVersion)
+	err = DownloadFileUsingLicenseKey(roleFileName, roleFileName, targetDir, server.Version, server.LicenseKey, rolePackageUUID)
+	if err != nil {
+		return "", err
+	}
+	return roleFileName, nil
+}
+
+func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string, version string, licenseKey string, packageUUID string) error {
+
+	// If the file path doesn't start with /artifacts/, add it
+	if !strings.HasPrefix(path, "artifacts/") || !strings.HasPrefix(path, "/artifacts/") {
+		path = "artifacts/" + path
+	}
+
+	// Check for a .local-testing file in the target directory
+	if _, err := os.Stat(targetDir + "/.local-testing"); err == nil {
+		log.Printf("LICENSE: In local-testing mode (%s/.local-testing exists), skipping file download\n", targetDir)
 		return nil
 	}
 
 	client := keygen.NewClientWithOptions(&keygen.ClientOptions{
-		Account:    licenseAccount,
-		APIURL:     licenseURL,
-		PublicKey:  licensePublicKey,
-		APIPrefix:  licenseAPIPrefix,
-		APIVersion: licenseAPIVersion,
+		Account:    LicenseAccount,
+		APIURL:     LicenseURL,
+		PublicKey:  LicensePublicKey,
+		APIPrefix:  LicenseAPIPrefix,
+		APIVersion: LicenseAPIVersion,
 		UserAgent:  "Ludus-Server/" + version,
 		LicenseKey: licenseKey,
 	})
+	keygen.Package = packageUUID
 	ctx := context.Background()
-	// Uncomment this to debug the plugin downloads
-	// keygen.Logger = keygen.NewLogger(keygen.LogLevelDebug)
+
+	if os.Getenv("LUDUS_DEBUG_LICENSE") == "1" {
+		keygen.Logger = keygen.NewLogger(keygen.LogLevelDebug)
+	}
 
 	artifact := &keygen.Artifact{}
 	response, err := client.Get(ctx, path, nil, artifact)
 	if err != nil {
-		log.Printf("LICENSE: unable to download plugin %s: %v", fileName, err)
+		logger.Error(fmt.Sprintf("LICENSE: unable to download file %s: %v", fileName, err))
 		return err
 	}
 	artifact.URL = response.Headers.Get("Location")
-	// Write the enterprise plugin to disk
-	if !FileExists(pluginDir) {
-		err := os.MkdirAll(pluginDir, 0755)
+	// Write the binary to disk
+	if !FileExists(targetDir) {
+		err := os.MkdirAll(targetDir, 0755)
 		if err != nil {
-			log.Printf("LICENSE: unable to create plugins directory: %v", err)
+			logger.Error(fmt.Sprintf("LICENSE: unable to create target directory: %v", err))
 			return err
 		}
 	}
-	pluginPath := filepath.Join(pluginDir, fileName)
-	pluginFile, err := os.Create(pluginPath)
+	targetPath := filepath.Join(targetDir, fileName)
+	targetFile, err := os.Create(targetPath)
 	if err != nil {
-		log.Printf("LICENSE: unable to create plugin file %s: %v", fileName, err)
+		logger.Error(fmt.Sprintf("LICENSE: unable to create target file %s: %v", fileName, err))
 		return err
 	}
-	defer pluginFile.Close()
+	defer targetFile.Close()
 
-	// Download the actual plugin binary
-	pluginResp, err := http.Get(artifact.URL)
+	// Download the actual binary
+	targetResp, err := http.Get(artifact.URL)
 	if err != nil {
-		log.Printf("LICENSE: unable to download plugin binary %s: %v", fileName, err)
+		logger.Error(fmt.Sprintf("LICENSE: unable to download target file %s: %v", fileName, err))
 		return err
 	}
-	defer pluginResp.Body.Close()
+	defer targetResp.Body.Close()
 
-	// Copy the plugin binary to the file
-	_, err = io.Copy(pluginFile, pluginResp.Body)
+	// Copy the binary to the file
+	_, err = io.Copy(targetFile, targetResp.Body)
 	if err != nil {
-		log.Printf("LICENSE: unable to write %s plugin: %v", fileName, err)
+		logger.Error(fmt.Sprintf("LICENSE: unable to write %s target file: %v", fileName, err))
 		return err
 	}
 
 	// Verify the signature
-	if err := VerifySignature(pluginPath, artifact.Signature, binaryPublicKey, licenseProductEnterprisePlugin); err != nil {
-		log.Printf("LICENSE: unable to verify signature for %s plugin: %v", fileName, err)
+	if err := VerifySignature(targetPath, artifact.Signature, BinaryPublicKey, packageUUID); err != nil {
+		logger.Error(fmt.Sprintf("LICENSE: unable to verify signature for %s target file: %v", fileName, err))
 		return err
 	}
-	log.Printf("LICENSE: successfully verified signature for %s plugin", fileName)
+	logger.Debug(fmt.Sprintf("LICENSE: successfully verified signature for %s target file", fileName))
 
 	return nil
 }
@@ -266,6 +346,19 @@ func VerifySignature(filePath string, signatureString string, publicKeyHex strin
 	// Verify the signature
 	err = ed25519.VerifyWithOptions(publicKey, checksum, signature, opts)
 	if err != nil {
+		// Fall back to the Ludus product UUID
+		if strings.Contains(err.Error(), "invalid signature") {
+			opts := &ed25519.Options{
+				Hash:    crypto.SHA512,
+				Context: LicenseProductLudus,
+			}
+			err = ed25519.VerifyWithOptions(publicKey, checksum, signature, opts)
+			if err != nil {
+				return fmt.Errorf("failed to verify ed25519ph signature with package and product UUID: %v", err)
+			} else {
+				return nil
+			}
+		}
 		return fmt.Errorf("failed to verify ed25519ph signature: %v", err)
 	}
 

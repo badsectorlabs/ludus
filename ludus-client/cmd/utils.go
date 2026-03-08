@@ -338,3 +338,48 @@ func printTaskOutputFromString(logs string, taskName string) {
 		}
 	}
 }
+
+// buildURLWithRangeAndUserID creates a URL with rangeID and userID query parameters
+// based on the global flags. It handles all combinations:
+//
+// - neither specified: returns baseURL as-is
+//
+// - only rangeID: adds ?rangeID=<rangeID>
+//
+// - only userID: adds ?userID=<userID>
+//
+// - both: adds ?rangeID=<rangeID>&userID=<userID>
+func buildURLWithRangeAndUserID(baseURL string) string {
+	if rangeID == "" && userID == "" {
+		return APIBasePath + baseURL
+	}
+
+	var params []string
+	if rangeID != "" {
+		params = append(params, fmt.Sprintf("rangeID=%s", rangeID))
+	}
+	if userID != "" {
+		params = append(params, fmt.Sprintf("userID=%s", userID))
+	}
+
+	queryString := strings.Join(params, "&")
+	return fmt.Sprintf("%s%s?%s", APIBasePath, baseURL, queryString)
+}
+
+// Add a query parameter to a URL
+// If the URL already has a query parameter, add the new parameter to the end
+// If the URL does not have a query parameter, add the new parameter to the end
+// and add the value to the end
+//
+// Example:
+//
+// addQueryParameterToURL("https://example.com", "param1", "value1") -> "https://example.com?param1=value1"
+//
+// addQueryParameterToURL("https://example.com?param1=value1", "param2", "value2") -> "https://example.com?param1=value1&param2=value2"
+func addQueryParameterToURL(url string, parameter string, value string) string {
+	if strings.Contains(url, "?") {
+		return fmt.Sprintf("%s&%s=%s", url, parameter, value)
+	} else {
+		return fmt.Sprintf("%s?%s=%s", url, parameter, value)
+	}
+}

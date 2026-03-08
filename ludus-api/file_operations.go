@@ -91,6 +91,13 @@ func Untar(tarFile, destDir string) error {
 	// Create a new tar reader
 	tarReader := tar.NewReader(file)
 
+	// Resolve the absolute, cleaned destination directory for safety checks
+	absDestDir, err := filepath.Abs(destDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve destination directory: %w", err)
+	}
+	absDestDir = filepath.Clean(absDestDir)
+
 	// Iterate through the files in the tar archive
 	for {
 		header, err := tarReader.Next()
@@ -101,8 +108,19 @@ func Untar(tarFile, destDir string) error {
 			return fmt.Errorf("failed to read tar file: %w", err)
 		}
 
-		// Construct the full path for the file/directory
-		path := filepath.Join(destDir, header.Name)
+		// Construct the full path for the file/directory and prevent path traversal
+		joinedPath := filepath.Join(absDestDir, header.Name)
+		cleanPath := filepath.Clean(joinedPath)
+		absPath, err := filepath.Abs(cleanPath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve path: %w", err)
+		}
+		// Ensure the final path is within the destination directory
+		if absPath != absDestDir && !strings.HasPrefix(absPath+string(os.PathSeparator), absDestDir+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path in tar: %s", header.Name)
+		}
+
+		path := absPath
 
 		// Check the file type
 		switch header.Typeflag {
@@ -112,6 +130,10 @@ func Untar(tarFile, destDir string) error {
 				return fmt.Errorf("failed to create directory: %w", err)
 			}
 		case tar.TypeReg: // Regular file
+			// Check if the file starts with '._' and if so, skip it (these are macOS hidden files)
+			if strings.HasPrefix(filepath.Base(header.Name), "._") {
+				continue
+			}
 			// Create the directory for the file (may be the first file deeply nested in a dir)
 			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 				return fmt.Errorf("failed to create directory: %w", err)
@@ -255,4 +277,98 @@ func FileExists(filename string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+// applyBlockInFile is a Go implementation of Ansible's blockinfile logic.
+// It correctly updates a block in-place, removes it, or adds it to the end if not found.
+// It returns the new file content and a boolean indicating if a change was made.
+func applyBlockInFile(originalContent, marker, block string, present bool) (string, bool) {
+	startMarker := strings.Replace(marker, "{mark}", "BEGIN", 1)
+	endMarker := strings.Replace(marker, "{mark}", "END", 1)
+	lines := strings.Split(originalContent, "\n")
+
+	var newLines []string
+	blockFound := false
+	i := 0
+
+	for i < len(lines) {
+		line := lines[i]
+
+		// Check if we found the start of our managed block.
+		if strings.TrimSpace(line) == startMarker {
+			blockFound = true
+
+			// If the desired state is 'present', write the new block.
+			if present {
+				newLines = append(newLines, startMarker)
+				newLines = append(newLines, block)
+				newLines = append(newLines, endMarker)
+			}
+
+			// Skip the old block in the original content by advancing the loop counter 'i'
+			// until we find the end marker or the end of the file.
+			for i < len(lines) && strings.TrimSpace(lines[i]) != endMarker {
+				i++
+			}
+		} else {
+			// This line is not part of our managed block, so keep it.
+			newLines = append(newLines, line)
+		}
+		i++
+	}
+
+	// If the block was never found and the state is 'present', add it to the end.
+	if !blockFound && present {
+		// If the file ended with a newline, the final line will be empty, which would add a blank line in the updated file
+		// so we need to remove it
+		if len(newLines[len(newLines)-1]) == 0 {
+			newLines = newLines[:len(newLines)-1]
+		}
+		newLines = append(newLines, startMarker)
+		newLines = append(newLines, block)
+		newLines = append(newLines, endMarker)
+	}
+
+	// Reconstruct the final content string.
+	finalContent := strings.Join(newLines, "\n")
+
+	// If the original content ended with a newline, add one to the final content if the final content does not already end with a newline
+	if len(originalContent) > 0 && len(finalContent) > 0 &&
+		originalContent[len(originalContent)-1] == '\n' && finalContent[len(finalContent)-1] != '\n' {
+		finalContent += "\n"
+	}
+
+	// Determine if the content actually changed.
+	// We compare stripped versions to avoid false positives from trailing whitespace differences.
+	changed := strings.TrimSpace(originalContent) != strings.TrimSpace(finalContent)
+
+	return finalContent, changed
+}
+
+// applyBlockInFileAtPath is a Go implementation of Ansible's blockinfile logic.
+// It correctly updates a block in-place, removes it, or adds it to the end if not found.
+// It returns a boolean indicating if a change was made and an error if one occurred.
+func applyBlockInFileAtPath(filePath, marker, block string, present bool) (bool, error) {
+	// Read in the file
+	originalContent, err := os.ReadFile(filePath)
+	if err != nil {
+		return false, err
+	}
+
+	// Get original file permissions
+	var fileMode os.FileMode
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		fileMode = os.FileMode(0644) // Fall back to 0644 if we can't get the file permissions, it may not exist
+	} else {
+		fileMode = fileInfo.Mode()
+	}
+
+	newContent, contentChanged := applyBlockInFile(string(originalContent), marker, block, present)
+	if contentChanged {
+		if err := os.WriteFile(filePath, []byte(newContent), fileMode); err != nil {
+			return false, err
+		}
+	}
+	return contentChanged, nil
 }

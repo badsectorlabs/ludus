@@ -1,0 +1,5845 @@
+openapi: 3.0.1
+info:
+  title: Ludus API
+  description: >-
+    This API controls Ludus user management, range deployment, power state, and
+    testing state.
+  version: 2.0.0
+  license:
+    name: GNU AGPLv3
+    url: https://www.gnu.org/licenses/agpl-3.0.txt/
+  contact:
+    name: Ludus Discord
+    url: https://discord.gg/HryzhdUSYT
+tags:
+  - name: Host Management
+  - name: Ansible Management
+  - name: User Management
+  - name: Range Management
+  - name: Power State Management
+  - name: Testing State Management
+  - name: Anti-Sandbox Management
+  - name: Template Management
+  - name: Snapshot Management
+  - name: KMS Management
+  - name: Group Management
+  - name: Migration
+  - name: Blueprint Management
+paths:
+  /:
+    get:
+      summary: Retrieve the ludus version
+      deprecated: false
+      description: |
+        Returns the ludus version
+      operationId: index
+      tags:
+        - Host Management
+      parameters: []
+      responses:
+        '200':
+          description: index
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Ludus Server v1.0.0+abc123a
+          headers: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /license:
+    get:
+      summary: Retrieve the ludus license
+      deprecated: false
+      description: |
+        Returns the ludus license
+      operationId: getLicense
+      tags:
+        - Host Management
+      parameters: []
+      responses:
+        '200':
+          description: License Object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LicenseDataObject'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /diagnostics:
+    get:
+      summary: Diagnostics
+      deprecated: false
+      description: >-
+        Get system information that can be helpful for debugging issues with
+        Ludus.
+      operationId: diagnostics
+      tags: []
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cpu:
+                    type: object
+                    properties:
+                      cores:
+                        type: integer
+                      model:
+                        type: string
+                  storage_pools:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        type:
+                          type: string
+                        size:
+                          type: integer
+                        free:
+                          type: integer
+                        disk_type:
+                          type: string
+              example:
+                cpu:
+                  cores: 16
+                  model: AMD Ryzen 7 8845HS w/ Radeon 780M Graphics
+                storage_pools:
+                  - name: ''
+                    type: dir
+                    size: 1966606663680
+                    free: 376010477568
+                    disk_type: unknown
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ansible/subscription-roles:
+    get:
+      summary: Retrieve available subscription roles
+      deprecated: false
+      description: An endpoint to return the avilable roles available to subscribers
+      tags: []
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    role:
+                      type: string
+                    file_count:
+                      type: integer
+                    last_modified:
+                      type: string
+                    last_modified_unix:
+                      type: string
+                    version:
+                      type: string
+                    description:
+                      type: string
+                    package_uuid:
+                      type: string
+                    entitlements:
+                      type: string
+                  required:
+                    - role
+                    - file_count
+                    - last_modified
+                    - last_modified_unix
+                    - version
+                    - description
+                    - package_uuid
+                    - entitlements
+              example:
+                - role: ludus_ad_groups
+                  file_count: 6
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: >-
+                    An Ansible Role that creates a group in AD and populates it
+                    with the specified users
+                  package_uuid: 128171ed-dbc0-4922-a8ca-6aac1d78e284
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_bulk_ad_content
+                  file_count: 16
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: >-
+                    An Ansible Role that creates OUs, Users, and Groups on a
+                    domain controller from CSV files
+                  package_uuid: 8e2db32c-3d86-43a6-bb18-b988c19d146a
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_chronicle_exporter
+                  file_count: 16
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: >-
+                    An Ansible Role that installs and configures Google SecOps
+                    (Chronicle) collection agent on Windows hosts
+                  package_uuid: b6c820d8-db92-401f-99f9-6675d71068f4
+                  entitlements: ENTERPRISE_ROLES
+                - role: ludus_ghosts_client
+                  file_count: 13
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: >-
+                    Install GHOSTS client on Windows or Linux machines and
+                    connect to the GHOSTS server
+                  package_uuid: 644188ee-88d6-47b2-bbe2-be08a6eb26bc
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_guacamole_client
+                  file_count: 13
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.5
+                  description: >-
+                    Ansible role to add windows/linux clients to Apache
+                    Guacamole
+                  package_uuid: fc4a5f0e-59e1-4c29-a7bc-37f831c66a41
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_guacamole_server
+                  file_count: 16
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.3
+                  description: Ansible role to deploy Apache Guacamole with Docker
+                  package_uuid: ff87c4ce-6491-4b5d-979f-543d78382e08
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_local_users_and_groups
+                  file_count: 8
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: >-
+                    An Ansible Role that adds local users and groups to a
+                    machine
+                  package_uuid: 4dc48455-93ff-4e87-8357-e537831fec6d
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_MDE
+                  file_count: 14
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.1
+                  description: >-
+                    An Ansible Role that installs Microsoft Defender for
+                    Endpoint on Windows hosts
+                  package_uuid: 0f26a5ca-548e-4a95-9a96-1d6c834036ae
+                  entitlements: ENTERPRISE_ROLES
+                - role: ludus_mythic
+                  file_count: 15
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: >-
+                    An Ansible Role that installs the Mythic C2 Framework on
+                    Debian 12 (Bookworm)
+                  package_uuid: a98a2892-0755-4366-85b0-5e4c39ddafeb
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_random_files
+                  file_count: 6
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: >-
+                    Drop random files on the desktop and downloads folder of a
+                    Windows machine
+                  package_uuid: 6c4acae0-632c-4846-aca5-707d9df9ce28
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_set_wallpaper
+                  file_count: 8
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: Set the wallpaper on Windows to a supplied image
+                  package_uuid: 1311b048-fa10-4f80-aa34-e8240816c340
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_smb_share
+                  file_count: 10
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.1
+                  description: >-
+                    An Ansible Role that sets up an SMB share on Windows 8 /
+                    Windows 2012 or newer and optionally mounts the share on
+                    clients
+                  package_uuid: f81b0649-23b5-4f7c-98a9-134df39c5e4e
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_sysmon
+                  file_count: 13
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.2
+                  description: Install Sysmon on Windows and Linux. Rulesets included.
+                  package_uuid: 941a398d-e848-4b0a-8aed-4827d640d8af
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_unconstrained_delegation
+                  file_count: 6
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: >-
+                    An Ansible Role that configures unconstrained delegation for
+                    a computer object in AD
+                  package_uuid: c0ea4fa1-f53a-4111-bc18-5389ca7516b3
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_velociraptor
+                  file_count: 27
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.2
+                  description: >-
+                    Install and configure the DFIR tool Velociraptor. Use
+                    velociraptor_client and velociraptor_server variables to
+                    install the client or server. Clients will automatically
+                    connect to the server.
+                  package_uuid: c2b36dc5-8fc5-4b5e-b397-b0197cb6fc93
+                  entitlements: ENTERPRISE_ROLES
+                - role: ludus_windows_configurator
+                  file_count: 9
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: Configure various windows settings
+                  package_uuid: 96607542-44c7-452c-ae9e-6579e7207a62
+                  entitlements: PRO_ROLES,ENTERPRISE_ROLES
+                - role: ludus_zeek_logging
+                  file_count: 14
+                  last_modified: Wed Dec 17 19:34:19 2025 -0500
+                  last_modified_unix: '1766018059'
+                  version: 1.0.0
+                  description: >-
+                    Install and configure Zeek on Debian 12 using official
+                    packages
+                  package_uuid: 3c7dd717-ba01-4dc1-b1d9-08fca383a4de
+                  entitlements: ENTERPRISE_ROLES
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    post:
+      summary: Install subscription roles
+      deprecated: false
+      description: >-
+        Install one or more subscription roles. Requires a valid Ludus license
+        key to be set on the server
+      tags: []
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roles:
+                  type: array
+                  items:
+                    type: string
+                    description: Role names
+                global:
+                  type: boolean
+                force:
+                  type: boolean
+              required:
+                - roles
+                - global
+                - force
+            example:
+              roles:
+                - ludus_velociraptor
+                - ludus_guacamole_client
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: array
+                    items:
+                      type: string
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        role:
+                          type: string
+                        reason:
+                          type: string
+                required:
+                  - success
+                  - errors
+              example:
+                success:
+                  - ludus_velociraptor
+                errors:
+                  - role: ludus_guacamole_client
+                    reason: Failed to get role from server
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ansible/role/vars:
+    post:
+      summary: Get role variables for one or more Ansible roles
+      deprecated: false
+      description: >
+        Returns the configurable variables (from defaults/main.yml) for one or
+        more Ansible roles.
+
+        These are the variables that can be set via role_vars in the range
+        configuration.
+
+        If a role is not found, an empty vars object is returned.
+      operationId: GetRoleVars
+      tags:
+        - Ansible Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roles:
+                  type: array
+                  items:
+                    type: string
+                  example:
+                    - geerlingguy.docker
+                    - lae.proxmox
+              required:
+                - roles
+      responses:
+        '200':
+          description: Role variables retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          example: geerlingguy.docker
+                        global:
+                          type: boolean
+                          example: false
+                        vars:
+                          type: object
+                          additionalProperties: true
+                          properties: {}
+              example:
+                roles:
+                  - name: geerlingguy.docker
+                    global: false
+                    vars:
+                      docker_package: docker-ce
+                      docker_package_state: present
+                  - name: nonexistent.role
+                    vars: {}
+          headers: {}
+        '400':
+          description: Bad request - at least one role name is required
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: At least one role name is required
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ansible:
+    get:
+      summary: Retrieve available Ansible roles and collections
+      deprecated: false
+      description: |
+        Returns available Ansible roles installed for this
+        user on the ludus host
+      operationId: getRolesAndCollections
+      tags:
+        - Ansible Management
+      parameters:
+        - name: userID
+          in: query
+          description: >-
+            pass an optional userID to get roles and collections for a specific
+            user
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: Available roles and collections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      example: geerlingguy.java
+                    version:
+                      type: string
+                      example: 2.3.2
+                    type:
+                      type: string
+                      example: role
+                    global:
+                      type: boolean
+                      example: false
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ansible/role/scope:
+    patch:
+      summary: Move or copy roles between global and local scopes
+      deprecated: false
+      description: >
+        Move or copy one or more Ansible roles between global (all users) and
+        local (current user) installation scopes.
+
+        Only administrators can use this endpoint.
+      operationId: MoveRoleScope
+      tags:
+        - Ansible Management
+      parameters:
+        - name: userID
+          in: query
+          description: The userID to impersonate for this request (Admins only)
+          required: false
+          example: JD
+          schema:
+            type: string
+            pattern: ^[A-Za-z0-9]{1,20}$
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                roles:
+                  type: array
+                  items:
+                    type: string
+                  example:
+                    - geerlingguy.java
+                    - geerlingguy.docker
+                global:
+                  type: boolean
+                  description: Target scope - true for global, false for local
+                  example: true
+                copy:
+                  type: boolean
+                  description: >-
+                    If true, copy the role (keep source). If false, move the
+                    role (remove source).
+                  example: false
+              required:
+                - roles
+                - global
+              type: object
+            examples: {}
+      responses:
+        '200':
+          description: roles processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: array
+                    items:
+                      type: string
+                    example:
+                      - geerlingguy.java
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        role:
+                          type: string
+                        error:
+                          type: string
+          headers: {}
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: At least one role name is required
+          headers: {}
+        '403':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Only administrators can move roles between scopes
+          headers: {}
+        '500':
+          description: Error moving/copying role
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Internal server error
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ansible/role:
+    post:
+      summary: Install or Remove an Ansible role
+      deprecated: false
+      description: |
+        Install or Remove an ansible role by name or URL.
+        Admins can pass a userID parameter to install a role for other users
+        Action can be either "install or "remove".
+      operationId: InstallRole
+      tags:
+        - Ansible Management
+      parameters:
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to install for.
+
+            Defaults to the user's range (admins can interact with other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                role:
+                  type: string
+                  example: geerlingguy.java
+                version:
+                  type: string
+                  example: 2.3.2
+                force:
+                  type: boolean
+                  example: true
+                action:
+                  type: string
+                  example: install
+                global:
+                  type: boolean
+                  example: false
+              type: object
+            examples: {}
+      responses:
+        '201':
+          description: role installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: 'Successfully installed: geerlingguy.java'
+          headers: {}
+        '403':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not authorized to perform this ansible action
+          headers: {}
+        '500':
+          description: Error installing role
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 'Unable to install the ansible role: geerlingguy.java'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ansible/role/fromtar:
+    put:
+      summary: Install an Ansible role from local directory
+      deprecated: false
+      description: |
+        Install an ansible role from a local directory.
+        Admins can pass a userID parameter to install a role for other users.
+      operationId: InstallRoleTar
+      tags:
+        - Ansible Management
+      parameters:
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to install for.
+
+            Defaults to the user's range (admins can interact with other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  example: ''
+                force:
+                  type: boolean
+                  example: false
+            examples: {}
+      responses:
+        '201':
+          description: role installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Successfully installed role
+          headers: {}
+        '400':
+          description: Error installing role - bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Invalid boolean value
+          headers: {}
+        '403':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not authorized to perform this ansible action
+          headers: {}
+        '500':
+          description: Error installing role - server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 'Unable to install the ansible role: <error>'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ansible/collection:
+    post:
+      summary: Install an Ansible collection
+      deprecated: false
+      description: >
+        Install an ansible collection by name or URL.
+
+        Admins can pass a userID parameter to install a collection for other
+        users.
+
+        Ansible collections can only be removed by rm-ing their directories.
+        This is not supported via Ludus due to potential edge cases in naming
+        depending on how the collection was installed.
+      operationId: InstallCollection
+      tags:
+        - Ansible Management
+      parameters:
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to install for.
+
+            Defaults to the user's range (admins can interact with other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                collection:
+                  type: string
+                  example: maxhoesel.smallstep
+                version:
+                  type: string
+                  example: 0.23.1
+                force:
+                  type: boolean
+                  example: true
+              type: object
+            examples: {}
+      responses:
+        '201':
+          description: collection installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: 'Successfully installed: maxhoesel.smallstep'
+          headers: {}
+        '409':
+          description: Collection already installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Collection already installed. Collections from
+                      https://docs.ansible.com/ansible/latest/collections/index.html
+                      are installed globally. If you want to reinstall it,
+                      consider using `--force`.
+          headers: {}
+        '500':
+          description: Error installing collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Unable to install the ansible collection:
+                      maxhoesel.smallstep
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /whoami:
+    get:
+      summary: whoami
+      deprecated: false
+      description: >-
+        Get the full JSON output of the user and range that will be used for the
+        request based on the query parameters
+      operationId: whoami
+      tags: []
+      parameters:
+        - name: userID
+          in: query
+          description: The userID to impersonate for this request (Admins only)
+          required: false
+          schema:
+            type: string
+        - name: rangeID
+          in: query
+          description: The rangeID to use for this request
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    type: object
+                    properties:
+                      avatar:
+                        type: string
+                      collectionId:
+                        type: string
+                      collectionName:
+                        type: string
+                      created:
+                        type: string
+                      defaultRangeID:
+                        type: string
+                      emailVisibility:
+                        type: boolean
+                      expand:
+                        type: object
+                        properties:
+                          ranges:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                allowedDomains:
+                                  type: 'null'
+                                allowedIPs:
+                                  type: 'null'
+                                collectionId:
+                                  type: string
+                                collectionName:
+                                  type: string
+                                created:
+                                  type: string
+                                description:
+                                  type: string
+                                id:
+                                  type: string
+                                lastDeployment:
+                                  type: string
+                                name:
+                                  type: string
+                                numberOfVMs:
+                                  type: integer
+                                purpose:
+                                  type: string
+                                rangeID:
+                                  type: string
+                                rangeNumber:
+                                  type: integer
+                                rangeState:
+                                  type: string
+                                testingEnabled:
+                                  type: boolean
+                                updated:
+                                  type: string
+                        required:
+                          - ranges
+                      groups:
+                        type: array
+                        items:
+                          type: string
+                      id:
+                        type: string
+                      isAdmin:
+                        type: boolean
+                      lastActive:
+                        type: string
+                      name:
+                        type: string
+                      proxmoxRealm:
+                        type: string
+                      proxmoxUsername:
+                        type: string
+                      quotaCPU:
+                        type: integer
+                      quotaRAM:
+                        type: integer
+                      quotaRanges:
+                        type: integer
+                      quotaStorage:
+                        type: integer
+                      quotaVMs:
+                        type: integer
+                      ranges:
+                        type: array
+                        items:
+                          type: string
+                      updated:
+                        type: string
+                      userID:
+                        type: string
+                      userNumber:
+                        type: integer
+                      verified:
+                        type: boolean
+                    required:
+                      - avatar
+                      - collectionId
+                      - collectionName
+                      - created
+                      - defaultRangeID
+                      - emailVisibility
+                      - expand
+                      - groups
+                      - id
+                      - isAdmin
+                      - lastActive
+                      - name
+                      - proxmoxRealm
+                      - proxmoxUsername
+                      - quotaCPU
+                      - quotaRAM
+                      - quotaRanges
+                      - quotaStorage
+                      - quotaVMs
+                      - ranges
+                      - updated
+                      - userID
+                      - userNumber
+                      - verified
+                  range:
+                    type: object
+                    properties:
+                      allowedDomains:
+                        type: 'null'
+                      allowedIPs:
+                        type: 'null'
+                      collectionId:
+                        type: string
+                      collectionName:
+                        type: string
+                      created:
+                        type: string
+                      description:
+                        type: string
+                      id:
+                        type: string
+                      lastDeployment:
+                        type: string
+                      name:
+                        type: string
+                      numberOfVMs:
+                        type: integer
+                      purpose:
+                        type: string
+                      rangeID:
+                        type: string
+                      rangeNumber:
+                        type: integer
+                      rangeState:
+                        type: string
+                      testingEnabled:
+                        type: boolean
+                      updated:
+                        type: string
+                    required:
+                      - allowedDomains
+                      - allowedIPs
+                      - collectionId
+                      - collectionName
+                      - created
+                      - description
+                      - id
+                      - lastDeployment
+                      - name
+                      - numberOfVMs
+                      - purpose
+                      - rangeID
+                      - rangeNumber
+                      - rangeState
+                      - testingEnabled
+                      - updated
+                required:
+                  - user
+                  - range
+              example: |-
+                {
+                  "user": {
+                    "avatar": "",
+                    "collectionId": "_pb_users_auth_",
+                    "collectionName": "users",
+                    "created": "2025-11-12 17:36:08.273Z",
+                    "defaultRangeID": "BSL",
+                    "emailVisibility": false,
+                    "expand": {
+                      "ranges": [
+                        {
+                          "allowedDomains": null,
+                          "allowedIPs": null,
+                          "collectionId": "pbc_596560939",
+                          "collectionName": "ranges",
+                          "created": "2025-11-12 17:36:04.910Z",
+                          "description": "Range migrated from Ludus 1.x",
+                          "id": "3lbupcsqp1ebiub",
+                          "lastDeployment": "2025-07-08 19:57:58.306Z",
+                          "name": "Default Range for BSL",
+                          "numberOfVMs": 14,
+                          "purpose": "General testing and development",
+                          "rangeID": "BSL",
+                          "rangeNumber": 2,
+                          "rangeState": "ERROR",
+                          "testingEnabled": false,
+                          "updated": "2025-11-13 05:41:14.742Z"
+                        },
+                      ]
+                    },
+                    "groups": [],
+                    "id": "325ja1fnzl9rmbd",
+                    "isAdmin": true,
+                    "lastActive": "2025-11-13 23:07:03.698Z",
+                    "name": "Bad Sector Labs",
+                    "proxmoxRealm": "pam",
+                    "proxmoxUsername": "bad-sector-labs",
+                    "quotaCPU": 0,
+                    "quotaRAM": 0,
+                    "quotaRanges": 0,
+                    "quotaStorage": 0,
+                    "quotaVMs": 0,
+                    "ranges": [
+                      "3lbupcsqp1ebiub",
+                    ],
+                    "updated": "2025-11-13 23:07:03.698Z",
+                    "userID": "BSL",
+                    "userNumber": 2,
+                    "verified": false
+                  },
+                  "range": {
+                    "allowedDomains": null,
+                    "allowedIPs": null,
+                    "collectionId": "pbc_596560939",
+                    "collectionName": "ranges",
+                    "created": "2025-11-12 17:36:04.910Z",
+                    "description": "Range migrated from Ludus 1.x",
+                    "id": "3lbupcsqp1ebiub",
+                    "lastDeployment": "2025-07-08 19:57:58.306Z",
+                    "name": "Default Range for BSL",
+                    "numberOfVMs": 14,
+                    "purpose": "General testing and development",
+                    "rangeID": "BSL",
+                    "rangeNumber": 2,
+                    "rangeState": "ERROR",
+                    "testingEnabled": false,
+                    "updated": "2025-11-13 05:41:14.742Z"
+                  }
+                }
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/default-range:
+    get:
+      summary: Get Default Range ID
+      deprecated: false
+      description: >-
+        Get the user's default range ID. This range will be used for any request
+        by the user that does not specify a `rangeID` query parameter
+      operationId: getDefaultRangeID
+      tags: []
+      parameters:
+        - name: userID
+          in: query
+          description: The userID to impersonate for this request (Admins only)
+          required: false
+          schema:
+            type: string
+            pattern: ^[A-Za-z0-9]{1,20}$
+            example: JD
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  defaultRangeID:
+                    type: string
+                    description: The default range ID for the requesting user
+                required:
+                  - defaultRangeID
+          headers: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                title: ''
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    post:
+      summary: Set Default Range ID
+      deprecated: false
+      description: >-
+        Set the user's default range ID. This range will be used for any request
+        by the user that does not specify a `rangeID` query parameter.
+      operationId: setDefaultRangeID
+      tags: []
+      parameters:
+        - name: userID
+          in: query
+          description: The userID to impersonate for this request (Admins only)
+          required: false
+          schema:
+            type: string
+            pattern: ^[A-Za-z0-9]{1,20}$
+            example: JD
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                defaultRangeID:
+                  $ref: '#/components/schemas/rangeID'
+              required:
+                - defaultRangeID
+            examples: {}
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  defaultRangeID:
+                    type: string
+                required:
+                  - defaultRangeID
+          headers: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                title: ''
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+          headers: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                title: ''
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+          headers: {}
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                title: ''
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/memberships:
+    get:
+      summary: Get user group memberships
+      deprecated: false
+      description: >
+        Returns the groups a user belongs to, along with their role in each
+        group. By default, returns memberships for the authenticated user.
+        Admins may impersonate another user by providing the `userID` query
+        parameter.
+      operationId: getUserMemberships
+      tags:
+        - User Management
+      parameters:
+        - name: userID
+          in: query
+          description: The userID to impersonate for this request (Admins only)
+          required: false
+          schema:
+            type: string
+            pattern: ^[A-Za-z0-9]{1,20}$
+            example: JD
+      responses:
+        '200':
+          description: List of group memberships
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties: {}
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+        '403':
+          description: Forbidden - not an admin trying to query another user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      You are not an admin and cannot view other users'
+                      memberships
+          headers: {}
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: User ABC not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user:
+    get:
+      summary: List user details
+      deprecated: false
+      description: >
+        Get a single user object (default: the caller's). Specify a specific
+        user to get with the userID query parameter. To get all users, the
+        caller must be an admin and must use the /user/all endpoint.
+      operationId: listUser
+      tags:
+        - User Management
+      parameters:
+        - name: userID
+          in: query
+          description: pass an optional userID to reset a specific user
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: search results matching criteria
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserObject'
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    post:
+      summary: Add a user to the system
+      deprecated: false
+      description: >
+        Adds a user to the system. This action is only available to admins.
+
+        Note: this response will contain the plaintext API key for the user.
+
+        It will not be available again except by resetting it using the
+        /user/apikey endpoint.
+      operationId: addUser
+      tags:
+        - User Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - userID
+                - isAdmin
+                - email
+              properties:
+                name:
+                  type: string
+                  example: John Doe
+                userID:
+                  $ref: '#/components/schemas/userID'
+                isAdmin:
+                  type: boolean
+                  example: true
+                password:
+                  type: string
+                  example: super-secret-password
+                email:
+                  type: string
+                  example: john.doe@example.com
+            examples: {}
+      responses:
+        '201':
+          description: user created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/UserObject'
+                  - type: object
+                    properties:
+                      apiKey:
+                        type: string
+                        example: JD.Vf{M@GC:w}YQ=1zv@gLLnDH:j3nI]l7@:ct:qPy9
+                  - type: object
+                    properties:
+                      proxmoxUsername:
+                        type: string
+                        example: john-doe
+          headers: {}
+        '400':
+          description: Error with request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: User with that name already exists
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/{userID}:
+    delete:
+      summary: Remove a user from the system
+      deprecated: false
+      description: |
+        Removes a user from the system. This action is only available to admins.
+      operationId: deleteUser
+      tags:
+        - User Management
+      parameters:
+        - name: userID
+          in: path
+          description: The id of the users to delete
+          required: true
+          example: ''
+          schema:
+            $ref: '#/components/schemas/userID'
+        - name: deleteDefaultRange
+          in: query
+          description: Flag to delete user's default range
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: user deleted
+          headers: {}
+        '400':
+          description: userID not provided
+          headers: {}
+        '404':
+          description: user not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/credentials:
+    get:
+      summary: Get proxmox creds for a user
+      deprecated: false
+      description: |
+        Get proxmox credentials for a user
+      operationId: getCredentials
+      tags:
+        - User Management
+      parameters:
+        - name: userID
+          in: query
+          description: pass an optional userID to reset a specific user
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: proxmox credentials for the user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    $ref: '#/components/schemas/UserCredentialObject'
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security: []
+    post:
+      summary: Set the Ludus and Proxmox creds for the user
+      deprecated: false
+      description: >
+        Set the Ludus and proxmox password for a user. userID is optional and
+        only can be set
+
+        to other user's userIDs by admins.
+      operationId: postCredentials
+      tags:
+        - User Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                userID:
+                  $ref: '#/components/schemas/userID'
+                proxmoxPassword:
+                  type: string
+                  example: 5cy5@plhik4g&Yk12sG
+              type: object
+      responses:
+        '200':
+          description: proxmox credentials for the user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Your proxmox password has been successfully updated.
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/apikey:
+    get:
+      summary: Reset and retrieve the Ludus API key for a user
+      deprecated: false
+      description: >
+        Reset and return the API key for the user specified in the query. By
+        default this will reset the caller's API key. To reset a specific user's
+        API key, specify their userID using the query parameter userID.
+      operationId: getAPIKey
+      tags:
+        - User Management
+      parameters:
+        - name: userID
+          in: query
+          description: pass an optional userID to reset a specific user
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ludus API key for the user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    properties:
+                      apiKey:
+                        type: string
+                        pattern: ^[a-zA-Z0-9!@#%^&*()_+\-=\[\]{}:\\|<>\/?]{40}$
+                        readOnly: true
+                        example: G0rO+G+8Zlu%CAEDyYC2ZdW3pBWW+alAJ2_tli1h
+                      userID:
+                        type: string
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/all:
+    get:
+      summary: List all users
+      deprecated: false
+      description: |
+        Get all users in Ludus. Available only to admins
+      operationId: listAllUsers
+      tags:
+        - User Management
+      parameters: []
+      responses:
+        '200':
+          description: search results matching criteria
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserObject'
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/wireguard:
+    get:
+      summary: Retrieve a WireGuard configuration file for a user
+      deprecated: false
+      description: |
+        Returns a WireGuard configuration file with appropriate
+        values for the user's range
+
+        "WireGuard" is the registered trademark of Jason A. Donenfeld.
+      operationId: getWireguardConfig
+      tags:
+        - User Management
+      parameters:
+        - name: userID
+          in: query
+          description: pass an optional userID to reset a specific user
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: a user's WireGuard configuration file
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    properties:
+                      wireGuardConfig:
+                        type: string
+                        example: >
+                          [Interface] PrivateKey =
+                          UJrxTNT4gkGQoJiltyjkC+Wi6m/VnY7YetjOYTjAWmc= Address =
+                          198.51.100.3/32
+
+                          [Peer] PublicKey =
+                          CHxW+36fC1g/cnBoSGGI0Shh/yMgbE9YgjC8p9zZnXw=
+                          AllowedIPs = 10.3.0.0/16, 198.51.100.1/32 Endpoint =
+                          198.18.0.25:51820 PersistentKeepalive = 25
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /vm/{vmID}:
+    delete:
+      summary: Destroy VM
+      deprecated: false
+      description: Halt and destroy a VM
+      operationId: destroyVM
+      tags: []
+      parameters:
+        - name: vmID
+          in: path
+          description: The Proxmox VMID to destroy
+          required: true
+          example: '123'
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                required:
+                  - result
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range:
+    get:
+      summary: List range VMs, power state, and testing state
+      deprecated: false
+      description: |
+        Lists a range's VMs along with their power state and the testing state
+        of the range.
+
+        Use rangeID to specify which range to query. If rangeID is not provided,
+        the user's default range will be used. Use userID to query a different
+        user's range (admins only).
+      operationId: listRange
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to query. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: |
+            The userID to query ranges for.
+            Defaults to the current user (admins can query other users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: search results matching criteria
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RangeObject'
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Delete a range from the database and proxmox host
+      deprecated: false
+      description: >
+        Deletes a range from the database and the proxmox host. The range
+
+        must have no VMs unless the force parameter is set to true.
+
+
+        Use rangeID to specify which range to delete. If rangeID is not
+        provided,
+
+        the user's default range will be used. Use userID to delete a different
+
+        user's range (admins only).
+      operationId: deleteRange
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to query. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: |
+            The userID whose range to delete.
+            Defaults to the current user (admins can delete other users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+        - name: force
+          in: query
+          description: >
+            Force deletion of the range even if it has VMs. This will also
+            destroy all VMs.
+          required: false
+          schema:
+            type: boolean
+            example: false
+      responses:
+        '201':
+          description: Range X deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Range 123 deleted
+          headers: {}
+        '409':
+          description: Range has VMs and force not specified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Range has VMs. Use force=true to delete anyway
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/abort:
+    post:
+      summary: Stop the range deployment ansible process
+      deprecated: false
+      description: |
+        Stops the range deployment by finding the pid of the ansible
+        process for the user and killing it.
+
+        Use rangeID to specify which range to abort. If rangeID is not provided,
+        the user's default range will be used. Use userID to abort a different
+        user's range deployment (admins only).
+      operationId: abortRange
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to abort deployment for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID whose range deployment to abort.
+
+            Defaults to the current user (admins can abort other users' range
+            deployments)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '201':
+          description: range deploy aborted
+          headers: {}
+        '400':
+          description: invalid input, object invalid
+          headers: {}
+        '500':
+          description: error with abort
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/{rangeID}/vms:
+    delete:
+      summary: Stop and delete all range VMs
+      deprecated: false
+      description: |
+        Stops and deletes all the range VMs. Used to start fresh. This endpoint
+        keeps the range object in the database.
+
+        Use rangeID in the path to specify which range to delete VMs from.
+        Use userID to delete VMs from a different user's range (admins only).
+      operationId: deleteRangeVMs
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: path
+          description: The range number to delete VMs from
+          required: false
+          example: ''
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID whose range VMs to delete.
+
+            Defaults to the current user (admins can delete other users' range
+            VMs)
+          required: false
+          example: ''
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Range VMs destroy in progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Range VMs destroy in progress
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/tags:
+    get:
+      summary: List all tags available to use with deploy
+      deprecated: false
+      description: |
+        List all the ansible tags a user can specify with the deploy command
+      operationId: listRangeTags
+      tags:
+        - Range Management
+      parameters: []
+      responses:
+        '200':
+          description: available tags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tags:
+                    type: array
+                    items:
+                      type: string
+                    description: List of available ansible tags
+                required:
+                  - tags
+                example:
+                  tags:
+                    - additional-tools
+                    - custom-choco
+                    - custom-tasks
+                    - dcs
+                    - debug
+                    - destroy-range
+                    - domain-join
+                    - etchosts
+                    - host-payload
+                    - install-office
+                    - install-visual-studio
+                    - nexus
+                    - opstations
+                    - redirectors
+                    - services
+                    - teamservers
+                    - test-range
+                    - user-management
+                    - win10
+                    - winrunner
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/all:
+    get:
+      summary: List summary information for all ranges
+      deprecated: false
+      description: >
+        Lists range VMs along with their power state and the testing state
+
+        of the range. For non-admin users, returns only ranges they have access
+        to.
+
+        For admin users, returns all ranges with updated VM count information
+        saved to the database.
+      operationId: listAllRange
+      tags:
+        - Range Management
+      parameters: []
+      responses:
+        '200':
+          description: search results matching criteria
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RangeObject'
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/config:
+    get:
+      summary: Retrieve range configuration
+      deprecated: false
+      description: >
+        Returns the current configuration for the range.
+
+
+        Use rangeID to specify which range to get config for. If rangeID is not
+        provided,
+
+        the user's default range will be used. Use userID to get config for a
+        different
+
+        user's range (admins only).
+      operationId: getConfig
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to get config for. If not provided, uses the user's
+            default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to get config for.
+
+            Defaults to the current user (admins can get config for other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: search results matching criteria
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    example: |
+                      ludus:
+                        - vm_name: "JD-ad-dc-win2019-server-x64"
+                          hostname: "JD-DC01-2019"
+                          template: win2019-server-x64-template
+                          ip_last_octet: 11
+                          ram_gb: 2
+                          cpus: 2
+                          full_clone: false
+                          windows:
+                        - vm_name: "JD-ad-win10-21h1-enterprise-x64-1"
+                          hostname: "JE-WIN10-21H1-1"
+                          template: win10-21h1-x64-enterprise-template
+                          ip_last_octet: 21
+                          ram_gb: 2
+                          cpus: 2
+                          full_clone: false
+                          windows:
+                            install_additional_tools: true
+                            office_version: 2016
+                            office_arch: 64bit
+                        - vm_name: "JD-ad-win10-21h1-enterprise-x64-2"
+                          hostname: "JD-WIN10-21H1-2"
+                          template: win10-21h1-x64-enterprise-template
+                          ip_last_octet: 22
+                          ram_gb: 2
+                          cpus: 2
+                          full_clone: false
+                          windows:
+                            install_additional_tools: true
+                            office_version: "2019"
+                            office_arch: 64bit
+                        - vm_name: "JD-ad-win10-21h1-enterprise-x64-3"
+                          hostname: "JD-WIN10-21H1-3"
+                          template: win10-21h1-x64-enterprise-template
+                          ip_last_octet: 23
+                          ram_gb: 2
+                          ram_max_gb: 4
+                          ram_balloon: true
+                          cpus: 2
+                          full_clone: false
+                          windows:
+                            install_additional_tools: true
+                            office_version: "2019"
+                            office_arch: 64bit
+                            visual_studio_version: "2019"
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Update the range configuration
+      deprecated: false
+      description: >
+        Updates the range configuration with the provided yaml file.
+
+
+        Use rangeID to specify which range to update config for. If rangeID is
+        not provided,
+
+        the user's default range will be used. Use userID to update config for a
+        different
+
+        user's range (admins only).
+      operationId: putConfig
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to update config for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to update config for.
+
+            Defaults to the current user (admins can update config for other
+            users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  example: ''
+                force:
+                  type: boolean
+                  example: false
+            examples: {}
+      responses:
+        '200':
+          description: successfully updated configuration
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/config/example:
+    get:
+      summary: Retrieve an example range configuration
+      deprecated: false
+      description: |
+        Returns an example configuration for the range with the user's
+        userID in vm_name and hostname fields
+      operationId: getConfigExample
+      tags:
+        - Range Management
+      parameters: []
+      responses:
+        '200':
+          description: an example range configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    example: |
+                      network:
+                        inter_vlan_default: REJECT
+                        rules:
+                          - name: Only allow windows to kali on 443
+                            vlan_src: 10
+                            vlan_dst: 99
+                            protocol: tcp
+                            ports: 443
+                            action: ACCEPT
+                          - name: Allow kali to all windows
+                            vlan_src: 99
+                            vlan_dst: 10
+                            protocol: all
+                            ports: all
+                            action: ACCEPT
+
+                      ludus:
+                        - vm_name: "{{ range_id }}-ad-dc-win2019-server-x64"
+                          hostname: "{{ range_id }}-DC01-2019"
+                          template: win2019-server-x64-template
+                          vlan: 10
+                          ip_last_octet: 11
+                          ram_gb: 8
+                          cpus: 4
+                          windows:
+                            sysprep: false
+                          domain:
+                            fqdn: ludus.domain
+                            role: primary-dc
+                      ...
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/deploy:
+    post:
+      summary: Deploy the range
+      deprecated: false
+      description: >
+        Deploys a range with ansible. This can be called multiple times
+
+        without issue without changing the range configuration without causing
+
+        issues. The tags value is optional, by default "all" is run. The force
+
+        value is optional, by default it is false.
+
+
+        Use rangeID to specify which range to deploy. If rangeID is not
+        provided,
+
+        the user's default range will be used. Use userID to deploy a different
+
+        user's range (admins only).
+      operationId: deployRange
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to deploy. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: |
+            The userID to deploy range for.
+            Defaults to the current user (admins can deploy other users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tags:
+                  type: string
+                  description: 'the ansible tags to run for this deploy (default: all)'
+                  example: all
+                force:
+                  type: boolean
+                  description: 'force the deployment if testing is enabled (default: false)'
+                  example: false
+                only_roles:
+                  type: array
+                  items:
+                    type: string
+                    example: badsectorlabs.ludus_bloodhound_ce
+                  description: >-
+                    limit the user defined roles to be run to this comma
+                    separated list of roles
+                limit:
+                  type: string
+                  description: >-
+                    limit the deploy to VM that match the specified pattern
+                    (must include localhost or no plays will run)
+                  example: JD-kali1
+            examples: {}
+      responses:
+        '201':
+          description: range deployed
+          headers: {}
+        '400':
+          description: invalid input, object invalid
+          headers: {}
+        '500':
+          description: error with range deployment
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/logs:
+    get:
+      summary: Retrieve the latest range logs
+      deprecated: false
+      description: >
+        Returns the latest logs for the range.
+
+
+        Use rangeID to specify which range to get logs for. If rangeID is not
+        provided,
+
+        the user's default range will be used. Use userID to get logs for a
+        different
+
+        user's range (admins only).
+      operationId: getLogs
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to get logs for. If not provided, uses the user's
+            default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to get logs for.
+
+            Defaults to the current user (admins can get logs for other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+        - name: tail
+          in: query
+          description: ''
+          required: false
+          example: 100
+          schema:
+            type: integer
+            example: 100
+        - name: resumeline
+          in: query
+          description: ''
+          required: false
+          example: 274
+          schema:
+            type: integer
+            example: 274
+      responses:
+        '200':
+          description: >-
+            ansible logs for the user and a cursor value of the last line
+            returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: >
+                      2022-12-06 16:11:11,810 p=2034571 u=john-doe n=ansible |
+                      PLAY [Acquire a session ticket for proxmox API] *****
+
+                      2022-12-06 16:11:11,818 p=2034571 u=john-doe n=ansible |
+                      TASK [Gathering Facts] ******************************
+
+                      2022-12-06 16:11:17,284 p=2034571 u=john-doe n=ansible |
+                      ok: [localhost] *************************************
+
+                      2022-12-06 16:11:17,517 p=2034571 u=john-doe n=ansible |
+                      TASK [Acquire session ticket] ***********************
+
+                      2022-12-06 16:11:18,028 p=2034571 u=john-doe n=ansible |
+                      changed: [localhost] ********************************
+
+                      2022-12-06 16:11:18,282 p=2034571 u=john-doe n=ansible |
+                      PLAY [Valdation] ************************************
+
+                      2022-12-06 16:11:18,628 p=2034571 u=john-doe n=ansible |
+                      PLAY [Set up a router VM] ***************************
+
+                      2022-12-06 16:11:19,005 p=2034571 u=john-doe n=ansible |
+                      PLAY [Configure router] *****************************
+
+                      2022-12-06 16:11:19,017 p=2034571 u=john-doe n=ansible |
+                      PLAY [Deploy test range DC VMs] *********************
+
+                      ...
+                  cursor:
+                    type: integer
+                    example: 274
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/etchosts:
+    get:
+      summary: Retrieve /etc/hosts file for the range
+      deprecated: false
+      description: >
+        Returns an /etc/hosts file with appropriate values for the range.
+
+
+        Use rangeID to specify which range to get hosts file for. If rangeID is
+        not provided,
+
+        the user's default range will be used. Use userID to get hosts file for
+        a different
+
+        user's range (admins only).
+      operationId: getEtcHosts
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to get hosts file for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to get hosts file for.
+
+            Defaults to the current user (admins can get hosts file for other
+            users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: a range /etc/hosts file
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: |
+                      # Ludus /etc/hosts
+                      10.3.10.13     JD-ad-dc-win2012r2-server-x64
+                      10.3.10.13     ad-dc-win2012r2-server-x64
+                      10.3.10.12     JD-ad-dc-win2016-server-x64
+                      10.3.10.12     ad-dc-win2016-server-x64
+                      10.3.10.11     JD-ad-dc-win2019-server-x64
+                      10.3.10.11     ad-dc-win2019-server-x64
+                      10.3.10.21     JD-ad-win10-21h1-enterprise-x64-1
+                      10.3.10.21     ad-win10-21h1-enterprise-x64-1
+                      10.3.10.22     JD-ad-win10-21h1-enterprise-x64-2
+                      10.3.10.22     ad-win10-21h1-enterprise-x64-2
+                      10.3.10.23     JD-ad-win10-21h1-enterprise-x64-3
+                      10.3.10.23     ad-win10-21h1-enterprise-x64-3
+                      10.3.50.10     JD-gitlab
+                      10.3.50.10     gitlab
+                      10.3.40.11     JD-kali1
+                      10.3.40.11     kali1
+                      10.3.10.157    JD-macOS-test
+                      10.3.10.157    macOS-test
+                      10.3.50.11     JD-mattermost
+                      10.3.50.11     meet.JE-mattermost
+                      10.3.50.11     mattermost
+                      10.3.50.13     JD-nextcloud
+                      10.3.50.13     nextcloud
+                      10.3.50.12     JD-redelk
+                      10.3.50.12     redelk
+                      10.3.30.11     JD-teamserver1
+                      10.3.30.11     teamserver1
+                      10.3.30.12     JD-teamserver2
+                      10.3.30.12     teamserver2
+                      10.3.30.13     JD-teamserver3
+                      10.3.30.13     teamserver3
+                      10.3.50.14     JD-winrunner
+                      10.3.50.14     winrunner
+                      10.3.50.254    ca
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/sshconfig:
+    get:
+      summary: Retrieve a ssh config
+      deprecated: false
+      description: >
+        Returns a ssh configuration file with appropriate values for the user's
+        range
+      operationId: getSSHConfig
+      tags:
+        - Range Management
+      parameters: []
+      responses:
+        '200':
+          description: a range SSH configuration file
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: |
+                      Host teamserver1
+                        HostName 10.3.30.11
+                        User debian
+                        Port 22
+                        IdentityFile ~/.ssh/ludus.key
+
+                      Host teamserver2
+                        HostName 10.3.30.12
+                        User debian
+                        Port 22
+                        IdentityFile ~/.ssh/ludus.key
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/rdpconfigs:
+    get:
+      summary: Retrieve a zip file of RDP configs
+      deprecated: false
+      description: >
+        Returns a zip file with RDP configuration files for the Windows
+
+        VMs in the range.
+
+
+        Use rangeID to specify which range to get RDP configs for. If rangeID is
+        not provided,
+
+        the user's default range will be used. Use userID to get RDP configs for
+        a different
+
+        user's range (admins only).
+      operationId: getRDP
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to get RDP configs for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to get RDP configs for.
+
+            Defaults to the current user (admins can get RDP configs for other
+            users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: a zip file
+          content:
+            application/zip:
+              schema:
+                type: object
+                properties: {}
+              example: rdp.zip
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/ansibleinventory:
+    get:
+      summary: Retrieve an ansible inventory
+      deprecated: false
+      description: >
+        Returns an ansible inventory file with appropriate values for the range.
+
+        Use rangeID to specify which range to get inventory for. If rangeID is
+        not provided, the user's default range will be used. Use userID to get
+        inventory for a different user's range (admins only).
+      operationId: getAnsibleInventory
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to get inventory for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to get inventory for.
+
+            Defaults to the current user (admins can get inventory for other
+            users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: an ansible inventory file
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: |
+                      all:
+                        children:
+                          ADMIN:
+                            hosts:
+                          JD:
+                            hosts:
+                              JD-ad-dc-win2019-server-x64:
+                                ansible_connection: winrm
+                                ansible_host: 10.2.10.11
+                                ansible_password: password
+                                ansible_user: localuser
+                                ansible_winrm_scheme: https
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ranges/create:
+    post:
+      summary: Create a new range
+      deprecated: false
+      description: Creates a new range.
+      operationId: createRange
+      tags:
+        - Range Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Red Team Range
+                rangeID:
+                  type: string
+                  pattern: ^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+){0,2}$
+                  example: RED_TEAM_RANGE
+                description:
+                  type: string
+                  example: Range for red team
+                purpose:
+                  type: string
+                  example: Testing
+                userID:
+                  type: array
+                  items:
+                    type: string
+                rangeNumber:
+                  type: integer
+                  example: 3
+              required:
+                - name
+                - rangeID
+            examples: {}
+      responses:
+        '201':
+          description: Range created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    $ref: '#/components/schemas/RangeObject'
+          headers: {}
+        '400':
+          description: Invalid input
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ranges/assign/{userID}/{rangeID}:
+    post:
+      summary: Assign a range to a user (admin only)
+      deprecated: false
+      description: Assigns a range to a user. Admin only.
+      operationId: assignRangeToUser
+      tags:
+        - Range Management
+      parameters:
+        - name: userID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+        - name: rangeID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Range assigned to user
+          headers: {}
+        '404':
+          description: Range or user not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ranges/revoke/{userID}/{rangeID}:
+    delete:
+      summary: Revoke range access from a user (admin only)
+      deprecated: false
+      description: Revokes a user's access to a range. Admin only.
+      operationId: revokeRangeFromUser
+      tags:
+        - Range Management
+      parameters:
+        - name: userID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+        - name: rangeID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+        - name: force
+          in: query
+          description: Force a revocation even if the range router is not accessible
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Range revoked from user
+          headers: {}
+        '404':
+          description: Range or user not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ranges/{rangeID}/users:
+    get:
+      summary: List users with access to a range (admin only)
+      deprecated: false
+      description: Lists all users with access to a range. Admin only.
+      operationId: listRangeUsers
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of users assigned to the range
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    userID:
+                      type: string
+                    name:
+                      type: string
+                    accessType:
+                      type: enum
+                      enum:
+                        - Direct
+                        - Group Member
+                        - Group Manager
+                    userNumber:
+                      type: integer
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ranges/accessible:
+    get:
+      summary: List ranges accessible to the user
+      deprecated: false
+      description: Lists all ranges accessible to the current user.
+      operationId: listUserAccessibleRanges
+      tags:
+        - Range Management
+      parameters: []
+      responses:
+        '200':
+          description: List of accessible ranges
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    rangeNumber:
+                      type: integer
+                    rangeID:
+                      type: string
+                    accessType:
+                      type: string
+                      enum:
+                        - Direct
+                        - Group
+                  required:
+                    - rangeNumber
+                    - rangeID
+                    - accessType
+              examples:
+                '1':
+                  summary: Success
+                  value:
+                    rangeNumber: 1
+                    rangeID: GTU
+                    accessType: direct
+                '2':
+                  summary: Success
+                  value:
+                    rangeNumber: 27
+                    rangeID: CIA
+                    accessType: Group
+          headers: {}
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/poweron:
+    put:
+      summary: Power on range VMs
+      deprecated: false
+      description: >
+        Power on one, multiple, or all range VMs.
+
+        passing the machine parameter "all" will operate on all VMs in the
+        user's range.
+
+        Admins can pass a userID parameter to control other user's ranges.
+      operationId: powerOnRange
+      tags:
+        - Power State Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to power on. If not provided, uses the user's
+            default range.
+
+            Not required if specifying one or multiple machines, only used if
+            "all" is specified.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to query.
+
+            Defaults to the user's range (admins can interact with other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                machines:
+                  type: array
+                  items:
+                    type: string
+                    example: JD-ad-dc-win2019-server-x64
+              type: object
+            examples: {}
+      responses:
+        '201':
+          description: range VM(s) powered on
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: range VM power on in progress
+          headers: {}
+        '500':
+          description: error with range VM power on
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/poweroff:
+    put:
+      summary: Power off range VMs
+      deprecated: false
+      description: >
+        Power off one, multiple, or all range VMs.
+
+        Passing the machine parameter "all" will operate on all VMs in the
+        user's range.
+
+        Admins can pass a userID parameter to control other user's ranges.
+      operationId: powerOffRange
+      tags:
+        - Power State Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to power off. If not provided, uses the user's
+            default range.
+
+            Not required if specifying one or multiple machines, only used if
+            "all" is specified.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to query.
+
+            Defaults to the user's range (admins can interact with other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                machines:
+                  type: array
+                  items:
+                    type: string
+                    example: JD-ad-dc-win2019-server-x64
+              type: object
+            examples: {}
+      responses:
+        '201':
+          description: range VM(s) powered off
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: range VM power off in progress
+          headers: {}
+        '500':
+          description: error with range VM power off
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /testing/start:
+    put:
+      summary: Snapshot and enter testing state
+      deprecated: false
+      description: |
+        Uses ansible to snapshot all test_range VMs and block all outbound
+        traffic and DNS requests from the test range subnet.
+        Admins can pass a userID parameter to control other user's ranges.
+      operationId: startTesting
+      tags:
+        - Testing State Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to start testing for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to get the start testing for.
+
+            Defaults to the user's range (admins can start testing on other
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '201':
+          description: testing state entered
+          headers: {}
+        '400':
+          description: invalid input, object invalid
+          headers: {}
+        '500':
+          description: error with testing start
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /testing/stop:
+    put:
+      summary: Revert and exit testing state
+      deprecated: false
+      description: |
+        Uses ansible to revet all test_range VMs and allow all outbound
+        traffic and DNS requests from the test range subnet.
+        Admins can pass a userID parameter to control other user's ranges.
+        The force parameter will ignore errors when reverting snapshots.
+        Setting force to true may leak telemetry or other data about your
+        payloads.
+      operationId: stopTesting
+      tags:
+        - Testing State Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to stop testing for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to get the stop testing for.
+
+            Defaults to the user's range (admins can stop testing on other
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                force:
+                  type: boolean
+                  example: false
+              type: object
+            examples: {}
+      responses:
+        '201':
+          description: testing state exited
+          headers: {}
+        '400':
+          description: invalid input, object invalid
+          headers: {}
+        '500':
+          description: error with testing stop
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /testing/allow:
+    post:
+      summary: Allow a domain
+      deprecated: false
+      description: |
+        Looks up the domain and its HTTPS certificate CRL domains adding all the
+        IPs to iptables allow as well as to a DNS allow list.
+      operationId: allow
+      tags:
+        - Testing State Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to apply allow rules for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to act on behalf of. Only admins can provide
+            userIDs that are not their own.
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllowPayload'
+            examples: {}
+      responses:
+        '200':
+          description: domains or ips allowed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  allowed:
+                    type: array
+                    items:
+                      type: string
+                      example: 203.0.113.4
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        item:
+                          type: string
+                          example: example.com
+                        reason:
+                          type: string
+                          example: already allowed
+          headers: {}
+        '400':
+          description: invalid input, object invalid
+          headers: {}
+        '500':
+          description: error with allowing domains or ips
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /testing/deny:
+    post:
+      summary: Deny a domain
+      deprecated: false
+      description: |
+        Removes iptables and DNS rules that allow a domain/ip
+        through the firewall. Note that this does NOT deny CRL
+        domains as they may be shared my multiple domains.
+      operationId: deny
+      tags:
+        - Testing State Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to apply deny rules for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to act on behalf of. Only admins can provide
+            userIDs that are not their own.
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllowPayload'
+            examples: {}
+      responses:
+        '200':
+          description: domains or ips denied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  denied:
+                    type: array
+                    items:
+                      type: string
+                      example: 203.0.113.4
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        item:
+                          type: string
+                          example: example.com
+                        reason:
+                          type: string
+                          example: was not allowed
+          headers: {}
+        '400':
+          description: invalid input, object invalid
+          headers: {}
+        '500':
+          description: error with allowing domains or ips
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /testing/update:
+    post:
+      summary: Update a VM or group
+      deprecated: false
+      description: |
+        Runs the ansible update routine on a VM or group of VMs specified
+        by the user in the request body. (Windows only)
+      operationId: update
+      tags:
+        - Testing State Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to update. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to act on behalf of. Only admins can provide
+            userIDs that are not their own.
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: JD-win10-21h2-enterprise-x64
+            examples: {}
+      responses:
+        '200':
+          description: VM update process started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: update process started
+          headers: {}
+        '500':
+          description: error starting update process
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /antisandbox/enable:
+    post:
+      summary: Enable anti-sandbox for a VM or multiple VMs (enterprise)
+      deprecated: false
+      description: |
+        Modifieds the given VM names or VM IDs to not look like virtualized
+        sandbox hosts. (Enterrpise and Windows only)
+      operationId: antiSandboxEnable
+      tags:
+        - Anti-Sandbox Management
+      parameters:
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to act on behalf of. Only admins can provide
+            userIDs that are not their own.
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vmIDs:
+                  type: string
+                  description: VM IDs or names to enable anti-sandbox
+                  example: 104,105
+                registeredOwner:
+                  type: string
+                  description: >-
+                    The string to use as the "RegisteredOwner" at
+                    HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion
+                  example: Acme Corp IT
+                registeredOrganization:
+                  type: string
+                  description: >-
+                    The string to use as the "RegisteredOrganization" at
+                    HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion
+                  example: Acme Corp
+                vendor:
+                  type: string
+                  enum:
+                    - Dell
+                    - HP
+                    - Lenovo
+                    - Google
+                    - IBM
+                  description: The computer vendor to use for all hardware values
+                dropFiles:
+                  type: boolean
+                  description: >-
+                    If true, will drop a random assortment of files on the
+                    autologon_user's desktop and in the autologon_user's
+                    download folder (default false)
+                  example: true
+                processorName:
+                  type: string
+                  description: The ProcessorNameString value to use for the VMs
+                  example: Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
+                processorVendor:
+                  type: string
+                  description: >-
+                    The VendorIdentifier value to use for the VMs (e.g.
+                    GenuineIntel or AuthenticAMD)")
+                  example: GenuineIntel
+                processorSpeed:
+                  type: string
+                  description: The ~Mhz value to use for the VMs in MHz
+                  example: '2600'
+                processorIdentifier:
+                  type: string
+                  description: The Identifier value to use for the VMs
+                  example: Intel64 Family 6 Model 142 Stepping 10
+                systemBiosVersion:
+                  type: string
+                  description: The SystemBiosVersion value to use for the VMs
+                  example: 1.18.0
+                persist:
+                  type: boolean
+                  description: >-
+                    Persist SystemBiosVersion and CPU the changes to the VMs via
+                    a non-obvious scheduled task
+                  example: true
+            examples: {}
+      responses:
+        '200':
+          description: Anti-sandbox process completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: array
+                    items:
+                      type: string
+                      example: '104'
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        item:
+                          type: string
+                          example: '105'
+                        reason:
+                          type: string
+                          example: Failed to get VM state no status found
+          headers: {}
+        '500':
+          description: Error enabling anti-sandbox for VM(s)
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /antisandbox/install-custom:
+    post:
+      summary: Install the custom QEMU/OMVF packages
+      deprecated: false
+      description: >
+        Installs the modified QEMU and OVMF packages that presents as Dell
+        hardware (Enterprise only)
+      operationId: antiSandboxInstallCustom
+      tags:
+        - Anti-Sandbox Management
+      parameters: []
+      responses:
+        '200':
+          description: Anti-sandbox install completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: >-
+                      Anti-Sandbox QEMU and OVMF installed - will take effect on
+                      VM's next power cycle
+          headers: {}
+        '500':
+          description: Error installing anti-sandbox packages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Error installing custom OMVF, check
+                      /tmp/anti-sandbox-debug.log: ...
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /antisandbox/install-standard:
+    post:
+      summary: Install the standard QEMU/OMVF packages
+      deprecated: false
+      description: |
+        Installs the standard QEMU and OVMF packages (Enterprise only)
+      operationId: antiSandboxInstallStandard
+      tags:
+        - Anti-Sandbox Management
+      parameters: []
+      responses:
+        '200':
+          description: Anti-sandbox install completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: >-
+                      Standard QEMU and OVMF installed - will take effect on
+                      VM's next power cycle
+          headers: {}
+        '500':
+          description: Error installing anti-sandbox packages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Error installing standard OMVF, check
+                      /tmp/anti-sandbox-debug.log: ...
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /templates:
+    get:
+      summary: Retrieve a list of VM templates
+      deprecated: false
+      description: |
+        Returns a list of VM templates that have been built in Ludus. These
+        templates can be used in a range config and deployed via Ludus.
+      operationId: getTemplates
+      tags:
+        - Template Management
+      parameters: []
+      responses:
+        '200':
+          description: template status array
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      example: debian-11-x64-server-template
+                    built:
+                      type: boolean
+                      example: false
+                    status:
+                      type: string
+                      description: Status of the template
+                      enum:
+                        - built
+                        - not_built
+                        - building
+          headers: {}
+        '500':
+          description: error getting templates
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    post:
+      summary: Build templates
+      deprecated: false
+      description: >
+        Starts the packer template build process. Monitor with the templates/log
+
+        endpoint. Specify an array of template names to build. Use ["all"] to
+        build all templates.
+      operationId: buildTemplates
+      tags:
+        - Template Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                templates:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Array of template names to build. Use ["all"] to build all
+                    templates.
+                  example:
+                    - debian-12-x64-server-template
+                    - ubuntu-22.04-x64-server-template
+                parallel:
+                  type: integer
+                  example: 3
+              type: object
+      responses:
+        '200':
+          description: template builds started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: >-
+                      Template building started - this will take a while.
+                      Building 3 template(s) at a time.
+          headers: {}
+        '400':
+          description: Bad request - empty templates array
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: templates array cannot be empty
+          headers: {}
+        '404':
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Template 'nonexistent-template' not found
+          headers: {}
+        '500':
+          description: error starting template build
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Install an Ansible role from local directory
+      deprecated: false
+      description: >
+        Add a template to ludus. The file must be a tar file with a single
+        directory (the template name) inside. The filename is ignored, and the
+        root directory name is used.
+      operationId: addTemplateFromTar
+      tags:
+        - Template Management
+      parameters: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  example: ''
+                force:
+                  type: boolean
+                  example: false
+      responses:
+        '201':
+          description: template added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Successfully added template
+          headers: {}
+        '400':
+          description: Error adding template - bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Invalid boolean value
+          headers: {}
+        '500':
+          description: Error adding template - server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 'Unable to add the template: <error>'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /template/{name}:
+    delete:
+      summary: Delete a template
+      deprecated: false
+      description: Delete a template. Users may not delete system templates.
+      operationId: deleteTemplate
+      tags:
+        - Template Management
+      parameters:
+        - name: name
+          in: path
+          description: The name of the template to delete
+          required: true
+          example: ''
+          schema:
+            type: string
+        - name: userID
+          in: query
+          description: pass an optional userID to impersonate a user (admins only)
+          required: false
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Template removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Template removed
+          headers: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Template name not provided
+          headers: {}
+        '403':
+          description: Access denied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Access denied. Users are not allowed to delete system
+                      templates
+          headers: {}
+        '404':
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Template not found
+          headers: {}
+        '409':
+          description: Template conflict
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Error removing template, it is in use by VMs
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /templates/abort:
+    post:
+      summary: Kill packer processes for user
+      deprecated: false
+      description: |
+        Kills any running packer processes for the user,
+        or the user given in the query string (admin only).
+      operationId: abortTemplates
+      tags:
+        - Template Management
+      parameters:
+        - name: userID
+          in: query
+          description: >
+            Pass an optional userID to kill packer processes for.
+
+            Defaults to the user's range (admins can interact with other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: Packer processes killed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Packer process(es) aborted for user john-doe
+          headers: {}
+        '500':
+          description: error starting template build
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: No packer processes found for user john-doe
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /templates/logs:
+    get:
+      summary: Retrieve the latest packer logs
+      deprecated: false
+      description: |
+        Returns the latest logs from packer
+      operationId: getPackerLogs
+      tags:
+        - Template Management
+      parameters:
+        - name: userID
+          in: query
+          description: |
+            pass an optional userID to get the logs for.
+            Defaults to the user's range (admins can query other ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+        - name: tail
+          in: query
+          description: ''
+          required: false
+          example: 100
+          schema:
+            type: integer
+            example: 100
+        - name: resumeline
+          in: query
+          description: ''
+          required: false
+          example: 274
+          schema:
+            type: integer
+            example: 274
+      responses:
+        '200':
+          description: >-
+            packer logs for the user and a cursor values of the last line
+            returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: >
+                      2023/01/29 14:57:40 Build debug mode: false
+
+                      2023/01/29 14:57:40 Force build: false
+
+                      2023/01/29 14:57:40 On error: abort
+
+                      2023/01/29 14:57:40 Waiting on builds to complete...
+
+                      2023/01/29 14:57:40 Starting build run: proxmox.debian10
+
+                      2023/01/29 14:57:40 Running builder:
+
+                      2023/01/29 14:57:40 [INFO] (telemetry) Starting builder
+                      proxmox.debian10
+
+                      2023/01/29 14:57:40 packer-builder-proxmox plugin: using
+                      password auth
+
+                      ...
+                  cursor:
+                    type: integer
+                    example: 274
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /templates/status:
+    get:
+      summary: Get the status of packer builds
+      deprecated: false
+      description: |
+        Returns a list of templates that are currently being built
+      operationId: getTemplatesStatus
+      tags:
+        - Template Management
+      parameters: []
+      responses:
+        '200':
+          description: >-
+            array of templates being built and the users who initiated the
+            builds
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    template:
+                      type: string
+                      example: debian-10-x64-server-template
+                    user:
+                      type: string
+                      example: john-doe
+          headers: {}
+        '500':
+          description: error getting templates status
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /snapshots/list:
+    get:
+      summary: Get all snapshots for a range
+      deprecated: false
+      description: |
+        Returns a list of snapshots for a range
+      operationId: getSnapshots
+      tags:
+        - Snapshot Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to query. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: |
+            pass an optional userID to get the logs for.
+            Defaults to the user's range (admins can query other ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+        - name: vmids
+          in: query
+          description: ''
+          required: false
+          example: 100,101
+          schema:
+            type: string
+            example: 100,101
+      responses:
+        '200':
+          description: array of snapshots for a range
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshots:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SnapshotInfo'
+                  errors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ErrorInfo'
+          headers: {}
+        '500':
+          description: error getting snapshots
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /snapshots/create:
+    post:
+      summary: Take a snapshot of a VM or multiple VMs
+      deprecated: false
+      description: |
+        Takes a snapshot of one or more VMs as specified by VMID(s)
+      operationId: snapshotsTake
+      tags:
+        - Snapshot Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to query. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to act on behalf of. Only admins can provide
+            userIDs that are not their own.
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SnapshotCreatePayload'
+            examples: {}
+      responses:
+        '200':
+          description: snapshot success and error arrays
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: array
+                    items:
+                      type: integer
+                      example: 179
+                  errors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ErrorInfo'
+          headers: {}
+        '500':
+          description: internal error creating snapshots
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /snapshots/rollback:
+    post:
+      summary: Roll back to a snapshot of a VM or multiple VMs
+      deprecated: false
+      description: >
+        Rolls back one or more VMs as specified by VMID(s) to a specified
+        snapshot
+      operationId: snapshotsRollback
+      tags:
+        - Snapshot Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to query. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to act on behalf of. Only admins can provide
+            userIDs that are not their own.
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Snapshot name
+                  example: My cool snapshot
+                vmids:
+                  type: array
+                  items:
+                    type: integer
+                    format: int32
+                  description: >-
+                    Array of VMIDs to snapshot, if blank all VMs in the range
+                    will be snapshotted
+                  example:
+                    - 179
+                    - 180
+            examples: {}
+      responses:
+        '200':
+          description: snapshot success and error arrays
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: array
+                    items:
+                      type: integer
+                      example: 179
+                  errors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ErrorInfo'
+          headers: {}
+        '500':
+          description: internal error rolling back snapshots
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /snapshots/remove:
+    post:
+      summary: Delete a snapshot from a VM or multiple VMs
+      deprecated: false
+      description: |
+        Deletes a snapshot from one or more VMs as specified by VMID(s)
+      operationId: snapshotsRemove
+      tags:
+        - Snapshot Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range number to query. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to act on behalf of. Only admins can provide
+            userIDs that are not their own.
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Snapshot name
+                  example: My cool snapshot
+                vmids:
+                  type: array
+                  items:
+                    type: integer
+                    format: int32
+                  description: >-
+                    Array of VMIDs to snapshot, if blank all VMs in the range
+                    will be snapshotted
+                  example:
+                    - 179
+                    - 180
+            examples: {}
+      responses:
+        '200':
+          description: snapshot success and error arrays
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: array
+                    items:
+                      type: integer
+                      example: 179
+                  errors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ErrorInfo'
+          headers: {}
+        '500':
+          description: internal error creating snapshots
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /kms/install:
+    post:
+      summary: Setup the KMS VM and install the KMS server
+      deprecated: false
+      description: >
+        Creates a KMS VM in the ADMIN pool at 192.0.2.1 and installs the KMS
+        server (Enterprise only)
+      operationId: kmsInstall
+      tags:
+        - KMS Management
+      parameters: []
+      responses:
+        '200':
+          description: KMS setup complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: KMS setup complete
+          headers: {}
+        '500':
+          description: Error installing KMS
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 'Task failed: ...'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /kms/license:
+    post:
+      summary: License Windows VMs using the KMS server
+      deprecated: false
+      description: |
+        License one or more Windows VMs using the KMS server (Enterprise only)
+      operationId: kmsLicense
+      tags:
+        - KMS Management
+      parameters:
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to act on behalf of. Only admins can provide
+            userIDs that are not their own.
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                productKey:
+                  type: string
+                  description: >-
+                    The volume license product key to license the VMs with (if
+                    blank or not sent: determine from Windows version)
+                  example: TVRH6-WHNXV-R9WG3-9XRFY-MY832
+                vmids:
+                  type: array
+                  items:
+                    type: integer
+                    format: int32
+                  description: Array of VMIDs to license
+                  example:
+                    - 179
+                    - 180
+            examples: {}
+      responses:
+        '200':
+          description: license success and error arrays
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: array
+                    items:
+                      type: integer
+                      example: 179
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        item:
+                          type: string
+                          description: The vmID of the failed VM
+                          example: '180'
+                        reason:
+                          type: string
+                          description: The error message associated with the failed vmID
+                          example: 'Failed to run license-windows ansible playbook: ...'
+          headers: {}
+        '500':
+          description: internal error creating snapshots
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /groups:
+    post:
+      summary: Create a new group
+      deprecated: false
+      description: Creates a new group in Ludus.
+      operationId: createGroup
+      tags:
+        - Group Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  pattern: ^[A-Za-z0-9_\-]+$
+                  example: Red_Team
+                description:
+                  type: string
+                  example: Red team group
+              required:
+                - name
+      responses:
+        '201':
+          description: Group created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Group created successfully
+          headers: {}
+        '400':
+          description: Invalid input
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    get:
+      summary: List all groups
+      deprecated: false
+      description: Returns a list of all groups in Ludus the user has access to.
+      operationId: listGroups
+      tags:
+        - Group Management
+      parameters: []
+      responses:
+        '200':
+          description: List of groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    description:
+                      type: string
+                    numMembers:
+                      type: integer
+                    numManagers:
+                      type: integer
+                    numRanges:
+                      type: integer
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /groups/{groupName}:
+    delete:
+      summary: Delete a group
+      deprecated: false
+      description: Deletes a group by Group Name.
+      operationId: deleteGroup
+      tags:
+        - Group Management
+      parameters:
+        - name: groupName
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Group deleted
+          headers: {}
+        '404':
+          description: Group not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /groups/{groupName}/users:
+    get:
+      summary: List group members
+      deprecated: false
+      description: Lists all users in a group.
+      operationId: listGroupMembers
+      tags:
+        - Group Management
+      parameters:
+        - name: groupName
+          in: path
+          description: Name of the group
+          required: true
+          example: mygroup
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of group members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    userID:
+                      type: string
+                    name:
+                      type: string
+                    role:
+                      type: string
+                      enum:
+                        - member
+                        - manager
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    post:
+      summary: Add users to group
+      deprecated: false
+      description: >-
+        Adds one or more users to a group. Requires request body with userIDs
+        array. Optionally specify managers array for users that should be
+        managers.
+      operationId: addUsersToGroup
+      tags:
+        - Group Management
+      parameters:
+        - name: groupName
+          in: path
+          description: Name of the group
+          required: true
+          example: mygroup
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkAddUsersToGroupRequest'
+        required: true
+      responses:
+        '200':
+          description: Users added to group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkGroupOperationResponse'
+          headers: {}
+        '400':
+          description: Bad request
+          headers: {}
+        '403':
+          description: Forbidden
+          headers: {}
+        '404':
+          description: Group or user not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Remove users from group
+      deprecated: false
+      description: >-
+        Removes one or more users from a group. Requires request body with
+        userIDs array.
+      operationId: removeUsersFromGroup
+      tags:
+        - Group Management
+      parameters:
+        - name: groupName
+          in: path
+          description: Name of the group
+          required: true
+          example: mygroup
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkRemoveUsersFromGroupRequest'
+        required: true
+      responses:
+        '200':
+          description: Users removed from group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkGroupOperationResponse'
+          headers: {}
+        '400':
+          description: Bad request
+          headers: {}
+        '403':
+          description: Forbidden
+          headers: {}
+        '404':
+          description: Group or user not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /groups/{groupName}/ranges:
+    get:
+      summary: List group ranges
+      deprecated: false
+      description: Lists all ranges in a group.
+      operationId: listGroupRanges
+      tags:
+        - Group Management
+      parameters:
+        - name: groupName
+          in: path
+          description: Name of the group
+          required: true
+          example: mygroup
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of group ranges
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RangeObject'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    post:
+      summary: Add ranges to group
+      deprecated: false
+      description: >-
+        Grants a group access to one or more ranges. Requires request body with
+        rangeIDs array.
+      operationId: addRangesToGroup
+      tags:
+        - Group Management
+      parameters:
+        - name: groupName
+          in: path
+          description: Name of the group
+          required: true
+          example: mygroup
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkAddRangesToGroupRequest'
+        required: true
+      responses:
+        '200':
+          description: Ranges added to group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkGroupOperationResponse'
+          headers: {}
+        '400':
+          description: Bad request
+          headers: {}
+        '403':
+          description: Forbidden
+          headers: {}
+        '404':
+          description: Group or range not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Remove ranges from group
+      deprecated: false
+      description: >-
+        Revokes a group's access to one or more ranges. Requires request body
+        with rangeIDs array.
+      operationId: removeRangesFromGroup
+      tags:
+        - Group Management
+      parameters:
+        - name: groupName
+          in: path
+          description: Name of the group
+          required: true
+          example: mygroup
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkRemoveRangesFromGroupRequest'
+        required: true
+      responses:
+        '200':
+          description: Ranges removed from group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkGroupOperationResponse'
+          headers: {}
+        '400':
+          description: Bad request
+          headers: {}
+        '403':
+          description: Forbidden
+          headers: {}
+        '404':
+          description: Group or range not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /migrate/sdn/status:
+    get:
+      summary: SDN Migration Status
+      deprecated: false
+      description: ''
+      tags: []
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sdn_zone_exists:
+                    type: boolean
+                  nat_vnet_exists:
+                    type: boolean
+                  needs_migration:
+                    type: boolean
+                  cluster_mode:
+                    type: boolean
+                  requires_manual_zone:
+                    type: boolean
+                  current_sdn_zone:
+                    type: string
+                  ludus_nat_interface:
+                    type: string
+                  message:
+                    type: string
+                required:
+                  - sdn_zone_exists
+                  - nat_vnet_exists
+                  - needs_migration
+                  - cluster_mode
+                  - requires_manual_zone
+                  - current_sdn_zone
+                  - ludus_nat_interface
+                  - message
+              example:
+                sdn_zone_exists: false
+                nat_vnet_exists: false
+                needs_migration: false
+                cluster_mode: false
+                requires_manual_zone: false
+                current_sdn_zone: ''
+                ludus_nat_interface: vmbr1000
+                message: >-
+                  Not in cluster mode. Using vmbr network management - no SDN
+                  migration needed.
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /migrate/sdn:
+    post:
+      summary: Migrate to SDN networking
+      deprecated: false
+      description: >-
+        Start the migration from Linux bridges to SDN VXLAN networking. Only
+        required if Ludus 1.x was installed on a cluster node and needs to be
+        upgraded to support cluster mode.
+      tags: []
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                required:
+                  - result
+              example:
+                result: Migration to SDN VNets completed successfully.
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /migrate/sqlite:
+    post:
+      summary: Migrate SQLite to PocketBase
+      deprecated: false
+      description: Migrates Ludus data from SQLite to PocketBase.
+      operationId: migrateSQLiteToPostgreSQL
+      tags:
+        - Migration
+      parameters: []
+      responses:
+        '200':
+          description: Migration started
+          headers: {}
+        '500':
+          description: Migration failed
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /vm/console/ticket:
+    get:
+      summary: Get Console Websocket Ticket
+      deprecated: false
+      description: >-
+        Generates a one-time VNC ticket for a specific VM if the calling user
+        has access
+      operationId: getConsoleWebsocketTicket
+      tags: []
+      parameters:
+        - name: VMID
+          in: query
+          description: The ID of the Virtual Machine
+          required: true
+          example: 120
+          schema:
+            type: integer
+        - name: userID
+          in: query
+          description: userID of the user to impersonate (admin only)
+          required: false
+          example: JD
+          schema:
+            type: string
+        - name: x-api-key
+          in: header
+          description: ''
+          required: false
+          example: '{{ SO_API_KEY}}'
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket:
+                    type: string
+                    description: The one-time use ticket for VNC connection
+                  password:
+                    type: string
+                    description: The VNC password (if applicable)
+                  port:
+                    type: integer
+                    description: The VNC port on the node
+                required:
+                  - ticket
+                  - password
+                  - port
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /vm/console/view:
+    get:
+      summary: Connect to VM Console WebSocket
+      deprecated: false
+      description: >-
+        Upgrades the connection to a WebSocket for VNC streaming. Requires a
+        valid ticket obtained from `/vm/console/ticket`
+      operationId: vmConsoleWebsocketHandler
+      tags: []
+      parameters:
+        - name: ticket
+          in: query
+          description: The one-time ticket obtained from the ticket API
+          required: true
+          schema:
+            type: string
+      responses:
+        '101':
+          description: ''
+          headers: {}
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                title: ''
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+          headers: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                title: ''
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+          headers: {}
+        '502':
+          description: ''
+          content:
+            application/json:
+              schema:
+                title: ''
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints:
+    get:
+      summary: List accessible blueprints
+      deprecated: false
+      description: Returns all blueprints the current user can access.
+      operationId: listBlueprints
+      tags:
+        - Blueprint Management
+      parameters: []
+      responses:
+        '200':
+          description: List of blueprints
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BlueprintListItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/from-range:
+    post:
+      summary: Create blueprint from range
+      deprecated: false
+      description: Creates a blueprint from a range configuration.
+      operationId: createBlueprintFromRange
+      tags:
+        - Blueprint Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBlueprintFromRangeRequest'
+      responses:
+        '201':
+          description: Blueprint created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintMutationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}:
+    delete:
+      summary: Delete blueprint
+      deprecated: false
+      description: Deletes a blueprint by ID.
+      operationId: deleteBlueprint
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/copy:
+    post:
+      summary: Copy blueprint
+      deprecated: false
+      description: Creates a copy of an existing blueprint.
+      operationId: copyBlueprint
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CopyBlueprintRequest'
+      responses:
+        '201':
+          description: Blueprint copied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintMutationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/apply:
+    post:
+      summary: Apply blueprint to range
+      deprecated: false
+      description: Applies a blueprint configuration to a target range.
+      operationId: applyBlueprintToRange
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyBlueprintRequest'
+        required: true
+      responses:
+        '200':
+          description: Blueprint applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/config:
+    get:
+      summary: Get blueprint config
+      deprecated: false
+      description: Returns the blueprint configuration content.
+      operationId: getBlueprintConfig
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+        - name: download
+          in: query
+          description: ''
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Blueprint config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Update blueprint config
+      deprecated: false
+      description: Updates a blueprint configuration from raw YAML text.
+      operationId: updateBlueprintConfig
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBlueprintConfigRequest'
+        required: true
+      responses:
+        '200':
+          description: Blueprint config updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/share/groups:
+    post:
+      summary: Share blueprint with groups
+      deprecated: false
+      description: Shares a blueprint with one or more groups.
+      operationId: shareBlueprintWithGroups
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkShareBlueprintWithGroupsRequest'
+        required: true
+      responses:
+        '200':
+          description: Bulk share result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Unshare blueprint from groups
+      deprecated: false
+      description: Removes blueprint sharing from one or more groups.
+      operationId: unshareBlueprintWithGroups
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUnshareBlueprintWithGroupsRequest'
+        required: true
+      responses:
+        '200':
+          description: Bulk unshare result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/share/users:
+    post:
+      summary: Share blueprint with users
+      deprecated: false
+      description: Shares a blueprint with one or more users.
+      operationId: shareBlueprintWithUsers
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkShareBlueprintWithUsersRequest'
+        required: true
+      responses:
+        '200':
+          description: Bulk share result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Unshare blueprint from users
+      deprecated: false
+      description: Removes blueprint sharing from one or more users.
+      operationId: unshareBlueprintWithUsers
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUnshareBlueprintWithUsersRequest'
+        required: true
+      responses:
+        '200':
+          description: Bulk unshare result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/access/users:
+    get:
+      summary: List blueprint access users
+      deprecated: false
+      description: Lists users who can access this blueprint and how they inherit access.
+      operationId: listBlueprintAccessUsers
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint access users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BlueprintAccessUserItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/access/groups:
+    get:
+      summary: List blueprint access groups
+      deprecated: false
+      description: Lists groups shared to this blueprint and their managers/members.
+      operationId: listBlueprintAccessGroups
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint access groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BlueprintAccessGroupItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+components:
+  schemas:
+    BulkAddUsersToGroupRequest:
+      type: object
+      required:
+        - userIDs
+      properties:
+        userIDs:
+          type: array
+          items:
+            type: string
+          description: Array of user IDs to add to the group
+          example:
+            - user1
+            - user2
+            - user3
+        managers:
+          type: array
+          items:
+            type: string
+          description: Optional array of user IDs that should be managers
+          example:
+            - user1
+    BulkRemoveUsersFromGroupRequest:
+      type: object
+      required:
+        - userIDs
+      properties:
+        userIDs:
+          type: array
+          items:
+            type: string
+          description: Array of user IDs to remove from the group
+          example:
+            - user1
+            - user2
+            - user3
+    BulkAddRangesToGroupRequest:
+      type: object
+      required:
+        - rangeIDs
+      properties:
+        rangeIDs:
+          type: array
+          items:
+            type: string
+          description: Array of range IDs to grant group access to
+          example:
+            - DEMO
+            - TEST
+            - PROD
+    BulkRemoveRangesFromGroupRequest:
+      type: object
+      required:
+        - rangeIDs
+      properties:
+        rangeIDs:
+          type: array
+          items:
+            type: string
+          description: Array of range IDs to revoke group access from
+          example:
+            - DEMO
+            - TEST
+            - PROD
+    BulkGroupOperationResponse:
+      type: object
+      properties:
+        success:
+          type: array
+          items:
+            type: string
+            example: user1
+          description: Array of successfully processed items
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkGroupOperationErrorItem'
+          description: Array of errors for failed items
+      example:
+        success:
+          - user1
+          - user2
+        errors:
+          - item: user3
+            reason: User not found
+    BulkGroupOperationErrorItem:
+      type: object
+      required:
+        - item
+        - reason
+      properties:
+        item:
+          type: string
+          description: The item that failed (userID or rangeID)
+        reason:
+          type: string
+          description: Reason for the failure
+      example:
+        item: user3
+        reason: User not found
+    BlueprintListItem:
+      type: object
+      required:
+        - blueprintID
+        - name
+        - ownerUserID
+        - created
+        - updated
+      properties:
+        blueprintID:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        ownerUserID:
+          type: string
+        sharedUsers:
+          type: array
+          items:
+            type: string
+        sharedGroups:
+          type: array
+          items:
+            type: string
+        accessType:
+          type: string
+          enum:
+            - admin
+            - owner
+            - direct
+            - group
+            - unknown
+        created:
+          type: string
+          format: date-time
+        updated:
+          type: string
+          format: date-time
+    CreateBlueprintFromRangeRequest:
+      type: object
+      required:
+        - blueprintID
+      properties:
+        blueprintID:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        rangeID:
+          type: string
+    CopyBlueprintRequest:
+      type: object
+      properties:
+        blueprintID:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+    ApplyBlueprintRequest:
+      type: object
+      properties:
+        rangeID:
+          type: string
+        force:
+          type: boolean
+    UpdateBlueprintConfigRequest:
+      type: object
+      required:
+        - config
+      properties:
+        config:
+          type: string
+    BulkShareBlueprintWithGroupsRequest: &ref_0
+      type: object
+      required:
+        - groupNames
+      properties:
+        groupNames:
+          type: array
+          items:
+            type: string
+    BulkUnshareBlueprintWithGroupsRequest: *ref_0
+    BulkShareBlueprintWithUsersRequest: &ref_1
+      type: object
+      required:
+        - userIDs
+      properties:
+        userIDs:
+          type: array
+          items:
+            type: string
+    BulkUnshareBlueprintWithUsersRequest: *ref_1
+    BulkBlueprintOperationErrorItem:
+      type: object
+      required:
+        - item
+        - reason
+      properties:
+        item:
+          type: string
+        reason:
+          type: string
+    BulkBlueprintOperationResponse:
+      type: object
+      properties:
+        success:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkBlueprintOperationErrorItem'
+    BlueprintMutationResponse:
+      type: object
+      required:
+        - result
+        - blueprintID
+      properties:
+        result:
+          type: string
+        blueprintID:
+          type: string
+    BlueprintAccessUserItem:
+      type: object
+      required:
+        - userID
+      properties:
+        userID:
+          type: string
+        name:
+          type: string
+        access:
+          type: array
+          items:
+            type: string
+        groups:
+          type: array
+          items:
+            type: string
+    BlueprintAccessGroupItem:
+      type: object
+      required:
+        - groupName
+      properties:
+        groupName:
+          type: string
+        managers:
+          type: array
+          items:
+            type: string
+        members:
+          type: array
+          items:
+            type: string
+    RangeObject:
+      type: object
+      required:
+        - rangeID
+        - rangeNumber
+        - lastDeployment
+        - numberOfVMs
+        - testingEnabled
+        - VMs
+      properties:
+        rangeID:
+          $ref: '#/components/schemas/userID'
+        rangeNumber:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 3
+        name:
+          type: string
+          example: Red Team Range
+        description:
+          type: string
+          example: Range for red team
+        purpose:
+          type: string
+          example: Testing
+        lastDeployment:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2022-08-29T09:12:33.001Z'
+        numberOfVMs:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 7
+        testingEnabled:
+          type: boolean
+          readOnly: true
+          example: true
+        allowedIPs:
+          type: array
+          items:
+            type: string
+            example: 1.2.3.4
+        allowedDomains:
+          type: array
+          items:
+            type: string
+            example: example.com
+        rangeState:
+          type: string
+          example: SUCCESS
+        VMs:
+          type: array
+          items:
+            $ref: '#/components/schemas/VMObject'
+    userID:
+      type: string
+      pattern: ^[A-Za-z0-9]{1,20}$
+      description: |
+        Must be a unique 1-20 character alpha-numeric string.
+        Initials are commonly used.
+      example: JD
+    rangeID:
+      type: string
+      pattern: ^[A-Za-z0-9_\-]+(\/[A-Za-z0-9_\-]+){0,2}$
+      description: >
+        Must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or
+        'New_Range'). Use only letters, numbers, hyphens, and underscores.
+
+        This is the rangeID, which is used to identify the range.
+      example: DEMO
+    UserObject:
+      type: object
+      required:
+        - name
+        - userID
+        - isAdmin
+      properties:
+        name:
+          type: string
+          example: John Doe
+        userID:
+          $ref: '#/components/schemas/userID'
+        dateCreated:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2022-08-29T09:12:33.001Z'
+        dateLastActive:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2022-08-29T09:12:33.001Z'
+        isAdmin:
+          type: boolean
+          example: true
+        proxmoxUsername:
+          type: string
+          readOnly: true
+          example: john-doe
+    UserCredentialObject:
+      properties:
+        proxmoxUsername:
+          readOnly: true
+          type: string
+          example: john-doe
+        proxmoxPassword:
+          readOnly: true
+          type: string
+          example: 5cy5@plhik4g&Yk12sG
+        ludusEmail:
+          readOnly: true
+          type: string
+          example: john.doe@example.com
+        proxmoxRealm:
+          readOnly: true
+          type: string
+          example: pam
+      type: object
+      example:
+        ludusEmail: john.doe@example.com
+        proxmoxPassword: 5cy5@plhik4g&Yk12sG
+        proxmoxUsername: john-doe
+        proxmoxRealm: pam
+    VMObject:
+      type: object
+      required:
+        - ID
+        - proxmoxID
+        - rangeNumber
+        - name
+        - poweredOn
+        - cpu
+        - ram
+      properties:
+        ID:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 53
+        proxmoxID:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 146
+        rangeNumber:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 3
+        name:
+          type: string
+          example: JD-ad-dc-win2019-server-x64
+        poweredOn:
+          type: boolean
+          example: true
+        ip:
+          type: string
+        isRouter:
+          type: boolean
+          description: Indicates whether this VM is the router for the range
+          example: false
+        cpu:
+          type: integer
+          format: int32
+          description: Number of CPU cores allocated to the VM
+          example: 4
+        ram:
+          type: integer
+          format: int32
+          description: Amount of RAM allocated to the VM in GB
+          example: 8
+    Domain:
+      type: string
+      pattern: >-
+        ^(?!.*?_.*?)(?!(?:[\d\w]+?\.)?\-[\w\d\.\-]*?)(?![\w\d]+?\-\.(?:[\d\w\.\-]+?))(?=[\w\d])(?=[\w\d\.\-]*?\.+[\w\d\.\-]*?)(?![\w\d\.\-]{254})(?!(?:\.?[\w\d\-\.]*?[\w\d\-]{64,}\.)+?)[\w\d\.\-]+?(?<![\w\d\-\.]*?\.[\d]+?)(?<=[\w\d\-]{2,})(?<![\w\d\-]{25})$
+      description: A domain to allow during testing (along with HTTPS CRL domains)
+      example: example.com
+    IP:
+      type: string
+      pattern: >-
+        ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+      example: 203.0.113.4
+    AllowPayload:
+      type: object
+      properties:
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/Domain'
+        ips:
+          type: array
+          items:
+            $ref: '#/components/schemas/IP'
+    SnapshotInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Snapshot identifier. Value 'current' identifies the current VM
+          example: My snapshot
+        includesRAM:
+          type: boolean
+          description: 1 if the snapshot includes RAM, 0 if it does not
+          example: true
+        description:
+          type: string
+          description: Description of the snapshot
+          example: Took this snapshot before testing something
+        snaptime:
+          type: integer
+          format: uint
+          description: Snapshot creation time (unix)
+          example: 1740779020
+        parent:
+          type: string
+          description: Parent snapshot identifier
+          example: Other snapshot
+        vmid:
+          type: integer
+          format: int32
+          description: The VMID of the VM
+          example: 179
+        vmname:
+          type: string
+          description: The name of the VM
+          example: JD-ad-win11-22h2-enterprise-x64-1
+    ErrorInfo:
+      type: object
+      properties:
+        vmid:
+          type: integer
+          format: int32
+          description: The VMID of the VM
+          example: 180
+        vmname:
+          type: string
+          description: The name of the VM
+          example: JD-ad-win11-22h2-enterprise-x64-2
+        error:
+          type: string
+          description: Error message
+          example: 'Error parsing VM ID abc: strconv.Atoi: parsing "abc": invalid syntax'
+    SnapshotCreatePayload:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Snapshot name
+          example: My cool snapshot
+        description:
+          type: string
+          description: Snapshot Description
+          example: Taking this snapshot before doing some testing
+        vmids:
+          type: array
+          items:
+            type: integer
+            format: int32
+          description: >-
+            Array of VMIDs to snapshot, if blank all VMs in the range will be
+            snapshotted
+          example:
+            - 179
+            - 180
+        includeRAM:
+          type: boolean
+          description: >-
+            Include RAM in the snapshot. If false, the VM will be powered off
+            when restored to this snapshot.
+          example: true
+    LicenseDataObject:
+      type: object
+      properties:
+        entitlements:
+          type: array
+          items:
+            type: string
+            description: Individual entitlement code
+          description: The entitlements granted by the license
+          example: ENTERPRISE_PLUGIN
+        licensed_to:
+          type: string
+          description: The name of the person or organization the license is licensed to
+          example: John Doe
+        expires_at:
+          type: string
+          format: date-time
+          description: The date and time the license expires
+          example: '2022-08-29T09:12:33.001Z'
+        active:
+          type: boolean
+          description: Whether the license is active
+          example: true
+        message:
+          type: string
+          description: The message associated with the license
+          example: 'License active, expires: 2022-08-29 14:12:33, licensed to John Doe'
+    UserAPIKeyObject:
+      type: object
+      properties:
+        apiKey:
+          type: string
+          pattern: ^[a-zA-Z0-9!@#%^&*()_+\-=\[\]{}:\\|<>\/?]{40}$
+          readOnly: true
+          example: G0rO+G+8Zlu%CAEDyYC2ZdW3pBWW+alAJ2_tli1h
+    UserMembershipObject:
+      type: object
+      required:
+        - groupName
+        - role
+      properties:
+        groupName:
+          type: string
+          description: The name of the group
+          example: Security Team
+        description:
+          type: string
+          description: Optional description of the group
+          example: Security team members
+        role:
+          type: string
+          description: The user's role in the group
+          enum:
+            - member
+            - manager
+          example: manager
+  responses: {}
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+    JWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+servers: []
+security:
+  - JWT: []
+  - ApiKeyAuth: []

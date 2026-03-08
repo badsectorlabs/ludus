@@ -1,5 +1,35 @@
 #!/bin/bash
 
+# Parse command line arguments
+while getopts "hDdPL" opt; do
+  case $opt in
+    h)
+      echo "Usage: $0 [-h] [-d] [-D] [-P] [-L]"
+      echo "  -d  Enable debug logging for Ludus"
+      echo "  -D  Enable debug logging for the database"
+      echo "  -P  Enable debug logging for proxmox"
+      echo "  -L  Enable debug logging for license requests"
+      exit 0
+      ;;
+    d)
+      DEBUG_MODE=true
+      ;;
+    D)
+      DEBUG_DATABASE=true
+      ;;
+    P)
+      DEBUG_PROXMOX=true
+      ;;
+    L)
+      DEBUG_LICENSE=true
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      exit 1
+      ;;
+  esac
+done
+
 pushd .
 
 # cd to the directory of the script
@@ -12,14 +42,26 @@ if [ "$1" == "docs" ]; then
     yarn build
     rm -f ./build/video/*
     rm -f ./build/img/hardware/Debian_12_RAID0.mp4
-    mv ./build ../ludus-server/src/docs
+    mv ./build ../ludus-api/docs
     cd ../ludus-server || exit
-    TAGS="-tags=embeddocs"
+fi
+
+TAGS=""
+if [ -d "../ludus-api/docs" ]; then
+    TAGS="embeddocs"
+fi
+if [ -d "../ludus-api/webUI" ]; then
+    if [ -n "$TAGS" ]; then
+        TAGS="${TAGS} embedwebui"
+    else
+        TAGS="embedwebui"
+    fi
 fi
 
 GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
 GIT_ABBREV_REF=$(git rev-parse --abbrev-ref HEAD)
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build  -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${GIT_ABBREV_REF}" ${TAGS} -o ludus-server
+echo CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${GIT_ABBREV_REF}" -tags "${TAGS}" -o ludus-server
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${GIT_ABBREV_REF}" -tags "${TAGS}" -o ludus-server
 if [[ $? -ne 0 ]]; then
     echo
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
@@ -41,6 +83,40 @@ fi
 if [ "$HOSTNAME" == "m1" ]; then
     scp ludus-server lkdev2: && ssh lkdev2 "./ludus-server --update"
 fi
+
+if [ "$DEBUG_MODE" = true ]; then
+    echo "[+] Setting LUDUS_DEBUG=1"
+    systemctl set-environment LUDUS_DEBUG=1
+else
+    echo "[-] Unsetting LUDUS_DEBUG"
+    systemctl unset-environment LUDUS_DEBUG
+fi
+
+if [ "$DEBUG_DATABASE" = true ]; then
+    echo "[+] Setting LUDUS_DEBUG_DATABASE=1"
+    systemctl set-environment LUDUS_DEBUG_DATABASE=1
+else
+    echo "[-] Unsetting LUDUS_DEBUG_DATABASE"
+    systemctl unset-environment LUDUS_DEBUG_DATABASE
+fi
+
+if [ "$DEBUG_PROXMOX" = true ]; then
+    echo "[+] Setting LUDUS_DEBUG_PROXMOX=1"
+    systemctl set-environment LUDUS_DEBUG_PROXMOX=1
+else
+    echo "[-] Unsetting LUDUS_DEBUG_PROXMOX"
+    systemctl unset-environment LUDUS_DEBUG_PROXMOX
+fi
+
+if [ "$DEBUG_LICENSE" = true ]; then
+    echo "[+] Setting LUDUS_DEBUG_LICENSE=1"
+    systemctl set-environment LUDUS_DEBUG_LICENSE=1
+else
+    echo "[-] Unsetting LUDUS_DEBUG_LICENSE"
+    systemctl unset-environment LUDUS_DEBUG_LICENSE
+fi
+
+systemctl set-environment LUDUS_ENABLE_SUPERADMIN=ill-be-careful
 
 ./ludus-server --update --no-dep-update
 

@@ -1,7 +1,7 @@
-go 1.23.1
+go 1.25
 
 use (
-    ./ludus-api
-    ./ludus-server
-    ./ludus-client
+	./ludus-api
+	./ludus-client
+	./ludus-server
 )

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -123,12 +124,8 @@ var rangeConfigEditCmd = &cobra.Command{
 			}
 			oldContent = string(oldContentBytes)
 		} else { // Get the config from the server
-			if userID != "" {
-				responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/range/config?userID=%s", userID))
-			} else {
-				responseJSON, success = rest.GenericGet(client, "/range/config")
-			}
-			if !success {
+			responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/range/config"))
+			if didFailOrWantJSON(success, responseJSON) {
 				return
 			}
 
@@ -170,15 +167,12 @@ var rangeConfigEditCmd = &cobra.Command{
 		}
 
 		// Send updated config back to server
-		if userID != "" {
-			responseJSON, success = rest.PostFileAndForce(client, fmt.Sprintf("/range/config?userID=%s", userID), newContent, "file", force)
-		} else {
-			responseJSON, success = rest.PostFileAndForce(client, "/range/config", newContent, "file", force)
-		}
+		responseJSON, success = rest.PostFileAndForce(client, buildURLWithRangeAndUserID("/range/config"), newContent, "file", force)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			if !success && !jsonFormat {
-				logger.Logger.Fatal("Load your edits with:\nludus range config edit --file " + tempPath)
+				command := strings.Join(os.Args, " ")
+				logger.Logger.Fatal(fmt.Sprintf("Load your edits with:\n%s --file %s", command, tempPath))
 			}
 			return
 		}

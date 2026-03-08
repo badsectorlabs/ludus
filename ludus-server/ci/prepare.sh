@@ -10,6 +10,11 @@ echo "CUSTOM_ENV_LUDUS_BUILD_TYPE: $CUSTOM_ENV_LUDUS_BUILD_TYPE"
 # This will set VM_ID
 source ${currentDir}/get-vm-ip.sh
 
+if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"cluster"* ]]; then
+    source ${currentDir}/prepare-cluster.sh
+    exit 0
+fi
+
 SKIP_BUILD="false"
 if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && ("$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "any-built" || "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot") ]]; then
     if [[ -z "$VM_ID" ]]; then

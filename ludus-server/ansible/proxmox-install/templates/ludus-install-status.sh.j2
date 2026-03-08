@@ -8,9 +8,12 @@ fi
 
 if [[ -f {{ ludus_install_path }}/install/.stage-3-complete ]]; then 
     echo 'Ludus install completed successfully'
-    echo -n "Root API key: "
-    cat {{ ludus_install_path }}/install/root-api-key
     echo
+    if [[ -f {{ ludus_install_path }}/install/initial-admin-credentials ]]; then
+        echo "Initial admin credentials:"
+        grep -E '^(email|username|api_key|password):' {{ ludus_install_path }}/install/initial-admin-credentials | sed 's/^/  /'
+        echo
+    fi
 else 
     tail -f {{ ludus_install_path }}/install/install.log | while read line; do
         echo "$line"
@@ -32,7 +35,9 @@ else
     fi
 
     echo
-    echo -n "Root API key: "
-    cat {{ ludus_install_path }}/install/root-api-key
-    echo
+    if [[ -f {{ ludus_install_path }}/install/initial-admin-credentials ]]; then
+        echo "Initial admin credentials:"
+        grep -E '^(email|username|api_key|password):' {{ ludus_install_path }}/install/initial-admin-credentials | sed 's/^/  /'
+        echo
+    fi
 fi

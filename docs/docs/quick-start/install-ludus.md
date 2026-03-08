@@ -50,15 +50,15 @@ ssh user@debian
 su -
 # Enter root password to elevate to root, then install the prerequisites
 # terminal-command-root-at-debian
-apt update && apt install curl sudo ca-certificates python-debian
+apt update && apt install curl sudo ca-certificates
 
 # All-in-one command
 # terminal-command-root-at-debian
-curl --proto '=https' --tlsv1.2 -sSf https://ludus.cloud/install-beta | bash
+curl --proto '=https' --tlsv1.2 -sSf https://ludus.cloud/install | bash
 
 # If you want to check out the install script
 # terminal-command-root-at-debian
-curl https://ludus.cloud/install-beta > install.sh
+curl https://ludus.cloud/install > install.sh
 # terminal-command-root-at-debian
 cat install.sh
 # terminal-command-root-at-debian

@@ -37,6 +37,8 @@ ludus ansible role add -d ./ludus_child_domain
 ludus ansible role add badsectorlabs.luds_adcs --user USER2
 ```
 
+Roles added from a directory will be listed as the directory name, regardless of what is in `meta/main.yml`. This is how `ansible-galaxy` works when installing roles.
+
 After roles have been added to Ludus, you can modify the range config to use them:
 
 ```yaml title="range-config.yml"
@@ -123,3 +125,4 @@ While most existing ansible roles will work with Ludus, this page contains a tab
 | [brmkit.ludus_guacamole](https://github.com/brmkit/ludus_guacamole) | Installs [Guacamole](https://guacamole.apache.org/) on Linux in a Ludus range, and optionally configures connections. [@_brmkit](https://x.com/_brmkit) | |
 | [e1a.ludus_windows_smb_share](https://github.com/E1A/ludus_windows_smb_share) | Creates a Windows SMB share and configures both share permissions and NTFS ACLs for read and write groups | [E1A](https://x.com/7hreathunter) | |
 | [mojeda101.ludus_win_privesc](https://github.com/mojeda101/ludus_win_privesc) | Configures a Windows host with intentional privilege escalation misconfigurations for hands-on security training, based on the [Windows-Local-Privilege-Escalation-Cookbook](https://github.com/nickvourd/Windows-Local-Privilege-Escalation-Cookbook) by [@nickvourd](https://github.com/nickvourd). |
+| [whispergate.ludus_nginx_redirector](https://github.com/Whispergate/ludus_nginx_redirector) | Deploy and configure a malleable Nginx-based HTTP/HTTPS redirector | [Whispergate](https://github.com/Whispergate) ||

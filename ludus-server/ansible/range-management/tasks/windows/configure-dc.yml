@@ -32,7 +32,7 @@
   microsoft.ad.domain:
     create_dns_delegation: false
     dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
-    domain_netbios_name: "{{ netbios_name }}"
+    domain_netbios_name: "{{ netbios_name[:15] }}" # NETBIOS names are limited to 15 characters
     domain_mode: "{{ defaults.ad_domain_functional_level }}"
     forest_mode: "{{ defaults.ad_forest_functional_level }}"
     safe_mode_password: "{{ defaults.ad_domain_safe_mode_password }}"

@@ -103,6 +103,7 @@
           - iptables-persistent
           - sshpass # for ansible provisioner in packer
           - swapspace # helps with machines with low RAM (32GB)
+          - python3-debian # required for proxmox role on Debian 13
         state: present
         update_cache: true
 

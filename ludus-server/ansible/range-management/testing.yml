@@ -1,9 +1,22 @@
 - name: Pre-run checks
   ansible.builtin.import_playbook: pre-run-checks.yml
 
+- name: Make sure the router VM is powered on
+  tags: [always]
+  hosts: localhost
+  tasks:
+    - name: Power on the router VM
+      ansible.builtin.include_tasks: tasks/proxmox/power-on-vm.yml
+      vars:
+        vm_name: "{{ router.vm_name | default(default_router_vm_name) }}"
+    - name: Wait for the router VM to be available
+      ansible.builtin.include_tasks: tasks/proxmox/wait-for-vm-availability-linux.yml
+      vars:
+        target_ip: "192.0.2.{{ 100 + range_second_octet }}"
+
 - name: Gather VMs to snapshot, and IPs to action # IPs to action are IPs of machines that should be allowed out during testing
   tags: [always]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   tasks:
     - name: Collect VMs to snapshot
       ansible.builtin.set_fact:
@@ -56,7 +69,7 @@
 
 - name: Block VMs from accessing the internet when testing undefined or block_internet is true
   tags: [never, start-testing]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
     - ansible.builtin.include_tasks: tasks/firewall/firewall-management.yml
@@ -86,7 +99,7 @@
 
 - name: Allow test-range subnet from the internet
   tags: [never, stop-testing]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
     - ansible.builtin.include_tasks: tasks/firewall/firewall-management.yml
@@ -143,7 +156,7 @@
 # ==========================================================
 - name: Allow VMs to an IP
   tags: [never, allow-ip]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
     - ansible.builtin.include_tasks: tasks/firewall/firewall-management.yml
@@ -153,7 +166,7 @@
 
 - name: Allow VMs to a domain
   tags: [never, allow-domain]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
     - ansible.builtin.include_tasks: tasks/firewall/firewall-management.yml
@@ -163,7 +176,7 @@
 
 - name: Deny VMs to an IP
   tags: [never, deny-ip]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
     - ansible.builtin.include_tasks: tasks/firewall/firewall-management.yml
@@ -173,7 +186,7 @@
 
 - name: Deny VMs to a domain
   tags: [never, deny-domain]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
     - ansible.builtin.include_tasks: tasks/firewall/firewall-management.yml

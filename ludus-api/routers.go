@@ -1,167 +1,302 @@
 package ludusapi
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io/fs"
+	"log/slog"
+	"ludusapi/models"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
-	"strings"
-	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/goforj/godump"
+	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/apis"
+	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/hook"
+	"github.com/pocketbase/pocketbase/ui"
 )
 
 var LudusVersion string
 
-// Route is the information for every URI.
-type Route struct {
-	// Name is the name of this Route.
-	Name string
-	// Method is the string for the HTTP method. ex) GET, POST etc..
-	Method string
-	// Pattern is the pattern of the URI.
-	Pattern string
-	// HandlerFunc is the handler function of this route.
-	HandlerFunc gin.HandlerFunc
+type PocketBaseRoute struct {
+	Name        string
+	Method      string
+	Pattern     string
+	HandlerFunc func(*core.RequestEvent) error
 }
+type PocketBaseRoutes []PocketBaseRoute
+
+const APIBasePath = "/api/v2"
 
 // Routes is the list of the generated Route.
-type Routes []Route
+type Routes []PocketBaseRoute
 
 var server *Server
-var Router *gin.Engine
+var logger *slog.Logger
+var adminProxy *httputil.ReverseProxy
+var PB *pocketbase.PocketBase
+var app core.App
+var LudusPluginHandlerManager *HandlerManager
+var DebugProxmox bool
+var UseSDN bool
 
 // NewRouter returns a new router.
-func NewRouter(ludusVersion string, ludusServer *Server) *gin.Engine {
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.Default()
-	router.SetTrustedProxies(nil)
-	RegisterRoutes(router, routes)
+func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
+
+	LudusPluginHandlerManager = NewHandlerManager()
+
+	server = ludusServer
+
+	// Transition from using log.Printf to using slog.Info, slog.Error, etc.
+	// Adopts the debug level from the main server logger
+	// Initialize logger BEFORE ParseConfig() as it may be used during license checking
+	if server.Logger != nil {
+		logger = server.Logger
+		slog.SetDefault(server.Logger)
+	} else {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+		slog.SetDefault(logger)
+	}
+
 	ludusServer.ParseConfig()
+
+	// Resolve the Proxmox debug flag here for speed (vs every call to GetGoProxmoxClientForUserUsingToken)
+	if os.Getenv("LUDUS_DEBUG_PROXMOX") == "1" {
+		DebugProxmox = true
+	}
+
+	// PocketBase Config
+	pbConfig := pocketbase.Config{
+		HideStartBanner:      true,
+		DefaultDev:           os.Getenv("LUDUS_DEBUG_DATABASE") == "1",
+		DefaultDataDir:       ServerConfiguration.DataDirectory,
+		DefaultEncryptionEnv: "LUDUS_DB_ENCRYPTION_PASSWORD",
+	}
+	PB = pocketbase.NewWithConfig(pbConfig)
+	app = PB.App
+
+	// We must bootstrap PocketBase before we can use it, and it creates the DB that is used by InitDb()
+	if err := app.Bootstrap(); err != nil {
+		logger.Error(fmt.Sprintf("Error bootstrapping PocketBase: %v", err))
+		os.Exit(1)
+	}
+
+	var err error
+	UseSDN, err = IsClusterMode()
+	if err != nil {
+		logger.Debug(fmt.Sprintf("Unable to check for cluster mode: %v", err))
+		UseSDN = false
+	}
+
+	// Run migrations before InitDb(); PocketBase normally runs them on Serve, but we use the app
+	// before starting the HTTP server (e.g. root user creation), so we must run them here.
+	if err := app.RunAllMigrations(); err != nil {
+		logger.Error(fmt.Sprintf("Error running migrations: %v", err))
+		os.Exit(1)
+	}
+
 	InitDb()
 	LudusVersion = ludusVersion
 
-	if checkEmbeddedDocs() {
-		// Set up the route to serve the static site
-		// The 'docs' is the directory inside the embedded file system
-		docs, _ := fs.Sub(embeddedDocs, "docs")
-		router.StaticFS("/ludus", http.FS(docs))
-	} else {
-		router.GET("/ludus", func(c *gin.Context) {
-			c.String(http.StatusOK, "Embedded documentation is not available for this build of ludus-server.")
+	// Setup NAT VNet for cluster mode, this function checks if we are in cluster mode first
+	setupNATVNet()
+
+	docsAvailable := checkEmbeddedDocs()
+	webUIAvailable := checkEmbeddedWebUI()
+
+	// Setup a reverse proxy for the admin API
+	adminURL, _ := url.Parse("https://127.0.0.1:8081")
+	adminProxy = httputil.NewSingleHostReverseProxy(adminURL)
+	customTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // Allow self-signed certificate
+		},
+	}
+	adminProxy.Transport = customTransport
+
+	// Serve the web UI from PocketBase if available
+	if webUIAvailable && os.Geteuid() != 0 {
+		logger.Debug("Serving web UI at /ui")
+		app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+			webUIFSRoot, err := fs.Sub(embeddedWebUI, "webUI")
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error serving web UI: %v", err))
+				return err
+			}
+			se.Router.GET("/ui/{path...}", apis.Static(webUIFSRoot, true))
+			return se.Next()
 		})
 	}
-	server = ludusServer
-	Router = router
 
-	return router
+	// Serve the docs from PocketBase if available
+	if docsAvailable && os.Geteuid() != 0 {
+		logger.Debug("Serving docs at /ludus")
+		app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+			docsFSRoot, err := fs.Sub(embeddedDocs, "docs")
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error serving docs: %v", err))
+				return err
+			}
+			se.Router.GET("/ludus/{path...}", apis.Static(docsFSRoot, true))
+			return se.Next()
+		})
+	}
+
+	// Register all custom middleware. These will apply to every request.
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		// Restrict access to the PocketBase admin API
+		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
+			Id:       "restrictPocketBaseEndpoints",
+			Func:     restrictPocketBaseEndpoints,
+			Priority: 998,
+		})
+		// Redirect the base URL to the UI
+		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
+			Id:       "redirectBaseURLToUI",
+			Func:     redirectBaseURLToUI,
+			Priority: 999,
+		})
+		// API key authentication for the PocketBase API
+		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
+			Id:       "APIKeyAuthenticationMiddleware",
+			Func:     APIKeyAuthenticationMiddleware,
+			Priority: 1000, // This runs before any other custom middleware, authenticates API keys and sets the user record and range record in the request context
+		})
+		// Lookup the user and ranges for the request, store them in the request context
+		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
+			Id:       "userAndRangesLookupMiddleware",
+			Func:     userAndRangesLookupMiddleware,
+			Priority: 1001,
+		})
+		// Update the last active time for the user and log the API action
+		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
+			Id:       "updateLastActiveTimeAndLog",
+			Func:     updateLastActiveTimeAndLog,
+			Priority: 1002,
+		})
+		// Limit the endpoints that can be accessed by the root user, and reverse proxy to the admin API for endpoints that need root access
+		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
+			Id:       "limitRootEndpoints",
+			Func:     limitRootEndpoints,
+			Priority: 1003,
+		})
+		// Require authentication for all requests
+		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
+			Id:       "requireAuth",
+			Func:     requireAuth,
+			Priority: 1004, // This should be the last middleware to run
+		})
+
+		return se.Next()
+	})
+
+	// Hook the OAuth2 user creation to populate the userID and userNumber fields
+	app.OnRecordAuthWithOAuth2Request("users").BindFunc(func(e *core.RecordAuthWithOAuth2RequestEvent) error {
+		return populateUserFieldsFromOAuth2Provider(e)
+	})
+
+	// Make /admin serve the same content as /_ (the pocketbase admin UI)
+	// This code is copied from the PocketBase codebase with just the path changed, https://github.com/pocketbase/pocketbase/blob/1dc5e061b8bbc7374e99c3fe6f153db25e71f860/apis/serve.go#L80-L94
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.GET("/admin/{path...}", apis.Static(ui.DistDirFS, false)).
+			BindFunc(func(e *core.RequestEvent) error {
+				// ignore root path
+				if e.Request.PathValue(apis.StaticWildcardParam) != "" {
+					e.Response.Header().Set("Cache-Control", "max-age=1209600, stale-while-revalidate=86400")
+				}
+
+				// add a default CSP
+				if e.Response.Header().Get("Content-Security-Policy") == "" {
+					e.Response.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' http://127.0.0.1:* https://tile.openstreetmap.org data: blob:; connect-src 'self' http://127.0.0.1:* https://nominatim.openstreetmap.org; script-src 'self' 'sha256-GRUzBA7PzKYug7pqxv5rJaec5bwDCw1Vo6/IXwvD3Tc='")
+				}
+
+				return e.Next()
+			}).
+			Bind(apis.Gzip())
+		return se.Next()
+	})
+
+	// Simple whoami to test authentication
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.GET(APIBasePath+"/whoami", func(e *core.RequestEvent) error {
+			if e.Auth == nil {
+				return e.UnauthorizedError("Authentication failed", "You are not authenticated")
+			}
+			var usersRange *models.Range
+			usersRangeFromContext := e.Get("range")
+			if usersRangeFromContext != nil {
+				usersRange = usersRangeFromContext.(*models.Range)
+			}
+			rangeString := godump.DumpJSONStr(usersRange)
+			userString := godump.DumpJSONStr(e.Auth)
+			return e.String(http.StatusOK, "{\"user\": "+userString+", \"range\": "+rangeString+"}")
+		})
+		return se.Next()
+	})
+
+	if os.Getenv("LUDUS_DEBUG") == "1" {
+		// Serve the console test from the embedded filesystem
+		app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+			logger.Debug("Serving console test page at /console_test")
+			consolePageFSRoot, err := fs.Sub(consolePage, "console_page")
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error serving docs: %v", err))
+				return err
+			}
+			se.Router.GET("/console_test/{path...}", apis.Static(consolePageFSRoot, true))
+			return se.Next()
+		})
+	}
+
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		RegisterRoutesWithPocketBase(se, routes)
+		RegisterPluginPlaceholderRoutes(se)
+		return se.Next()
+	})
+
+	return &app
 }
 
-// Index is the index handler.
-func Index(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"result": fmt.Sprintf("Ludus Server %s - %s", LudusVersion, server.LicenseMessage)})
-}
-
-// Ensure the user is an admin, otherwise returns a 401 response
-// Note: the calling handler must return if the return value of this is false
-// otherwise the user may get two JSON blobs (the error and the actual response)
-func isAdmin(c *gin.Context, setJSON bool) bool {
-	isAdmin := c.GetBool("isAdmin")
-	if !isAdmin {
-		if setJSON {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "This is an admin only endpoint or you queried another user and are not an admin"})
-		}
-		return false
-	}
-	return true
-}
-
-// Updates the date_last_active column in the database for the user making the API call
-// Also logs the API action to a file
-func updateLastActiveTimeAndLog(c *gin.Context) {
-	anyTypeUser, exists := c.Get("thisUser")
-	if !exists {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "error getting this user from context"})
-		return
-	}
-	user, ok := anyTypeUser.(UserObject)
-	if !ok {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "error converting context stored user interface to user object"})
-		return
-	}
-	db.Model(&user).Update("date_last_active", time.Now())
-}
-
-// Validates the API key header and sets the userID, thisUser, and isAdmin value in the gin context
-func validateAPIKey(c *gin.Context) {
-	APIKey := c.Request.Header.Get("X-API-Key")
-
-	if len(APIKey) == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "No API Key provided"})
-		c.Abort()
-		return
-	}
-
-	// Check that we can pull the userID and apikey from what the user provided
-	apiKeySplit := strings.Split(APIKey, ".")
-	if len(apiKeySplit) != 2 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Malformed API Key provided"})
-		c.Abort()
-		return
-	}
-	userID := apiKeySplit[0]
-
-	var user UserObject
-	db.First(&user, "user_id = ?", userID)
-
-	// Note, we stored the hash of the whole key, with userID, so check against that
-	if CheckHash(APIKey, user.HashedAPIKey) {
-		if user.IsAdmin {
-			c.Set("isAdmin", true)
-		} else {
-			c.Set("isAdmin", false)
-		}
-		c.Set("userID", userID)
-		c.Set("thisUser", user)
-		return
-	} else {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication failed"})
-		c.Abort()
-		return
-	}
-}
-
-// This function makes sure the request is to a user endpoint if the server is running as root (i.e. :8081)
-func limitRootEndpoints(c *gin.Context) {
-	if os.Geteuid() == 0 && !strings.HasPrefix(c.Request.URL.Path, "/user") && !strings.HasPrefix(c.Request.URL.Path, "/antisandbox/") {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The :8081 endpoint can only be used for user actions. Use the :8080 endpoint for all other actions."})
-		return
-	}
-}
-
-func RegisterRoutes(router *gin.Engine, routes Routes) {
+func RegisterRoutesWithPocketBase(se *core.ServeEvent, routes PocketBaseRoutes) {
+	// Redirect / to /ui
 	for _, route := range routes {
 		switch route.Method {
 		case http.MethodGet:
-			router.GET(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+			se.Router.GET(APIBasePath+route.Pattern, route.HandlerFunc)
 		case http.MethodPost:
-			router.POST(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+			se.Router.POST(APIBasePath+route.Pattern, route.HandlerFunc)
 		case http.MethodPut:
-			router.PUT(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+			se.Router.PUT(APIBasePath+route.Pattern, route.HandlerFunc)
 		case http.MethodPatch:
-			router.PATCH(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+			se.Router.PATCH(APIBasePath+route.Pattern, route.HandlerFunc)
 		case http.MethodDelete:
-			router.DELETE(route.Pattern, validateAPIKey, updateLastActiveTimeAndLog, limitRootEndpoints, route.HandlerFunc)
+			se.Router.DELETE(APIBasePath+route.Pattern, route.HandlerFunc)
 		}
 	}
 }
 
-var routes = Routes{
+func Version(e *core.RequestEvent) error {
+	return JSONResult(e, http.StatusOK, "Ludus Server "+LudusVersion+" - "+server.LicenseMessage)
+}
+
+var routes = PocketBaseRoutes{
 	{
-		"Index",
+		"Version",
 		http.MethodGet,
 		"/",
-		Index,
+		Version,
+	},
+
+	{
+		"GetLicense",
+		http.MethodGet,
+		"/license",
+		GetLicense,
 	},
 
 	{
@@ -221,9 +356,16 @@ var routes = Routes{
 	},
 
 	{
+		"DeleteRangeVMs",
+		http.MethodDelete,
+		"/range/{rangeID}/vms",
+		DeleteRangeVMs,
+	},
+
+	{
 		"DeleteTemplate",
 		http.MethodDelete,
-		"/template/:templateName",
+		"/template/{templateName}",
 		DeleteTemplate,
 	},
 
@@ -319,20 +461,6 @@ var routes = Routes{
 	},
 
 	{
-		"RangeAccessAction",
-		http.MethodPost,
-		"/range/access",
-		RangeAccessAction,
-	},
-
-	{
-		"RangeAccessList",
-		http.MethodGet,
-		"/range/access",
-		RangeAccessList,
-	},
-
-	{
 		"StartTesting",
 		http.MethodPut,
 		"/testing/start",
@@ -354,9 +482,16 @@ var routes = Routes{
 	},
 
 	{
+		"ProvisionOAuth2User",
+		http.MethodPost,
+		"/user/provision-oauth2",
+		ProvisionOAuth2User,
+	},
+
+	{
 		"DeleteUser",
 		http.MethodDelete,
-		"/user/:userID",
+		"/user/{userID}",
 		DeleteUser,
 	},
 
@@ -372,6 +507,13 @@ var routes = Routes{
 		http.MethodGet,
 		"/ansible",
 		GetRolesAndCollections,
+	},
+
+	{
+		"GetRoleVars",
+		http.MethodPost,
+		"/ansible/role/vars",
+		GetRoleVars,
 	},
 
 	{
@@ -417,6 +559,20 @@ var routes = Routes{
 	},
 
 	{
+		"GetDefaultRangeID",
+		http.MethodGet,
+		"/user/default-range",
+		GetDefaultRangeID,
+	},
+
+	{
+		"SetDefaultRangeID",
+		http.MethodPost,
+		"/user/default-range",
+		SetDefaultRangeID,
+	},
+
+	{
 		"ListAllUsers",
 		http.MethodGet,
 		"/user/all",
@@ -435,13 +591,6 @@ var routes = Routes{
 		http.MethodGet,
 		"/user",
 		ListUser,
-	},
-
-	{
-		"PasswordReset",
-		http.MethodPost,
-		"/user/passwordreset",
-		PasswordReset,
 	},
 
 	{
@@ -491,5 +640,283 @@ var routes = Routes{
 		http.MethodPost,
 		"/testing/update",
 		UpdateVMs,
+	},
+
+	// Group management routes
+	{
+		"CreateGroup",
+		http.MethodPost,
+		"/groups",
+		CreateGroup,
+	},
+
+	{
+		"DeleteGroup",
+		http.MethodDelete,
+		"/groups/{groupName}",
+		DeleteGroup,
+	},
+
+	{
+		"ListGroups",
+		http.MethodGet,
+		"/groups",
+		ListGroups,
+	},
+
+	{
+		"GetUserMemberships",
+		http.MethodGet,
+		"/user/memberships",
+		GetUserMemberships,
+	},
+
+	{
+		"AddUsersToGroup",
+		http.MethodPost,
+		"/groups/{groupName}/users",
+		AddUsersToGroup,
+	},
+
+	{
+		"RemoveUsersFromGroup",
+		http.MethodDelete,
+		"/groups/{groupName}/users",
+		RemoveUsersFromGroup,
+	},
+
+	{
+		"AddRangesToGroup",
+		http.MethodPost,
+		"/groups/{groupName}/ranges",
+		AddRangesToGroup,
+	},
+
+	{
+		"RemoveRangesFromGroup",
+		http.MethodDelete,
+		"/groups/{groupName}/ranges",
+		RemoveRangesFromGroup,
+	},
+
+	{
+		"ListGroupMembers",
+		http.MethodGet,
+		"/groups/{groupName}/users",
+		ListGroupMembers,
+	},
+
+	{
+		"ListGroupRanges",
+		http.MethodGet,
+		"/groups/{groupName}/ranges",
+		ListGroupRanges,
+	},
+
+	// Enhanced range management routes
+	{
+		"CreateRange",
+		http.MethodPost,
+		"/ranges/create",
+		CreateRange,
+	},
+
+	{
+		"AssignRangeToUser",
+		http.MethodPost,
+		"/ranges/assign/{userID}/{rangeID}",
+		AssignRangeToUser,
+	},
+
+	{
+		"RevokeRangeFromUser",
+		http.MethodDelete,
+		"/ranges/revoke/{userID}/{rangeID}",
+		RevokeRangeFromUser,
+	},
+
+	{
+		"ListRangeUsers",
+		http.MethodGet,
+		"/ranges/{rangeID}/users",
+		ListRangeUsers,
+	},
+
+	{
+		"ListUserAccessibleRanges",
+		http.MethodGet,
+		"/ranges/accessible",
+		ListUserAccessibleRanges,
+	},
+
+	// Blueprint management routes
+	{
+		"ListBlueprints",
+		http.MethodGet,
+		"/blueprints",
+		ListBlueprints,
+	},
+
+	{
+		"CreateBlueprintFromRange",
+		http.MethodPost,
+		"/blueprints/from-range",
+		CreateBlueprintFromRange,
+	},
+
+	{
+		"ApplyBlueprintToRange",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/apply",
+		ApplyBlueprintToRange,
+	},
+
+	{
+		"CopyBlueprint",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/copy",
+		CopyBlueprint,
+	},
+
+	{
+		"DeleteBlueprint",
+		http.MethodDelete,
+		"/blueprints/{blueprintID}",
+		DeleteBlueprint,
+	},
+
+	{
+		"GetBlueprintConfig",
+		http.MethodGet,
+		"/blueprints/{blueprintID}/config",
+		GetBlueprintConfig,
+	},
+
+	{
+		"UpdateBlueprintConfig",
+		http.MethodPut,
+		"/blueprints/{blueprintID}/config",
+		UpdateBlueprintConfig,
+	},
+
+	{
+		"ListBlueprintAccessUsers",
+		http.MethodGet,
+		"/blueprints/{blueprintID}/access/users",
+		ListBlueprintAccessUsers,
+	},
+
+	{
+		"ListBlueprintAccessGroups",
+		http.MethodGet,
+		"/blueprints/{blueprintID}/access/groups",
+		ListBlueprintAccessGroups,
+	},
+
+	{
+		"ShareBlueprintWithGroups",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/share/groups",
+		ShareBlueprintWithGroups,
+	},
+
+	{
+		"UnshareBlueprintWithGroups",
+		http.MethodDelete,
+		"/blueprints/{blueprintID}/share/groups",
+		UnshareBlueprintWithGroups,
+	},
+
+	{
+		"ShareBlueprintWithUsers",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/share/users",
+		ShareBlueprintWithUsers,
+	},
+
+	{
+		"UnshareBlueprintWithUsers",
+		http.MethodDelete,
+		"/blueprints/{blueprintID}/share/users",
+		UnshareBlueprintWithUsers,
+	},
+
+	// Migration routes
+	{
+		"MigrateSQLiteToPocketBase",
+		http.MethodPost,
+		"/migrate/sqlite",
+		MigrateSQLiteToPocketBaseHandler,
+	},
+
+	{
+		"GetSDNMigrationStatus",
+		http.MethodGet,
+		"/migrate/sdn/status",
+		GetSDNMigrationStatus,
+	},
+
+	{
+		"MigrateToSDN",
+		http.MethodPost,
+		"/migrate/sdn",
+		MigrateToSDN,
+	},
+
+	{
+		"SetupSDNInfrastructure",
+		http.MethodPost,
+		"/sdn/setup",
+		SetupSDNInfrastructure,
+	},
+
+	// Diagnostics route
+	{
+		"GetDiagnostics",
+		http.MethodGet,
+		"/diagnostics",
+		GetDiagnostics,
+	},
+
+	{
+		"GetConsoleWebsocketTicket",
+		http.MethodGet,
+		"/vm/console/ticket",
+		getConsoleWebsocketTicket,
+	},
+
+	{
+		"GetConsoleWebsocketView",
+		http.MethodGet,
+		"/vm/console/view",
+		vmConsoleWebsocketHandler,
+	},
+
+	{
+		"DestroyVM",
+		http.MethodDelete,
+		"/vm/{vmID}",
+		DestroyVM,
+	},
+
+	{
+		"GetSubscriptionRoles",
+		http.MethodGet,
+		"/ansible/subscription-roles",
+		GetSubscriptionRoles,
+	},
+
+	{
+		"InstallSubscriptionRoles",
+		http.MethodPost,
+		"/ansible/subscription-roles",
+		InstallSubscriptionRoles,
+	},
+
+	{
+		"MoveRoleScope",
+		http.MethodPatch,
+		"/ansible/role/scope",
+		MoveRoleScope,
 	},
 }

@@ -1,4 +1,4 @@
-- name: Create the gitlab-runner user and deploy a Debian 12 VM
+- name: Create the gitlab-runner user and deploy a Debian 13 VM
   hosts: localhost
   tasks:
     - name: Check inventory
@@ -212,7 +212,7 @@
             state: started
 
     - name: Wait for VM to acquire an IP address
-      command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host debian-12-x64-server-ludus-ci
+      command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host debian-13-x64-server-ludus-ci
       register: nodecheck
       changed_when: false
       until: (nodecheck.stdout | default('') | from_json).ansible_host | default('') | ansible.utils.ipaddr
@@ -262,6 +262,10 @@
 
     - name: Install git lfs repo
       ansible.builtin.shell: "curl -s 'https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh' | bash"
+      become: true
+
+    - name: Install rclone
+      ansible.builtin.shell: "curl https://rclone.org/install.sh | bash"
       become: true
 
     - name: Add the user to the host
@@ -362,7 +366,10 @@
 
     - name: Install yarn
       ansible.builtin.shell: npm install --global yarn
-
+      
+    - name: Install bun
+      ansible.builtin.shell: npm install --global bun
+      
 - name: Add gitlab-runner to proxmox and convert the VM to a template
   hosts: localhost
   roles:

@@ -81,6 +81,10 @@
                     "type": "boolean",
                     "description": "Enable dynamic wallpaper for all Windows VMs in the range",
                     "default": true
+                },
+                "target_node": {
+                    "type": "string",
+                    "description": "The Proxmox node to deploy this range to. If not specified, Ludus will select the node with the most available resources (for cluster mode) or use the default node."
                 }
             },
             "required": [
@@ -333,13 +337,13 @@
                     "description": "If set to true, the config defined IP address will be used for the VM when no IP is available via qemu-guest-agent (only use for EDR appliances or anti-sandbox VMs that do not have qemu-guest-agent installed)"
                 },
                 "ram_min_gb": {
-                    "type": "integer",
-                    "minimum": 1,
+                    "type": "number",
+                    "minimum": 0.5,
                     "maximum": 4096,
                     "description": "If defined, the minimum amount of RAM to allocated to the VM in ballooning mode"
                 },
                 "ram_gb": {
-                    "type": "integer",
+                    "type": "number",
                     "minimum": 1,
                     "maximum": 4096,
                     "description": "The amount of RAM to allocate to the VM in in non-ballooning mode, or the max RAM in ballooning mode. Define ram_min_gb to enable ballooning mode."
@@ -415,6 +419,10 @@
                 "secondary_dns_server": {
                     "type": "string",
                     "description": "A secondary DNS server to set for the VM"
+                },
+                "target_node": {
+                    "type": "string",
+                    "description": "Proxmox node to deploy this specific VM to. Overrides the range-level target_node. If not specified, uses the range-level target_node or auto-selects based on available resources."
                 }
             },
             "required": [
@@ -651,13 +659,13 @@
                     "description": "The template that will be the base for this VM (`ludus templates list` to get a list of them)"
                 },
                 "ram_min_gb": {
-                    "type": "integer",
-                    "minimum": 1,
+                    "type": "number",
+                    "minimum": 0.5,
                     "maximum": 4096,
                     "description": "If defined, the minimum amount of RAM to allocated to the VM in ballooning mode"
                 },
                 "ram_gb": {
-                    "type": "integer",
+                    "type": "number",
                     "minimum": 1,
                     "maximum": 4096,
                     "description": "The amount of RAM to allocate to the VM in in non-ballooning mode, or the max RAM in ballooning mode. Define ram_min_gb to enable ballooning mode."
@@ -695,6 +703,10 @@
                         "type": "string",
                         "description": "A full iptables command to run at the end of router setup; example: iptables -I LUDUS_DEFAULTS -i ens18 -s 192.0.2.103 -j ACCEPT" 
                     }
+                },
+                "target_node": {
+                    "type": "string",
+                    "description": "Proxmox node to deploy the router VM to. Overrides the range-level target_node. Cluster only. If not specified, uses the range-level target_node or auto-selects based on available resources."
                 }
             },
             "dependentRequired": {

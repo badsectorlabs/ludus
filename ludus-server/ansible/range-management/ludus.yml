@@ -7,10 +7,13 @@
   tasks:
     - name: Deploy router VM
       ansible.builtin.include_tasks: tasks/proxmox/deploy-vm.yml
+    - name: Wait for the router VM to be available
+      ansible.builtin.include_tasks: tasks/proxmox/wait-for-vm-availability-linux.yml
   vars:
     template_vm_name: "{{ router.template | default('debian-11-x64-server-template') }}"
-    vm_name: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
-    bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - the "WAN" side of the router
+    vm_name: "{{ router.vm_name | default(default_router_vm_name) }}"
+    # In cluster mode (SDN): use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
+    bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
     vm_groups: '"{{ range_id }}","{{ range_id }}_router"'
     is_linux: true
     ram: "{{ router.ram_gb | default(2) }}"
@@ -18,11 +21,12 @@
     cpu_cores: "{{ router.cpus | default(2) }}"
     num_vcpus: "{{ router.cpus | default(2) }}"
     unmanaged: false
+    target_ip: "192.0.2.{{ 100 + range_second_octet }}"  
 
 # This must come before the VLAN setup to install iptables etc
 - name: Configure the router
   tags: [network]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   pre_tasks:
     - name: Check if the .ludus-configured file exists
@@ -61,8 +65,8 @@
     vmbr_number: "{{ range_second_octet + 1000 }}"
 
 - name: Apply all user defined network rules to the router
-  tags: [network]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  tags: [network, access-control]
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
     - name: Set any user defined firewall rules
@@ -70,13 +74,13 @@
 
 - name: Apply all user defined roles to the router (Enterprise)
   tags: [network]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
-    - name: Check for enterprise license
+    - name: Check for enterprise plugin entitlement
       ansible.builtin.assert:
-        that: ludus_enterprise_license is defined and ludus_enterprise_license
-        fail_msg: "The router roles feature requires an enterprise license"
+        that: ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
+        fail_msg: "The router roles feature requires the ENTERPRISE_PLUGIN entitlement"
       when:
         - router.roles is defined
         - router.roles | length > 0
@@ -84,20 +88,20 @@
     - name: Set any user defined firewall rules
       ansible.builtin.include_tasks: tasks/router/user-defined-roles.yml
       when:
-        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/user-defined-roles.yml') != []
         - router.roles is defined
         - router.roles | length > 0
 
 - name: Apply outbound WireGuard to the router (Enterprise)
   tags: [network]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
-    - name: Check for enterprise license
+    - name: Check for enterprise plugin entitlement
       ansible.builtin.assert:
-        that: ludus_enterprise_license is defined and ludus_enterprise_license
-        fail_msg: "The outbound WireGuard feature requires an enterprise license"
+        that: ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
+        fail_msg: "The outbound WireGuard feature requires the ENTERPRISE_PLUGIN entitlement"
       when:
         - router.outbound_wireguard_config is defined
         - router.outbound_wireguard_config | length > 0
@@ -105,13 +109,13 @@
     - name: Clear any outbound WireGuard related configurations
       ansible.builtin.include_tasks: tasks/router/clear-outbound-wireguard.yml
       when:
-        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-outbound-wireguard.yml') != []
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-outbound-wireguard.yml') != []
     - name: Setup outbound WireGuard on the router
       ansible.builtin.include_tasks: tasks/router/setup-outbound-wireguard.yml
       when:
-        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-outbound-wireguard.yml') != []
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-outbound-wireguard.yml') != []
         - router.outbound_wireguard_config is defined
@@ -119,13 +123,13 @@
 
 - name: Apply inbound WireGuard to the router (Enterprise)
   tags: [network]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
-    - name: Check for enterprise license
+    - name: Check for enterprise plugin entitlement
       ansible.builtin.assert:
-        that: ludus_enterprise_license is defined and ludus_enterprise_license
-        fail_msg: "The inbound WireGuard feature requires an enterprise license"
+        that: ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
+        fail_msg: "The inbound WireGuard feature requires the ENTERPRISE_PLUGIN entitlement"
       when:
         - router.inbound_wireguard is defined
         - router.inbound_wireguard.enabled is defined
@@ -134,13 +138,13 @@
     - name: Clear any inbound WireGuard related configurations
       ansible.builtin.include_tasks: tasks/router/clear-inbound-wireguard.yml
       when:
-        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-inbound-wireguard.yml') != []
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-inbound-wireguard.yml') != []
     - name: Setup inbound WireGuard on the router
       ansible.builtin.include_tasks: tasks/router/setup-inbound-wireguard.yml
       when:
-        - ludus_enterprise_license is defined and ludus_enterprise_license
+        - ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-inbound-wireguard.yml') != []
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-inbound-wireguard.yml') != []
         - router.inbound_wireguard is defined
@@ -221,6 +225,46 @@
       loop: "{{ ludus }}"
       when: item.unmanaged is not defined or (item.unmanaged is defined and not item.unmanaged)
 
+- name: Ensure all VMs have an IP address
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect VMs without an IP address
+      ansible.builtin.set_fact:
+        vms_without_ip: "{{ vms_without_ip | default([]) + [item] }}"
+      loop: "{{ range_vms | default([]) }}"
+      when: hostvars[item].ansible_host is undefined
+
+    - name: Display VMs without an IP address
+      ansible.builtin.debug:
+        msg: "The following VMs do not have an IP address and will be powered on: {{ vms_without_ip }}"
+      when: vms_without_ip | default([]) | length > 0
+
+    - name: Power on VMs without an IP address
+      ansible.builtin.include_tasks: tasks/proxmox/power-on-vm.yml
+      vars:
+        vm_name: "{{ item }}"
+      loop: "{{ vms_without_ip | default([]) }}"
+
+    # The 'until' is a way to fail if the VM has a self-assigned 169.254.0.0/16 or a Docker 172.17.0.0/16 IP
+    # We accept any IP that starts with 10.
+    - name: Wait for VMs to acquire an IP address
+      ansible.builtin.command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host {{ item }}
+      register: nodecheck
+      changed_when: false
+      until: >
+        nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('') |
+          regex_search('^(?!169\.254|172\.17)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') is not none
+        and
+          (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 10
+      retries: 30
+      delay: 5
+      loop: "{{ vms_without_ip | default([]) }}"
+
+    - name: Refresh inventory
+      ansible.builtin.meta: refresh_inventory
+      when: vms_without_ip | default([]) | length > 0
+
 - name: Configure IP and Hostname for all VMs
   tags: [assign-ip]
   hosts: "{{ hostvars['localhost']['range_vms'] | default([]) }}"
@@ -241,7 +285,7 @@
 # ==========================================================
 - name: Add all hosts to DNS on the router
   tags: [dns-rewrites]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   tasks:
     - name: Add host to router DNS
       ansible.builtin.include_tasks: tasks/router/add-host-to-router-dns.yml
@@ -259,7 +303,7 @@
 
 - name: Add custom DNS rewrite rules
   tags: [dns-rewrites]
-  hosts: "{{ router.vm_name | default(range_id + '-router-debian11-x64') }}"
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   tasks:
     - name: Add user-defined rewrites to the router
       ansible.builtin.include_tasks: tasks/router/add-user-defined-rewrites-to-router.yml
@@ -370,8 +414,13 @@
   vars:
     primary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan | string + '.254') }}"
     secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
+<<<<<<< HEAD
     netbios_name: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
     fqdn_tail: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
+=======
+    netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
+    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
+>>>>>>> ludus-2
     domain_admin: "{{ defaults.ad_domain_admin }}"
     domain_admin_password: "{{ defaults.ad_domain_admin_password }}"
     domain_safe_mode_password: "{{ defaults.ad_domain_safe_mode_password }}"
@@ -727,9 +776,31 @@
         - ludus_domain_fqdn is defined
     # End set standard Ludus variables
 
+    - name: Ensure /etc/docker directory exists if host is Linux and MTU is less than 1500
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        mode: '0755'
+      when:
+        - ansible_system == 'Linux'
+        - ansible_default_ipv4 is defined
+        - ansible_default_ipv4.mtu | int < 1500
+
+    # Dynamically inject the host's MTU (e.g., 1450) into the docker config
+    # This is needed in cluster deployments where the VXLAN network MTU is 1450 but Docker sets the MTU to 1500 by default
+    - name: Pre-configure Docker MTU to match host default interface if host is Linux and MTU is less than 1500
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: "{{ {'mtu': ansible_default_ipv4.mtu} | to_nice_json }}"
+        mode: '0644'
+      when:
+        - ansible_system == 'Linux'
+        - ansible_default_ipv4 is defined
+        - ansible_default_ipv4.mtu | int < 1500
+
 - name: Run the user-defined roles playbook
   tags: [user-defined-roles]
-  ansible.builtin.import_playbook: "{{ lookup('env','ANSIBLE_HOME') }}/user-defined-roles.yml"
+  ansible.builtin.import_playbook: "{{ ludus_install_path }}/ranges/{{ range_id }}/user-defined-roles.yml"
 
 # ==========================================================
 # User management
@@ -762,7 +833,8 @@
       vars:
         template_vm_name: debian-11-x64-server-template
         vm_name: ADMIN-nexus-3-oss
-        bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - 192.0.2.0/24
+        # In cluster mode: use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
+        bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
         vm_groups: '"admin"'
         is_linux: true
         is_windows: false
@@ -782,7 +854,8 @@
     - name: Configure IP and Hostname
       ansible.builtin.include_tasks: tasks/proxmox/configure-ip-and-hostname.yml
       vars:
-        bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - 192.0.2.0/24
+        # In cluster mode: use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
+        bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
         static_ip: "192.0.2.2"
         cidr_netmask: "24"
         default_gateway: "192.0.2.254"
@@ -924,7 +997,8 @@
       vars:
         template_vm_name: debian-12-x64-server-template
         vm_name: ADMIN-share
-        bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - 192.0.2.0/24
+        # In cluster mode: use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
+        bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
         vm_groups: '"admin"'
         is_linux: true
         is_windows: false
@@ -944,7 +1018,8 @@
     - name: Configure IP and Hostname
       ansible.builtin.include_tasks: tasks/proxmox/configure-ip-and-hostname.yml
       vars:
-        bridge_interface: "{{ ludus_nat_interface }}" # This is the NAT'd vmbr - 192.0.2.0/24
+        # In cluster mode: use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
+        bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
         static_ip: "192.0.2.3"
         cidr_netmask: "24"
         default_gateway: "192.0.2.254"
@@ -1069,10 +1144,7 @@
         src: etc-hosts.j2
         dest: "{{ ludus_install_path }}/users/{{ username }}/etc-hosts"
       # Skip this when doing a destroy-range, but run for every other tag
-      when: 
-        - "'destroy-range' not in ansible_run_tags"
-        - 'ansible_limit is undefined'
-        - 'range_id is defined and range_id in groups' # This will error if the user doesn't have any VMs in their range, like deploying a nexus cache with an empty range.
+      when: "'destroy-range' not in ansible_run_tags and ansible_limit is undefined"
 
 # ==========================================================
 # Alert the user on failed office install

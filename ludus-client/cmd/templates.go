@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"ludus/logger"
 	"ludus/rest"
+	"ludusapi/dto"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/olekukonko/tablewriter"
@@ -19,6 +19,7 @@ var (
 	follow              bool
 	tail                int
 	templateName        string
+	templateNames       []string
 	templateParallel    int
 	templateDirectory   string
 	verboseTemplateLogs bool
@@ -40,18 +41,16 @@ var templatesListCmd = &cobra.Command{
 
 		var responseJSON []byte
 		var success bool
-		if userID != "" {
-			responseJSON, success = rest.GenericGet(client, fmt.Sprintf("/templates?userID=%s", userID))
-		} else {
-			responseJSON, success = rest.GenericGet(client, "/templates")
-		}
+
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/templates"))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
 		type TemplateStatus struct {
-			Name  string
-			Built bool
+			Name   string
+			Built  bool
+			Status string
 		}
 		var templateStatusArray []TemplateStatus
 		err := json.Unmarshal(responseJSON, &templateStatusArray)
@@ -61,10 +60,20 @@ var templatesListCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Template", "Built"})
+		table.SetHeader([]string{"Template", "Status"})
 
 		for _, template := range templateStatusArray {
-			table.Append([]string{template.Name, strings.ToUpper(strconv.FormatBool(template.Built))})
+			var statusString string
+			if template.Status == "building" {
+				statusString = "🚧 BUILDING"
+			} else {
+				if template.Built {
+					statusString = "✅ BUILT"
+				} else {
+					statusString = "❌ NOT BUILT"
+				}
+			}
+			table.Append([]string{template.Name, statusString})
 		}
 
 		// Print table
@@ -84,16 +93,17 @@ var templatesBuildCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		requestBody := fmt.Sprintf(`{
-			"template": "%s",
-			"parallel": %d
-		  }`, templateName, templateParallel)
-
-		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/templates?userID=%s", userID), requestBody)
-		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/templates", requestBody)
+		// If no name is provided, build all templates
+		if len(templateNames) == 0 {
+			templateNames = []string{"all"}
 		}
+
+		requestBody := dto.BuildTemplatesRequest{
+			Templates: templateNames,
+			Parallel:  templateParallel,
+		}
+
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/templates"), requestBody)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -105,7 +115,7 @@ var templatesBuildCmd = &cobra.Command{
 }
 
 func setupTemplatesBuildCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&templateName, "name", "n", "all", "the name of the template to build")
+	command.Flags().StringSliceVarP(&templateNames, "names", "n", []string{}, "template names to build separated by commas (use 'all' to build all templates)")
 	command.Flags().IntVarP(&templateParallel, "parallel", "p", 1, "build templates in parallel (speeds things up). Specify what number of templates to build at a time")
 }
 
@@ -120,17 +130,13 @@ var templatesStatusCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		responseJSON, success = rest.GenericGet(client, "/templates/status")
+		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/templates/status"))
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
 
-		type PackerProcessItem struct {
-			Name string
-			User string
-		}
-		var templatesInProgress []PackerProcessItem
+		var templatesInProgress []dto.GetTemplatesStatusResponseItem
 
 		err := json.Unmarshal(responseJSON, &templatesInProgress)
 		if err != nil {
@@ -145,7 +151,7 @@ var templatesStatusCmd = &cobra.Command{
 			table.SetHeader([]string{"Template Being Built", "User"})
 
 			for _, item := range templatesInProgress {
-				table.Append([]string{item.Name, item.User})
+				table.Append([]string{item.Template, item.User})
 
 			}
 
@@ -163,16 +169,13 @@ var templateLogsCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, false, verbose, LudusVersion)
 
 		var apiString string
+		apiString = buildURLWithRangeAndUserID("/templates/logs")
 		if follow {
 			var newLogs string
 			var cursor int = 0
-			if userID != "" {
-				apiString = fmt.Sprintf("/templates/logs?userID=%s", userID)
-			} else {
-				apiString = "/templates/logs"
-			}
+
 			for {
-				apiStringWithCursor := fmt.Sprintf("%s?cursor=%d", apiString, cursor)
+				apiStringWithCursor := addQueryParameterToURL(apiString, "cursor", strconv.Itoa(cursor))
 				responseJSON, success := rest.GenericGet(client, apiStringWithCursor)
 				if !success {
 					return
@@ -184,14 +187,8 @@ var templateLogsCmd = &cobra.Command{
 				time.Sleep(2 * time.Second)
 			}
 		} else {
-			if userID != "" && tail > 0 {
-				apiString = fmt.Sprintf("/templates/logs?userID=%s&tail=%d", userID, tail)
-			} else if userID == "" && tail > 0 {
-				apiString = fmt.Sprintf("/templates/logs?tail=%d", tail)
-			} else if userID != "" {
-				apiString = fmt.Sprintf("/templates/logs?userID=%s", userID)
-			} else {
-				apiString = "/templates/logs"
+			if tail > 0 {
+				apiString = addQueryParameterToURL(apiString, "tail", strconv.Itoa(tail))
 			}
 			responseJSON, success := rest.GenericGet(client, apiString)
 			if didFailOrWantJSON(success, responseJSON) {
@@ -242,11 +239,7 @@ var templateAddCmd = &cobra.Command{
 			logger.Logger.Fatalf("Could not tar directory: %s, error: %s\n", templateDirectory, err.Error())
 		}
 		filename := filepath.Base(templateDirectory)
-		if userID != "" {
-			responseJSON, success = rest.PostFileAndForce(client, fmt.Sprintf("/templates?userID=%s", userID), roleTar.Bytes(), filename, force)
-		} else {
-			responseJSON, success = rest.PostFileAndForce(client, "/templates", roleTar.Bytes(), filename, force)
-		}
+		responseJSON, success = rest.PostFileAndForce(client, buildURLWithRangeAndUserID("/templates"), roleTar.Bytes(), filename, force)
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -272,11 +265,7 @@ var templatesAbortCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 
-		if userID != "" {
-			responseJSON, success = rest.GenericJSONPost(client, fmt.Sprintf("/templates/abort?userID=%s", userID), "")
-		} else {
-			responseJSON, success = rest.GenericJSONPost(client, "/templates/abort", "")
-		}
+		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/templates/abort"), "")
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -303,11 +292,7 @@ var templatesRemoveCmd = &cobra.Command{
 			logger.Logger.Fatal("You must specify a template name to delete")
 		}
 
-		if userID != "" {
-			responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/template/%s?userID=%s", templateName, userID))
-		} else {
-			responseJSON, success = rest.GenericDelete(client, fmt.Sprintf("/template/%s", templateName))
-		}
+		responseJSON, success = rest.GenericDelete(client, buildURLWithRangeAndUserID(fmt.Sprintf("/template/%s", templateName)))
 
 		if didFailOrWantJSON(success, responseJSON) {
 			return

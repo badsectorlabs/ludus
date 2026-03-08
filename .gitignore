@@ -1,4 +1,6 @@
 repomix*.txt
+repomix*.xml
+ludus-gui
 ludus-antisandbox-plugin
 ludus-enterprise-plugin
 ### VScode ###

@@ -51,13 +51,6 @@ variable "proxmox_url" {
 variable "proxmox_host" {
   type = string
 }
-variable "proxmox_username" {
-  type = string
-}
-variable "proxmox_password" {
-  type      = string
-  sensitive = true
-}
 variable "proxmox_storage_pool" {
   type = string
 }
@@ -122,6 +115,7 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
     iso_url          = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.240-1/virtio-win-0.1.240.iso"
     iso_storage_pool = "${var.iso_storage_pool}"
     unmount          = true
+    iso_download_pve  = true
   }
   boot_iso {
     type              = "ide"
@@ -155,9 +149,6 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
   }
   pool                     = "${var.proxmox_pool}"
   insecure_skip_tls_verify = "${var.proxmox_skip_tls_verify}"
-  iso_checksum             = "${var.iso_checksum}"
-  iso_url                  = "${var.iso_url}"
-  iso_storage_pool         = "${var.iso_storage_pool}"
   memory                   = "${var.vm_memory}"
   network_adapters {
     bridge = "${var.ludus_nat_interface}"
@@ -165,10 +156,8 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
   }
   node                 = "${var.proxmox_host}"
   os                   = "${var.os}"
-  password             = "${var.proxmox_password}"
   proxmox_url          = "${var.proxmox_url}"
   template_description = "${local.template_description}"
-  username             = "${var.proxmox_username}"
   vm_name              = "${var.vm_name}"
   winrm_insecure       = true
   winrm_password       = "${var.winrm_password}"
