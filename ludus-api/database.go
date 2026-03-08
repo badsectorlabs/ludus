@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"log/slog"
 	"net/http"
 	"os"
 	"slices"
@@ -55,7 +54,7 @@ func InitDb() {
 		}
 		// Check if there was a previous sqlite db, and if so, run the migrations
 		if FileExists(fmt.Sprintf("%s/ludus.db", ludusInstallPath)) && !FileExists(fmt.Sprintf("%s/install/.sqlite_db_migrated", ludusInstallPath)) {
-			slog.Info("SQLite database found, running migrations")
+			logger.Info("SQLite database found, running migrations")
 			if err := MigrateFromSQLiteToPocketBase(); err != nil {
 				logger.Error(fmt.Sprintf("SQLite migration failed: %v", err))
 				os.Exit(2)
