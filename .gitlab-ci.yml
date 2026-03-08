@@ -1977,7 +1977,7 @@ cluster install kickoff:
     LUDUS_BUILD_TYPE: clean-cluster
     LUDUS_INSTALL_STEP: kickoff
     GIT_STRATEGY: none
-  timeout: 10m
+  timeout: 20m
   script:
     - cd binaries
     - |
