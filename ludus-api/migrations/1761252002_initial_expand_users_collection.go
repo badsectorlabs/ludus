@@ -98,6 +98,10 @@ func init() {
 				Name:     "defaultRangeID",
 				Required: false,
 			},
+			&core.BoolField{
+				Name:     "hasCompletedOnboarding",
+				Required: false,
+			},
 		)
 
 		// enable password auth and disable OTP
