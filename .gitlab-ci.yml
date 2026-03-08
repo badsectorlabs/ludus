@@ -2334,7 +2334,7 @@ keygen-upload:
     - keygen upload ludus-client_windows-386.exe --release ${THIS_VERSION} --platform 'windows' --arch '386' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-386.exe
     - keygen upload ludus-client_windows-arm64.exe --release ${THIS_VERSION} --platform 'windows' --arch 'arm64' --filetype 'exe' --filename ${THIS_VERSION}/ludus-client_windows-arm64.exe
     - keygen publish --release ${THIS_VERSION}
-    - keygen untag --release 'latest'
+    - keygen untag --release 'latest' || true
     - keygen tag 'latest' --release ${THIS_VERSION}
     # We don't upload the server to keygen because it's large and there is no built in update mechanism yet
     # - export KEYGEN_PRODUCT_ID=[GUID for ludus-server]
