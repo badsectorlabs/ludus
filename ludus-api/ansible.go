@@ -363,7 +363,11 @@ func checkRoleExists(e *core.RequestEvent, roleName string) (bool, error) {
 		collectionCmd.Env = os.Environ()
 		collectionCmd.Env = append(collectionCmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 
-		collectionOutput, err := collectionCmd.CombinedOutput()
+		var stdoutBuf bytes.Buffer
+		collectionCmd.Stdout = &stdoutBuf
+		collectionCmd.Stderr = io.Discard
+		err := collectionCmd.Run()
+		collectionOutput := stdoutBuf.Bytes()
 		if err != nil {
 			return false, errors.New("Unable to get the ansible collections: " + err.Error())
 		}
@@ -372,7 +376,7 @@ func checkRoleExists(e *core.RequestEvent, roleName string) (bool, error) {
 		var data map[string]map[string]map[string]string
 		err = json.Unmarshal(collectionOutput, &data)
 		if err != nil {
-			return false, errors.New("Unable to get parse ansible collections JSON: " + err.Error())
+			return false, errors.New("Unable to parse ansible collections JSON: " + err.Error())
 		}
 
 		// Iterate through the data
@@ -404,7 +408,11 @@ func checkRoleExists(e *core.RequestEvent, roleName string) (bool, error) {
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_ROLES_PATH=%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath))
-	roleOutput, err := cmd.CombinedOutput()
+	var stdoutBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = io.Discard
+	err := cmd.Run()
+	roleOutput := stdoutBuf.Bytes()
 	if err != nil {
 		return false, fmt.Errorf("unable to get the ansible roles: %w", err)
 	}

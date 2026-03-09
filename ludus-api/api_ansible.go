@@ -39,7 +39,11 @@ func GetRolesAndCollections(e *core.RequestEvent) error {
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_ROLES_PATH=%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath))
 
-	roleOutput, err := cmd.CombinedOutput()
+	var stdoutBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = io.Discard
+	err := cmd.Run()
+	roleOutput := stdoutBuf.Bytes()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Unable to get the ansible roles: "+err.Error()+"; Output was: "+string(roleOutput))
 	}
@@ -92,7 +96,11 @@ func GetRolesAndCollections(e *core.RequestEvent) error {
 	collectionCmd := exec.Command("ansible-galaxy", "collection", "list", "--format", "json")
 	collectionCmd.Env = os.Environ()
 	collectionCmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
-	collectionOutput, err := collectionCmd.CombinedOutput()
+	var collectionStdout bytes.Buffer
+	collectionCmd.Stdout = &collectionStdout
+	collectionCmd.Stderr = io.Discard
+	err = collectionCmd.Run()
+	collectionOutput := collectionStdout.Bytes()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Unable to get the ansible collections: "+err.Error())
 	}
@@ -101,7 +109,7 @@ func GetRolesAndCollections(e *core.RequestEvent) error {
 	var data map[string]map[string]map[string]string
 	err = json.Unmarshal(collectionOutput, &data)
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, "Unable to get parse ansible collections JSON: "+err.Error())
+		return JSONError(e, http.StatusInternalServerError, "Unable to parse ansible collections JSON: "+err.Error())
 	}
 
 	// Iterate through the data
