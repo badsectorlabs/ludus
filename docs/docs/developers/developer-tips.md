@@ -45,7 +45,7 @@ The `dev.sh` script can set these automatically with flags `-d`, `-D`, `-P` and 
 
 ```shell-session
 # terminal-command-ludus-root
-set-environment LUDUS_DEBUG=1
+systemctl set-environment LUDUS_DEBUG=1
 # terminal-command-ludus-root
 systemctl restart ludus ludus-admin
 ```
@@ -61,7 +61,7 @@ To unset the variables, use
 
 ```shell-session
 # terminal-command-ludus-root
-unset-environment LUDUS_DEBUG
+systemctl unset-environment LUDUS_DEBUG
 # terminal-command-ludus-root
 systemctl restart ludus ludus-admin
 ```
