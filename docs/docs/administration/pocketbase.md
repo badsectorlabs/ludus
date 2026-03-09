@@ -11,7 +11,7 @@ To do this, the administrator can enable the PocketBase UI by running the follow
 
 ```shell-session
 #terminal-command-ludus-root
-set-environment LUDUS_ENABLE_SUPERADMIN=ill-be-careful
+systemctl set-environment LUDUS_ENABLE_SUPERADMIN=ill-be-careful
 #terminal-command-ludus-root
 systemctl restart ludus
 ```
