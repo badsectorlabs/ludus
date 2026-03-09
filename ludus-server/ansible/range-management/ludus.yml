@@ -414,13 +414,8 @@
   vars:
     primary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan | string + '.254') }}"
     secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
-<<<<<<< HEAD
-    netbios_name: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
-    fqdn_tail: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
-=======
     netbios_name: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[0] }}"
     fqdn_tail: "{{ (ludus | selectattr('vm_name', 'match', inventory_hostname))[0].domain.fqdn.split('.')[1:] | join('.') }}"
->>>>>>> ludus-2
     domain_admin: "{{ defaults.ad_domain_admin }}"
     domain_admin_password: "{{ defaults.ad_domain_admin_password }}"
     domain_safe_mode_password: "{{ defaults.ad_domain_safe_mode_password }}"
