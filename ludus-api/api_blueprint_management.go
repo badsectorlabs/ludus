@@ -330,7 +330,7 @@ func readBlueprintConfigBytes(e *core.RequestEvent, blueprintRecord *core.Record
 	defer filesystemClient.Close()
 
 	filePath := path.Join(blueprintRecord.BaseFilesPath(), configFileName)
-	fileReader, err := filesystemClient.GetFile(filePath)
+	fileReader, err := filesystemClient.GetReader(filePath)
 	if err != nil {
 		return nil, err
 	}
