@@ -83,7 +83,7 @@
 
 - name: Wait for the host's control interface (WinRM via HTTPS) to come up
   ansible.builtin.wait_for:
-    host: "{{ inventory_hostname }}"
+    host: "{{ ansible_host }}"
     port: 5986
     delay: 10
     state: started
