@@ -84,7 +84,6 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	// If there is a userID query parameter, and the userID is different from the userID of the authenticated user,
 	// use the userID to set the user in the context if the authenticated user is an admin
 	requestedUserID := e.Request.URL.Query().Get("userID")
-	impersonatedUser := &models.User{}
 	if requestedUserID != "" && requestedUserID != e.Auth.GetString("userID") {
 		if e.Auth.GetBool("isAdmin") {
 			var err error
@@ -92,7 +91,6 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 			if err != nil {
 				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("User %s from query parameter not found", requestedUserID))
 			}
-			impersonatedUser.SetProxyRecord(userRecord)
 		} else {
 			return JSONError(e, http.StatusUnauthorized, "You are not an admin and cannot impersonate other users")
 		}
@@ -106,19 +104,18 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 
 	// Check if the user is requesting a specific range
 	rangeID := e.Request.URL.Query().Get("rangeID")
-	if rangeID == "" && requestedUserID != "" {
-		// The user is impersonating another user, but not specifying a range, so we need to get the default range for the impersonated user
-		rangeID = impersonatedUser.GetString("defaultRangeID")
-	} else if rangeID != "" {
+	if rangeID != "" {
 		rangeNumber, err := GetRangeNumberFromRangeID(rangeID)
 		if err != nil {
 			return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", rangeID, err))
 		}
-		if !HasRangeAccess(e, user.UserId(), rangeNumber) && !e.Auth.GetBool("isAdmin") {
-			return JSONError(e, http.StatusForbidden, fmt.Sprintf("User %s does not have access to range %s", e.Auth.GetString("userID"), rangeID))
+		if !HasRangeAccess(e, user.UserId(), rangeNumber) && !user.IsAdmin() {
+			return JSONError(e, http.StatusForbidden, fmt.Sprintf("User %s does not have access to range %s", user.UserId(), rangeID))
 		}
 	} else {
-		rangeID = e.Auth.GetString("defaultRangeID")
+		// Since the user is set above to either the authenticated user or the impersonated user, we can use the user's default range ID and it will
+		// correctly resolve to the default range for the impersonated user if this request is impersonating another user
+		rangeID = user.DefaultRangeId()
 		// Allow ROOT to bypass the default range check
 		if rangeID == "" && e.Auth.GetString("userID") != "ROOT" {
 			return JSONError(e, http.StatusNotFound, "User has no default range and no rangeID was provided in the request")
