@@ -522,3 +522,8 @@ type SDNStatus struct {
 	LudusNATInterface  string `json:"ludus_nat_interface"`
 	Message            string `json:"message"`
 }
+
+type VersionResponse struct {
+	Version string `json:"version"`
+	Result  string `json:"result"`
+}

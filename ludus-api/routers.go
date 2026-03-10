@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"ludusapi/dto"
 	"ludusapi/models"
 	"net/http"
 	"net/http/httputil"
@@ -281,7 +282,12 @@ func RegisterRoutesWithPocketBase(se *core.ServeEvent, routes PocketBaseRoutes) 
 }
 
 func Version(e *core.RequestEvent) error {
-	return JSONResult(e, http.StatusOK, "Ludus Server "+LudusVersion+" - "+server.LicenseMessage)
+
+	response := dto.VersionResponse{
+		Version: LudusVersion,
+		Result:  "Ludus Server " + LudusVersion + " - " + server.LicenseMessage,
+	}
+	return e.JSON(http.StatusOK, response)
 }
 
 var routes = PocketBaseRoutes{
