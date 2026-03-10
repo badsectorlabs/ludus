@@ -46,7 +46,15 @@ paths:
                 properties:
                   result:
                     type: string
-                    example: Ludus Server v1.0.0+abc123a
+                    example: Ludus Version 2.0.0+abc1234
+                  version:
+                    type: string
+                    pattern: \d+\.\d+.\d+
+                required:
+                  - version
+              example:
+                result: Ludus Server 2.0.0+abc123a
+                version: 2.0.0
           headers: {}
         '401':
           description: ''
@@ -494,51 +502,6 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /ansible:
-    get:
-      summary: Retrieve available Ansible roles and collections
-      deprecated: false
-      description: |
-        Returns available Ansible roles installed for this
-        user on the ludus host
-      operationId: getRolesAndCollections
-      tags:
-        - Ansible Management
-      parameters:
-        - name: userID
-          in: query
-          description: >-
-            pass an optional userID to get roles and collections for a specific
-            user
-          required: false
-          schema:
-            $ref: '#/components/schemas/userID'
-      responses:
-        '200':
-          description: Available roles and collections
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    name:
-                      type: string
-                      example: geerlingguy.java
-                    version:
-                      type: string
-                      example: 2.3.2
-                    type:
-                      type: string
-                      example: role
-                    global:
-                      type: boolean
-                      example: false
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
   /ansible/role/scope:
     patch:
       summary: Move or copy roles between global and local scopes
@@ -643,6 +606,51 @@ paths:
                   error:
                     type: string
                     example: Internal server error
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /ansible:
+    get:
+      summary: Retrieve available Ansible roles and collections
+      deprecated: false
+      description: |
+        Returns available Ansible roles installed for this
+        user on the ludus host
+      operationId: getRolesAndCollections
+      tags:
+        - Ansible Management
+      parameters:
+        - name: userID
+          in: query
+          description: >-
+            pass an optional userID to get roles and collections for a specific
+            user
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: Available roles and collections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      example: geerlingguy.java
+                    version:
+                      type: string
+                      example: 2.3.2
+                    type:
+                      type: string
+                      example: role
+                    global:
+                      type: boolean
+                      example: false
           headers: {}
       security:
         - JWT: []
