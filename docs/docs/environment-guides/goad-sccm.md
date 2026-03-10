@@ -56,7 +56,7 @@ GOAD will deploy to whatever user you currently "are" (based on exported Ludus A
 ```bash
 git clone https://github.com/Orange-Cyberdefense/GOAD.git
 cd GOAD
-sudo apt install python3.11-venv
+sudo apt install python3.11-venv || sudo apt install python3.13-venv
 export LUDUS_API_KEY='myapikey'  # put your Ludus admin api key here
 ./goad.sh -p ludus
 GOAD/ludus/local > check
