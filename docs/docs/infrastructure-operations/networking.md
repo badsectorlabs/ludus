@@ -72,6 +72,8 @@ ludus:
 
 For basic setups the defaults, allow internet and allow inter-vlan-routing, will be suitable for many users and no `network` key needs to be set in the user's config.
 
+If you want to get callbacks from range VMs to WireGuard clients, see **[Getting callbacks to WireGuard clients](../troubleshooting/callbacks-to-wireguard.md)**.
+
 Users are able to define custom firewall rules that will always be enforced regardless of testing status. Testing rules will be inserted above user defined rules and take precedence over them.
 Rules are defined in the `network.rules` object.
 Two keys exists to set the default for traffic leaving the network: `external_default`, and traffic between VLANs: `inter_vlan_default`. By default both of these values are `ACCEPT`.

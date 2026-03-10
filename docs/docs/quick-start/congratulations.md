@@ -6,9 +6,11 @@ sidebar_position: 7
 
 You have just learned the **basics of Ludus** and and worked with the **default configuration**.
 
+If you want to get callbacks from range VMs to WireGuard clients, see **[Getting callbacks to WireGuard clients](../troubleshooting/callbacks-to-wireguard.md)**.
+
 Ludus has **much more to offer**! You should review the **[security](../administration/security)** page to understand what is exposed.
 
-Have **5 more minutes**? Take a look at **[configuration](../configuration.mdx)** and the **[Ludus CLI](../using-ludus/cli)**.
+Have **5 more minutes**? Take a look at **[configuration](../configuration.mdx)**.
 
 Anything **unclear** or **buggy** in this tutorial? [Please report it!](https://gitlab.com/badsectorlabs/ludus/-/issues)
 

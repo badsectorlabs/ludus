@@ -69,16 +69,16 @@
     comment: "Default: Deny traffic in on external interface"
     numeric: true
 
-- name: Allow the user's WireGuard IP to hit this router from the outside
+- name: Set the default WireGuard subnet rule
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
-    source: "198.51.100.{{ range_second_octet }}"
-    in_interface: "{{ router_external_interface }}"
+    source: "10.{{ range_second_octet }}.0.0/16"
+    destination: "198.51.100.0/24"
     protocol: all
-    jump: ACCEPT
+    jump: "{{ network.wireguard_vlan_default | default('REJECT') }}"
     state: present
     action: insert
-    comment: "Default: WireGuard Client access rule"
+    comment: "User Default: WireGuard Subnet Rule"
     numeric: true
 
 # Somehow the access_grants_array is being set to NoneType, so we need to set it to an empty list if it is NoneType
@@ -101,17 +101,16 @@
     numeric: true
   loop: "{{ range_access_grants_array | default([]) | list }}"
 
-- name: Set the default WireGuard subnet rule
+- name: Reject traffic that starts in the range and is destined for the Ludus host's WireGuard IP, regardless of the wireguard_vlan_default rule
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
     source: "10.{{ range_second_octet }}.0.0/16"
-    destination: "198.51.100.0/24"
+    destination: "198.51.100.1"
     protocol: all
-    jump: "{{ network.wireguard_vlan_default | default('ACCEPT') }}"
+    jump: REJECT
     state: present
     action: insert
-    comment: "User Default: WireGuard Subnet Rule"
-    numeric: true
+    comment: "Default: Deny traffic in on WireGuard interface"
 
 - name: Set the default allow related/established out to the user's WireGuard IP
   ansible.builtin.iptables:

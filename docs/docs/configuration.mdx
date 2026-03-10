@@ -150,7 +150,7 @@ router:
 network: 
   inter_vlan_default: REJECT     # The default rule to apply to traffic between VLANs. Default: ACCEPT
   external_default: ACCEPT       # The default rule to apply to traffic leaving the range out to the internet. Default: ACCEPT
-  wireguard_vlan_default: ACCEPT # The default rule to apply to traffic leaving the range to clients connected via WireGuard. Default: ACCEPT
+  wireguard_vlan_default: ACCEPT # The default rule to apply to traffic leaving the range to clients connected via WireGuard. Default: REJECT
   always_blocked_networks:       # Define any networks that ranges should never be able to reach (i.e. the LAN where the Ludus host is located)
     - 192.168.1.0/24             # entries must be in CIDR format
   rules: # Specify rules to restrict or allow based on inter_vlan_default. Default: allow all traffic
