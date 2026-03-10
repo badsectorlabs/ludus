@@ -1,5 +1,6 @@
 .claude/settings.local.json
 .claude/skills
+.claude/hooks/
 
 repomix*.txt
 repomix*.xml
