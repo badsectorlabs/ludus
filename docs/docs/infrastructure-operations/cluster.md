@@ -138,6 +138,8 @@ iface ludusnat
 8. Run `ifdown vmbr1000`
 9. Run `ludus migrate sdn run`
 10. Check the routing table with `ip route show` and make sure all `10.x.0.0/16` routes end in `dev ludusnat`. If not remove them and re-add them
+11. VMs that have been migrated to the SDN will still have their old MTU and should be rebooted.
+12. Manually move the VMs in the `ADMIN` pool to the `ludusnat` interface and reboot to fix their MTU.
 
 ```
 ip route del 10.1.0.0/16 via 192.0.2.101 dev vmbr1000
