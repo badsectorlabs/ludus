@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -47,6 +48,13 @@ var reservedUserIDs = []string{"ADMIN", "ROOT", "CICD", "SHARED", "0"}
 
 // initialAdminUserIDRegex matches valid user IDs: ^[A-Za-z0-9]{1,20}$
 var initialAdminUserIDRegex = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
+
+// userExistsOnHostSystem checks if a user exists on the host (same logic as ludus-api).
+// Used to validate the initial admin display name, since proxmoxUsername is derived from it.
+func userExistsOnHostSystem(username string) bool {
+	cmd := exec.Command("/usr/bin/id", username)
+	return cmd.Run() == nil
+}
 
 type Styles struct {
 	Base,
@@ -302,6 +310,10 @@ func NewModel() Model {
 				Validate(func(s string) error {
 					if s == "" {
 						return fmt.Errorf("Initial admin name cannot be empty")
+					}
+					proxmoxUsername := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), " ", "-")
+					if userExistsOnHostSystem(proxmoxUsername) {
+						return fmt.Errorf("username %s already exists on this host (derived from display name)", proxmoxUsername)
 					}
 					return nil
 				}).
