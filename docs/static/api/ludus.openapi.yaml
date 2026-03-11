@@ -2376,7 +2376,7 @@ paths:
           schema:
             type: integer
             example: 100
-        - name: resumeline
+        - name: cursor
           in: query
           description: ''
           required: false
@@ -3844,7 +3844,7 @@ paths:
           schema:
             type: integer
             example: 100
-        - name: resumeline
+        - name: cursor
           in: query
           description: ''
           required: false
