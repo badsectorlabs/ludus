@@ -147,6 +147,13 @@ func deleteRangeResources(targetRange *models.Range, force bool, e *core.Request
 		return fmt.Errorf("failed to remove range directory: %w", err)
 	}
 
+	// Delete all VM records referencing this range before deleting the range itself,
+	// otherwise PocketBase will reject the deletion due to the required foreign key.
+	_, err = e.App.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").Bind(dbx.Params{"range_id": targetRange.Id}).Execute()
+	if err != nil {
+		return fmt.Errorf("failed to delete VM records for range: %w", err)
+	}
+
 	// Delete the range object from the database
 	err = e.App.Delete(targetRange)
 	if err != nil {
@@ -184,14 +191,20 @@ func DeleteRange(e *core.RequestEvent) error {
 		return err
 	}
 
-	// Check if range has VMs (before updating VM data to avoid unnecessary work)
-	// We need to update VM data first to get accurate count
+	// Update VM data to get accurate count. If the pool is already gone
+	// (e.g. from a partially completed previous deletion), treat the range as
+	// having zero VMs and proceed with cleanup.
+	poolGone := false
 	err = updateRangeVMData(e, targetRange, proxmoxClient)
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, err.Error())
+		if strings.Contains(err.Error(), fmt.Sprintf("unable to get pool by ID: 500 pool '%s' does not exist", targetRange.RangeId())) {
+			poolGone = true
+		} else {
+			return JSONError(e, http.StatusInternalServerError, err.Error())
+		}
 	}
 
-	if targetRange.NumberOfVms() > 0 && !force {
+	if !poolGone && targetRange.NumberOfVms() > 0 && !force {
 		return JSONError(e, http.StatusConflict, "Range has VMs. Use --force to delete anyway")
 	}
 
