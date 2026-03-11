@@ -756,6 +756,41 @@ func getVMsForPool(e *core.RequestEvent, ctx context.Context, poolName string, c
 	return vmsForPool, nil
 }
 
+// waitForPoolEmpty waits until the specified pool has no non-template VMs.
+// It polls Proxmox directly (without using cached results) until either the
+// pool is empty or the context is done.
+func waitForPoolEmpty(ctx context.Context, client *goproxmox.Client, poolName string) error {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for pool %s to be empty: %w", poolName, ctx.Err())
+		case <-ticker.C:
+			poolData, err := client.Pool(ctx, poolName, "qemu")
+			if err != nil {
+				// If the pool no longer exists, consider it empty
+				if strings.Contains(err.Error(), poolName+"' does not exist") {
+					return nil
+				}
+				return fmt.Errorf("unable to get pool by ID while waiting for empty: %w", err)
+			}
+
+			remaining := 0
+			for _, vm := range poolData.Members {
+				if vm.Type == "qemu" && vm.Template != 1 {
+					remaining++
+				}
+			}
+
+			if remaining == 0 {
+				return nil
+			}
+		}
+	}
+}
+
 func grantGroupAccessToSDNVNet(groupID string, rangeNumber int) error {
 	return sdnGroupVNetACLAction(groupID, rangeNumber, false)
 }

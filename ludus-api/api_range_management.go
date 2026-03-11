@@ -116,17 +116,28 @@ func deleteRangeResources(targetRange *models.Range, force bool, e *core.Request
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	// If range has VMs and force is true, destroy VMs first
 	if targetRange.NumberOfVms() > 0 && force {
+		destroyedVMs := false
 		// Get the VMs for the range
 		vms, err := getVMsForPool(e, ctx, targetRange.RangeId(), proxmoxClient)
 		if err != nil {
 			return fmt.Errorf("failed to get VMs for range: %w", err)
 		}
 		for _, vm := range vms {
-			destroyVM(ctx, proxmoxClient, int(vm.VMID))
+			if err := destroyVM(ctx, proxmoxClient, int(vm.VMID)); err != nil {
+				return fmt.Errorf("failed to destroy VM %d: %w", int(vm.VMID), err)
+			}
+			destroyedVMs = true
+		}
+
+		// If we destroyed any VMs, wait for the pool to be empty before removing it.
+		if destroyedVMs {
+			if err := waitForPoolEmpty(ctx, proxmoxClient, targetRange.RangeId()); err != nil {
+				return fmt.Errorf("failed waiting for pool %s to become empty: %w", targetRange.RangeId(), err)
+			}
 		}
 	}
 
