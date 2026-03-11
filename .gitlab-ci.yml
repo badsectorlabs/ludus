@@ -164,22 +164,30 @@ stages:
   - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
   - ludus testing allow -i 8.8.8.8
   - ludus testing status
+  # Validate that 8.8.8.8 is in the allowedIPs list
+  - 'ludus testing status --json | jq -e ''.allowedIPs | index("8.8.8.8")'''
   # Validate that WIN10 can get to 8.8.8.8 but not 1.1.1.1
   - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
   - sudo qm guest exec $WIN11VMID -- ping -n 1 1.1.1.1 | egrep 'Request timed out.|Destination port unreachable.'
   # Allow google.com and check that google is allowed but example isn't
   - ludus testing allow -d google.com
   - ludus testing status
+  # Validate that google.com is in the allowedDomains list
+  - 'ludus testing status --json | jq -e ''.allowedDomains | any(startswith("google.com"))'''
   # This sometimes takes a few seconds - try 3 times 5 seconds apart
   - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML') && break || sleep 5; done
   - sudo qm guest exec $WIN11VMID -- curl https://example.com/ | egrep 'Could not resolve host|Failed to connect to example.com'
   # Deny google.com and 8.8.8.8 and check that they are not reachable
   - ludus testing deny -d google.com
   - ludus testing deny -i 8.8.8.8
+  # Validate that google.com and 8.8.8.8 are no longer in the allowed lists
+  - 'ludus testing status --json | jq -e ''(.allowedDomains | any(startswith("google.com")) | not) and (.allowedIPs | index("8.8.8.8") | not)'''
   - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com') && break || sleep 5; done
   - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.') && break || sleep 5; done
   - ludus testing stop
   - ludus testing status
+  # Validate that testing is disabled and allowed lists are empty
+  - 'ludus testing status --json | jq -e ''.testingEnabled == false and (.allowedIPs | length == 0) and (.allowedDomains | length == 0)'''
   # Now that testing has stopped, check the VM can reach the internet
   - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
   - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'

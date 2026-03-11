@@ -59,7 +59,7 @@ func Allow(e *core.RequestEvent) error {
 				continue
 			}
 			// Save allowed value in the DB for each success - in the event one fails, the DB will reflect the correct state
-			usersRange.Set("allowedDomains+", fmt.Sprintf("%s (%s)", domain, domainIP))
+			usersRange.SetAllowedDomains(append(usersRange.AllowedDomains(), fmt.Sprintf("%s (%s)", domain, domainIP)))
 			e.App.Save(usersRange)
 			returnArray = append(returnArray, domain)
 
@@ -83,7 +83,7 @@ func Allow(e *core.RequestEvent) error {
 						continue
 					}
 					// Save allowed value in the DB for each success - in the event one fails, the DB will reflect the correct state
-					usersRange.Set("allowedDomains+", fmt.Sprintf("%s (%s)", crlDomain, domainIP))
+					usersRange.SetAllowedDomains(append(usersRange.AllowedDomains(), fmt.Sprintf("%s (%s)", crlDomain, domainIP)))
 					e.App.Save(usersRange)
 					returnArray = append(returnArray, crlDomain)
 				}
@@ -101,7 +101,7 @@ func Allow(e *core.RequestEvent) error {
 				continue
 			}
 			// Save allowed value in the DB for each success - in the event one fails, the DB will reflect the correct state
-			usersRange.Set("allowedIPs+", ip)
+			usersRange.SetAllowedIps(append(usersRange.AllowedIps(), ip))
 			e.App.Save(usersRange)
 			returnArray = append(returnArray, ip)
 		}
@@ -150,7 +150,7 @@ func Deny(e *core.RequestEvent) error {
 			// Save allowed value in the DB for each success - in the event one fails, the DB will reflect the correct state
 			// The `+" ("` is to ensure that subdomains aren't matched incorrectly - a.com won't match a.company.com because of the added space and paren
 			newAllowedDomains := removeElementThatContainsString(usersRange.AllowedDomains(), domain+" (")
-			usersRange.Set("allowedDomains-", newAllowedDomains)
+			usersRange.SetAllowedDomains(newAllowedDomains)
 			e.App.Save(usersRange)
 			returnArray = append(returnArray, domain)
 
@@ -169,7 +169,7 @@ func Deny(e *core.RequestEvent) error {
 			}
 			// Save allowed value in the DB for each success - in the event one fails, the DB will reflect the correct state
 			newAllowedIPs := removeStringExact(usersRange.AllowedIps(), ip)
-			usersRange.Set("allowedIPs-", newAllowedIPs)
+			usersRange.SetAllowedIps(newAllowedIPs)
 			e.App.Save(usersRange)
 			returnArray = append(returnArray, ip)
 		}
