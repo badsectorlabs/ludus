@@ -1334,6 +1334,12 @@ post-deploy ranges-as-admin:
     - ludus --user CIA range accessible | grep CIA-extra-1
     - ludus range rm-range -r CIA-extra-1 --no-prompt
     - '! ludus --user CIA range accessible | grep CIA-extra-1'
+    # Deploy a simple range, then delete it to verify deleting a range with VMs works
+    - ludus range create -n "CIA Test Range" -r CIA-test
+    - ludus range config set -f /opt/ludus/ci/configs/small-range.yml -r CIA-test
+    - ludus range deploy -r CIA-test
+    - while [ "$(ludus range list --json -r CIA-test | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range -r CIA-test logs --tail 20; sleep 60; done
+    - ludus range rm-range -r CIA-test --no-prompt --force
 
 post-deploy templates-as-admin:
   stage: post-deploy-admin-templates
