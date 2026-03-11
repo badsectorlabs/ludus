@@ -170,11 +170,11 @@
 
     - name: Add the user to proxmox
       ansible.builtin.shell:
-        cmd: pveum user add {{ username }}@pam --password {{ proxmox_password }} -group ludus_users
+        cmd: pveum user add '{{ username }}@pam' --password '{{ proxmox_password }}' -group ludus_users
 
     - name: Set the acls for the user on their own pool
       ansible.builtin.shell:
-        cmd: pveum aclmod /pool/{{ user_id }} -user {{ username }}@pam -role PVEAdmin -role PVESDNAdmin
+        cmd: pveum aclmod /pool/{{ user_id }} -user '{{ username }}@pam' -role PVEAdmin -role PVESDNAdmin
 
     - name: Set the acls users pool for admins
       ansible.builtin.shell:
@@ -182,8 +182,8 @@
 
     - name: Set acls for local "/storage/local"
       ansible.builtin.shell:
-        cmd: pveum aclmod /storage/local -user {{ username }}@pam -role PVEDatastoreAdmin
+        cmd: pveum aclmod /storage/local -user '{{ username }}@pam' -role PVEDatastoreAdmin
 
     - name: Add user to ludus_admins
-      ansible.builtin.shell: pveum user modify {{ username }}@pam --groups ludus_admins --append
+      ansible.builtin.shell: pveum user modify '{{ username }}@pam' --groups ludus_admins --append
       when: user_is_admin is defined and user_is_admin
