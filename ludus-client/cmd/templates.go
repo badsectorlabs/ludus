@@ -47,12 +47,7 @@ var templatesListCmd = &cobra.Command{
 			return
 		}
 
-		type TemplateStatus struct {
-			Name   string
-			Built  bool
-			Status string
-		}
-		var templateStatusArray []TemplateStatus
+		var templateStatusArray []dto.GetTemplatesResponseItem
 		err := json.Unmarshal(responseJSON, &templateStatusArray)
 		if err != nil {
 			logger.Logger.Fatal(err.Error())
@@ -60,7 +55,7 @@ var templatesListCmd = &cobra.Command{
 
 		// Create table
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Template", "Status"})
+		table.SetHeader([]string{"Template", "OS", "Status"})
 
 		for _, template := range templateStatusArray {
 			var statusString string
@@ -73,7 +68,7 @@ var templatesListCmd = &cobra.Command{
 					statusString = "❌ NOT BUILT"
 				}
 			}
-			table.Append([]string{template.Name, statusString})
+			table.Append([]string{template.Name, template.OS, statusString})
 		}
 
 		// Print table

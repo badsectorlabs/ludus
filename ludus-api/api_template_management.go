@@ -25,11 +25,22 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
+// LudusOS represents the operating system category for a template.
+type LudusOS string
+
+const (
+	LudusOSLinux   LudusOS = "linux"
+	LudusOSWindows LudusOS = "windows"
+	LudusOSMacOS   LudusOS = "macos"
+	LudusOSOther   LudusOS = "other"
+)
+
 type TemplateStatus struct {
-	Name     string `json:"name"`
-	Built    bool   `json:"built"`
-	Status   string `json:"status"`
-	FilePath string `json:"-"`
+	Name     string  `json:"name"`
+	Built    bool    `json:"built"`
+	Status   string  `json:"status"`
+	Os       LudusOS `json:"os"`
+	FilePath string  `json:"-"`
 }
 
 const templateRegex string = `(?m)[^"]*?-template`
@@ -68,6 +79,53 @@ func extractTemplateNameFromHCL(hclFile string, templateRegex *regexp.Regexp) st
 		return templateName
 	} else {
 		return "could not find template name in " + hclFile
+	}
+}
+
+// proxmoxOSToLudusOS maps a Proxmox guest OS type code to a Ludus OS category.
+// Proxmox OS types: wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, win11, l24, l26, solaris, other
+func proxmoxOSToLudusOS(proxmoxOs string) LudusOS {
+	proxmoxOs = strings.TrimSpace(strings.ToLower(proxmoxOs))
+	switch {
+	case strings.HasPrefix(proxmoxOs, "win") || strings.HasPrefix(proxmoxOs, "w2k") ||
+		proxmoxOs == "wxp" || proxmoxOs == "wvista":
+		return LudusOSWindows
+	case strings.HasPrefix(proxmoxOs, "l2"): // l24, l26
+		return LudusOSLinux
+	case proxmoxOs == "solaris" || proxmoxOs == "other" || proxmoxOs == "":
+		return LudusOSOther
+	default:
+		return LudusOSOther
+	}
+}
+
+var osVariableRegex = regexp.MustCompile(`(?s)variable\s+"os"\s*\{[^}]*default\s*=\s*"([^"]+)"`)
+
+// extractOsFromHCL reads a Packer HCL file and extracts the default value of the "os" variable,
+// then maps it to a Ludus OS category (linux, windows, macos, other).
+func extractOSFromHCL(hclFile string) LudusOS {
+	fileBytes, err := os.ReadFile(hclFile)
+	if err != nil {
+		return ""
+	}
+	matches := osVariableRegex.FindSubmatch(fileBytes)
+	if len(matches) < 2 {
+		return ""
+	}
+	return proxmoxOSToLudusOS(string(matches[1]))
+}
+
+// osFromTemplateName guesses the OS category from a template name as a fallback
+// when no HCL file is available.
+func osFromTemplateName(name string) LudusOS {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "win") || strings.Contains(lower, "windows"):
+		return LudusOSWindows
+	case strings.Contains(lower, "macos") || strings.Contains(lower, "osx"):
+		return LudusOSMacOS
+	default:
+		return LudusOSLinux
 	}
 }
 
@@ -365,6 +423,10 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 		// Fill out the template status details
 		thisTemplateStatus.Name = thisTemplateName
 		thisTemplateStatus.FilePath = templateFile
+		thisTemplateStatus.Os = extractOSFromHCL(templateFile)
+		if thisTemplateStatus.Os == "" {
+			thisTemplateStatus.Os = osFromTemplateName(thisTemplateName)
+		}
 		if slices.Contains(templates, thisTemplateName) {
 			thisTemplateStatus.Built = true
 			thisTemplateStatus.Status = "built"
@@ -392,6 +454,7 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 			thisTemplateStatus.FilePath = "None"
 			thisTemplateStatus.Built = true
 			thisTemplateStatus.Status = "built"
+			thisTemplateStatus.Os = osFromTemplateName(templateVM)
 			templateStatusArray = append(templateStatusArray, thisTemplateStatus)
 		}
 	}

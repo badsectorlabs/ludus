@@ -172,8 +172,10 @@ type GetTemplatesResponse struct {
 	Value []GetTemplatesResponseItem `json:"-"`
 }
 type GetTemplatesResponseItem struct {
-	Name  string `json:"name,omitempty"`
-	Built bool   `json:"built,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Built  bool   `json:"built,omitempty"`
+	Status string `json:"status,omitempty"`
+	OS     string `json:"os,omitempty"`
 }
 type GetTemplatesStatusResponse struct {
 	Value []GetTemplatesStatusResponseItem `json:"-"`
