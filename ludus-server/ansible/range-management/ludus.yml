@@ -79,7 +79,7 @@
   tasks:
     - name: Check for Pro entitlement
       ansible.builtin.assert:
-        that: ludus_entitlements is defined and "PRO_ROLES" in ludus_entitlements
+        that: (ludus_entitlements | default([])) is defined and "PRO_ROLES" in ludus_entitlements
         fail_msg: "The router roles feature requires the PRO_ROLES entitlement"
       when:
         - router.roles is defined
