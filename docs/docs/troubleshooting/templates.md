@@ -20,7 +20,7 @@ To do this:
 
 Change
 
-```
+```hcl
 variable "iso_url" {
   type    = string
   default = "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
@@ -29,17 +29,44 @@ variable "iso_url" {
 
 to 
 
-```
+```hcl
 variable "iso_file" {
   type    = string
   default = "local:iso/SERVER_EVAL_x64FRE_en-us.iso"
 }
 ```
 
-4. Build the template with ludus, and it will use the local ISO. `ludus template build -n <template name>`
+4. Also change the second `iso_url` line
 
-Assuming your iso is stored in the `local` pool.
+```hcl
+iso_url  = "${var.iso_url}"
+```
 
+to
+
+```hcl
+iso_file = "${var.iso_file}"
+```
+
+5. Build the template with ludus, and it will use the local ISO. `ludus template build -n <template name>`
+
+*Assuming your iso is stored in the `local` pool.*
+
+## ISO downloads fail - Download with packer instead of PVE
+
+Some templates are configured to download the ISOs directly to PVE instead of downloading via packer to a cache and then uploading.
+
+You can disable this (which may fix stubborn ISO downloads) by changing
+
+```
+iso_download_pve = true
+```
+
+to
+
+```
+iso_download_pve = false
+```
 
 ## Linux template stuck on `Configuring apt - scanning the mirror`
 
