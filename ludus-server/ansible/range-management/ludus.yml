@@ -72,15 +72,15 @@
     - name: Set any user defined firewall rules
       ansible.builtin.include_tasks: tasks/firewall/set-firewall-rules.yml
 
-- name: Apply all user defined roles to the router (Enterprise)
+- name: Apply all user defined roles to the router (Pro/Enterprise)
   tags: [network]
   hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
   become: true
   tasks:
-    - name: Check for enterprise plugin entitlement
+    - name: Check for Pro entitlement
       ansible.builtin.assert:
-        that: ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
-        fail_msg: "The router roles feature requires the ENTERPRISE_PLUGIN entitlement"
+        that: ludus_entitlements is defined and "PRO_ROLES" in ludus_entitlements
+        fail_msg: "The router roles feature requires the PRO_ROLES entitlement"
       when:
         - router.roles is defined
         - router.roles | length > 0
@@ -88,8 +88,7 @@
     - name: Set any user defined firewall rules
       ansible.builtin.include_tasks: tasks/router/user-defined-roles.yml
       when:
-        - ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
-        - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/user-defined-roles.yml') != []
+        - ludus_entitlements is defined and "PRO_ROLES" in ludus_entitlements
         - router.roles is defined
         - router.roles | length > 0
 

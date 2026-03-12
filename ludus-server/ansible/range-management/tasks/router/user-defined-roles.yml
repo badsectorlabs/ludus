@@ -1,0 +1,30 @@
+- name: Get roles for this VM
+  ansible.builtin.set_fact:
+    rotuer_custom_roles_list: "{{ router.roles }}"
+
+- name: Check type of role_vars
+  ansible.builtin.assert:
+    that: router.role_vars | type_debug == 'dict'
+    fail_msg: "'role_vars' must be a dictionary. Remove the leading `-` from each value!"
+    success_msg: "'role_vars' is a dictionary"
+  when: router.role_vars is defined
+
+# This is required because you cannot simply add vars to include_role, see https://github.com/ansible/ansible/issues/19084
+- name: Set all role variables for non-arrays
+  ansible.builtin.set_fact:
+    "{{ role_item.key }}": "{{ role_item.value }}"
+  loop: "{{ (router.role_vars | dict2items) if router.role_vars is defined else [] }}"
+  loop_control:
+    loop_var: role_item
+
+- name: Show roles that will be executed
+  ansible.builtin.debug:
+    msg: "{{ item }}"
+  loop: "{{ router.roles }}"
+  when: (only_roles is undefined or only_roles is none) or (only_roles is defined and item in only_roles)
+
+- name: Include the user-defined role
+  ansible.builtin.include_role:
+    name: "{{ item }}"
+  loop: "{{ router.roles }}"
+  when: (only_roles is undefined or only_roles is none) or (only_roles is defined and item in only_roles)
