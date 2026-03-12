@@ -25,10 +25,16 @@ Monitor the deployment with
 ludus range logs -f
 ```
 
+:::tip
+
+The Nexus admin password is printed at the end of the deploy logs, but it's also available on Ludus host at `/opt/ludus/install/nexus-admin-password`
+
+:::
+
 Once the deployment has finished, you must manually toggle the chocolatey-proxy repository to Nuget V2 via the web interface!
 1. RDP into a windows box (or use the Proxmox web UI console) OR add `192.0.2.2/32` to the `AllowedIPs` block of your wireguard config and reload it.
 2. Browse to: http://192.0.2.2:8081
-3. Log in with `admin:<your proxmox password>`
+3. Log in with `admin:<generated password shown in deploy log>`
 4. Navigate to Repositories -> chocolatey-proxy
 
 ![Nexus Chocolatey-Proxy](/img/nexus/nexus-choco-proxy.png)

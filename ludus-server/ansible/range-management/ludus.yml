@@ -881,6 +881,15 @@
           - temurin-17-jdk
         update_cache: true
 
+- name: Generate a password for the Nexus admin user
+  tags: [never, nexus]
+  hosts: ADMIN-nexus-3-oss
+  become: true
+  tasks:
+    - name: Generate a password for the Nexus admin user
+      ansible.builtin.set_fact:
+        nexus_admin_password: "{{ lookup('password', ludus_install_path + '/install/nexus-admin-password length=24 chars=ascii_letters,digits') }}"
+
 - name: Configure Nexus nuget cache VM
   tags: [never, nexus]
   hosts: ADMIN-nexus-3-oss
@@ -890,7 +899,7 @@
   vars:
     nexus_version: 3.71.0-06
     nexus_timezone: 'Etc/UTC'
-    nexus_admin_password: "{{ hostvars['localhost'].api_password }}"
+    nexus_admin_password: "{{ nexus_admin_password }}"
     nexus_public_hostname: '192.0.2.2'
     nexus_public_scheme: http
     nexus_download_dir: '/tmp'
@@ -972,7 +981,7 @@
           - You must manually toggle the chocolatey-proxy repository to Nuget V2 via the web interface!
           -  1. RDP into a windows box
           -  '2. Browse to: http://192.0.2.2:8081'
-          -  3. Log in with admin:{{ hostvars['localhost'].api_password }}
+          -  3. Log in with admin:{{ nexus_admin_password }}
           -  4. Navigate to Repositories -> chocolatey-proxy
           -  5. Click the radio button for NuGet V2
           -  6. Click save (at the bottom of the page)
@@ -1138,7 +1147,11 @@
         src: etc-hosts.j2
         dest: "{{ ludus_install_path }}/users/{{ username }}/etc-hosts"
       # Skip this when doing a destroy-range, but run for every other tag
-      when: "'destroy-range' not in ansible_run_tags and ansible_limit is undefined"
+      when: 
+        - '"destroy-range" not in ansible_run_tags'
+        - ansible_limit is undefined
+        - '"nexus" not in ansible_run_tags'
+        - '"share" not in ansible_run_tags'
 
 # ==========================================================
 # Alert the user on failed office install
