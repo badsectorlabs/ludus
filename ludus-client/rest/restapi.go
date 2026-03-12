@@ -130,7 +130,7 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 		error = true
 	}
 
-	if resp.StatusCode() == 403 || resp.StatusCode() == 409 || resp.StatusCode() == 404 {
+	if resp.StatusCode() == 403 || resp.StatusCode() == 409 || resp.StatusCode() == 404 || resp.StatusCode() == 413 {
 		// Try to parse as PocketBase error first, then fall back to simple error format
 		err := prettyPrintPocketBaseError(resp.Body())
 		if err != nil {
