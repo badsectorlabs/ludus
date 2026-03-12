@@ -1,9 +1,9 @@
 {
-    "label": "🏛️ Pro/Enterprise",
+    "label": "🎭 Private Role Catalog",
     "position": 4,
     "link": {
         "type": "generated-index",
-        "description": "Pro and Enterprise features for Ludus",
+        "description": "🎭 Private Role Catalog",
         "slug": "category/enterprise"
     }
 }

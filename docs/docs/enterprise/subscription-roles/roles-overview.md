@@ -1,24 +1,26 @@
 ---
 sidebar_position: 2
-title: "🎭 Private Role Catalog"
+title: "📋 Roles Overview"
 ---
 
-# 🎭 Private Role Catalog
+# 📋 Roles Overview
 
-:::note[🏛️ `Available in Ludus Enterprise`]
+:::note[👨‍💼 `Available in Ludus Pro`]
 :::
 
-Ludus Enterprise can optionally include a plugin that enables the use of a private role catalog.
-
-These roles are written by Bad Sector Labs and include the following:
-
 * Apache Guacamole server with automated VM connection creation
-* Microsoft Defender for Endpoint (formerly ATP)
-* Google Chronicle exporter
 * Microsoft Active Directory group management
 * Microsoft Active Directory user management
 * Microsoft Active Directory unconstrained delegation management
 * Mythic C2 Server with multiple agents and transports
 * SMB Share creation and mounting
 * Microsoft Sysmon
+* Windows Set Wallpaper (without GPO)
+
+:::note[🏛️ `Available in Ludus Enterprise`]
+:::
+
+* Microsoft Defender for Endpoint (formerly ATP)
+* Google Chronicle exporter
 * Velociraptor Server and Client
+* Zeek

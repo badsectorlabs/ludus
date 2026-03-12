@@ -1,42 +1,50 @@
 ---
 sidebar_position: 1
-title: "🏛️ Enterprise"
+title: "🏛️ Pro/Enterprise Overview"
 ---
 
-# 🏛️ Ludus Enterprise
+# 🏛️ Ludus Pro and Enterprise Overview
 
-While Ludus is free and open source, Ludus Enterprise is a paid service that provides additional features and support.
-
-
-| Feature | Community | Enterprise |
-| --- | :---: | :---:|
-| Easy one command install | ✅  | ✅ |
-| Automated tempalte builds | ✅ | ✅ |
-| Chocolatey package manager support | ✅ | ✅ |
-| Ansible role management | ✅ | ✅ |
-| Command line client | ✅ | ✅ |
-| Fully documented API | ✅ | ✅ |
-| Up to 255 VLANs per range | ✅ | ✅ |
-| Cluster support | ✅ | ✅ |
-| Support | Community | Professional |
-| Roles on the router | ❌ | ✅ |
-| Inbound WireGuard Server per range | ❌ | ✅ |
-| CTFd integration | ❌ | ✅ |
-| [Private Role Catalog](./private-roles.md) | ❌ | ✅ |
-| [Outbound WireGuard](./outbound-wireguard.md) | ❌ | ✅ |
-| [Windows Licensing](./kms.md) | ❌ | ✅ |
-| Web Interface | ❌ | ✅  |
-| [Anti-Sandbox](./anti-sandbox.md) | ❌ | 🔌 Add-on |
-| Arbitrary credential support | ❌ | 🚧 In development |   
+While Ludus is free and open source, Ludus Pro or Enterprise are paid licenses that provides additional features and support.
 
 
-Ludus Enterprise directly supports the development of the free and open source core Ludus product that helps thousands of cybersecurity professionals around the world every day.
+| Feature                                       | Community | Pro               | Enterprise        |
+|-----------------------------------------------|:---------:|:-----------------:|:-----------------:|
+| Easy one command install                      | ✅         | ✅                 | ✅                 |
+| Automated template builds                     | ✅         | ✅                 | ✅                 |
+| Chocolatey package manager support            | ✅         | ✅                 | ✅                 |
+| Ansible role management                       | ✅         | ✅                 | ✅                 |
+| Command line client                           | ✅         | ✅                 | ✅                 |
+| Fully documented API                          | ✅         | ✅                 | ✅                 |
+| Up to 255 VLANs per range                     | ✅         | ✅                 | ✅                 |
+| Cluster support                               | ✅         | ✅                 | ✅                 |
+| Range Blueprints                              | ✅         | ✅                 | ✅                 |
+| Support                                       | Community  | Dedicated Discord Channel| SLA backed support |
+| Roles on the router                           | ❌         | ✅                 | ✅                 |
+| [Private Role Catalog](./subscription-roles/roles-overview.md)    | ❌         | Pro Roles         | Pro + Enterprise Roles|
+| Web Interface                                 | ❌         | ✅                 | ✅                 |
+| [Outbound WireGuard](./outbound-wireguard.md) | ❌         | ❌                 | ✅                 |
+| Inbound WireGuard Server per range            | ❌         | ❌                 | ✅                 |
+| CTFd integration                              | ❌         | ❌                 | ✅                 |
+| [Windows Licensing](./kms.md)                 | ❌         | ❌                 | ✅                 |
+| [Anti-Sandbox](./anti-sandbox.md)             | ❌         | ❌                 | 🔌 Add-on          |
+| Arbitrary credential support                  | ❌         | 🚧 In development | 🚧 In development   |
 
-To enquire about Ludus Enterprise, please [contact us](<mailto:ludus-support@badsectorlabs.com?subject=I'm interested in Ludus Enterprise>).
+
+
+Ludus Pro and Enterprise directly supports the development of the free and open source core Ludus product that helps thousands of cybersecurity professionals around the world every day.
+
+## How to get a license key
+
+Ludus Pro is available for self-service checkout at [ludus.cloud](https://ludus.cloud/#pricing).
+
+To enquire about Ludus Enterprise licensing for your organization, please [contact us](<mailto:ludus-support@badsectorlabs.com?subject=I'm interested in Ludus Enterprise>).
+
+
 
 # 🪪 License Key
 
-The Ludus Enterprise license key is a unique string that is used to activate the Ludus Enterprise features.
+The Ludus Pro and Enterprise license keys are a unique string that is used to activate the Ludus Pro or Enterprise features.
 
 Your license key will look like this:
 
@@ -44,19 +52,15 @@ Your license key will look like this:
 46C1CA-B11C52-80E9E7-19E436-FDDG1B-V3
 ```
 
-## How to get a license key
-
-To enquire about Ludus Enterprise licensing for your organization, please [contact us](<mailto:ludus-support@badsectorlabs.com?subject=I'm interested in Ludus Enterprise>).
-
 ## How use the license key
 
-Once you have a license key, you can activate Ludus Enterprise by setting the `license_key` key in the Ludus config file (or during install).
+Once you have a license key, you can activate Ludus Pro/Enterprise by setting the `license_key` key in the Ludus config file (or during install).
 
 ```yaml
 license_key: 46C1CA-B11C52-80E9E7-19E436-FDDG1B-V3
 ```
 
-Once the license key is set, Ludus will check the license key on startup and if it is valid, it will activate the Ludus Enterprise features and any add-ons you are entitled to.
+Once the license key is set, Ludus will check the license key on startup and if it is valid, it will activate the Ludus Pro/Enterprise features and any add-ons you are entitled to.
 
 You can manually restart the Ludus services to have the license key check run again.
 
