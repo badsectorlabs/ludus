@@ -150,6 +150,9 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 
 	// Register all custom middleware. These will apply to every request.
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		// Allow very large request bodies (up to ~4TB) to support massive role tars
+		se.Router.Bind(apis.BodyLimit(4 * 1024 * 1024 * 1024 * 1024))
+
 		// Restrict access to the PocketBase admin API
 		se.Router.Bind(&hook.Handler[*core.RequestEvent]{
 			Id:       "restrictPocketBaseEndpoints",
