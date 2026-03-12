@@ -230,8 +230,8 @@ func DownloadRoleUsingLicenseKey(e *core.RequestEvent, roleName string, targetDi
 
 func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string, version string, licenseKey string, packageUUID string) error {
 
-	// If the file path doesn't start with /artifacts/, add it
-	if !strings.HasPrefix(path, "artifacts/") || !strings.HasPrefix(path, "/artifacts/") {
+	// If the file path doesn't start with artifacts/ or /artifacts/, add it
+	if !strings.HasPrefix(path, "artifacts/") && !strings.HasPrefix(path, "/artifacts/") {
 		path = "artifacts/" + path
 	}
 
