@@ -784,10 +784,10 @@ var rangeCreateCmd = &cobra.Command{
 				}
 				return
 			}
+		} else {
+			// Handle success response
+			handleGenericResult(responseJSON)
 		}
-
-		// Handle success response
-		handleGenericResult(responseJSON)
 	},
 }
 
