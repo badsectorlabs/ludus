@@ -52,6 +52,8 @@ func InitDb() {
 			logger.Info("Creating initial admin user from install config")
 			if err := createInitialAdminFromFile(initialAdminPath); err != nil {
 				logger.Error(fmt.Sprintf("Failed to create initial admin user: %v", err))
+				logger.Error(fmt.Sprintf("If you already have an admin user you can remove this file: %s", initialAdminPath))
+				logger.Error("and restart the ludus-admin service to bypass this error.")
 				os.Exit(2)
 			}
 		}
