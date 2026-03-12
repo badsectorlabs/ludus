@@ -1,14 +1,15 @@
 #!/bin/bash
 
 # Parse command line arguments
-while getopts "hDdPL" opt; do
+while getopts "hDdPLv:" opt; do
   case $opt in
     h)
-      echo "Usage: $0 [-h] [-d] [-D] [-P] [-L]"
+      echo "Usage: $0 [-h] [-d] [-D] [-P] [-L] [-v version]"
       echo "  -d  Enable debug logging for Ludus"
       echo "  -D  Enable debug logging for the database"
       echo "  -P  Enable debug logging for proxmox"
       echo "  -L  Enable debug logging for license requests"
+      echo "  -v  Version string to embed in the server binary"
       exit 0
       ;;
     d)
@@ -22,6 +23,9 @@ while getopts "hDdPL" opt; do
       ;;
     L)
       DEBUG_LICENSE=true
+      ;;
+    v)
+      VERSION_STRING=$OPTARG
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -59,9 +63,11 @@ if [ -d "../ludus-api/webUI" ]; then
 fi
 
 GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
-GIT_ABBREV_REF=$(git rev-parse --abbrev-ref HEAD)
-echo CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${GIT_ABBREV_REF}" -tags "${TAGS}" -o ludus-server
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${GIT_ABBREV_REF}" -tags "${TAGS}" -o ludus-server
+if [ -z "$VERSION_STRING" ]; then
+    VERSION_STRING=$(git rev-parse --abbrev-ref HEAD)
+fi
+echo CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${VERSION_STRING}" -tags "${TAGS}" -o ludus-server
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${VERSION_STRING}" -tags "${TAGS}" -o ludus-server
 if [[ $? -ne 0 ]]; then
     echo
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"

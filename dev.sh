@@ -4,10 +4,10 @@
 # It assumes you are on a macOS or Linux host and have root SSH access to the target machine
 
 # Parse command line arguments
-while getopts "hlap:t:n:cdwsSDCPL" opt; do
+while getopts "hlap:t:n:cdwsSDCPLv:" opt; do
   case $opt in
     h)
-      echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c] [-d] [-p] [-w] [-s] [-D] [-C]"
+      echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c] [-d] [-p] [-w] [-s] [-D] [-C] [-v version]"
       echo "  -h  Show this help message"
       echo "  -l  Show Ludus service logs (default 100 lines)"
       echo "  -a  Show Ludus admin service logs (requires -l)"
@@ -23,6 +23,7 @@ while getopts "hlap:t:n:cdwsSDCPL" opt; do
       echo "  -D  Enable debug mode for database"
       echo "  -P  Enable debug mode for Proxmox"
       echo "  -L  Enable debug mode for license requests"
+      echo "  -v  Version string to use for server and client builds"
       echo ""
       echo "Examples:"
       echo "  $0 -t ludus-dev-hostname -C -d -s # Build and install client remotely, Build and install Ludus server with debug mode, skip plugins"
@@ -69,6 +70,9 @@ while getopts "hlap:t:n:cdwsSDCPL" opt; do
       ;;
     L)
       DEBUG_LICENSE=true
+      ;;
+    v)
+      VERSION_STRING=$OPTARG
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -145,20 +149,33 @@ if [ "$DEBUG_LICENSE" = true ]; then
     DEBUG_FLAGS="${DEBUG_FLAGS} -L"
 fi
 
+SERVER_VERSION_ARG=""
+if [ -n "$VERSION_STRING" ]; then
+    SERVER_VERSION_ARG="-v $VERSION_STRING"
+fi
+
 if [ "$SKIP_SERVER" != true ]; then
-    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh $DEBUG_FLAGS"
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-server && ./dev.sh $DEBUG_FLAGS $SERVER_VERSION_ARG"
 else
     echo "[-] Skipping server build"
 fi
 
 # Build the client remotely if requested
 if [ "$BUILD_CLIENT_REMOTELY" = true ]; then
-    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-client && ./dev.sh"
+    CLIENT_VERSION_ARG=""
+    if [ -n "$VERSION_STRING" ]; then
+        CLIENT_VERSION_ARG="-v $VERSION_STRING"
+    fi
+    ssh -p $PORT "$DEVELOPMENT_HOSTNAME" "cd ~/ludus-dev/ludus-client && ./dev.sh $CLIENT_VERSION_ARG"
 fi
 
 # Build the client locally if requested
 if [ "$BUILD_CLIENT" = true ]; then
-    ./ludus-client/dev.sh
+    CLIENT_VERSION_ARG=""
+    if [ -n "$VERSION_STRING" ]; then
+        CLIENT_VERSION_ARG="-v $VERSION_STRING"
+    fi
+    ./ludus-client/dev.sh $CLIENT_VERSION_ARG
 fi
 
 # Handle log viewing
