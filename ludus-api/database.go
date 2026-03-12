@@ -38,6 +38,9 @@ var reservedInitialAdminUserIDs = []string{"ADMIN", "ROOT", "CICD", "SHARED", "0
 
 func InitDb() {
 	if os.Geteuid() == 0 {
+		// Make sure the db path is owned by the ludus user
+		chownDirToUsernameRecursive(ServerConfiguration.DataDirectory, "ludus")
+
 		// If a root-api-key file doesn't exist, recreate the root user in the database
 		if !FileExists(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath)) {
 			logger.Info("Creating root user in database")
