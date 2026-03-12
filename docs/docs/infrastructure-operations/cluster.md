@@ -39,15 +39,16 @@ For each VM, the chosen node is determined in this order:
 
 1. **Existing VM**: If the VM already exists, it stays on the node it is on. **This is true even if you set a target_node after initial deployment that differs from the node the VM is running on; Ludus will not migrate VMs**
 2. **VM `target_node`**: If the VM has `target_node` set in the range config, that node is used.
-3. **Range default**: If the top-level `target_node` key is set in the range config, that node is used.
+3. **Range default**: If the `defaults.target_node` key is set in the range config, that node is used.
 4. **Auto-select**: Ludus picks a node using a weighted score (80% available RAM, 20% free CPU); only online nodes are considered.
 3. **Server `proxmox_node`**: If auto-select fails, the server’s configured `proxmox_node` is used.
 
 Example range config with node placement:
 
 ```yaml
-# Default node for the whole range (optional)
-target_node: pve1
+defaults:
+  # Default node for the whole range (optional)
+  target_node: pve1
 
 ludus:
   - vm_name: "{{ range_id }}-dc01"
