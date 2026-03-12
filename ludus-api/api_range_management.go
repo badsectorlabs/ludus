@@ -696,32 +696,13 @@ func CreateRange(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, "Range ID is required")
 	}
 
-	if poolExists(payload.RangeID) {
-		return JSONError(e, http.StatusConflict, fmt.Sprintf("Pool with the name %s already exists", payload.RangeID))
+	// Validate the range ID is a valid proxmox pool name using regex
+	proxmoxPoolNameRegex := regexp.MustCompile(ProxmoxPoolNameRegexString)
+	if !proxmoxPoolNameRegex.MatchString(payload.RangeID) {
+		return JSONError(e, http.StatusConflict, "Range ID name must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or 'New_Range'). Use only letters, numbers, hyphens, and underscores. Must start with a letter.")
 	}
 
-	// Determine range number
-	var rangeNumber int
-	if payload.RangeNumber > 0 {
-		// Check if range number is already in use
-		rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeNumber", payload.RangeNumber)
-		if err != nil && err != sql.ErrNoRows {
-			return JSONError(e, http.StatusConflict, fmt.Sprintf("Error checking if range number %d is already in use: %v", payload.RangeNumber, err))
-		}
-		if rangeRecord != nil {
-			return JSONError(e, http.StatusConflict, fmt.Sprintf("Range number %d already in use", payload.RangeNumber))
-		}
-		// Make sure the range number is not a reserved range number
-		if slices.Contains(ServerConfiguration.ReservedRangeNumbers, int32(payload.RangeNumber)) {
-			return JSONError(e, http.StatusConflict, fmt.Sprintf("Range number %d is a reserved range number. Edit the reserved_range_numbers array in /opt/ludus/config.yml to use this range number.", payload.RangeNumber))
-		}
-		rangeNumber = int(payload.RangeNumber)
-	} else {
-		// Find next available range number
-		rangeNumber = findNextAvailableRangeNumber(app)
-	}
-
-	// Check if name is already in use
+	// Check if range ID is already in use in the database as early as possible.
 	existingRange, err := e.App.FindFirstRecordByData("ranges", "rangeID", payload.RangeID)
 	if err != nil && err != sql.ErrNoRows {
 		return JSONError(e, http.StatusConflict, fmt.Sprintf("Error checking if range ID %s is already in use: %v", payload.RangeID, err))
@@ -730,10 +711,30 @@ func CreateRange(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusConflict, fmt.Sprintf("Range ID %s already in use", payload.RangeID))
 	}
 
-	// Validate the name is a valid proxmox pool name using regex
-	proxmoxPoolNameRegex := regexp.MustCompile(ProxmoxPoolNameRegexString)
-	if !proxmoxPoolNameRegex.MatchString(payload.RangeID) {
-		return JSONError(e, http.StatusConflict, "Range ID name must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or 'New_Range'). Use only letters, numbers, hyphens, and underscores. Must start with a letter.")
+	// Determine range number and validate collisions early.
+	var rangeNumber int
+	if payload.RangeNumber > 0 {
+		// Make sure the range number is not a reserved range number
+		if slices.Contains(ServerConfiguration.ReservedRangeNumbers, int32(payload.RangeNumber)) {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Range number %d is a reserved range number. Edit the reserved_range_numbers array in /opt/ludus/config.yml to use this range number.", payload.RangeNumber))
+		}
+
+		// Check if range number is already in use
+		rangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeNumber", payload.RangeNumber)
+		if err != nil && err != sql.ErrNoRows {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Error checking if range number %d is already in use: %v", payload.RangeNumber, err))
+		}
+		if rangeRecord != nil {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Range number %d already in use", payload.RangeNumber))
+		}
+		rangeNumber = int(payload.RangeNumber)
+	} else {
+		// Find next available range number
+		rangeNumber = findNextAvailableRangeNumber(app)
+	}
+
+	if poolExists(payload.RangeID) {
+		return JSONError(e, http.StatusConflict, fmt.Sprintf("Pool with the name %s already exists", payload.RangeID))
 	}
 
 	// Create a new resource pool for the range
@@ -775,6 +776,9 @@ func CreateRange(e *core.RequestEvent) error {
 		removePool(payload.RangeID)
 		manageRangeNetwork(payload.RangeID, rangeNumber, false)
 		os.RemoveAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID))
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Range ID %s or range number %d is already in use", payload.RangeID, rangeNumber))
+		}
 		return JSONError(e, http.StatusConflict, "Unable to save range: "+err.Error())
 	}
 
