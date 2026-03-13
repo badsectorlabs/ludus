@@ -1291,6 +1291,7 @@ post-deploy ranges-as-admin:
     - changes:
       - ludus-client/cmd/range.go
       - ludus-api/api_range_management.go
+      - ludus-api/middleware.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1306,6 +1307,9 @@ post-deploy ranges-as-admin:
     - ludus range rm-range -r CIA-extra-1 --no-prompt --force || true
     - ludus range rm-range -r CIU-extra-1 --no-prompt --force || true
     - ludus range rm-range -r CIU-extra-2 --no-prompt --force || true
+    - ludus range rm-range -r CIU-fallback --no-prompt --force || true
+    - ludus range rm-range -r CIU-other --no-prompt --force || true
+    - ludus range rm-range -r CIU-solo --no-prompt --force || true
     # Create two additional ranges for CIU (standard user)
     - ludus range create -n "CIU Extra Range 1" -r CIU-extra-1 --user CIU
     - ludus range create -n "CIU Extra Range 2" -r CIU-extra-2 --user CIU
@@ -1325,6 +1329,27 @@ post-deploy ranges-as-admin:
     - ludus --user CIA range accessible | grep CIA-extra-1
     - ludus range rm-range -r CIA-extra-1 --no-prompt
     - '! ludus --user CIA range accessible | grep CIA-extra-1'
+    # --- Default range reassignment tests ---
+    # Test 1: Deleting the default range reassigns to another accessible range
+    - export CIU_ORIGINAL_DEFAULT=$(ludus --user CIU range default get --json | jq -r '.defaultRangeID')
+    - ludus range create -n "CIU Fallback Range" -r CIU-fallback --user CIU
+    - ludus --user CIU range default set CIU-fallback
+    - ludus range create -n "CIU Other Range" -r CIU-other --user CIU
+    - ludus range rm-range -r CIU-fallback --no-prompt
+    # CIU's default should have been reassigned (not CIU-fallback anymore)
+    - '! ludus --user CIU range default get --json | jq -r ".defaultRangeID" | grep CIU-fallback'
+    # CIU should still be able to list ranges (not locked out)
+    - ludus --user CIU range accessible
+    # Clean up
+    - ludus range rm-range -r CIU-other --no-prompt || true
+    # Test 2: Deleting the only non-original range clears the default but user is not locked out
+    - ludus range create -n "CIU Solo Range" -r CIU-solo --user CIU
+    - ludus --user CIU range default set CIU-solo
+    - ludus range rm-range -r CIU-solo --no-prompt
+    # CIU should still be able to call endpoints (middleware reassigns to their original range)
+    - ludus --user CIU range accessible
+    # Verify the default was reassigned to CIU's original range
+    - ludus --user CIU range default get --json | jq -r '.defaultRangeID' | grep "$CIU_ORIGINAL_DEFAULT"
 
 post-deploy templates-as-admin:
   stage: post-deploy-admin-templates
