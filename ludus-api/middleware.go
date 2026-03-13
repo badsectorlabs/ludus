@@ -117,9 +117,7 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		// correctly resolve to the default range for the impersonated user if this request is impersonating another user
 		rangeID = user.DefaultRangeId()
 		// Allow ROOT to bypass the default range check
-		if rangeID == "" && e.Auth.GetString("userID") != "ROOT" {
-			return JSONError(e, http.StatusNotFound, "User has no default range and no rangeID was provided in the request")
-		} else if rangeID == "" && e.Auth.GetString("userID") == "ROOT" {
+		if rangeID == "" && e.Auth.GetString("userID") == "ROOT" {
 			rangeCollection, err := e.App.FindCollectionByNameOrId("ranges")
 			if err != nil {
 				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding ranges collection: %v", err))
@@ -140,15 +138,60 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	rawRangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
 	if err != nil && err != sql.ErrNoRows {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding range: %v", err))
-	} else if err == sql.ErrNoRows {
-		logger.Debug(fmt.Sprintf("Range %s not found during middleware lookup, continuing with no range", rangeID))
-	} else {
+	}
+
+	// If the default range is missing (empty or deleted), try to reassign
+	if rawRangeRecord == nil && e.Auth.GetString("userID") != "ROOT" {
+		rangeID, rawRangeRecord = tryReassignDefaultRange(e, user, rangeID)
+	}
+
+	if rawRangeRecord != nil {
 		rangeRecord := &models.Range{}
 		rangeRecord.SetProxyRecord(rawRangeRecord)
 		e.Set("range", rangeRecord)
 	}
 
 	return e.Next()
+}
+
+// tryReassignDefaultRange attempts to find another accessible range for the user
+// and set it as their new default. Returns the new rangeID and range record, or
+// empty string and nil if no accessible range was found.
+func tryReassignDefaultRange(e *core.RequestEvent, user *models.User, oldRangeID string) (string, *core.Record) {
+	accessibleRanges, err := GetAccessibleRangesForUser(user)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error getting accessible ranges for user %s: %s", user.UserId(), err.Error()))
+		return "", nil
+	}
+
+	if len(accessibleRanges) == 0 {
+		if oldRangeID != "" {
+			// Clear the stale defaultRangeID
+			user.SetDefaultRangeId("")
+			if err := e.App.Save(user); err != nil {
+				logger.Error(fmt.Sprintf("Error clearing defaultRangeID for user %s: %s", user.UserId(), err.Error()))
+			} else {
+				logger.Info(fmt.Sprintf("Cleared default range for user %s (range %s no longer exists and no other ranges available)", user.UserId(), oldRangeID))
+			}
+		}
+		return "", nil
+	}
+
+	newRangeID := accessibleRanges[0].RangeID
+	user.SetDefaultRangeId(newRangeID)
+	if err := e.App.Save(user); err != nil {
+		logger.Error(fmt.Sprintf("Error reassigning defaultRangeID for user %s: %s", user.UserId(), err.Error()))
+		return "", nil
+	}
+	logger.Info(fmt.Sprintf("Reassigned default range for user %s from %s to %s", user.UserId(), oldRangeID, newRangeID))
+
+	rawRangeRecord, err := e.App.FindFirstRecordByData("ranges", "rangeID", newRangeID)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error finding reassigned range %s: %s", newRangeID, err.Error()))
+		return "", nil
+	}
+
+	return newRangeID, rawRangeRecord
 }
 
 // This function makes sure the request is to a user endpoint if the server is running as root (i.e. :8081)
