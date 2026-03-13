@@ -21,28 +21,6 @@
     dest: C:\ludus\background
   when: not file_check.stat.exists
 
-- name: Ensure BUILTIN\Users can read and execute C:\ludus
-  ansible.windows.win_acl:
-    path: C:\ludus
-    user: BUILTIN\Users
-    rights: ReadAndExecute
-    type: allow
-    inherit: ContainerInherit,ObjectInherit
-    propagation: None
-    state: present
-  when: not file_check.stat.exists
-
-- name: Ensure BUILTIN\Users cannot modify C:\ludus
-  ansible.windows.win_acl:
-    path: C:\ludus
-    user: BUILTIN\Users
-    rights: Modify
-    type: deny
-    inherit: ContainerInherit,ObjectInherit
-    propagation: None
-    state: present
-  when: not file_check.stat.exists
-
 - name: Eject any isos
   ansible.windows.win_powershell:
     script: |
@@ -240,4 +218,34 @@
     name: PrivacySandboxSiteEnabledAdsEnabled
     data: 0
     type: dword
+    state: present
+
+- name: Ensure .\localuser can modify C:\ludus
+  ansible.windows.win_acl:
+    path: C:\ludus
+    user: .\localuser
+    rights: Modify
+    type: allow
+    inherit: ContainerInherit,ObjectInherit
+    propagation: None
+    state: present
+
+- name: Ensure BUILTIN\Users can read and execute C:\ludus
+  ansible.windows.win_acl:
+    path: C:\ludus
+    user: BUILTIN\Users
+    rights: ReadAndExecute
+    type: allow
+    inherit: ContainerInherit,ObjectInherit
+    propagation: None
+    state: present
+
+- name: Ensure Domain Users cannot modify C:\ludus
+  ansible.windows.win_acl:
+    path: C:\ludus
+    user: Domain Users
+    rights: Modify
+    type: deny
+    inherit: ContainerInherit,ObjectInherit
+    propagation: None
     state: present
