@@ -692,23 +692,38 @@ func CreateRange(e *core.RequestEvent) error {
 		}
 	}
 
+	// Auto-generate rangeID from name if not provided
 	if payload.RangeID == "" {
-		return JSONError(e, http.StatusBadRequest, "Range ID is required")
-	}
+		baseID := sanitizeNameToRangeID(payload.Name)
+		if baseID == "" {
+			return JSONError(e, http.StatusBadRequest, "Range name must contain at least one alphanumeric character, or provide an explicit Range ID.")
+		}
 
-	// Validate the range ID is a valid proxmox pool name using regex
-	proxmoxPoolNameRegex := regexp.MustCompile(ProxmoxPoolNameRegexString)
-	if !proxmoxPoolNameRegex.MatchString(payload.RangeID) {
-		return JSONError(e, http.StatusConflict, "Range ID name must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or 'New_Range'). Use only letters, numbers, hyphens, and underscores. Must start with a letter.")
-	}
+		existsFn := func(id string) bool {
+			rec, _ := e.App.FindFirstRecordByData("ranges", "rangeID", id)
+			return rec != nil || poolExists(id)
+		}
 
-	// Check if range ID is already in use in the database as early as possible.
-	existingRange, err := e.App.FindFirstRecordByData("ranges", "rangeID", payload.RangeID)
-	if err != nil && err != sql.ErrNoRows {
-		return JSONError(e, http.StatusConflict, fmt.Sprintf("Error checking if range ID %s is already in use: %v", payload.RangeID, err))
-	}
-	if existingRange != nil {
-		return JSONError(e, http.StatusConflict, fmt.Sprintf("Range ID %s already in use", payload.RangeID))
+		generatedID, err := resolveUniqueRangeID(baseID, existsFn)
+		if err != nil {
+			return JSONError(e, http.StatusConflict, err.Error())
+		}
+		payload.RangeID = generatedID
+	} else {
+		// Validate explicitly provided range ID
+		proxmoxPoolNameRegex := regexp.MustCompile(ProxmoxPoolNameRegexString)
+		if !proxmoxPoolNameRegex.MatchString(payload.RangeID) {
+			return JSONError(e, http.StatusConflict, "Range ID name must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or 'New_Range'). Use only letters, numbers, hyphens, and underscores. Must start with a letter.")
+		}
+
+		// Check if explicit range ID is already in use
+		existingRange, err := e.App.FindFirstRecordByData("ranges", "rangeID", payload.RangeID)
+		if err != nil && err != sql.ErrNoRows {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Error checking if range ID %s is already in use: %v", payload.RangeID, err))
+		}
+		if existingRange != nil {
+			return JSONError(e, http.StatusConflict, fmt.Sprintf("Range ID %s already in use", payload.RangeID))
+		}
 	}
 
 	// Determine range number and validate collisions early.
@@ -738,6 +753,7 @@ func CreateRange(e *core.RequestEvent) error {
 	}
 
 	// Create a new resource pool for the range
+	var err error
 	err = createPool(payload.RangeID)
 	if err != nil {
 		return JSONError(e, http.StatusConflict, "Unable to create resource pool: "+err.Error())
@@ -811,7 +827,13 @@ func CreateRange(e *core.RequestEvent) error {
 		return e.JSON(http.StatusInternalServerError, dto.CreateRangeResponseError{Errors: errorArray})
 	}
 
-	return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s created successfully", payload.RangeID))
+	return e.JSON(http.StatusCreated, dto.CreateRangeResponse{
+		Result: &dto.CreateRangeResponseResult{
+			RangeID:     payload.RangeID,
+			RangeNumber: rangeNumber,
+			Name:        payload.Name,
+		},
+	})
 }
 
 func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bool) error {

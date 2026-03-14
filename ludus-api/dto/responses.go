@@ -51,29 +51,9 @@ type CreateRangeResponse struct {
 	Result *CreateRangeResponseResult `json:"result,omitempty"`
 }
 type CreateRangeResponseResult struct {
-	RangeNumber    int32                              `json:"rangeNumber"`
-	Description    string                             `json:"description,omitempty"`
-	Purpose        string                             `json:"purpose,omitempty"`
-	LastDeployment time.Time                          `json:"lastDeployment"`
-	TestingEnabled bool                               `json:"testingEnabled"`
-	VMs            []CreateRangeResponseResultVMsItem `json:"VMs"`
-	UserID         string                             `json:"userID,omitempty"`
-	Name           string                             `json:"name,omitempty"`
-	NumberOfVMs    int32                              `json:"numberOfVMs"`
-	AllowedIPs     []string                           `json:"allowedIPs,omitempty"`
-	AllowedDomains []string                           `json:"allowedDomains,omitempty"`
-	RangeState     string                             `json:"rangeState,omitempty"`
-}
-type CreateRangeResponseResultVMsItem struct {
-	ID          int32  `json:"ID"`
-	ProxmoxID   int32  `json:"proxmoxID"`
-	RangeNumber int32  `json:"rangeNumber"`
+	RangeID     string `json:"rangeID"`
+	RangeNumber int    `json:"rangeNumber"`
 	Name        string `json:"name"`
-	PoweredOn   bool   `json:"poweredOn"`
-	Ip          string `json:"ip,omitempty"`
-	IsRouter    bool   `json:"isRouter,omitempty"`
-	CPU         int32  `json:"cpu"`
-	RAM         int32  `json:"ram"`
 }
 type DeleteRangeResponse struct {
 	Result string `json:"result,omitempty"`

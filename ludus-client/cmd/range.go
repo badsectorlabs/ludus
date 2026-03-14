@@ -724,9 +724,6 @@ var rangeCreateCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		if rangeID == "" {
-			logger.Logger.Fatal("Range ID is required. Use --range-id or -r to specify the range ID.")
-		}
 		if name == "" {
 			logger.Logger.Fatal("Name is required. Use --name or -n to specify the name.")
 		}
@@ -785,8 +782,14 @@ var rangeCreateCmd = &cobra.Command{
 				return
 			}
 		} else {
-			// Handle success response
-			handleGenericResult(responseJSON)
+			// Handle structured success response
+			var createResult dto.CreateRangeResponse
+			if err := json.Unmarshal(responseJSON, &createResult); err == nil && createResult.Result != nil && createResult.Result.RangeID != "" {
+				logger.Logger.Infof("Range %q created (ID: %s, Number: %d)", createResult.Result.Name, createResult.Result.RangeID, createResult.Result.RangeNumber)
+			} else {
+				// Fallback for older API versions
+				handleGenericResult(responseJSON)
+			}
 		}
 	},
 }
