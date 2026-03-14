@@ -451,10 +451,16 @@ var rangeDeleteCmd = &cobra.Command{
 
 		var rangeIDString string
 		if rangeID == "" {
-			if userID == "" {
-				rangeIDString = strings.Split(apiKey, ".")[0]
-			} else {
-				rangeIDString = userID
+			// Fetch the actual default range from the API
+			defaultRangeJSON, defaultRangeSuccess := rest.GenericGet(client, buildURLWithRangeAndUserID("/user/default-range"))
+			if defaultRangeSuccess {
+				var defaultRangeData dto.GetOrPostDefaultRangeIDResponse
+				if err := json.Unmarshal(defaultRangeJSON, &defaultRangeData); err == nil && defaultRangeData.DefaultRangeID != "" {
+					rangeIDString = defaultRangeData.DefaultRangeID
+				}
+			}
+			if rangeIDString == "" {
+				logger.Logger.Fatal("No default range found. Use -r <rangeID> to specify the range to delete.")
 			}
 		} else {
 			rangeIDString = rangeID
@@ -510,10 +516,16 @@ var rangeDestroyVmsCmd = &cobra.Command{
 
 		var rangeIDString string
 		if rangeID == "" {
-			if userID == "" {
-				rangeIDString = strings.Split(apiKey, ".")[0]
-			} else {
-				rangeIDString = userID
+			// Fetch the actual default range from the API
+			defaultRangeJSON, defaultRangeSuccess := rest.GenericGet(client, buildURLWithRangeAndUserID("/user/default-range"))
+			if defaultRangeSuccess {
+				var defaultRangeData dto.GetOrPostDefaultRangeIDResponse
+				if err := json.Unmarshal(defaultRangeJSON, &defaultRangeData); err == nil && defaultRangeData.DefaultRangeID != "" {
+					rangeIDString = defaultRangeData.DefaultRangeID
+				}
+			}
+			if rangeIDString == "" {
+				logger.Logger.Fatal("No default range found. Use -r <rangeID> to specify the range to destroy.")
 			}
 		} else {
 			rangeIDString = rangeID
