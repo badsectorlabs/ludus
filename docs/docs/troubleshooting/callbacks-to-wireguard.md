@@ -10,6 +10,8 @@ Ludus 2 changed the `wireguard_vlan_default` from `ACCEPT` to `REJECT`
 
 :::
 
+Ludus user's WireGuard clients can initiate and maintain connections with VMs (i.e. RDP, SSH, VNC), but by default VMs cannot initiate connections to WireGuard clients.
+
 If you want range VMs to be able to initiate connections to WireGuard clients, you must set
 
 ```yaml
@@ -44,3 +46,5 @@ network:
       ports: all
       action: ACCEPT
 ```
+
+Once you make this change in the range config you can apply it by running `ludus range deploy -t network`. For more information on deploy tags see [tags](../using-ludus/tags.md).

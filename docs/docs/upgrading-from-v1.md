@@ -17,6 +17,7 @@ The biggest change is Ludus 2 breaks the strict 1-1 mapping of users to ranges. 
 | Range configs | `/opt/ludus/users/<username>/range-config.yml` | `/opt/ludus/ranges/<rangeID>/range-config.yml` |
 | API authentication | API keys only | API keys, JWT (web UI) |
 | API base path | / | /api/v2 |
+| VM to Wireguard traffic | Allowed by default | Blocked by default |
 
 Your existing Proxmox VMs, templates, and network configuration are not modified by the upgrade. Only the Ludus API's internal data store changes.
 
@@ -27,6 +28,7 @@ Your existing Proxmox VMs, templates, and network configuration are not modified
 - **The web UI** at `https://<ludus-host>:8080` is now available for users to log in (if licensed) with their email and Proxmox password. Migrated users have the email address of `<proxmox-username>@ludus.internal` and can use their Proxmox password.
 - **SSO** via OAuth2 providers can be configured in the [PocketBase admin panel](./administration/sso).
 - The original SQLite database at `/opt/ludus/ludus.db` is preserved in the event you wish to downgrade or retry the migration
+- If you wish to get callbacks to WireGuard clients from VMs, see [this page](./troubleshooting/callbacks-to-wireguard.md).
 
 ## How to Upgrade
 
