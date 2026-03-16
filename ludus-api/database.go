@@ -52,6 +52,7 @@ func InitDb() {
 			logger.Info("Creating initial admin user from install config")
 			if err := createInitialAdminFromFile(initialAdminPath); err != nil {
 				logger.Error(fmt.Sprintf("Failed to create initial admin user: %v", err))
+				writeInitialAdminError(err)
 				logger.Error(fmt.Sprintf("If you already have an admin user you can remove this file: %s", initialAdminPath))
 				logger.Error("and restart the ludus-admin service to bypass this error.")
 				os.Exit(2)
@@ -66,6 +67,15 @@ func InitDb() {
 			}
 		}
 	}
+}
+
+func writeInitialAdminError(err error) {
+	initialAdminErrorPath := fmt.Sprintf("%s/install/initial-admin-error", ludusInstallPath)
+	if writeErr := os.WriteFile(initialAdminErrorPath, []byte(err.Error()), 0600); writeErr != nil {
+		logger.Error(fmt.Sprintf("Failed to write initial-admin-error: %v", writeErr))
+		return
+	}
+	os.Chown(initialAdminErrorPath, 0, 0)
 }
 
 func createRootUserInDatabase() {
@@ -102,20 +112,19 @@ func createRootUserInDatabase() {
 	user.SetIsAdmin(true)
 	user.SetEmail("root@ludus.internal")
 
-	rootWebPassword := security.RandomString(25)
-	err = os.WriteFile(fmt.Sprintf("%s/install/root-web-password", ludusInstallPath), []byte(rootWebPassword), 0400)
-	if err != nil {
-		log.Fatal(err.Error())
-	}
-	os.Chown(fmt.Sprintf("%s/install/root-web-password", ludusInstallPath), 0, 0)
-	user.SetPassword(rootWebPassword)
+	user.SetPassword(security.RandomString(25))
 
+	logger.Info("Writing root API key to: " + fmt.Sprintf("%s/install/root-api-key", ludusInstallPath))
 	apiKey := GenerateAPIKey(user.UserId())
 	err = os.WriteFile(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), []byte(apiKey), 0400)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	os.Chown(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), 0, 0)
+	err = os.Chown(fmt.Sprintf("%s/install/root-api-key", ludusInstallPath), 0, 0)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error chowning root API key: %v", err))
+
+	}
 	tokenID, tokenSecret, err := createRootAPITokenWithShell()
 	if err != nil {
 		log.Fatal(err.Error())
@@ -293,13 +302,12 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 
 		os.MkdirAll(fmt.Sprintf("%s/users/%s", ludusInstallPath, user.ProxmoxUsername()), 0700)
 
-		credentialsPath := fmt.Sprintf("%s/install/initial-admin-credentials", ludusInstallPath)
-		credentialsContent := fmt.Sprintf("email:%s\nusername:%s\napi_key:%s\npassword:%s\n", user.Email(), user.ProxmoxUsername(), apiKey, cfg.Password)
-		if err := os.WriteFile(credentialsPath, []byte(credentialsContent), 0600); err != nil {
-			logger.Error(fmt.Sprintf("Failed to write initial-admin-credentials: %v", err))
-			// non-fatal: we still created the user
+		initialAdminUserIDPath := fmt.Sprintf("%s/install/initial-admin-userid", ludusInstallPath)
+		if err := os.WriteFile(initialAdminUserIDPath, []byte(user.UserId()), 0600); err != nil {
+			logger.Error(fmt.Sprintf("Failed to write initial-admin-userid: %v", err))
+			// non-fatal: initial admin user was still created
 		} else {
-			os.Chown(credentialsPath, 0, 0)
+			os.Chown(initialAdminUserIDPath, 0, 0)
 		}
 
 		return nil
@@ -309,6 +317,12 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 	}
 	if removeErr := os.Remove(initialAdminPath); removeErr != nil {
 		logger.Error(fmt.Sprintf("Failed to remove initial-admin.yml: %v", removeErr))
+	}
+	initialAdminErrorPath := fmt.Sprintf("%s/install/initial-admin-error", ludusInstallPath)
+	if FileExists(initialAdminErrorPath) {
+		if removeErr := os.Remove(initialAdminErrorPath); removeErr != nil {
+			logger.Error(fmt.Sprintf("Failed to remove initial-admin-error: %v", removeErr))
+		}
 	}
 	logger.Info("Successfully created initial admin user")
 	return nil

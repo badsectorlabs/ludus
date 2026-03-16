@@ -93,6 +93,7 @@ func runInstallPlaybook(existingProxmox bool) {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
+	defer ansibleLogFile.Close()
 	execute := execute.NewDefaultExecute(
 		// Write to a log file and stdout
 		execute.WithWrite(io.MultiWriter(os.Stdout, ansibleLogFile)),
@@ -114,7 +115,10 @@ func runInstallPlaybook(existingProxmox bool) {
 
 	err = playbook.Run(context.TODO())
 	if err != nil {
-		panic(err)
+		log.Printf("Ludus install failed while running the Ansible playbook: %v", err)
+		log.Printf("See full playbook output in %s/install/install.log", ludusInstallPath)
+		log.Println("The most common cause of this error is a time sync issue. Please check your time settings and try again.")
+		os.Exit(1)
 	}
 }
 

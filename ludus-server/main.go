@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bufio"
 	"crypto/tls"
 	"embed"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	ludusapi "ludusapi"
@@ -155,37 +153,6 @@ func runBootstrapOnly() {
 	_ = ludusapi.NewRouter(LudusVersion, server)
 }
 
-// parseInitialAdminCredentials reads install/initial-admin-credentials (format: key:value per line).
-func parseInitialAdminCredentials(path string) (email, username, apiKey, password string) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", "", "", ""
-	}
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		idx := strings.Index(line, ":")
-		if idx <= 0 {
-			continue
-		}
-		k, v := strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+1:])
-		switch k {
-		case "email":
-			email = v
-		case "username":
-			username = v
-		case "api_key":
-			apiKey = v
-		case "password":
-			password = v
-		}
-	}
-	return email, username, apiKey, password
-}
-
 func main() {
 
 	// Remove date and time from log output
@@ -226,10 +193,9 @@ func main() {
 	installAnsibleRequirements()
 	// Run the install playbooks with ansible now that it is installed
 	runInstallPlaybook(existingProxmox)
-	// Display credentials if the install was interactive and successful (after a short delay)
+	// If initial-admin.yml exists, run bootstrap to create ROOT + initial admin.
 	time.Sleep(3 * time.Second)
-	if interactiveInstall && fileExists(fmt.Sprintf("%s/install/root-web-password", ludusInstallPath)) {
-		// If initial-admin.yml was provided, run bootstrap to create ROOT + initial admin, then show both
+	if interactiveInstall {
 		initialAdminPath := fmt.Sprintf("%s/install/initial-admin.yml", ludusInstallPath)
 		if fileExists(initialAdminPath) {
 			runBootstrapOnly()

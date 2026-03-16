@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/list"
+	"github.com/go-ozzo/ozzo-validation/v4/is"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v2"
 
@@ -325,6 +326,9 @@ func NewModel() Model {
 				Validate(func(s string) error {
 					if s == "" {
 						return fmt.Errorf("Initial admin email cannot be empty")
+					}
+					if err := is.EmailFormat.Validate(s); err != nil {
+						return fmt.Errorf("Initial admin email must be a valid email address")
 					}
 					return nil
 				}).

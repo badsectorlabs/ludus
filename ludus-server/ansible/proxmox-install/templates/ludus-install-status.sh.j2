@@ -6,14 +6,78 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+
+print_initial_admin_credentials() {
+    local root_api_key_path="{{ ludus_install_path }}/install/root-api-key"
+    local initial_admin_userid_path="{{ ludus_install_path }}/install/initial-admin-userid"
+    local root_api_key
+    local initial_admin_userid
+    local initial_admin_error_path="{{ ludus_install_path }}/install/initial-admin-error"
+    local creds_response
+    local username
+    local password
+    local api_error
+    local initial_admin_error
+
+    if [[ -f "$initial_admin_error_path" ]]; then
+        initial_admin_error="$(tr -d '\n' < "$initial_admin_error_path")"
+        echo "Initial admin user creation failed:"
+        echo "  $initial_admin_error"
+        echo
+        return 0
+    fi
+
+    if [[ ! -f "$initial_admin_userid_path" ]]; then
+        return 0
+    fi
+
+    # Wait up to 10 seconds for root-api-key file to exist
+    count=0
+    while [ ! -f "$root_api_key_path" ] && [ $count -lt 10 ]; do
+        sleep 1
+        ((count++))
+    done
+    if [ ! -f "$root_api_key_path" ]; then
+        echo "Error: Root API key file ($root_api_key_path) not found"
+        return 1
+    fi
+
+    root_api_key="$(tr -d '\n' < "$root_api_key_path")"
+    initial_admin_userid="$(tr -d '\n' < "$initial_admin_userid_path")"
+
+    creds_response="$(curl -sSk \
+        -H "X-API-Key: $root_api_key" \
+        "https://127.0.0.1:8081/api/v2/user/credentials?userID=$initial_admin_userid")"
+    username="$(echo "$creds_response" | jq -r '.result.proxmoxUsername // empty')"
+    password="$(echo "$creds_response" | jq -r '.result.proxmoxPassword // empty')"
+    api_error="$(echo "$creds_response" | jq -r '.error // empty')"
+
+    if [[ -n "$username" && -n "$password" ]]; then
+        echo "Initial admin credentials:"
+        echo "  userID: $initial_admin_userid"
+        echo "  username: $username"
+        echo "  password: $password"
+        echo
+    elif [[ -n "$api_error" ]]; then
+        echo "Initial admin credentials could not be retrieved:"
+        echo "  $api_error"
+        echo
+    else
+        initial_admin_error="$(grep -E 'Failed to create initial admin user:' {{ ludus_install_path }}/install/install.log | tail -n 1 | sed 's/.*Failed to create initial admin user: //')"
+        if [[ -n "$initial_admin_error" ]]; then
+            echo "Initial admin user creation failed:"
+            echo "  $initial_admin_error"
+        else
+            echo "Initial admin credentials were not available yet."
+        fi
+        echo
+    fi
+}
+
 if [[ -f {{ ludus_install_path }}/install/.stage-3-complete ]]; then 
     echo 'Ludus install completed successfully'
     echo
-    if [[ -f {{ ludus_install_path }}/install/initial-admin-credentials ]]; then
-        echo "Initial admin credentials:"
-        grep -E '^(email|username|api_key|password):' {{ ludus_install_path }}/install/initial-admin-credentials | sed 's/^/  /'
-        echo
-    fi
+    print_initial_admin_credentials
 else 
     tail -f {{ ludus_install_path }}/install/install.log | while read line; do
         echo "$line"
@@ -22,22 +86,6 @@ else
             break
         fi
     done
-
-    # Wait up to 10 seconds for root-api-key file to exist
-    count=0
-    while [ ! -f {{ ludus_install_path }}/install/root-api-key ] && [ $count -lt 10 ]; do
-        sleep 1
-        ((count++))
-    done
-    if [ ! -f {{ ludus_install_path }}/install/root-api-key ]; then
-        echo "Error: Root API key file ({{ ludus_install_path }}/install/root-api-key)not found"
-        exit 1
-    fi
-
     echo
-    if [[ -f {{ ludus_install_path }}/install/initial-admin-credentials ]]; then
-        echo "Initial admin credentials:"
-        grep -E '^(email|username|api_key|password):' {{ ludus_install_path }}/install/initial-admin-credentials | sed 's/^/  /'
-        echo
-    fi
+    print_initial_admin_credentials
 fi
