@@ -26,7 +26,7 @@ Your existing Proxmox VMs, templates, and network configuration are not modified
 - **API keys** from Ludus 1.x continue to work. Users do not need new keys.
 - **Range configs** are now stored under `/opt/ludus/ranges/<rangeID>/` instead of `/opt/ludus/users/<username>/`. The old files are not removed.
 - **The web UI** at `https://<ludus-host>:8080` is now available for users to log in (if licensed) with their email and Proxmox password. Migrated users have the email address of `<proxmox-username>@ludus.internal` and can use their Proxmox password.
-- **SSO** via OAuth2 providers can be configured in the [PocketBase admin panel](./administration/sso).
+- **SSO** via OAuth2 providers can be configured in the [PocketBase admin panel](./administration/sso.md).
 - The original SQLite database at `/opt/ludus/ludus.db` is preserved in the event you wish to downgrade or retry the migration
 - If you wish to get callbacks to WireGuard clients from VMs, see [this page](./troubleshooting/callbacks-to-wireguard.md).
 
