@@ -553,7 +553,7 @@ func routeForRangeNetworkInVNetAction(rangeNumber int, present bool) error {
 
 	block := fmt.Sprintf(`
 if [ "$IFACE" = "r%d" ]; then
-	ip route add 10.%d.0.0/16 via 192.0.2.%d dev %s
+	ip route replace 10.%d.0.0/16 via 192.0.2.%d dev %s
 fi
 	`, rangeNumber, rangeNumber, 100+rangeNumber, NATVNetName)
 	_, err := applyBlockInFileAtPath(sdnRoutesFile, fmt.Sprintf("# LUDUS MANAGED BLOCK FOR RANGE %d {mark}", rangeNumber), block, present)
