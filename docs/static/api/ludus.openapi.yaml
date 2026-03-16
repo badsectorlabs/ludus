@@ -2939,6 +2939,7 @@ paths:
                   type: array
                   items:
                     type: string
+                    description: VMID or VM name
                     example: JD-ad-dc-win2019-server-x64
               type: object
             examples: {}
@@ -3549,6 +3550,7 @@ paths:
                         - building
                     os:
                       type: string
+                      description: Detected operating system category
                       enum:
                         - linux
                         - windows

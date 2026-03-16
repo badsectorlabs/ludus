@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 
 	"ludusapi/dto"
@@ -45,13 +47,39 @@ func PowerAction(e *core.RequestEvent, action string) error {
 		}
 	} else {
 		// One or more machine names passed in
+		vmIDsByName := make(map[string]int, len(allVMs))
+		vmIDsByID := make(map[int]int, len(allVMs))
+		for _, vm := range allVMs {
+			vmIDsByName[vm.Name()] = vm.ProxmoxId()
+			vmIDsByID[vm.ProxmoxId()] = vm.ProxmoxId()
+		}
+
+		var missingMachines []string
 		for _, machineName := range powerBody.Machines {
-			for _, vm := range allVMs {
-				if vm.Name() == machineName {
-					vmids = append(vmids, vm.ProxmoxId())
-				}
+			normalizedMachineName := strings.TrimSpace(machineName)
+			var vmid int
+			var found bool
+
+			// If a numeric value is provided, prefer lookup by VMID first.
+			parsedVMID, parseErr := strconv.Atoi(normalizedMachineName)
+			if parseErr == nil {
+				vmid, found = vmIDsByID[parsedVMID]
 			}
 
+			// If VMID lookup fails (or value is non-numeric), fall back to name lookup.
+			if !found {
+				vmid, found = vmIDsByName[normalizedMachineName]
+			}
+			if !found {
+				missingMachines = append(missingMachines, normalizedMachineName)
+				continue
+			}
+			vmids = append(vmids, vmid)
+		}
+
+		if len(missingMachines) > 0 {
+			slices.Sort(missingMachines)
+			return JSONError(e, http.StatusConflict, "Unable to find VM(s) in your range by name: "+strings.Join(missingMachines, ", "))
 		}
 	}
 

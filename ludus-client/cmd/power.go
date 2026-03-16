@@ -59,7 +59,7 @@ var powerOffCmd = genericPowerCmd("off")
 var powerOnCmd = genericPowerCmd("on")
 
 func setupPowerCmd(command *cobra.Command) {
-	command.Flags().StringVarP(&powerCmdNames, "name", "n", "", "A VM name (JS-win10-21h2-enterprise-x64-1) or names separated by commas or 'all'")
+	command.Flags().StringVarP(&powerCmdNames, "name", "n", "", "A VM ID (100) or name (JS-win10-21h2-enterprise-x64-1) or names/IDs separated by commas or 'all'")
 	_ = command.MarkFlagRequired("name")
 }
 
