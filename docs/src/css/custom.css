@@ -63,13 +63,13 @@
 }
 
 .code-block-terminal-command-user-at-debian:before {
-  content: 'user@debian12:~$';
+  content: 'user@debian:~$';
   margin-right: 10px;
   color: rgb(202, 168, 71);
 }
 
 .code-block-terminal-command-root-at-debian:before {
-  content: 'root@debian12:~$';
+  content: 'root@debian:~$';
   margin-right: 10px;
   color: rgb(202, 168, 71);
 }
