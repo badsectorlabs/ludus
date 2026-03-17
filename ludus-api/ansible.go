@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"ludusapi/models"
+	"maps"
 	"os"
 	"os/exec"
 	"regexp"
@@ -21,9 +22,51 @@ import (
 	"github.com/apenella/go-ansible/pkg/options"
 	"github.com/apenella/go-ansible/pkg/playbook"
 	"github.com/pocketbase/pocketbase/core"
-	"golang.org/x/exp/maps"
 	yaml "sigs.k8s.io/yaml"
 )
+
+func getMergedDefaults(rangeConfigPath string) map[string]interface{} {
+	mergedDefaults := map[string]interface{}{}
+
+	serverConfigPath := fmt.Sprintf("%s/ansible/server-config.yml", ludusInstallPath)
+	serverConfigBytes, err := os.ReadFile(serverConfigPath)
+	if err != nil {
+		logger.Debug(fmt.Sprintf("Failed to read server config for defaults merge: %v", err))
+		return mergedDefaults
+	}
+
+	var serverConfig map[string]interface{}
+	if err := yaml.Unmarshal(serverConfigBytes, &serverConfig); err != nil {
+		logger.Debug(fmt.Sprintf("Failed to parse server config for defaults merge: %v", err))
+		return mergedDefaults
+	}
+
+	if serverDefaults, ok := serverConfig["defaults"].(map[string]interface{}); ok {
+		maps.Copy(mergedDefaults, serverDefaults)
+	}
+
+	if rangeConfigPath == "" || !FileExists(rangeConfigPath) {
+		return mergedDefaults
+	}
+
+	rangeConfigBytes, err := os.ReadFile(rangeConfigPath)
+	if err != nil {
+		logger.Debug(fmt.Sprintf("Failed to read range config for defaults merge: %v", err))
+		return mergedDefaults
+	}
+
+	var rangeConfig map[string]interface{}
+	if err := yaml.Unmarshal(rangeConfigBytes, &rangeConfig); err != nil {
+		logger.Debug(fmt.Sprintf("Failed to parse range config for defaults merge: %v", err))
+		return mergedDefaults
+	}
+
+	if rangeDefaults, ok := rangeConfig["defaults"].(map[string]interface{}); ok {
+		maps.Copy(mergedDefaults, rangeDefaults)
+	}
+
+	return mergedDefaults
+}
 
 // Runs an ansible playbook with an arbitrary amount of extraVars
 // Returns a tuple of the playbook output and an error
@@ -47,6 +90,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	}
 
 	accessGrantsArray := GetRangeAccessibleUsers(usersRange.RangeNumber())
+	rangeConfigPath := fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId())
 
 	// Compute target nodes for cluster deployments
 	rangeDefaultTargetNode, vmTargetNodes := computeTargetNodes(e, usersRange.RangeId())
@@ -68,12 +112,15 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		"ludus_cluster_mode":        UseSDN,
 	}
 
+	// Extra vars files are merged at top-level only; without this, a user-provided
+	// partial defaults object replaces all server defaults.
+	userVars["defaults"] = getMergedDefaults(rangeConfigPath)
+
 	// Merge userVars with any extraVars provided
 	maps.Copy(userVars, extraVars)
 
 	// Always include the ludus, server, and user configs
 	var serverAndUserConfigs []string
-	rangeConfigPath := fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId())
 	if FileExists(rangeConfigPath) {
 		// The @ prefix is used to tell ansible to use the file as a local file
 		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), "@" + rangeConfigPath}
@@ -474,6 +521,7 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 		"access_grants_array":   accessGrantsArray,
 		"ludus_testing_enabled": usersRange.TestingEnabled(),
 	}
+	userVars["defaults"] = getMergedDefaults(fmt.Sprintf("%s/ranges/%s/.tmp-range-config.yml", ludusInstallPath, usersRange.RangeId()))
 
 	// Always include the ludus, server, and user configs
 	// Use .tmp-range-config.yml since this function is called during PutConfig before the file is renamed

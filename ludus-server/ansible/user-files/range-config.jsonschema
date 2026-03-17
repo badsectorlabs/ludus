@@ -87,19 +87,7 @@
                     "description": "The Proxmox node to deploy this range to. If not specified, Ludus will select the node with the most available resources (for cluster mode) or use the default node."
                 }
             },
-            "required": [
-                "ad_domain_admin",
-                "ad_domain_admin_password",
-                "ad_domain_functional_level",
-                "ad_domain_safe_mode_password",
-                "ad_domain_user",
-                "ad_domain_user_password",
-                "ad_forest_functional_level",
-                "snapshot_with_RAM",
-                "stale_hours",
-                "timezone",
-                "enable_dynamic_wallpaper"
-            ],
+            "required": [],
             "title": "Defaults"
         },
         "Network": {
