@@ -1352,25 +1352,30 @@ post-deploy ranges-as-admin:
     - ludus range deploy -r CIA-test
     - while [ "$(ludus range list --json -r CIA-test | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range -r CIA-test logs --tail 20; sleep 60; done
     - ludus range rm-range -r CIA-test --no-prompt --force
-    # --- Default range reassignment tests ---
-    # Test 1: Deleting the default range reassigns to another accessible range
+    # --- Default range delete test ---
+    # Deleting the default range throws an error for range function but allows non-range functions to work
     - export CIU_ORIGINAL_DEFAULT=$(ludus --user CIU range default get --json | jq -r '.defaultRangeID')
     - ludus range create -n "CIU Fallback Range" -r CIU-fallback --user CIU
     - ludus --user CIU range default set CIU-fallback
     - ludus range create -n "CIU Other Range" -r CIU-other --user CIU
     - ludus range rm-range -r CIU-fallback --no-prompt
-    # CIU's default should have been reassigned (not CIU-fallback anymore)
-    - '! ludus --user CIU range default get --json | jq -r ".defaultRangeID" | grep CIU-fallback'
+    # CIU's default should not change
+    - ludus --user CIU range default get --json | jq -r ".defaultRangeID" | grep CIU-fallback
     # CIU should still be able to list ranges (not locked out)
+    - ludus --user CIU range accessible
+    # CIU should not be able to do range actions
+    - set +o pipefail
+    - ludus --user CIU range config get 2>&1 | grep "Range CIU-fallback not found for user CIU."
+    - ludus --user CIU power off -n "all" 2>&1 | grep "Range CIU-fallback not found for user CIU."
+    - set -o pipefail
+    # Check that a different range can be assigned default, and range functions work
+    - ludus --user CIU range default set CIU-other
+    - ludus --user CIU range default get --json | jq -r ".defaultRangeID" | grep CIU-other
+    - ludus --user CIU range config get
     - ludus --user CIU range accessible
     # Clean up
     - ludus range rm-range -r CIU-other --no-prompt || true
-    # Test 2: Deleting the only non-original range clears the default but user is not locked out
-    - ludus range create -n "CIU Solo Range" -r CIU-solo --user CIU
-    - ludus --user CIU range default set CIU-solo
-    - ludus range rm-range -r CIU-solo --no-prompt
-    # CIU should still be able to call endpoints (middleware reassigns to their original range)
-    - ludus --user CIU range accessible
+    - ludus --user CIU range default set "$CIU_ORIGINAL_DEFAULT"
     # Verify the default was reassigned to CIU's original range
     - ludus --user CIU range default get --json | jq -r '.defaultRangeID' | grep "$CIU_ORIGINAL_DEFAULT"
 

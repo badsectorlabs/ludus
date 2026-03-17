@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"ludusapi/models"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
@@ -367,7 +368,14 @@ func mustGetUserFromRequest(e *core.RequestEvent) *models.User {
 func GetRange(e *core.RequestEvent) (*models.Range, error) {
 	rawRange := e.Get("range")
 	if rawRange == nil {
-		return nil, errors.New("a range is required for this request and was not found")
+		// GetRange is called, so we need a range and we didn't find one. Error and tell the user how to fix it
+		// If the user specified a rangeID in the request, the error would have been caught by the middleware and returned as a 404
+		// So we know if we get here, the user's default range is missing
+		user := e.Get("user").(*models.User)
+		if user == nil {
+			return nil, JSONError(e, http.StatusNotFound, "User not found in request context")
+		}
+		return nil, JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found for user %s.\nSet a new default range with `ludus range default set <rangeID>` or specify a rangeID in the request with `-r <rangeID>`", user.DefaultRangeId(), user.UserId()))
 	}
 	rangeRecord := rawRange.(*models.Range)
 	return rangeRecord, nil
