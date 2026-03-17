@@ -91,4 +91,4 @@ You can also monitor template builds using the Proxmox web UI. It is available a
 
 Once all the templates have been built, you can deploy a range.
 
-Curious how templates work? Check out the [Templates](../using-ludus/templates) page.
+Curious how templates work? Check out the [Templates](../using-ludus/templates.md) page.
