@@ -235,6 +235,9 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 		path = "artifacts/" + path
 	}
 
+	// If the file path starts with /, remove it
+	path = strings.TrimPrefix(path, "/")
+
 	// Check for a .local-testing file in the target directory
 	if _, err := os.Stat(targetDir + "/.local-testing"); err == nil {
 		log.Printf("LICENSE: In local-testing mode (%s/.local-testing exists), skipping file download\n", targetDir)
