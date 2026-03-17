@@ -21,3 +21,17 @@ You can then browse to the PocketBase admin page at `https://<Ludus IP>:8080/adm
 Log in with the username `root@ludus.internal` and the password the full ROOT API key from `/opt/ludus/install/root-api-key`.
 
 ![The PocketBase login screen](/img/pocketbase/pocketbase-login.png)
+
+## Logs in PocketBase
+
+If there is a critical error in Ludus (i.e. a panic) it may only log in PocketBase and present a standard error to the user.
+
+```
+[ERROR] Check the PocketBase logs for crash details
+```
+
+When this occurs, log into pocket base and click the `Logs` icon on the left.
+
+![The PocketBase Logs icon](/img/pocketbase/logs.png)
+
+Then find the error in the log stream, click it, and investigate.
