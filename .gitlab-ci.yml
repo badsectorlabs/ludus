@@ -2231,6 +2231,25 @@ cluster-test-range-default:
   timeout: 3h
   script:
     - *ci-setup-cluster-admin
+    # Verify cluster mode still grants pool ACLs for newly created ranges
+    - |
+      TEST_RANGE_ID="CCIA-acl-test"
+      # Ensure no leftover from a prior failed run
+      ludus range rm-range -r "${TEST_RANGE_ID}" --no-prompt --force || true
+      ludus range create -n "CCIA ACL Test" -r "${TEST_RANGE_ID}" --user CCIA
+
+      ACL_JSON="$(sudo pveum acl list --output-format json)"
+      for ROLE in PVEVMAdmin PVESDNAdmin PVEPoolUser; do
+        # Creating user should have the expected pool ACL roles
+        echo "${ACL_JSON}" | jq -e --arg path "/pool/${TEST_RANGE_ID}" --arg role "${ROLE}" \
+          'any(.[]; .path == $path and .ugid == "CCIA@pam" and .roleid == $role)' >/dev/null
+
+        # Admin group should also have the expected pool ACL roles
+        echo "${ACL_JSON}" | jq -e --arg path "/pool/${TEST_RANGE_ID}" --arg role "${ROLE}" \
+          'any(.[]; .path == $path and (.ugid == "ludus_admins" or .ugid == "@ludus_admins") and .roleid == $role)' >/dev/null
+      done
+
+      ludus range rm-range -r "${TEST_RANGE_ID}" --no-prompt --force
     # Destroy existing range
     - ludus range rm --no-prompt
     - timeout 180 bash -c 'until [[ $(ludus range list --json | jq ".numberOfVMs") == 0 ]]; do sleep 5; done'

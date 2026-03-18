@@ -315,14 +315,18 @@ func removePool(poolName string) error {
 
 func giveUserAccessToRange(username string, realm string, poolName string, rangeNumber int) error {
 	if UseSDN {
-		return sdnVNetACLAction(username, realm, rangeNumber, false)
+		if err := sdnVNetACLAction(username, realm, rangeNumber, false); err != nil {
+			return err
+		}
 	}
 	return poolACLAction(username, realm, poolName, false)
 }
 
 func removeUserAccessFromRange(username string, realm string, poolName string, rangeNumber int) error {
 	if UseSDN {
-		return sdnVNetACLAction(username, realm, rangeNumber, true)
+		if err := sdnVNetACLAction(username, realm, rangeNumber, true); err != nil {
+			return err
+		}
 	}
 	return poolACLAction(username, realm, poolName, true)
 }
@@ -487,14 +491,18 @@ func removeUserFromGroupInProxmox(username string, realm string, groupName strin
 
 func grantGroupAccessToRangeInProxmox(groupID string, poolName string, rangeNumber int) error {
 	if UseSDN {
-		return grantGroupAccessToSDNVNet(groupID, rangeNumber)
+		if err := grantGroupAccessToSDNVNet(groupID, rangeNumber); err != nil {
+			return err
+		}
 	}
 	return groupACLAction(groupID, poolName, false)
 }
 
 func revokeGroupAccessToRangeInProxmox(groupID string, poolName string, rangeNumber int) error {
 	if UseSDN {
-		return revokeGroupAccessToSDNVNet(groupID, rangeNumber)
+		if err := revokeGroupAccessToSDNVNet(groupID, rangeNumber); err != nil {
+			return err
+		}
 	}
 	return groupACLAction(groupID, poolName, true)
 }
