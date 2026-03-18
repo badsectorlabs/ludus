@@ -2231,7 +2231,7 @@ cluster-test-range-default:
   timeout: 3h
   script:
     - *ci-setup-cluster-admin
-    # Verify cluster mode still grants pool ACLs for newly created ranges
+    # Verify cluster mode grants pool ACLs for newly created ranges
     - |
       TEST_RANGE_ID="CCIA-acl-test"
       # Ensure no leftover from a prior failed run
@@ -2242,7 +2242,7 @@ cluster-test-range-default:
       for ROLE in PVEVMAdmin PVESDNAdmin PVEPoolUser; do
         # Creating user should have the expected pool ACL roles
         echo "${ACL_JSON}" | jq -e --arg path "/pool/${TEST_RANGE_ID}" --arg role "${ROLE}" \
-          'any(.[]; .path == $path and .ugid == "CCIA@pam" and .roleid == $role)' >/dev/null
+          'any(.[]; .path == $path and .ugid == "cluster-ci-admin@pam" and .roleid == $role)' >/dev/null
 
         # Admin group should also have the expected pool ACL roles
         echo "${ACL_JSON}" | jq -e --arg path "/pool/${TEST_RANGE_ID}" --arg role "${ROLE}" \
