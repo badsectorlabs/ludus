@@ -14,7 +14,7 @@ import (
 const (
 	// Minimum required versions
 	minPackerVersion              = "1.9.4"  // No v in the version string
-	minPackerProxmoxPluginVersion = "1.2.3"  // No v in the version string - Note we are using the badsectorlabs/proxmox plugin instead of hashicorp/proxmox
+	minPackerProxmoxPluginVersion = "1.2.4"  // No v in the version string - Note we are using the badsectorlabs/proxmox plugin instead of hashicorp/proxmox
 	minPackerAnsiblePluginVersion = "1.1.1"  // No v in the version string
 	minAnsibleCoreVersion         = "2.16.0" // 2.16.14 is the last version that supports Python 2.7 on the target hosts
 	ansiblePyPiVersionToInstall   = "9.13.0" // 9.13.0 is the last version that supports Python 2.7 on the target hosts
