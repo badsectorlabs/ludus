@@ -285,12 +285,10 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 
 }
 
-// RunAddUserPlaybookStandalone runs the add-user playbook without a request event.
-// Used when creating the initial admin user during InitDb. extraVars must include:
-// username, user_id, user_number, proxmox_public_ip, user_is_admin, proxmox_password.
-func RunAddUserPlaybookStandalone(extraVars map[string]interface{}) (string, error) {
+// runUserManagementPlaybookStandalone runs a user-management playbook without a
+// request event or range context.
+func runUserManagementPlaybookStandalone(playbookPath string, extraVars map[string]interface{}) (string, error) {
 	buff := new(bytes.Buffer)
-	playbookPath := ludusInstallPath + "/ansible/user-management/add-user.yml"
 	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
 
 	ansiblePlaybookConnectionOptions := &options.AnsibleConnectionOptions{
@@ -344,6 +342,25 @@ func RunAddUserPlaybookStandalone(extraVars map[string]interface{}) (string, err
 		return buff.String(), err
 	}
 	return buff.String(), nil
+}
+
+// RunAddUserPlaybookStandalone runs the add-user playbook without a request event.
+// Used when creating the initial admin user during InitDb. extraVars must include:
+// username, user_id, user_number, proxmox_public_ip, user_is_admin, proxmox_password.
+func RunAddUserPlaybookStandalone(extraVars map[string]interface{}) (string, error) {
+	return runUserManagementPlaybookStandalone(
+		ludusInstallPath+"/ansible/user-management/add-user.yml",
+		extraVars,
+	)
+}
+
+// RunDeleteUserPlaybookStandalone runs the del-user playbook without a request
+// event or range context.
+func RunDeleteUserPlaybookStandalone(extraVars map[string]interface{}) (string, error) {
+	return runUserManagementPlaybookStandalone(
+		ludusInstallPath+"/ansible/user-management/del-user.yml",
+		extraVars,
+	)
 }
 
 // A helper to keep function calls clean

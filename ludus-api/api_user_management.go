@@ -392,14 +392,13 @@ func DeleteUser(e *core.RequestEvent) error {
 	}
 	user.SetProxyRecord(userRecord)
 
-	playbook := []string{ludusInstallPath + "/ansible/user-management/del-user.yml"}
 	extraVars := map[string]interface{}{
 		"username":      user.ProxmoxUsername(),
 		"user_id":       user.UserId(),
 		"user_number":   user.UserNumber(),
 		"user_is_admin": user.IsAdmin(),
 	}
-	output, err := server.RunAnsiblePlaybookWithVariables(e, playbook, []string{}, extraVars, "", false, "")
+	output, err := RunDeleteUserPlaybookStandalone(extraVars)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running ansible playbook: %v", output))
 	}
