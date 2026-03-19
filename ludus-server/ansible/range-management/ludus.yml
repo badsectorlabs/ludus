@@ -614,7 +614,7 @@
           ansible.builtin.include_tasks: tasks/windows/install-office.yml
           vars:
             office_version: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.office_version | string }}"
-            office_arch: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.office_arch | string }}"
+            office_arch: "{{ ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.office_arch | string) | default('64bit') }}"
             office_installer_version_lookback: "1"
       # Sometimes the latest office installer fails - fall back to the last version and try again
       rescue:
@@ -624,7 +624,7 @@
               ansible.builtin.include_tasks: tasks/windows/install-office.yml
               vars:
                 office_version: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.office_version | string }}"
-                office_arch: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.office_arch | string }}"
+                office_arch: "{{ ((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows.office_arch | string) | default('64bit') }}"
                 office_installer_version_lookback: "2"
           # If Mircosoft has pulled the previous office install binary, it will fail with 404. Move on but warn the user at the end of the deploy
           rescue:
