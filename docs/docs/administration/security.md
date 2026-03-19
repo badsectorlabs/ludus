@@ -75,8 +75,8 @@ In order to [maximize CPU speed](https://www.phoronix.com/review/retbleed-benchm
 Ludus makes conscious tradeoffs between security and usability.
 Ludus is designed for individual or team use, and not to be shared with untrusted users.
 
-## Passwords
+## Passwords/Tokens
 
-In order to allow admins to impersonate users (act on their behalf), user Proxmox passwords are stored in plain text and are readable by the `ludus` user. Malicious users could deploy custom Ansible roles to read other user's Proxmox credentials.
+In order to allow admins to impersonate users (act on their behalf), user Proxmox tokens are stored encrypted in the database and are readable by the `ludus` user. Malicious users could deploy custom Ansible roles to read other user's Proxmox credentials.
 
 Simple passwords (often literally `password`) are used throughout Ludus virtual machines. Ludus VMs are meant for testing and not serious infrastructure deployment.
