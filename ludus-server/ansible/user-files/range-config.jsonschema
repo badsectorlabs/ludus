@@ -202,7 +202,7 @@
                 },
                 "ports": {
                     "$ref": "#/definitions/Ports",
-                    "description": "A single port, a range in the format start:end, or 'all'"
+                    "description": "A single port, a range in the format start:end, a comma-separated list of ports/ranges, or 'all'"
                 },
                 "action": {
                     "type": "string",
@@ -540,11 +540,11 @@
                 },
                 {
                     "type": "string",
-                    "pattern": "^([0-9]{1,5}|[0-9]{1,5}:[0-9]{1,5}|all)$"
+                    "pattern": "^((([0-9]{1,5}|[0-9]{1,5}:[0-9]{1,5})(\\s*,\\s*([0-9]{1,5}|[0-9]{1,5}:[0-9]{1,5}))*)|all)$"
                 }
             ],
             "title": "Ports",
-            "description": "A single port, a range in the format start:end, or 'all'"
+            "description": "A single port, a range in the format start:end, a comma-separated list of ports/ranges, or 'all'"
         },
         "RoleVars": {
             "type": ["number", "string", "boolean", "object", "array", "null"],

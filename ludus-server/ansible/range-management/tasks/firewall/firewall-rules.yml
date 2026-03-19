@@ -144,6 +144,29 @@
   ansible.builtin.debug:
     msg: "src: {{ src }}    dst: {{ dst }}     proto: {{ proto }}    ports: {{ item.ports | default('undefined') }}    action: {{ item.action }}"
 
+- name: Normalize ports into a list for rule application
+  ansible.builtin.set_fact:
+    rule_ports: >-
+      {{
+        ['all']
+        if (item.ports is not defined or (item.ports | string | trim) == 'all')
+        else (
+          [item.ports | string]
+          if item.ports is number
+          else ((item.ports | string).split(',') | map('trim') | list)
+        )
+      }}
+
+- name: Validate parsed ports list does not include empty values
+  ansible.builtin.assert:
+    that:
+      - "'' not in rule_ports"
+    fail_msg: "Ports list cannot contain empty values. Use comma-separated values like '8080, 8090, 4433'."
+    success_msg: "Parsed ports list is valid"
+  when:
+    - item.ports is defined
+    - item.ports | string != 'all'
+
 - name: Check that ports are only set with supported protocols
   ansible.builtin.assert:
     that:
@@ -160,13 +183,16 @@
     source: "{{ src }}"
     destination: "{{ dst }}"
     protocol: "{{ proto }}"
-    destination_port: "{{ item.ports if (item.ports is defined and (item.ports | string) != 'all') else omit }}"
+    destination_port: "{{ rule_port if rule_port != 'all' else omit }}"
     jump: "{{ item.action }}"
     state: present
     action: insert
     comment: "User Rule: {{ item.name }}"
     numeric: true
     rule_num: "{{ 2 if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else omit }}"
+  loop: "{{ rule_ports }}"
+  loop_control:
+    loop_var: rule_port
   when: >
       (item.ip_last_octet_src is undefined and item.ip_last_octet_dst is undefined) or
       (item.ip_last_octet_dst is undefined and item.ip_last_octet_src is defined and "-" not in (item.ip_last_octet_src | string)) or
@@ -179,13 +205,16 @@
     src_range: "{{ src }}"
     destination: "{{ dst }}"
     protocol: "{{ proto }}"
-    destination_port: "{{ item.ports if (item.ports is defined and (item.ports | string) != 'all') else omit }}"
+    destination_port: "{{ rule_port if rule_port != 'all' else omit }}"
     jump: "{{ item.action }}"
     state: present
     action: insert
     comment: "User Rule: {{ item.name }}"
     numeric: true
     rule_num: "{{ 2 if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else omit }}"
+  loop: "{{ rule_ports }}"
+  loop_control:
+    loop_var: rule_port
   when:
     - item.ip_last_octet_src is defined
     - '"-" in (item.ip_last_octet_src | string)'
@@ -197,13 +226,16 @@
     source: "{{ src }}"
     dst_range: "{{ dst }}"
     protocol: "{{ proto }}"
-    destination_port: "{{ item.ports if (item.ports is defined and (item.ports | string) != 'all') else omit }}"
+    destination_port: "{{ rule_port if rule_port != 'all' else omit }}"
     jump: "{{ item.action }}"
     state: present
     action: insert
     comment: "User Rule: {{ item.name }}"
     numeric: true
     rule_num: "{{ 2 if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else omit }}"
+  loop: "{{ rule_ports }}"
+  loop_control:
+    loop_var: rule_port
   when:
     - item.ip_last_octet_dst is defined
     - '"-" in (item.ip_last_octet_dst| string)'
@@ -215,13 +247,16 @@
     src_range: "{{ src }}"
     dst_range: "{{ dst }}"
     protocol: "{{ proto }}"
-    destination_port: "{{ item.ports if (item.ports is defined and (item.ports | string) != 'all') else omit }}"
+    destination_port: "{{ rule_port if rule_port != 'all' else omit }}"
     jump: "{{ item.action }}"
     state: present
     action: insert
     comment: "User Rule: {{ item.name }}"
     numeric: true
     rule_num: "{{ 2 if (item.vlan_src | string == 'wireguard' or item.vlan_dst | string == 'wireguard') else omit }}"
+  loop: "{{ rule_ports }}"
+  loop_control:
+    loop_var: rule_port
   when:
     - item.ip_last_octet_src is defined
     - item.ip_last_octet_dst is defined

@@ -157,6 +157,14 @@ network:
       protocol: tcp
       ports: "1:80"
       action: ACCEPT
+    - name: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20
+      vlan_src: 10
+      ip_last_octet_src: 11
+      vlan_dst: 20
+      ip_last_octet_dst: 21-25
+      protocol: tcp
+      ports: 8080, 8090, 4433, 5000:6000, 9000
+      action: ACCEPT
     - name: Block SSH from VLAN 10 to VLAN 20
       vlan_src: 10
       vlan_dst: 20

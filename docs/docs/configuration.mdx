@@ -161,8 +161,14 @@ network:
       vlan_src: 10   # Traffic source VLAN. Special value 'public' can be used which is converted to '! 10.ID.0.0/16' in the iptables rule, 'all' is '10.ID.0.0/16', and 'wireguard' is '198.51.100.0/24'
       vlan_dst: 99   # Traffic destination VLAN. Special value 'public' can be used which is converted to '! 10.ID.0.0/16' in the iptables rule, 'all' is '10.ID.0.0/16', and 'wireguard' is '198.51.100.0/24'
       protocol: tcp  # Protocol (tcp|udp|icmp|all)
-      ports: 443     # A single port, a range in the format start:end, or 'all'
+      ports: 443     # A single port, a range in the format start:end, a comma-separated list, or 'all'
       action: ACCEPT # ACCEPT|REJECT|DROP
+    - name: Allow multiple TCP ports from VLAN 10 to VLAN 20
+      vlan_src: 10
+      vlan_dst: 20
+      protocol: tcp
+      ports: 8080, 8090, 4433
+      action: ACCEPT
     - name: Allow kali to the DC
       vlan_src: 99
       ip_last_octet_src: 1 # The single machine from the vlan_src to apply the rule to
