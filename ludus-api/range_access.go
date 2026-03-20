@@ -1,6 +1,7 @@
 package ludusapi
 
 import (
+	"errors"
 	"fmt"
 	"ludusapi/dto"
 	"ludusapi/models"
@@ -10,6 +11,18 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
+
+// ErrRangeRouterPoweredOff is returned when the access-control playbook cannot reach the range router
+// because the VM exists in the cluster but is not reachable (typically powered off).
+var ErrRangeRouterPoweredOff = errors.New("The range router you are sharing access to must be accessible. Make sure the router is powered on and accessible.")
+
+func playbookReportsRouterUnreachable(output, routerVMName string) bool {
+	if routerVMName == "" {
+		return false
+	}
+	prefix := "fatal: [" + routerVMName + "]:"
+	return strings.Contains(output, prefix) && strings.Contains(output, "UNREACHABLE")
+}
 
 // This will run just the access-control tag on the provided range
 func RunAccessControlPlaybook(e *core.RequestEvent, targetRange *models.Range) error {
@@ -25,12 +38,29 @@ func RunAccessControlPlaybook(e *core.RequestEvent, targetRange *models.Range) e
 
 	e.Set("range", targetRange)
 
-	_, err = RunPlaybookWithTag(e, "range-access.yml", "", false)
-	if err != nil {
+	output, err := RunPlaybookWithTag(e, "range-access.yml", "", false)
+	// No error, good to go
+	if err == nil {
+		return nil
+	}
+
+	routerName, _ := GetRouterVMName(targetRange)
+	// If the router is not unreachable, return the error as is (something else is wrong)
+	if !playbookReportsRouterUnreachable(output, routerName) {
 		return err
 	}
 
-	return nil
+	_, vmErr := getNodeForVMByName(e, routerName)
+	// If the router is not found, return nil (the router is not deployed, access will be handled correctly on next deploy)
+	if errors.Is(vmErr, ErrProxmoxVMNotFound) {
+		return nil
+	}
+	if vmErr != nil {
+		return fmt.Errorf("%w (could not verify router VM in cluster: %v)", err, vmErr)
+	}
+
+	// If the router is unreachable, return the powered off error
+	return ErrRangeRouterPoweredOff
 }
 
 // GetRangeAccessibleUsers returns all userIDs who can access a specific range

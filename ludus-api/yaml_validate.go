@@ -185,6 +185,7 @@ type VM struct {
 
 // Router represents the router section of the range config.
 type Router struct {
+	VMName     string `json:"vm_name"`
 	TargetNode string `json:"target_node,omitempty"` // Proxmox node for the router VM; overrides range default (cluster only)
 }
 

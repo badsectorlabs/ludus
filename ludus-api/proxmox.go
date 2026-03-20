@@ -25,6 +25,9 @@ import (
 	"github.com/Telmate/proxmox-api-go/proxmox"
 )
 
+// ErrProxmoxVMNotFound is returned by getNodeForVMByName when no cluster VM matches the name.
+var ErrProxmoxVMNotFound = errors.New("proxmox VM not found")
+
 func GetProxmoxClientForUserUsingToken(e *core.RequestEvent) (*proxmox.Client, error) {
 	user := e.Get("user").(*models.User)
 
@@ -740,7 +743,7 @@ func getNodeForVMByName(e *core.RequestEvent, vmName string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("VM %s not found in cluster", vmName)
+	return "", fmt.Errorf("%w: VM %s not found in cluster", ErrProxmoxVMNotFound, vmName)
 }
 
 func getVMsForPool(e *core.RequestEvent, ctx context.Context, poolName string, client *goproxmox.Client) ([]goproxmox.ClusterResource, error) {

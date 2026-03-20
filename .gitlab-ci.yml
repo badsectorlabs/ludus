@@ -1308,6 +1308,7 @@ post-deploy ranges-as-admin:
     - changes:
       - ludus-client/cmd/range.go
       - ludus-api/api_range_management.go
+      - ludus-api/range_access.go
       - ludus-api/middleware.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
@@ -1346,6 +1347,29 @@ post-deploy ranges-as-admin:
     - ludus --user CIA range accessible | grep CIA-extra-1
     - ludus range rm-range -r CIA-extra-1 --no-prompt
     - '! ludus --user CIA range accessible | grep CIA-extra-1'
+    # Assign / share range (access-control playbook): on, empty, router off ---
+    - ludus range revoke CIU CIA || true
+    # 1) Deployed range with VMs powered on: assign succeeds
+    - ludus range assign CIU CIA
+    - ludus range users CIA | grep CIU
+    - ludus range revoke CIU CIA
+    # 2) Empty range (never deployed): assign succeeds (no router in cluster)
+    - ludus range rm-range -r CIA-share-assign-test --no-prompt --force || true
+    - ludus range create -n "CIA share assign empty" -r CIA-share-assign-test
+    - ludus range assign CIU CIA-share-assign-test
+    - ludus range users CIA-share-assign-test | grep CIU
+    - ludus range revoke CIU CIA-share-assign-test
+    - ludus range rm-range -r CIA-share-assign-test --no-prompt
+    # 3) Router VM exists but powered off: assign fails with clear message
+    - ludus range revoke CIU CIA || true
+    - ludus power off -n CIA-router-debian11-x64
+    - timeout 120 bash -c 'until [[ $(ludus range list --json | jq -r ".VMs[] | select(.name == \"CIA-router-debian11-x64\") | .poweredOn") == "false" ]]; do sleep 5; done'
+    - set +o pipefail
+    - ludus range assign CIU CIA 2>&1 | grep -F "The range router you are sharing access to must be accessible. Make sure the router is powered on and accessible."
+    - set -o pipefail
+    - '! ludus range users CIA | grep CIU'
+    - ludus power on -n CIA-router-debian11-x64
+    - timeout 180 bash -c 'until [[ $(ludus range list --json | jq -r ".VMs[] | select(.name == \"CIA-router-debian11-x64\") | .poweredOn") == "true" ]]; do sleep 5; done'
     # Deploy a simple range, then delete it to verify deleting a range with VMs works
     - ludus range create -n "CIA Test Range" -r CIA-test
     - ludus range config set -f /opt/ludus/ci/configs/small-range.yml -r CIA-test

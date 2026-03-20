@@ -2,6 +2,7 @@ package ludusapi
 
 import (
 	"database/sql"
+	stderrors "errors"
 	"fmt"
 	"ludusapi/dto"
 	"ludusapi/models"
@@ -249,12 +250,15 @@ func AddUsersToGroup(e *core.RequestEvent) error {
 			err = RunAccessControlPlaybook(e, rangeRecord)
 			if err != nil {
 				errorString := ""
-				isDeployed, err := rangeIsDeployed(e, rangeRecord)
-				if err != nil {
-					errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeRecord.RangeId(), err)
-				}
-				if isDeployed {
-					errorString = fmt.Sprintf("Range %s is deployed and access cannot be added to group %s", rangeRecord.RangeId(), group.Name())
+				if stderrors.Is(err, ErrRangeRouterPoweredOff) {
+					errorString = err.Error()
+				} else {
+					isDeployed, deployErr := rangeIsDeployed(e, rangeRecord)
+					if deployErr != nil {
+						errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeRecord.RangeId(), deployErr)
+					} else if isDeployed {
+						errorString = fmt.Sprintf("Range %s is deployed and access cannot be added to group %s", rangeRecord.RangeId(), group.Name())
+					}
 				}
 				if errorString != "" {
 					// Rollback
@@ -358,12 +362,15 @@ func RemoveUsersFromGroup(e *core.RequestEvent) error {
 			err = RunAccessControlPlaybook(e, rangeRecord)
 			if err != nil {
 				errorString := ""
-				isDeployed, err := rangeIsDeployed(e, rangeRecord)
-				if err != nil {
-					errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeRecord.RangeId(), err)
-				}
-				if isDeployed {
-					errorString = fmt.Sprintf("Range %s is deployed and access cannot be removed from group %s", rangeRecord.RangeId(), group.Name())
+				if stderrors.Is(err, ErrRangeRouterPoweredOff) {
+					errorString = err.Error()
+				} else {
+					isDeployed, deployErr := rangeIsDeployed(e, rangeRecord)
+					if deployErr != nil {
+						errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeRecord.RangeId(), deployErr)
+					} else if isDeployed {
+						errorString = fmt.Sprintf("Range %s is deployed and access cannot be removed from group %s", rangeRecord.RangeId(), group.Name())
+					}
 				}
 				if errorString != "" {
 					// If there is an error or the range is deployed, we need to restore the user to the group and range
@@ -481,12 +488,15 @@ func AddRangesToGroup(e *core.RequestEvent) error {
 		err = RunAccessControlPlaybook(e, rangeObj)
 		if err != nil {
 			errorString := ""
-			isDeployed, err := rangeIsDeployed(e, rangeObj)
-			if err != nil {
-				errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), err)
-			}
-			if isDeployed {
-				errorString = fmt.Sprintf("Range %s is deployed and access cannot be granted to group %s. Make sure the router is powered on and accessible.", rangeObj.RangeId(), group.Name())
+			if stderrors.Is(err, ErrRangeRouterPoweredOff) {
+				errorString = err.Error()
+			} else {
+				isDeployed, deployErr := rangeIsDeployed(e, rangeObj)
+				if deployErr != nil {
+					errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), deployErr)
+				} else if isDeployed {
+					errorString = fmt.Sprintf("Range %s is deployed and access cannot be granted to group %s. Make sure the router is powered on and accessible.", rangeObj.RangeId(), group.Name())
+				}
 			}
 			if errorString != "" {
 				// Rollback
@@ -568,12 +578,15 @@ func RemoveRangesFromGroup(e *core.RequestEvent) error {
 		err = RunAccessControlPlaybook(e, rangeObj)
 		if err != nil {
 			errorString := ""
-			isDeployed, err := rangeIsDeployed(e, rangeObj)
-			if err != nil {
-				errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), err)
-			}
-			if isDeployed {
-				errorString = fmt.Sprintf("Range %s is deployed and access cannot be revoked from group %s", rangeObj.RangeId(), group.Name())
+			if stderrors.Is(err, ErrRangeRouterPoweredOff) {
+				errorString = err.Error()
+			} else {
+				isDeployed, deployErr := rangeIsDeployed(e, rangeObj)
+				if deployErr != nil {
+					errorString = fmt.Sprintf("Error checking if range %s is deployed: %v", rangeObj.RangeId(), deployErr)
+				} else if isDeployed {
+					errorString = fmt.Sprintf("Range %s is deployed and access cannot be revoked from group %s", rangeObj.RangeId(), group.Name())
+				}
 			}
 			if errorString != "" {
 				// Rollback

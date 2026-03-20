@@ -672,6 +672,26 @@ func computeTargetNodes(e *core.RequestEvent, rangeID string) (string, map[strin
 		return ServerConfiguration.ProxmoxNode, vmTargetNodes
 	}
 
+	// Replace {{ range_id }} with the actual range ID
+	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
+	for i, vm := range config.Ludus {
+		config.Ludus[i].VMName = rangeIDTemplateRegex.ReplaceAllString(vm.VMName, rangeID)
+	}
+	if config.Router != nil {
+		config.Router.VMName = rangeIDTemplateRegex.ReplaceAllString(config.Router.VMName, rangeID)
+	}
+
+	// Not in cluster mode, use the configured node
+	if !UseSDN {
+		for _, vm := range config.Ludus {
+			vmTargetNodes[vm.VMName] = ServerConfiguration.ProxmoxNode
+		}
+		if config.Router != nil {
+			vmTargetNodes[config.Router.VMName] = ServerConfiguration.ProxmoxNode
+		}
+		return ServerConfiguration.ProxmoxNode, vmTargetNodes
+	}
+
 	// Determine the default target node
 	// Priority: Range target_node > Auto-select
 	var defaultTargetNode string

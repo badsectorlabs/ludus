@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"ludusapi/commandmanager"
@@ -869,6 +870,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 		if err != nil {
 			sourceUserObject.Set("ranges-", targetRange.Id)
 			e.App.Save(sourceUserObject)
+			if errors.Is(err, ErrRangeRouterPoweredOff) {
+				return JSONError(e, http.StatusConflict, err.Error())
+			}
 			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
 		}
 
@@ -894,6 +898,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 		if err != nil {
 			sourceUserObject.Set("ranges+", targetRange.Id)
 			e.App.Save(sourceUserObject)
+			if errors.Is(err, ErrRangeRouterPoweredOff) {
+				return JSONError(e, http.StatusConflict, err.Error())
+			}
 			return JSONError(e, http.StatusInternalServerError, "Error running access control playbook: "+err.Error())
 		}
 
