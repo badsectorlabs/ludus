@@ -59,6 +59,12 @@ print_initial_admin_credentials() {
         echo "  username: $username"
         echo "  password: $password"
         echo
+        echo "Initial admin API key:"
+        if ! LUDUS_API_KEY="$root_api_key" ludus --user "$initial_admin_userid" user apikey --no-prompt --value; then
+            echo "  (could not retrieve API key via ludus CLI; is ludus in PATH?)"
+        fi
+        echo "  [Note: This API key will be recreated if this command is run again and the old key will no longer work]"
+        echo
     elif [[ -n "$api_error" ]]; then
         echo "Initial admin credentials could not be retrieved:"
         echo "  $api_error"
