@@ -257,6 +257,23 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		})
 	}
 
+	// Serve the OpenAPI spec
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.GET(APIBasePath+"/openapi", func(e *core.RequestEvent) error {
+			spec := EmbeddedOpenAPISpec()
+			if spec == nil {
+				return e.JSON(http.StatusNotFound, map[string]string{
+					"error": "OpenAPI spec not available",
+				})
+			}
+			e.Response.Header().Set("Content-Type", "text/yaml")
+			e.Response.WriteHeader(http.StatusOK)
+			e.Response.Write(spec)
+			return nil
+		})
+		return se.Next()
+	})
+
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		RegisterRoutesWithPocketBase(se, routes)
 		RegisterPluginPlaceholderRoutes(se)

@@ -56,6 +56,16 @@ func checkEmbeddedWebUI() bool {
 	return true
 }
 
+// EmbeddedOpenAPISpec reads the OpenAPI spec from the embedded docs filesystem.
+// Returns nil if the spec is not available (e.g. dev builds without the embeddocs tag).
+func EmbeddedOpenAPISpec() []byte {
+	data, err := fs.ReadFile(embeddedDocs, "docs/static/api/ludus.openapi.yaml")
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
 func HashString(password string) (string, error) {
 	// Use a lower cost for the hash than the recommended 14
 	// We have to hash the API key each request during the compare, so we don't want to use too much CPU
