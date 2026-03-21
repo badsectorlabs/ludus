@@ -24,6 +24,13 @@ func playbookReportsRouterUnreachable(output, routerVMName string) bool {
 	return strings.Contains(output, prefix) && strings.Contains(output, "UNREACHABLE")
 }
 
+// playbookReportsUndeployedRangeRouter matches range-access.yml localhost validation when
+// the expected router host is absent from inventory (never deployed / empty range).
+func playbookReportsUndeployedRangeRouter(output string) bool {
+	return strings.Contains(output, "Target router is not up.") &&
+		strings.Contains(output, "range has not been deployed yet")
+}
+
 // This will run just the access-control tag on the provided range
 func RunAccessControlPlaybook(e *core.RequestEvent, targetRange *models.Range) error {
 
@@ -39,28 +46,30 @@ func RunAccessControlPlaybook(e *core.RequestEvent, targetRange *models.Range) e
 	e.Set("range", targetRange)
 
 	output, err := RunPlaybookWithTag(e, "range-access.yml", "", false)
-	// No error, good to go
 	if err == nil {
 		return nil
 	}
 
-	routerName, _ := GetRouterVMName(targetRange)
-	// If the router is not unreachable, return the error as is (something else is wrong)
-	if !playbookReportsRouterUnreachable(output, routerName) {
-		return err
+	// range-access.yml fails on localhost when the router is not in dynamic inventory.
+	if playbookReportsUndeployedRangeRouter(output) {
+		return nil
 	}
 
+	routerName, _ := GetRouterVMName(targetRange)
 	_, vmErr := getNodeForVMByName(e, routerName)
-	// If the router is not found, return nil (the router is not deployed, access will be handled correctly on next deploy)
 	if errors.Is(vmErr, ErrProxmoxVMNotFound) {
+		// No non-template router VM in the cluster; access rules apply on next deploy.
 		return nil
 	}
 	if vmErr != nil {
 		return fmt.Errorf("%w (could not verify router VM in cluster: %v)", err, vmErr)
 	}
 
-	// If the router is unreachable, return the powered off error
-	return ErrRangeRouterPoweredOff
+	if playbookReportsRouterUnreachable(output, routerName) {
+		return ErrRangeRouterPoweredOff
+	}
+
+	return err
 }
 
 // GetRangeAccessibleUsers returns all userIDs who can access a specific range
