@@ -57,6 +57,9 @@ func getAvailableTemplates(user *models.User) ([]string, error) {
 	}
 	userTemplates, err := findFiles(fmt.Sprintf("%s/users/%s/packer/", ludusInstallPath, user.ProxmoxUsername()), ".hcl", ".json")
 	if err != nil {
+		if user.Name() == "ROOT" {
+			return nil, errors.New("ROOT user should not be used for this action. Use a normal user instead.")
+		}
 		return nil, errors.New("unable to get user packer templates")
 	}
 	// Filter out pkrvars.hcl files from userTemplates, re: https://gitlab.com/badsectorlabs/ludus/-/issues/103
