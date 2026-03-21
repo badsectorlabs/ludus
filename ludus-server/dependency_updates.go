@@ -144,7 +144,7 @@ func checkPackerPluginVersions() error {
 				if err != nil {
 					return fmt.Errorf("error checking proxmox version: %v", err)
 				}
-				if !versionMeetsMinimum(proxmoxVersion, "9.1.0") {
+				if !versionMeetsMinimum(strings.TrimSpace(proxmoxVersion), "9.1.0") {
 					log.Printf("Proxmox version %s is less than 9.1.0. Staying on packer plugin version 1.2.3. Upgrade proxmox to use TPM enabled VMs with snapshots.", proxmoxVersion)
 					Run("PACKER_PLUGIN_PATH="+ludusInstallPath+"/resources/packer/plugins packer plugins install github.com/badsectorlabs/proxmox v1.2.3", false, true)
 					continue
