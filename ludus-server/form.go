@@ -399,7 +399,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = min(msg.Width, maxWidth) - m.styles.Base.GetHorizontalFrameSize()
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "esc", "ctrl+c", "q":
+		case "esc", "ctrl+c":
 			return m, tea.Quit
 		case "down", "tab", "enter":
 			m.currentFieldIndex = (m.currentFieldIndex + 1) % numberOfFields
