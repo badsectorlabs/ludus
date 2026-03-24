@@ -16,6 +16,7 @@ print_initial_admin_credentials() {
     local creds_response
     local username
     local password
+    local web_username
     local api_error
     local initial_admin_error
 
@@ -51,15 +52,18 @@ print_initial_admin_credentials() {
         "https://127.0.0.1:8081/api/v2/user/credentials?userID=$initial_admin_userid")"
     username="$(echo "$creds_response" | jq -r '.result.proxmoxUsername // empty')"
     password="$(echo "$creds_response" | jq -r '.result.proxmoxPassword // empty')"
+    web_username="$(echo "$creds_response" | jq -r '.result.ludusEmail // empty')"
     api_error="$(echo "$creds_response" | jq -r '.error // empty')"
 
     if [[ -n "$username" && -n "$password" ]]; then
         echo "Initial admin credentials:"
         echo "  userID: $initial_admin_userid"
-        echo "  username: $username"
-        echo "  password: $password"
+        echo "  Proxmox username: $username"
+        echo "  Proxmox password: $password"
+        echo "  Ludus Web username: $web_username"
+        echo "  Ludus Web password: $password"
         echo
-        echo "Initial admin API key:"
+        echo -n "API key for user $initial_admin_userid: "
         if ! LUDUS_API_KEY="$root_api_key" ludus --user "$initial_admin_userid" user apikey --no-prompt --value; then
             echo "  (could not retrieve API key via ludus CLI; is ludus in PATH?)"
         fi
