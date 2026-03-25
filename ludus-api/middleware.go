@@ -1,8 +1,10 @@
 package ludusapi
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
+	"io"
 	"ludusapi/models"
 	"net"
 	"net/http"
@@ -172,6 +174,21 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 		// First clear all the headers to prevent sending 2x of each header
 		for k := range e.Response.Header() {
 			e.Response.Header().Del(k)
+		}
+		// Strip PocketBase's RereadableReadCloser before proxying.
+		// PocketBase wraps every request body in a RereadableReadCloser
+		// (see pocketbase/tools/router/router.go:141) that buffers bytes
+		// as they're read and rewinds on EOF. When Go's HTTP transport
+		// writes the proxied request, it reads ContentLength bytes then
+		// checks for leftovers — triggering the rewind and reading the
+		// buffered copy again, producing ContentLength=N with Body length 2N.
+		// See: https://github.com/pocketbase/pocketbase/blob/master/tools/router/rereadable_read_closer.go
+		if e.Request.Body != nil {
+			bodyBytes, err := io.ReadAll(e.Request.Body)
+			if err == nil {
+				e.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				e.Request.ContentLength = int64(len(bodyBytes))
+			}
 		}
 		// Reverse proxy to the admin API
 		adminProxy.ServeHTTP(e.Response, e.Request)
