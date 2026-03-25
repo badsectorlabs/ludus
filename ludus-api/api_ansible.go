@@ -199,6 +199,40 @@ func ActionRoleFromInternet(e *core.RequestEvent) error {
 
 }
 
+// ansibleRoleArchiveSuffixes are stripped from the end of an uploaded filename when deriving
+// the role name for ansible-galaxy. Longer entries must precede shorter suffixes they contain
+// (e.g. ".tar.gz" before ".gz").
+var ansibleRoleArchiveSuffixes = []string{
+	".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst",
+	".tgz", ".tbz2", ".txz",
+	".tar", ".zip",
+	".gz", ".bz2", ".xz", ".zst",
+}
+
+// roleNameFromUploadedArchiveBasename returns the role name for ansible-galaxy from the uploaded
+// file basename. Only known archive suffixes are removed so names like mynamespace.my_role stay intact.
+func roleNameFromUploadedArchiveBasename(basename string) string {
+	name := basename
+	for {
+		stripped := false
+		for _, suf := range ansibleRoleArchiveSuffixes {
+			if len(name) < len(suf) {
+				continue
+			}
+			tail := name[len(name)-len(suf):]
+			if strings.EqualFold(tail, suf) {
+				name = name[:len(name)-len(suf)]
+				stripped = true
+				break
+			}
+		}
+		if !stripped {
+			break
+		}
+	}
+	return name
+}
+
 // InstallRoleFromTar - installs an ansible role from a user uploaded tar file
 func InstallRoleFromTar(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
@@ -256,15 +290,9 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, "Unable to save the file: "+err.Error())
 	}
 
-	// Remove all extensions from the uploaded file name. Ansible Galaxy uses this as the role name, so we need to format it
-	roleName := filepath.Base(roleTarPath)
-	for {
-		ext := filepath.Ext(roleName)
-		if ext == "" {
-			break // No more extensions found
-		}
-		roleName = strings.TrimSuffix(roleName, ext)
-	}
+	// Strip known archive suffixes only; do not use filepath.Ext in a loop (that treats
+	// mynamespace.my_role as name + extension and truncates to mynamespace).
+	roleName := roleNameFromUploadedArchiveBasename(filepath.Base(roleTarPath))
 	newPath := fmt.Sprintf("%s/%s", ansibleTmpPath, roleName)
 	os.Rename(roleTarPath, newPath)
 	defer os.Remove(newPath)
