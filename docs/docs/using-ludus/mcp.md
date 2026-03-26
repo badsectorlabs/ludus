@@ -15,9 +15,9 @@ claude mcp add ludus -- npx -y @badsectorlabs/ludus-mcp \
   --url https://<LUDUS_HOST>:8080 --api-key <YOUR_API_KEY>
 
 # Then ask things like:
-# "deploy my range with the user-defined-roles tag"
 # "list all templates and tell me which ones are built"
-# "show me the range config"
+# "show me my range config"
+# "snapshot all VMs, then start testing mode"
 ```
 
 ## Setup
@@ -72,13 +72,21 @@ Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
 The `--url` and `--api-key` flags can also be set via `LUDUS_URL` and `LUDUS_API_KEY` environment variables.
 
-## Tools
+## Usage
 
-The server exposes the full Ludus API through three tools:
+Anything you can do with the [Ludus CLI](cli) works through the MCP server — [templates](templates), [deploy tags](tags), [snapshots](snapshots), [testing mode](../quick-start/testing-mode), [blueprints](blueprints), [roles](roles), and everything else. Describe what you want in plain language and the AI will figure out the API calls.
 
-- **`list_ludus_operations`** — search and filter available API operations
-- **`describe_ludus_operation`** — get parameter and request body schemas for an operation
-- **`call_ludus_api`** — execute an API operation
+It can also chain steps together:
+
+```
+"snapshot all my VMs, then start testing mode and allow example.com"
+```
+```
+"deploy with the vm-deploy, network, and dns-rewrites tags, then deploy again limited to my new kali box"
+```
+```
+"list my roles, check which VMs have roles assigned in the range config, and tell me what's not wired up yet"
+```
 
 ## How It Works
 
@@ -92,7 +100,13 @@ The server exposes the full Ludus API through three tools:
 
 The MCP server runs on your machine as a stdio process. On startup it loads a bundled copy of the Ludus OpenAPI spec, then tries to fetch the latest version from your server at `/api/v2/openapi`.
 
-`list` and `describe` just read from the parsed spec. `call` builds an HTTP request from the operation definition and your arguments, sends it to the Ludus REST API, and returns the result.
+It exposes three tools:
+
+- **`list_ludus_operations`** — search and filter available API operations
+- **`describe_ludus_operation`** — get parameter and request body schemas for an operation
+- **`call_ludus_api`** — execute an API operation
+
+`list` and `describe` read from the parsed spec. `call` builds an HTTP request from the operation definition and your arguments, sends it to the Ludus REST API, and returns the result.
 
 ## Good to Know
 
