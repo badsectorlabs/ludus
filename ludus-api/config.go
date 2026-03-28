@@ -31,6 +31,7 @@ type Configuration struct {
 	DataDirectory          string  `mapstructure:"data_directory" yaml:"data_directory"`
 	DatabaseEncryptionKey  string  `mapstructure:"database_encryption_key" yaml:"database_encryption_key"`
 	WireguardPort          int     `mapstructure:"wireguard_port" yaml:"wireguard_port"`
+	MaxLogHistory int `mapstructure:"max_log_history" yaml:"max_log_history"` // Max number of log history entries to keep per range/user (default: 10)
 	// Cluster mode settings
 	ClusterMode  bool   `mapstructure:"cluster_mode" yaml:"cluster_mode"`     // Auto-detected via API during startup, can be overridden
 	SDNZone      string `mapstructure:"sdn_zone" yaml:"sdn_zone"`             // The SDN zone name for Ludus networking (default: "ludus")
@@ -66,7 +67,8 @@ func (s *Server) ParseConfig() {
 	// Do not set a default for cluster_mode to force viper to leave it unset unless provided,
 	// so we can detect if user has explicitly set it or not and fallback to API if unset.
 	// (See IsClusterMode in sdn.go for logic)
-	viper.SetDefault("sdn_zone", "ludus") // Default SDN zone name
+	viper.SetDefault("max_log_history", 10) // Max log history entries per range/user
+	viper.SetDefault("sdn_zone", "ludus")  // Default SDN zone name
 	viper.SetDefault("vxlan_tag_base", 0) // Base VXLAN tag added to range number
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)

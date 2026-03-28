@@ -163,6 +163,10 @@ var templateLogsCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, false, verbose, LudusVersion)
 
+		if displayLogHistory(client, "/templates/logs/history") {
+			return
+		}
+
 		var apiString string
 		apiString = buildURLWithRangeAndUserID("/templates/logs")
 		if follow {
@@ -200,6 +204,8 @@ func setupTemplateLogsCmd(command *cobra.Command) {
 	command.Flags().BoolVarP(&follow, "follow", "f", false, "continuously poll the log and print new lines as they are written")
 	command.Flags().IntVarP(&tail, "tail", "t", 0, "number of lines of the log from the end to print")
 	command.Flags().BoolVarP(&verboseTemplateLogs, "verbose-packer", "v", false, "print all lines from the packer log")
+	command.Flags().BoolVar(&history, "history", false, "show log history entries")
+	command.Flags().StringVar(&historyID, "id", "", "view a specific historical log entry by ID")
 }
 
 var templateAddCmd = &cobra.Command{

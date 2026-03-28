@@ -1117,9 +1117,29 @@ Usage:
   ludus range logs
 
 Flags:
-    -f, --follow     continuously poll the log and print new lines as they are written
-    -t, --tail int   number of lines of the log from the end to print
+    -f, --follow        continuously poll the log and print new lines as they are written
+        --history       show log history entries
+        --id string     view a specific historical log entry by ID
+    -t, --tail int      number of lines of the log from the end to print
 ```
+
+Ludus saves deploy logs after each run completes. Use `--history` to list past entries and `--id` to view a specific one.
+
+```
+ludus range logs --history
++-----------------+---------+---------------------+---------------------+
+|       ID        | STATUS  |        START        |         END         |
++-----------------+---------+---------------------+---------------------+
+| njec0ungvnc5ctk | failure | 2026-03-27 22:43:21 | 2026-03-27 22:44:16 |
+| ab12c3defg45678 | success | 2026-03-26 14:10:05 | 2026-03-26 14:32:41 |
++-----------------+---------+---------------------+---------------------+
+```
+
+```
+ludus range logs --history --id njec0ungvnc5ctk
+```
+
+By default the server keeps the last 10 logs per range. This can be changed with `max_log_history` in `/opt/ludus/config.yml` (see [Admin Notes](../administration/admin)).
 
 ### Range Rdp
 
@@ -1342,9 +1362,13 @@ Usage:
 
 Flags:
     -f, --follow           continuously poll the log and print new lines as they are written
+        --history          show log history entries
+        --id string        view a specific historical log entry by ID
     -t, --tail int         number of lines of the log from the end to print
     -v, --verbose-packer   print all lines from the packer log
 ```
+
+Like range logs, packer logs are saved after each build. Use `--history` to list past entries and `--id` to view one. When building multiple templates in parallel, they share a single log entry.
 
 ### Templates RM
 

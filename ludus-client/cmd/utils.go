@@ -9,11 +9,16 @@ import (
 	"fmt"
 	"io"
 	"ludus/logger"
+	"ludus/rest"
+	"ludusapi/dto"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/go-resty/resty/v2"
+	"github.com/olekukonko/tablewriter"
 )
 
 const regexStringForMissingRole = "the role '([\\w._-]+)'"
@@ -382,4 +387,57 @@ func addQueryParameterToURL(url string, parameter string, value string) string {
 	} else {
 		return fmt.Sprintf("%s?%s=%s", url, parameter, value)
 	}
+}
+
+// displayLogHistory handles the --history and --id flags for log history commands.
+// basePath is the API path prefix, e.g. "/range/logs/history" or "/templates/logs/history".
+// Returns true if history mode was handled (caller should return), false otherwise.
+func displayLogHistory(client *resty.Client, basePath string) bool {
+	if !history && historyID == "" {
+		return false
+	}
+
+	if historyID != "" {
+		apiString := buildURLWithRangeAndUserID(fmt.Sprintf("%s/%s", basePath, historyID))
+		responseJSON, success := rest.GenericGet(client, apiString)
+		if didFailOrWantJSON(success, responseJSON) {
+			return true
+		}
+		var data dto.LogHistoryDetailResponse
+		if err := json.Unmarshal(responseJSON, &data); err != nil {
+			logger.Logger.Fatal(err.Error())
+		}
+		fmt.Printf("Log ID: %s | Status: %s | %s - %s\n\n",
+			data.Id, data.Status,
+			data.Start.Format("2006-01-02 15:04:05"),
+			data.End.Format("2006-01-02 15:04:05"),
+		)
+		fmt.Print(data.Result)
+	} else {
+		apiString := buildURLWithRangeAndUserID(basePath)
+		responseJSON, success := rest.GenericGet(client, apiString)
+		if didFailOrWantJSON(success, responseJSON) {
+			return true
+		}
+		var entries []dto.LogHistoryEntry
+		if err := json.Unmarshal(responseJSON, &entries); err != nil {
+			logger.Logger.Fatal(err.Error())
+		}
+		if len(entries) == 0 {
+			fmt.Println("No log history entries found")
+			return true
+		}
+		table := tablewriter.NewWriter(os.Stdout)
+		table.SetHeader([]string{"ID", "Status", "Start", "End"})
+		for _, entry := range entries {
+			table.Append([]string{
+				entry.Id,
+				entry.Status,
+				entry.Start.Format("2006-01-02 15:04:05"),
+				entry.End.Format("2006-01-02 15:04:05"),
+			})
+		}
+		table.Render()
+	}
+	return true
 }

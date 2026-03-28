@@ -132,10 +132,11 @@ func osFromTemplateName(name string) LudusOS {
 	}
 }
 
-func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose bool) {
+func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose bool) error {
 	proxmoxToken, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret())
 	if err != nil {
 		logger.Error(fmt.Sprintf("Unable to decrypt proxmox token secret: %v\n", err))
+		return fmt.Errorf("unable to decrypt proxmox token secret: %v", err)
 	}
 	// Run the longest, grossest packer command you have ever seen...
 	// There should be a better way to do this, but apparently not: https://devops.stackexchange.com/questions/14181/is-it-possible-to-control-packer-from-golang
@@ -182,13 +183,13 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 		file, err := os.OpenFile(packerLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			fmt.Printf("Error opening file: %v\n", err)
-			return
+			return fmt.Errorf("error opening file: %v", err)
 		}
 		defer file.Close()
 
 		if _, err := file.Write([]byte("\n\n=>================\n=> No logs will be written in parallel mode\n=>================\n\n")); err != nil {
 			fmt.Printf("Error writing to file: %v\n", err)
-			return
+			return fmt.Errorf("error writing to file: %v", err)
 		}
 	}
 
@@ -229,7 +230,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 	tmpl, err := template.New("command").Parse(tmplStr)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Failed to parse template: %v\n", err))
-		return
+		return fmt.Errorf("failed to parse template: %v", err)
 	}
 
 	// Create a buffer to hold the rendered output
@@ -238,7 +239,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 	err = tmpl.Execute(&renderedOutput, data)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Failed to execute template: %v\n", err))
-		return
+		return fmt.Errorf("failed to execute template: %v", err)
 	}
 
 	// Get the contents of the buffer as a string
@@ -260,26 +261,31 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 		file, err := os.OpenFile(packerLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			logger.Error(fmt.Sprintf("Error opening file: %v\n", err))
-			return
+			return fmt.Errorf("error opening file: %v", err)
 		}
 		defer file.Close()
 
 		if _, err := file.Write([]byte("\n\n=>================\n=> Build complete!\n=>================\n\n")); err != nil {
 			logger.Error(fmt.Sprintf("Error writing to file: %v\n", err))
-			return
+			return fmt.Errorf("error writing to file: %v", err)
 		}
 	} else if verbose && packerCommandError != nil {
 		// Copy the debug log to the regular log if the command failed
 		if err := copyFileContents(packerLogFileDebug, packerLogFile); err != nil {
 			logger.Error(fmt.Sprintf("Failed to copy file contents: %v\n", err))
+			return fmt.Errorf("failed to copy file contents: %v", err)
 		}
 	}
 
+	return packerCommandError
 }
 
-func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user *models.User, templateNames []string, parallel int, verbose bool) error {
+func buildVMsFromTemplates(app core.App, templateStatusArray []TemplateStatus, user *models.User, templateNames []string, parallel int, verbose bool) error {
 	// Create a WaitGroup to wait for all goroutines to finish.
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	anyFailed := false
+	startTime := time.Now()
 
 	// Create a semaphore (buffered channel of empty structs) to limit the number of concurrent goroutines.
 	semaphoreChannel := make(chan struct{}, parallel)
@@ -372,7 +378,11 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user *models.Us
 				logger.Debug("Canary check failed - not building template " + templateStatus.Name)
 				return
 			}
-			buildVMFromTemplateWithPacker(user, templateStatus.FilePath, verbose)
+			if err := buildVMFromTemplateWithPacker(user, templateStatus.FilePath, verbose); err != nil {
+				mu.Lock()
+				anyFailed = true
+				mu.Unlock()
+			}
 		}(templateStatus, username)
 
 		// Sleep for 3 seconds so the server isn't flooded with builds all at exactly the same time if the user gives a high number for parallel
@@ -380,6 +390,15 @@ func buildVMsFromTemplates(templateStatusArray []TemplateStatus, user *models.Us
 	}
 
 	wg.Wait()
+
+	// Save log history
+	status := "success"
+	if anyFailed {
+		status = "failure"
+	}
+	packerLogPath := fmt.Sprintf("%s/users/%s/packer.log", ludusInstallPath, user.ProxmoxUsername())
+	saveLogHistory(app, user.Id, "", status, packerLogPath, startTime)
+
 	return nil
 }
 
@@ -498,7 +517,7 @@ func templateActions(e *core.RequestEvent, buildTemplates bool, templateNames []
 
 	user := e.Get("user").(*models.User)
 
-	go buildVMsFromTemplates(templateStatusArray, user, templateNames, parallel, verbose)
+	go buildVMsFromTemplates(e.App, templateStatusArray, user, templateNames, parallel, verbose)
 
 	return JSONResult(e, http.StatusOK, fmt.Sprintf("Template building started - this will take a while. Building %d template(s) at a time.", parallel))
 

@@ -370,8 +370,12 @@ func RunRangeManagementAnsibleWithTag(e *core.RequestEvent, tag string, verbose 
 		return "", err
 	}
 
+	user := e.Get("user").(*models.User)
+
 	onlyRolesArray := removeEmptyStrings(onlyRoles)
 	extraVars := map[string]interface{}{"only_roles": onlyRolesArray}
+
+	startTime := time.Now()
 
 	// Run the deploy
 	output, err := server.RunAnsiblePlaybookWithVariables(e, nil, nil, extraVars, tag, verbose, limit)
@@ -387,6 +391,15 @@ func RunRangeManagementAnsibleWithTag(e *core.RequestEvent, tag string, verbose 
 			return "", fmt.Errorf("error saving range: %w", saveErr)
 		}
 	}
+
+	// Save log history
+	status := "success"
+	if err != nil {
+		status = "failure"
+	}
+	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeId())
+	saveLogHistory(e.App, user.Id, usersRange.Id, status, ansibleLogPath, startTime)
+
 	return output, err
 }
 

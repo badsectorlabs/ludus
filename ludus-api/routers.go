@@ -431,6 +431,31 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"GetRangeLogHistory",
+		http.MethodGet,
+		"/range/logs/history",
+		GetRangeLogHistory,
+	},
+	{
+		"GetRangeLogHistoryByID",
+		http.MethodGet,
+		"/range/logs/history/{logID}",
+		GetRangeLogHistoryByID,
+	},
+	{
+		"GetTemplateLogHistory",
+		http.MethodGet,
+		"/templates/logs/history",
+		GetTemplateLogHistory,
+	},
+	{
+		"GetTemplateLogHistoryByID",
+		http.MethodGet,
+		"/templates/logs/history/{logID}",
+		GetTemplateLogHistoryByID,
+	},
+
+	{
 		"GetRDP",
 		http.MethodGet,
 		"/range/rdpconfigs",
