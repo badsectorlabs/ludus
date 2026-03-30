@@ -253,6 +253,10 @@ stages:
   - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
   - ludus templates logs
   - ludus templates list
+  # Log history: verify a log entry was saved after the template build
+  - ludus templates logs --history --json | jq -e 'length > 0'
+  - export TEMPLATE_LOG_ID=$(ludus templates logs --history --json | jq -r '.[0].id')
+  - ludus templates logs --history --id "$TEMPLATE_LOG_ID" | grep -q "=>"
   - ludus templates rm -n debian-10-x64-server-template
   - '! ludus templates list | grep "debian-10-x64-server-template"'
 
@@ -1308,6 +1312,7 @@ post-deploy ranges-as-admin:
     - changes:
       - ludus-client/cmd/range.go
       - ludus-api/api_range_management.go
+      - ludus-api/api_log_history.go
       - ludus-api/range_access.go
       - ludus-api/middleware.go
   variables:
@@ -1321,6 +1326,14 @@ post-deploy ranges-as-admin:
   script:
     - *ci-setup-user # Ensure CIU user is created
     - *ci-setup-admin
+    # Log history: verify a log entry was saved from the earlier deploy
+    - ludus range logs --history --json | jq -e 'length > 0'
+    - export RANGE_LOG_ID=$(ludus range logs --history --json | jq -r '.[0].id')
+    - ludus range logs --history --id "$RANGE_LOG_ID" | grep -q "PLAY"
+    # Log history: verify an invalid ID returns an error
+    - set +o pipefail
+    - 'ludus range logs --history --id nonexistent 2>&1 | grep "Log entry not found"'
+    - set -o pipefail
     # Clean up potential leftovers (ignore errors)
     - ludus range rm-range -r CIA-extra-1 --no-prompt --force || true
     - ludus range rm-range -r CIU-extra-1 --no-prompt --force || true
@@ -1429,7 +1442,8 @@ post-deploy templates-as-admin:
       when: never
     - changes:
         - ludus-client/cmd/templates.go
-        - ludus-server/src/api_template_management.go
+        - ludus-api/api_template_management.go
+        - ludus-api/api_log_history.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
