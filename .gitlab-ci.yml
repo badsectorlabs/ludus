@@ -1326,14 +1326,27 @@ post-deploy ranges-as-admin:
   script:
     - *ci-setup-user # Ensure CIU user is created
     - *ci-setup-admin
-    # Log history: verify a log entry was saved from the earlier deploy
+    # Log history: verify a success entry was saved from the earlier deploy
     - ludus range logs --history --json | jq -e 'length > 0'
+    - ludus range logs --history --json | jq -e '.[0].status == "success"'
     - export RANGE_LOG_ID=$(ludus range logs --history --json | jq -r '.[0].id')
     - ludus range logs --history --id "$RANGE_LOG_ID" | grep -q "PLAY"
     # Log history: verify an invalid ID returns an error
     - set +o pipefail
     - 'ludus range logs --history --id nonexistent 2>&1 | grep "Log entry not found"'
     - set -o pipefail
+    # Log history: deploy a range that will fail and verify the failure is recorded
+    - ludus range rm-range -r CIA-log-err --no-prompt --force || true
+    - ludus range create -n "CIA Log Error Test" -r CIA-log-err
+    - ludus ansible role add -d /opt/ludus/ci/roles/always_fails --force
+    - ludus range config set -f /opt/ludus/ci/configs/small-range-error.yml -r CIA-log-err
+    - ludus range deploy -r CIA-log-err
+    - while [ "$(ludus range list --json -r CIA-log-err | jq -r '.rangeState')" == "DEPLOYING" ]; do sleep 15; done
+    - ludus range list --json -r CIA-log-err | jq -e '.rangeState == "ERROR"'
+    - ludus range logs --history --json -r CIA-log-err | jq -e '.[0].status == "failure"'
+    - export ERR_LOG_ID=$(ludus range logs --history --json -r CIA-log-err | jq -r '.[0].id')
+    - ludus range logs --history --id "$ERR_LOG_ID" -r CIA-log-err | grep -q "This role always fails"
+    - ludus range rm-range -r CIA-log-err --no-prompt --force
     # Clean up potential leftovers (ignore errors)
     - ludus range rm-range -r CIA-extra-1 --no-prompt --force || true
     - ludus range rm-range -r CIU-extra-1 --no-prompt --force || true
