@@ -23,6 +23,33 @@
     unmanaged: false
     target_ip: "192.0.2.{{ 100 + range_second_octet }}"  
 
+- name: Bootstrap SSH key auth on router
+  tags: [network, bootstrap-auth]
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
+  gather_facts: false
+  tasks:
+    - name: Check for enterprise plugin entitlement
+      ansible.builtin.assert:
+        that: ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
+        fail_msg: "Certificate-based authentication requires the ENTERPRISE_PLUGIN entitlement"
+      when:
+        - defaults.use_cert_auth | default(false)
+    - name: Bootstrap router SSH key
+      ansible.builtin.include_tasks: tasks/bootstrap/bootstrap-linux-ssh-key.yml
+      when: defaults.use_cert_auth | default(false)
+
+- name: Switch router to SSH key auth
+  tags: [network, bootstrap-auth]
+  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
+  gather_facts: false
+  tasks:
+    - name: Override connection to use SSH key auth
+      ansible.builtin.set_fact:
+        ansible_ssh_private_key_file: "{{ ludus_install_path }}/resources/machine-credentials/ssh/ludus_ed25519"
+        ansible_ssh_pass: null
+        ansible_sudo_pass: null
+      when: defaults.use_cert_auth | default(false)
+
 # This must come before the VLAN setup to install iptables etc
 - name: Configure the router
   tags: [network]
@@ -263,6 +290,65 @@
     - name: Refresh inventory
       ansible.builtin.meta: refresh_inventory
       when: vms_without_ip | default([]) | length > 0
+
+# ==========================================================
+# Bootstrap SSH key / WinRM cert auth on newly deployed VMs
+# (only when defaults.use_cert_auth is true)
+# ==========================================================
+- name: Bootstrap SSH key auth on Linux VMs
+  tags: [bootstrap-auth]
+  hosts: "{{ hostvars['localhost']['range_vms'] | default([]) }}"
+  gather_facts: false
+  vars:
+    # Override group_vars: use password auth for this one-time bootstrap
+    ansible_ssh_private_key_file: ""
+    ansible_ssh_pass: "{{ ludus_template_password }}"
+    ansible_become_pass: "{{ ludus_template_password }}"
+  tasks:
+    - name: Bootstrap Linux SSH key
+      ansible.builtin.include_tasks: tasks/bootstrap/bootstrap-linux-ssh-key.yml
+      when:
+        - defaults.use_cert_auth | default(false)
+        - hostvars[inventory_hostname].ansible_connection | default('ssh') == 'ssh'
+
+- name: Bootstrap WinRM cert auth on Windows VMs
+  tags: [bootstrap-auth]
+  hosts: "{{ hostvars['localhost']['range_vms'] | default([]) }}"
+  gather_facts: false
+  vars:
+    # Override group_vars: use basic auth for this one-time bootstrap
+    ansible_winrm_transport: basic
+    ansible_password: "{{ ludus_template_password | default('password') }}"
+  tasks:
+    - name: Bootstrap Windows WinRM cert
+      ansible.builtin.include_tasks: tasks/bootstrap/bootstrap-windows-winrm-cert.yml
+      when:
+        - defaults.use_cert_auth | default(false)
+        - hostvars[inventory_hostname].ansible_connection | default('ssh') == 'winrm'
+
+- name: Switch to certificate-based auth for all VMs
+  tags: [bootstrap-auth]
+  hosts: "{{ hostvars['localhost']['range_vms'] | default([]) }}"
+  gather_facts: false
+  tasks:
+    - name: Override Linux connection to use SSH key auth
+      ansible.builtin.set_fact:
+        ansible_ssh_private_key_file: "{{ ludus_install_path }}/resources/machine-credentials/ssh/ludus_ed25519"
+        ansible_ssh_pass: null
+        ansible_sudo_pass: null
+      when:
+        - defaults.use_cert_auth | default(false)
+        - hostvars[inventory_hostname].ansible_connection | default('ssh') == 'ssh'
+
+    - name: Override Windows connection to use WinRM cert auth
+      ansible.builtin.set_fact:
+        ansible_winrm_transport: certificate
+        ansible_winrm_cert_pem: "{{ ludus_install_path }}/resources/machine-credentials/winrm/client_cert.pem"
+        ansible_winrm_cert_key_pem: "{{ ludus_install_path }}/resources/machine-credentials/winrm/client_key.pem"
+        ansible_password: null
+      when:
+        - defaults.use_cert_auth | default(false)
+        - hostvars[inventory_hostname].ansible_connection | default('ssh') == 'winrm'
 
 - name: Configure IP and Hostname for all VMs
   tags: [assign-ip]

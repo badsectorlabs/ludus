@@ -85,6 +85,11 @@
                 "target_node": {
                     "type": "string",
                     "description": "The Proxmox node to deploy this range to. If not specified, Ludus will select the node with the most available resources (for cluster mode) or use the default node."
+                },
+                "use_cert_auth": {
+                    "type": "boolean",
+                    "description": "Use SSH key auth for Linux VMs and WinRM certificate auth for Windows VMs instead of passwords. When enabled, a bootstrap step injects keys/certs on first deploy, and all subsequent Ansible operations use certificate-based authentication. Default: false",
+                    "default": false
                 }
             },
             "required": [],

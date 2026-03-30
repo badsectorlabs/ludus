@@ -72,6 +72,14 @@ func getMergedDefaults(rangeConfigPath string) map[string]interface{} {
 // Returns a tuple of the playbook output and an error
 func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
 
+	// Ensure SSH keys and WinRM certificates exist before running any playbook
+	if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") {
+		if err := EnsureLudusAuthMaterial(); err != nil {
+			logger.Error(fmt.Sprintf("Failed to ensure auth material: %v", err))
+			// Non-fatal: continue with playbook execution, bootstrap may still work with passwords
+		}
+	}
+
 	buff := new(bytes.Buffer)
 
 	// Default to using the range management ludus.yml
