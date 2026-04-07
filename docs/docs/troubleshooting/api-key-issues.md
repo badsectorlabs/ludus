@@ -8,7 +8,7 @@ title: Lost API Key
 
 ### Recover an API key using the `ROOT` key (no admin key is known)
 
-1. SSH into the Ludus host as root and run `ludus-install-status` which will print the `ROOT` key
+1. SSH into the Ludus host as root and run `cat /opt/ludus/install/root-api-key` which will print the `ROOT` key
 2. Use the `ROOT` key with the client to reset the api key of the user with the lost key
 
 ```

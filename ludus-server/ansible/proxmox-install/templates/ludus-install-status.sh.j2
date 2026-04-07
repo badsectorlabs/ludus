@@ -55,6 +55,8 @@ print_initial_admin_credentials() {
     web_username="$(echo "$creds_response" | jq -r '.result.ludusEmail // empty')"
     api_error="$(echo "$creds_response" | jq -r '.error // empty')"
 
+    user_api_key="$(LUDUS_API_KEY="$root_api_key" ludus --user "$initial_admin_userid" user apikey --no-prompt --value 2>/dev/null)"
+
     if [[ -n "$username" && -n "$password" ]]; then
         echo "Initial admin credentials:"
         echo "  userID: $initial_admin_userid"
@@ -63,10 +65,7 @@ print_initial_admin_credentials() {
         echo "  Ludus Web username: $web_username"
         echo "  Ludus Web password: $password"
         echo
-        echo -n "API key for user $initial_admin_userid: "
-        if ! LUDUS_API_KEY="$root_api_key" ludus --user "$initial_admin_userid" user apikey --no-prompt --value; then
-            echo "  (could not retrieve API key via ludus CLI; is ludus in PATH?)"
-        fi
+        echo "  API key for user $initial_admin_userid: $user_api_key"
         echo "  [Note: This API key will be recreated if this command is run again and the old key will no longer work]"
         echo
     elif [[ -n "$api_error" ]]; then

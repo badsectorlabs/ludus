@@ -25,13 +25,15 @@ shell's history file in most common shells.
 su -
 #terminal-command-ludus-root
 ludus-install-status
-Ludus install completed successfully
-
 Initial admin credentials:
-  email:john.doe@example.com
-  username:john-doe
-  api_key:JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
-  password:password
+  userID: JD
+  Proxmox username: john-doe
+  Proxmox password: password
+  Ludus Web username: john.doe@example.com
+  Ludus Web password: password
+
+  API key for user JD: JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
+  [Note: This API key will be recreated if this command is run again and the old key will no longer work]
 #terminal-command-ludus-root
 exit
 #terminal-command-ludus

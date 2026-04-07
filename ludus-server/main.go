@@ -88,10 +88,18 @@ func serve() {
 	// Register plugin routes
 	server.RegisterPluginRoutes(app)
 
-	certPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.pem"
-	keyPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.key"
+	// When a user uploads their own certificate to proxmox, it gets saved as pveproxy-ssl.pem and pveproxy-ssl.key in the /etc/pve/nodes/<node>/ directory.
+	// If these files exist, use them instead of the proxmox CA signed certs (pve-ssl.pem and pve-ssl.key), and only fall back to our own self signed certs if both are missing.
+	certPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pveproxy-ssl.pem"
+	keyPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pveproxy-ssl.key"
 
-	// Check if the pve-ssl.pem and pve-ssl.key files exist and we can read them
+	// Check if the pveproxy-ssl.pem and pveproxy-ssl.key files exist and we can read them. If not, use the proxmox CA signed certs.
+	if !fileExists(certPath) || !fileExists(keyPath) {
+		certPath = "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.pem"
+		keyPath = "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.key"
+	}
+
+	// Check if the pve-ssl.pem and pve-ssl.key files exist and we can read them. If not, generate our own self signed certs.
 	if !fileExists(certPath) || !fileExists(keyPath) {
 		log.Println("Could not find/read " + certPath + " or " + keyPath)
 		generateSelfSignedCert()

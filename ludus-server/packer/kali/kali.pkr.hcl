@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "sha256:49f548d770fdac3cfc5215d476127c1f96854b91ea59ea5dcce92e3394afda12"
+  default = "sha256:caf5ff7d7a4f73c85a6f1688300b936d3d7fd6965c52d80632e36709a09255a7"
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
@@ -11,7 +11,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://cdimage.kali.org/kali-2025.4/kali-linux-2025.4-installer-netinst-amd64.iso"
+  default = "https://cdimage.kali.org/kali-2026.1/kali-linux-2026.1-installer-netinst-amd64.iso"
 }
 
 variable "vm_cpu_cores" {
