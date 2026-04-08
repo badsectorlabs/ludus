@@ -1143,7 +1143,7 @@ ludus range logs --history
 ludus range logs --history --id njec0ungvnc5ctk
 ```
 
-By default the server keeps the last 10 logs per range. This can be changed with `max_log_history` in `/opt/ludus/config.yml` (see [Admin Notes](../administration/admin)).
+By default the server keeps the last 100 logs per range. This can be changed with `max_log_history` in `/opt/ludus/config.yml` (see [Admin Notes](../administration/admin)).
 
 ### Range Rdp
 
