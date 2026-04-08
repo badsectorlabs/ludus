@@ -40,6 +40,19 @@ systemctl restart ludus
 
 Enable the Pocketbase web UI as detailed above and log in. Select the `ranges` table and click on the range. Toggle the `testingEnabled` toggle. Remember to click `Save changes`.
 
+## Log history retention
+
+Ludus keeps the last 100 deploy/build logs per range and per user (for template builds). To change this limit:
+
+```yaml title="/opt/ludus/config.yml"
+max_log_history: 25
+```
+
+```shell-session
+#terminal-command-ludus-root
+systemctl restart ludus
+```
+
 ## Get the total resources for a range config
 
 ```

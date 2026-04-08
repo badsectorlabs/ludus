@@ -529,3 +529,21 @@ type VersionResponse struct {
 	Version string `json:"version"`
 	Result  string `json:"result"`
 }
+
+type LogHistoryEntry struct {
+	Id       string    `json:"id"`
+	Template string    `json:"template,omitempty"`
+	Status   string    `json:"status"`
+	Start    time.Time `json:"start,omitempty"`
+	End      time.Time `json:"end,omitempty"`
+	Created  time.Time `json:"created"`
+}
+
+type LogHistoryDetailResponse struct {
+	Id      string    `json:"id"`
+	Status  string    `json:"status"`
+	Start   time.Time `json:"start,omitempty"`
+	End     time.Time `json:"end,omitempty"`
+	Created time.Time `json:"created"`
+	Result  string    `json:"result"`
+}

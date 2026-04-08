@@ -668,6 +668,8 @@ func AbortAnsible(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
+	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId())
+	finalizeRunningRangeLogHistory(e.App, targetRange.Id, "aborted", ansibleLogPath, time.Now())
 
 	return JSONResult(e, http.StatusOK, "Ansible process aborted")
 }

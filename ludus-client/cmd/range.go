@@ -30,6 +30,8 @@ var (
 	purpose         string
 	userIDsForRange string
 	rangeNumber     int
+	history         bool
+	historyID       string
 )
 
 var rangeCmd = &cobra.Command{
@@ -379,6 +381,13 @@ var rangeLogsCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+		if follow && historyID != "" {
+			logger.Logger.Fatal("`ludus range logs -f` only supports following the current deployment. Remove `--id` to use follow mode.")
+		}
+
+		if displayLogHistory(client, "/range/logs/history") {
+			return
+		}
 
 		if follow {
 			var newLogs string
@@ -416,6 +425,8 @@ var rangeLogsCmd = &cobra.Command{
 func setupRangeLogsCmd(command *cobra.Command) {
 	command.Flags().BoolVarP(&follow, "follow", "f", false, "continuously poll the log and print new lines as they are written")
 	command.Flags().IntVarP(&tail, "tail", "t", 0, "number of lines of the log from the end to print")
+	command.Flags().BoolVar(&history, "history", false, "show log history entries")
+	command.Flags().StringVar(&historyID, "id", "", "view a specific historical log entry by ID")
 }
 
 var rangeErrorsCmd = &cobra.Command{

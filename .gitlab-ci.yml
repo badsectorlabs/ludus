@@ -253,6 +253,10 @@ stages:
   - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
   - ludus templates logs
   - ludus templates list
+  # Log history: verify a log entry was saved after the template build
+  - ludus templates logs --history --json | jq -e 'length > 0'
+  - export TEMPLATE_LOG_ID=$(ludus templates logs --history --json | jq -r '.[0].id')
+  - ludus templates logs --history --id "$TEMPLATE_LOG_ID" | grep -q "=>"
   - ludus templates rm -n debian-10-x64-server-template
   - '! ludus templates list | grep "debian-10-x64-server-template"'
 
@@ -615,6 +619,11 @@ templates build:
     - *ci-setup-admin
     # Build in parallel to speed up CI
     - ludus templates build --parallel 6
+    # A running history entry should be visible shortly after build start.
+    - export RUNNING_TEMPLATE_LOG_ID=$(ludus templates logs --history --json | jq -r '[.[] | select(.status == "running")][0].id')
+    - test -n "$RUNNING_TEMPLATE_LOG_ID" && test "$RUNNING_TEMPLATE_LOG_ID" != "null"
+    # Running history entries should be readable before build completion.
+    - ludus templates logs --history --id "$RUNNING_TEMPLATE_LOG_ID" | grep -Eq ".+"
 
 templates check:
   stage: templates-check
@@ -658,6 +667,11 @@ templates check:
     # Wait for all templates to build
     - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
     - ludus templates list
+    # Parallel builds should create separate template log history entries.
+    - export TEMPLATE_LOG_HISTORY_COUNT=$(ludus templates logs --history --json | jq 'length')
+    - test "$TEMPLATE_LOG_HISTORY_COUNT" -ge 2
+    - export TEMPLATE_LOG_ID=$(ludus templates logs --history --json | jq -r '.[0].id')
+    - ludus templates logs --history --id "$TEMPLATE_LOG_ID" | grep -Eq "=>|Build complete|==>"
 
 templates snapshot:
   stage: templates-snapshot
@@ -1308,6 +1322,7 @@ post-deploy ranges-as-admin:
     - changes:
       - ludus-client/cmd/range.go
       - ludus-api/api_range_management.go
+      - ludus-api/api_log_history.go
       - ludus-api/range_access.go
       - ludus-api/middleware.go
   variables:
@@ -1321,6 +1336,27 @@ post-deploy ranges-as-admin:
   script:
     - *ci-setup-user # Ensure CIU user is created
     - *ci-setup-admin
+    # Log history: verify a success entry was saved from the earlier deploy
+    - ludus range logs --history --json | jq -e 'length > 0'
+    - ludus range logs --history --json | jq -e '.[0].status == "success"'
+    - export RANGE_LOG_ID=$(ludus range logs --history --json | jq -r '.[0].id')
+    - ludus range logs --history --id "$RANGE_LOG_ID" | grep -q "PLAY"
+    # Log history: verify an invalid ID returns an error
+    - set +o pipefail
+    - 'ludus range logs --history --id nonexistent 2>&1 | grep "Log entry not found"'
+    - set -o pipefail
+    # Log history: deploy a range that will fail and verify the failure is recorded
+    - ludus range rm-range -r CIA-log-err --no-prompt --force || true
+    - ludus range create -n "CIA Log Error Test" -r CIA-log-err
+    - ludus ansible role add -d /opt/ludus/ci/roles/always_fails --force
+    - ludus range config set -f /opt/ludus/ci/configs/small-range-error.yml -r CIA-log-err
+    - ludus range deploy -r CIA-log-err
+    - while [ "$(ludus range list --json -r CIA-log-err | jq -r '.rangeState')" == "DEPLOYING" ]; do sleep 15; done
+    - ludus range list --json -r CIA-log-err | jq -e '.rangeState == "ERROR"'
+    - ludus range logs --history --json -r CIA-log-err | jq -e '.[0].status == "failure"'
+    - export ERR_LOG_ID=$(ludus range logs --history --json -r CIA-log-err | jq -r '.[0].id')
+    - ludus range logs --history --id "$ERR_LOG_ID" -r CIA-log-err | grep -q "This role always fails"
+    - ludus range rm-range -r CIA-log-err --no-prompt --force
     # Clean up potential leftovers (ignore errors)
     - ludus range rm-range -r CIA-extra-1 --no-prompt --force || true
     - ludus range rm-range -r CIU-extra-1 --no-prompt --force || true
@@ -1429,7 +1465,8 @@ post-deploy templates-as-admin:
       when: never
     - changes:
         - ludus-client/cmd/templates.go
-        - ludus-server/src/api_template_management.go
+        - ludus-api/api_template_management.go
+        - ludus-api/api_log_history.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin

@@ -120,6 +120,10 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		rangeID = user.DefaultRangeId()
 		// Allow ROOT to bypass the default range check
 		if rangeID == "" && e.Auth.GetString("userID") == "ROOT" {
+			// The ROOT key should only be used for user actions, so check the request and fail if it's not a user action
+			if !strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") {
+				return JSONError(e, http.StatusForbidden, "The ROOT key can only be used for user actions")
+			}
 			rangeCollection, err := e.App.FindCollectionByNameOrId("ranges")
 			if err != nil {
 				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding ranges collection: %v", err))

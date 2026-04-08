@@ -112,4 +112,5 @@ wireguard_port: 51820             # The port WireGuard listens on
 cluster_mode: false               # Override cluster detection and for cluster mode on (true) or off (false)
 sdn_zone: ludus                   # The SDN Zone name Ludus will use for the `ludusnat` VNet and range VNets in cluster mode
 vxlan_tag_base: 0                 # The number that will be added to the VXLAN tag used for each range's VNet (vxlan_tag_base + range_number = Range VNet VXLAN tag)
+max_log_history: 100              # The number of log entries to keep per range and user (user logs for template builds)
 ```
