@@ -381,6 +381,9 @@ var rangeLogsCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+		if follow && historyID != "" {
+			logger.Logger.Fatal("`ludus range logs -f` only supports following the current deployment. Remove `--id` to use follow mode.")
+		}
 
 		if displayLogHistory(client, "/range/logs/history") {
 			return

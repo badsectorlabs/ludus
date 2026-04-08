@@ -619,6 +619,11 @@ templates build:
     - *ci-setup-admin
     # Build in parallel to speed up CI
     - ludus templates build --parallel 6
+    # A running history entry should be visible shortly after build start.
+    - export RUNNING_TEMPLATE_LOG_ID=$(ludus templates logs --history --json | jq -r '[.[] | select(.status == "running")][0].id')
+    - test -n "$RUNNING_TEMPLATE_LOG_ID" && test "$RUNNING_TEMPLATE_LOG_ID" != "null"
+    # Running history entries should be readable before build completion.
+    - ludus templates logs --history --id "$RUNNING_TEMPLATE_LOG_ID" | grep -Eq ".+"
 
 templates check:
   stage: templates-check
@@ -662,6 +667,11 @@ templates check:
     # Wait for all templates to build
     - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
     - ludus templates list
+    # Parallel builds should create separate template log history entries.
+    - export TEMPLATE_LOG_HISTORY_COUNT=$(ludus templates logs --history --json | jq 'length')
+    - test "$TEMPLATE_LOG_HISTORY_COUNT" -ge 2
+    - export TEMPLATE_LOG_ID=$(ludus templates logs --history --json | jq -r '.[0].id')
+    - ludus templates logs --history --id "$TEMPLATE_LOG_ID" | grep -Eq "=>|Build complete|==>"
 
 templates snapshot:
   stage: templates-snapshot

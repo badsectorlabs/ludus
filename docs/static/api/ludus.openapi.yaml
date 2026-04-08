@@ -2894,6 +2894,88 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /range/logs/history:
+    get:
+      summary: List range deploy log history
+      deprecated: false
+      description: >
+        Returns a list of historical log entries for the user's range. Each
+        entry includes the log id, status, start/end times, and created
+        timestamp. A `running` entry is created when deployment starts and
+        finalized to `success`, `failure`, or `aborted` when deployment ends.
+        Use the log id to retrieve the full log content via
+        /range/logs/history/{logID}.
+      operationId: getRangeLogHistory
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to get log history for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to get log history for. Defaults to the current user
+            (admins can query other users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: A list of log history entries for the range
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogHistoryEntry'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/logs/history/{logID}:
+    get:
+      summary: Retrieve a specific range log history entry
+      deprecated: false
+      description: >
+        Returns the full log content for a specific historical range deploy log
+        entry. The log entry must belong to the user's range.
+      operationId: getRangeLogHistoryByID
+      tags:
+        - Range Management
+      parameters:
+        - name: logID
+          in: path
+          description: The id of the log history entry to retrieve
+          required: true
+          example: abc123
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The full log history entry including log content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogHistoryDetailResponse'
+          headers: {}
+        '400':
+          description: logID not provided
+          headers: {}
+        '403':
+          description: Log entry does not belong to this range
+          headers: {}
+        '404':
+          description: Log entry not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /range/poweron:
     put:
       summary: Power on range VMs
@@ -3832,8 +3914,9 @@ paths:
     get:
       summary: Retrieve the latest packer logs
       deprecated: false
-      description: |
-        Returns the latest logs from packer
+      description: >-
+        Returns live packer logs. When one or more template builds are currently
+        running, this endpoint returns logs for the latest active build.
       operationId: getPackerLogs
       tags:
         - Template Management
@@ -3862,6 +3945,12 @@ paths:
           schema:
             type: integer
             example: 274
+        - name: logID
+          in: query
+          description: Follow a specific running template build by history log ID.
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: >-
@@ -3932,6 +4021,106 @@ paths:
           headers: {}
         '500':
           description: error getting templates status
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /templates/logs/history:
+    get:
+      summary: List template build log history
+      deprecated: false
+      description: >
+        Returns a list of historical log entries for the user's template builds.
+        Each entry includes the log id, status, start/end times, and created
+        timestamp. A `running` entry is created for each build start and
+        finalized to `success`, `failure`, or `aborted` when that build ends.
+        Parallel template builds create one history entry per template build.
+        Use the log id to retrieve the full log content via
+        /templates/logs/history/{logID}.
+      operationId: getTemplateLogHistory
+      tags:
+        - Template Management
+      parameters: []
+      responses:
+        '200':
+          description: A list of log history entries for the user's template builds
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogHistoryEntry'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /templates/logs/history/{logID}:
+    get:
+      summary: Retrieve a specific template log history entry
+      deprecated: false
+      description: >
+        Returns the full log content for a specific historical template build
+        log entry. The log entry must belong to the requesting user.
+      operationId: getTemplateLogHistoryByID
+      tags:
+        - Template Management
+      parameters:
+        - name: logID
+          in: path
+          description: The id of the log history entry to retrieve
+          required: true
+          example: abc123
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The full log history entry including log content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    description: The unique identifier for the log history entry
+                    example: abc123def456
+                  status:
+                    type: string
+                    description: The final status of the operation
+                    enum:
+                      - success
+                      - failure
+                    example: success
+                  start:
+                    type: string
+                    format: date-time
+                    description: When the operation started
+                    example: '2024-01-15T10:30:00.000Z'
+                  end:
+                    type: string
+                    format: date-time
+                    description: When the operation completed
+                    example: '2024-01-15T10:45:00.000Z'
+                  created:
+                    type: string
+                    format: date-time
+                    description: When the log history entry was created
+                    example: '2024-01-15T10:45:01.000Z'
+                  result:
+                    type: string
+                    description: The full log content
+                    example: >
+                      2024-01-15 10:30:00,810 p=2034571 u=john-doe n=ansible |
+                      PLAY [Deploy test range] *****
+          headers: {}
+        '400':
+          description: logID not provided
+          headers: {}
+        '403':
+          description: Log entry does not belong to this user
+          headers: {}
+        '404':
+          description: Log entry not found
           headers: {}
       security:
         - JWT: []
@@ -5261,6 +5450,403 @@ paths:
         - ApiKeyAuth: []
 components:
   schemas:
+    ErrorInfo:
+      type: object
+      properties:
+        vmid:
+          type: integer
+          format: int32
+          description: The VMID of the VM
+          example: 180
+        vmname:
+          type: string
+          description: The name of the VM
+          example: JD-ad-win11-22h2-enterprise-x64-2
+        error:
+          type: string
+          description: Error message
+          example: 'Error parsing VM ID abc: strconv.Atoi: parsing "abc": invalid syntax'
+    SnapshotCreatePayload:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Snapshot name
+          example: My cool snapshot
+        description:
+          type: string
+          description: Snapshot Description
+          example: Taking this snapshot before doing some testing
+        vmids:
+          type: array
+          items:
+            type: integer
+            format: int32
+          description: >-
+            Array of VMIDs to snapshot, if blank all VMs in the range will be
+            snapshotted
+          example:
+            - 179
+            - 180
+        includeRAM:
+          type: boolean
+          description: >-
+            Include RAM in the snapshot. If false, the VM will be powered off
+            when restored to this snapshot.
+          example: true
+    LicenseDataObject:
+      type: object
+      properties:
+        entitlements:
+          type: array
+          items:
+            type: string
+            description: Individual entitlement code
+          description: The entitlements granted by the license
+          example: ENTERPRISE_PLUGIN
+        licensed_to:
+          type: string
+          description: The name of the person or organization the license is licensed to
+          example: John Doe
+        expires_at:
+          type: string
+          format: date-time
+          description: The date and time the license expires
+          example: '2022-08-29T09:12:33.001Z'
+        active:
+          type: boolean
+          description: Whether the license is active
+          example: true
+        message:
+          type: string
+          description: The message associated with the license
+          example: 'License active, expires: 2022-08-29 14:12:33, licensed to John Doe'
+    LogHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The unique identifier for the log history entry
+          example: abc123def456
+        status:
+          type: string
+          description: The final status of the operation
+          enum:
+            - success
+            - failure
+          example: success
+        start:
+          type: string
+          format: date-time
+          description: When the operation started
+          example: '2024-01-15T10:30:00.000Z'
+        end:
+          type: string
+          format: date-time
+          description: When the operation completed
+          example: '2024-01-15T10:45:00.000Z'
+        created:
+          type: string
+          format: date-time
+          description: When the log history entry was created
+          example: '2024-01-15T10:45:01.000Z'
+        template:
+          type: string
+          description: The template this log relates to
+          example: debian-12-x64-server-template
+    LogHistoryDetailResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The unique identifier for the log history entry
+          example: abc123def456
+        status:
+          type: string
+          description: The final status of the operation
+          enum:
+            - success
+            - failure
+          example: success
+        start:
+          type: string
+          format: date-time
+          description: When the operation started
+          example: '2024-01-15T10:30:00.000Z'
+        end:
+          type: string
+          format: date-time
+          description: When the operation completed
+          example: '2024-01-15T10:45:00.000Z'
+        created:
+          type: string
+          format: date-time
+          description: When the log history entry was created
+          example: '2024-01-15T10:45:01.000Z'
+        result:
+          type: string
+          description: The full log content
+          example: >
+            2024-01-15 10:30:00,810 p=2034571 u=john-doe n=ansible | PLAY
+            [Deploy test range] *****
+    RangeObject:
+      type: object
+      required:
+        - rangeID
+        - rangeNumber
+        - lastDeployment
+        - numberOfVMs
+        - testingEnabled
+        - VMs
+      properties:
+        rangeID:
+          $ref: '#/components/schemas/userID'
+        rangeNumber:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 3
+        name:
+          type: string
+          example: Red Team Range
+        description:
+          type: string
+          example: Range for red team
+        purpose:
+          type: string
+          example: Testing
+        lastDeployment:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2022-08-29T09:12:33.001Z'
+        numberOfVMs:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 7
+        testingEnabled:
+          type: boolean
+          readOnly: true
+          example: true
+        allowedIPs:
+          type: array
+          items:
+            type: string
+            example: 1.2.3.4
+        allowedDomains:
+          type: array
+          items:
+            type: string
+            example: example.com
+        rangeState:
+          type: string
+          example: SUCCESS
+        VMs:
+          type: array
+          items:
+            $ref: '#/components/schemas/VMObject'
+    userID:
+      type: string
+      pattern: ^[A-Za-z0-9]{1,20}$
+      description: |
+        Must be a unique 1-20 character alpha-numeric string.
+        Initials are commonly used.
+      example: JD
+    rangeID:
+      type: string
+      pattern: ^[A-Za-z0-9_\-]+(\/[A-Za-z0-9_\-]+){0,2}$
+      description: >
+        Must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or
+        'New_Range'). Use only letters, numbers, hyphens, and underscores.
+
+        This is the rangeID, which is used to identify the range.
+      example: DEMO
+    UserObject:
+      type: object
+      required:
+        - name
+        - userID
+        - isAdmin
+      properties:
+        name:
+          type: string
+          example: John Doe
+        userID:
+          $ref: '#/components/schemas/userID'
+        dateCreated:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2022-08-29T09:12:33.001Z'
+        dateLastActive:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2022-08-29T09:12:33.001Z'
+        isAdmin:
+          type: boolean
+          example: true
+        proxmoxUsername:
+          type: string
+          readOnly: true
+          example: john-doe
+    UserCredentialObject:
+      properties:
+        proxmoxUsername:
+          readOnly: true
+          type: string
+          example: john-doe
+        proxmoxPassword:
+          readOnly: true
+          type: string
+          example: 5cy5@plhik4g&Yk12sG
+        ludusEmail:
+          readOnly: true
+          type: string
+          example: john.doe@example.com
+        proxmoxRealm:
+          readOnly: true
+          type: string
+          example: pam
+      type: object
+      example:
+        ludusEmail: john.doe@example.com
+        proxmoxPassword: 5cy5@plhik4g&Yk12sG
+        proxmoxUsername: john-doe
+        proxmoxRealm: pam
+    VMObject:
+      type: object
+      required:
+        - ID
+        - proxmoxID
+        - rangeNumber
+        - name
+        - poweredOn
+        - cpu
+        - ram
+      properties:
+        ID:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 53
+        proxmoxID:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 146
+        rangeNumber:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 3
+        name:
+          type: string
+          example: JD-ad-dc-win2019-server-x64
+        poweredOn:
+          type: boolean
+          example: true
+        ip:
+          type: string
+        isRouter:
+          type: boolean
+          description: Indicates whether this VM is the router for the range
+          example: false
+        cpu:
+          type: integer
+          format: int32
+          description: Number of CPU cores allocated to the VM
+          example: 4
+        ram:
+          type: integer
+          format: int32
+          description: Amount of RAM allocated to the VM in GB
+          example: 8
+    Domain:
+      type: string
+      pattern: >-
+        ^(?!.*?_.*?)(?!(?:[\d\w]+?\.)?\-[\w\d\.\-]*?)(?![\w\d]+?\-\.(?:[\d\w\.\-]+?))(?=[\w\d])(?=[\w\d\.\-]*?\.+[\w\d\.\-]*?)(?![\w\d\.\-]{254})(?!(?:\.?[\w\d\-\.]*?[\w\d\-]{64,}\.)+?)[\w\d\.\-]+?(?<![\w\d\-\.]*?\.[\d]+?)(?<=[\w\d\-]{2,})(?<![\w\d\-]{25})$
+      description: A domain to allow during testing (along with HTTPS CRL domains)
+      example: example.com
+    IP:
+      type: string
+      pattern: >-
+        ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+      example: 203.0.113.4
+    AllowPayload:
+      type: object
+      properties:
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/Domain'
+        ips:
+          type: array
+          items:
+            $ref: '#/components/schemas/IP'
+    SnapshotInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Snapshot identifier. Value 'current' identifies the current VM
+          example: My snapshot
+        includesRAM:
+          type: boolean
+          description: 1 if the snapshot includes RAM, 0 if it does not
+          example: true
+        description:
+          type: string
+          description: Description of the snapshot
+          example: Took this snapshot before testing something
+        snaptime:
+          type: integer
+          format: uint
+          description: Snapshot creation time (unix)
+          example: 1740779020
+        parent:
+          type: string
+          description: Parent snapshot identifier
+          example: Other snapshot
+        vmid:
+          type: integer
+          format: int32
+          description: The VMID of the VM
+          example: 179
+        vmname:
+          type: string
+          description: The name of the VM
+          example: JD-ad-win11-22h2-enterprise-x64-1
+    UserAPIKeyObject:
+      type: object
+      properties:
+        apiKey:
+          type: string
+          pattern: ^[a-zA-Z0-9!@#%^&*()_+\-=\[\]{}:\\|<>\/?]{40}$
+          readOnly: true
+          example: G0rO+G+8Zlu%CAEDyYC2ZdW3pBWW+alAJ2_tli1h
+    UserMembershipObject:
+      type: object
+      required:
+        - groupName
+        - role
+      properties:
+        groupName:
+          type: string
+          description: The name of the group
+          example: Security Team
+        description:
+          type: string
+          description: Optional description of the group
+          example: Security team members
+        role:
+          type: string
+          description: The user's role in the group
+          enum:
+            - member
+            - manager
+          example: manager
     BulkAddUsersToGroupRequest:
       type: object
       required:
@@ -5518,335 +6104,6 @@ components:
           type: array
           items:
             type: string
-    RangeObject:
-      type: object
-      required:
-        - rangeID
-        - rangeNumber
-        - lastDeployment
-        - numberOfVMs
-        - testingEnabled
-        - VMs
-      properties:
-        rangeID:
-          $ref: '#/components/schemas/userID'
-        rangeNumber:
-          type: integer
-          format: int32
-          readOnly: true
-          example: 3
-        name:
-          type: string
-          example: Red Team Range
-        description:
-          type: string
-          example: Range for red team
-        purpose:
-          type: string
-          example: Testing
-        lastDeployment:
-          type: string
-          format: date-time
-          readOnly: true
-          example: '2022-08-29T09:12:33.001Z'
-        numberOfVMs:
-          type: integer
-          format: int32
-          readOnly: true
-          example: 7
-        testingEnabled:
-          type: boolean
-          readOnly: true
-          example: true
-        allowedIPs:
-          type: array
-          items:
-            type: string
-            example: 1.2.3.4
-        allowedDomains:
-          type: array
-          items:
-            type: string
-            example: example.com
-        rangeState:
-          type: string
-          example: SUCCESS
-        VMs:
-          type: array
-          items:
-            $ref: '#/components/schemas/VMObject'
-    userID:
-      type: string
-      pattern: ^[A-Za-z0-9]{1,20}$
-      description: |
-        Must be a unique 1-20 character alpha-numeric string.
-        Initials are commonly used.
-      example: JD
-    rangeID:
-      type: string
-      pattern: ^[A-Za-z0-9_\-]+(\/[A-Za-z0-9_\-]+){0,2}$
-      description: >
-        Must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or
-        'New_Range'). Use only letters, numbers, hyphens, and underscores.
-
-        This is the rangeID, which is used to identify the range.
-      example: DEMO
-    UserObject:
-      type: object
-      required:
-        - name
-        - userID
-        - isAdmin
-      properties:
-        name:
-          type: string
-          example: John Doe
-        userID:
-          $ref: '#/components/schemas/userID'
-        dateCreated:
-          type: string
-          format: date-time
-          readOnly: true
-          example: '2022-08-29T09:12:33.001Z'
-        dateLastActive:
-          type: string
-          format: date-time
-          readOnly: true
-          example: '2022-08-29T09:12:33.001Z'
-        isAdmin:
-          type: boolean
-          example: true
-        proxmoxUsername:
-          type: string
-          readOnly: true
-          example: john-doe
-    UserCredentialObject:
-      properties:
-        proxmoxUsername:
-          readOnly: true
-          type: string
-          example: john-doe
-        proxmoxPassword:
-          readOnly: true
-          type: string
-          example: 5cy5@plhik4g&Yk12sG
-        ludusEmail:
-          readOnly: true
-          type: string
-          example: john.doe@example.com
-        proxmoxRealm:
-          readOnly: true
-          type: string
-          example: pam
-      type: object
-      example:
-        ludusEmail: john.doe@example.com
-        proxmoxPassword: 5cy5@plhik4g&Yk12sG
-        proxmoxUsername: john-doe
-        proxmoxRealm: pam
-    VMObject:
-      type: object
-      required:
-        - ID
-        - proxmoxID
-        - rangeNumber
-        - name
-        - poweredOn
-        - cpu
-        - ram
-      properties:
-        ID:
-          type: integer
-          format: int32
-          readOnly: true
-          example: 53
-        proxmoxID:
-          type: integer
-          format: int32
-          readOnly: true
-          example: 146
-        rangeNumber:
-          type: integer
-          format: int32
-          readOnly: true
-          example: 3
-        name:
-          type: string
-          example: JD-ad-dc-win2019-server-x64
-        poweredOn:
-          type: boolean
-          example: true
-        ip:
-          type: string
-        isRouter:
-          type: boolean
-          description: Indicates whether this VM is the router for the range
-          example: false
-        cpu:
-          type: integer
-          format: int32
-          description: Number of CPU cores allocated to the VM
-          example: 4
-        ram:
-          type: integer
-          format: int32
-          description: Amount of RAM allocated to the VM in GB
-          example: 8
-    Domain:
-      type: string
-      pattern: >-
-        ^(?!.*?_.*?)(?!(?:[\d\w]+?\.)?\-[\w\d\.\-]*?)(?![\w\d]+?\-\.(?:[\d\w\.\-]+?))(?=[\w\d])(?=[\w\d\.\-]*?\.+[\w\d\.\-]*?)(?![\w\d\.\-]{254})(?!(?:\.?[\w\d\-\.]*?[\w\d\-]{64,}\.)+?)[\w\d\.\-]+?(?<![\w\d\-\.]*?\.[\d]+?)(?<=[\w\d\-]{2,})(?<![\w\d\-]{25})$
-      description: A domain to allow during testing (along with HTTPS CRL domains)
-      example: example.com
-    IP:
-      type: string
-      pattern: >-
-        ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
-      example: 203.0.113.4
-    AllowPayload:
-      type: object
-      properties:
-        domains:
-          type: array
-          items:
-            $ref: '#/components/schemas/Domain'
-        ips:
-          type: array
-          items:
-            $ref: '#/components/schemas/IP'
-    SnapshotInfo:
-      type: object
-      properties:
-        name:
-          type: string
-          description: Snapshot identifier. Value 'current' identifies the current VM
-          example: My snapshot
-        includesRAM:
-          type: boolean
-          description: 1 if the snapshot includes RAM, 0 if it does not
-          example: true
-        description:
-          type: string
-          description: Description of the snapshot
-          example: Took this snapshot before testing something
-        snaptime:
-          type: integer
-          format: uint
-          description: Snapshot creation time (unix)
-          example: 1740779020
-        parent:
-          type: string
-          description: Parent snapshot identifier
-          example: Other snapshot
-        vmid:
-          type: integer
-          format: int32
-          description: The VMID of the VM
-          example: 179
-        vmname:
-          type: string
-          description: The name of the VM
-          example: JD-ad-win11-22h2-enterprise-x64-1
-    ErrorInfo:
-      type: object
-      properties:
-        vmid:
-          type: integer
-          format: int32
-          description: The VMID of the VM
-          example: 180
-        vmname:
-          type: string
-          description: The name of the VM
-          example: JD-ad-win11-22h2-enterprise-x64-2
-        error:
-          type: string
-          description: Error message
-          example: 'Error parsing VM ID abc: strconv.Atoi: parsing "abc": invalid syntax'
-    SnapshotCreatePayload:
-      type: object
-      properties:
-        name:
-          type: string
-          description: Snapshot name
-          example: My cool snapshot
-        description:
-          type: string
-          description: Snapshot Description
-          example: Taking this snapshot before doing some testing
-        vmids:
-          type: array
-          items:
-            type: integer
-            format: int32
-          description: >-
-            Array of VMIDs to snapshot, if blank all VMs in the range will be
-            snapshotted
-          example:
-            - 179
-            - 180
-        includeRAM:
-          type: boolean
-          description: >-
-            Include RAM in the snapshot. If false, the VM will be powered off
-            when restored to this snapshot.
-          example: true
-    LicenseDataObject:
-      type: object
-      properties:
-        entitlements:
-          type: array
-          items:
-            type: string
-            description: Individual entitlement code
-          description: The entitlements granted by the license
-          example: ENTERPRISE_PLUGIN
-        licensed_to:
-          type: string
-          description: The name of the person or organization the license is licensed to
-          example: John Doe
-        expires_at:
-          type: string
-          format: date-time
-          description: The date and time the license expires
-          example: '2022-08-29T09:12:33.001Z'
-        active:
-          type: boolean
-          description: Whether the license is active
-          example: true
-        message:
-          type: string
-          description: The message associated with the license
-          example: 'License active, expires: 2022-08-29 14:12:33, licensed to John Doe'
-    UserAPIKeyObject:
-      type: object
-      properties:
-        apiKey:
-          type: string
-          pattern: ^[a-zA-Z0-9!@#%^&*()_+\-=\[\]{}:\\|<>\/?]{40}$
-          readOnly: true
-          example: G0rO+G+8Zlu%CAEDyYC2ZdW3pBWW+alAJ2_tli1h
-    UserMembershipObject:
-      type: object
-      required:
-        - groupName
-        - role
-      properties:
-        groupName:
-          type: string
-          description: The name of the group
-          example: Security Team
-        description:
-          type: string
-          description: Optional description of the group
-          example: Security team members
-        role:
-          type: string
-          description: The user's role in the group
-          enum:
-            - member
-            - manager
-          example: manager
   responses: {}
   securitySchemes:
     ApiKeyAuth:

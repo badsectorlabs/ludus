@@ -339,7 +339,9 @@ func printTaskOutputFromString(logs string, taskName string) {
 		fmt.Println(strings.Join(output, "\n"))
 		// Add separator between multiple instances
 		if i < len(allOutputs)-1 {
-			fmt.Println("\n---\n")
+			fmt.Println()
+			fmt.Println("---")
+			fmt.Println()
 		}
 	}
 }
@@ -407,10 +409,14 @@ func displayLogHistory(client *resty.Client, basePath string) bool {
 		if err := json.Unmarshal(responseJSON, &data); err != nil {
 			logger.Logger.Fatal(err.Error())
 		}
+		endString := data.End.Format("2006-01-02 15:04:05")
+		if data.End.IsZero() {
+			endString = "Still running..."
+		}
 		fmt.Printf("Log ID: %s | Status: %s | %s - %s\n\n",
 			data.Id, data.Status,
 			data.Start.Format("2006-01-02 15:04:05"),
-			data.End.Format("2006-01-02 15:04:05"),
+			endString,
 		)
 		fmt.Print(data.Result)
 	} else {
@@ -428,14 +434,43 @@ func displayLogHistory(client *resty.Client, basePath string) bool {
 			return true
 		}
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"ID", "Status", "Start", "End"})
+		showTemplateColumn := false
 		for _, entry := range entries {
-			table.Append([]string{
-				entry.Id,
-				entry.Status,
-				entry.Start.Format("2006-01-02 15:04:05"),
-				entry.End.Format("2006-01-02 15:04:05"),
-			})
+			if entry.Template != "" {
+				showTemplateColumn = true
+				break
+			}
+		}
+		if showTemplateColumn {
+			table.SetHeader([]string{"ID", "Template", "Status", "Start", "End"})
+		} else {
+			table.SetHeader([]string{"ID", "Status", "Start", "End"})
+		}
+		for _, entry := range entries {
+			endString := entry.End.Format("2006-01-02 15:04:05")
+			if entry.End.IsZero() {
+				endString = "Still running..."
+			}
+			if showTemplateColumn {
+				templateName := entry.Template
+				if templateName == "" {
+					templateName = "-"
+				}
+				table.Append([]string{
+					entry.Id,
+					templateName,
+					entry.Status,
+					entry.Start.Format("2006-01-02 15:04:05"),
+					endString,
+				})
+			} else {
+				table.Append([]string{
+					entry.Id,
+					entry.Status,
+					entry.Start.Format("2006-01-02 15:04:05"),
+					endString,
+				})
+			}
 		}
 		table.Render()
 	}

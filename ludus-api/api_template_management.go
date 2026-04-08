@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +47,7 @@ type TemplateStatus struct {
 const templateRegex string = `(?m)[^"]*?-template`
 
 var templateStringRegex = regexp.MustCompile(templateRegex)
+var templateLogSafeCharRegex = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 var templateProgressStore sync.Map
 
@@ -132,7 +134,26 @@ func osFromTemplateName(name string) LudusOS {
 	}
 }
 
-func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose bool) error {
+func getTemplateBuildLogPath(user *models.User, templateName string, startTime time.Time) string {
+	safeTemplateName := strings.Trim(templateLogSafeCharRegex.ReplaceAllString(templateName, "_"), "._-")
+	if safeTemplateName == "" {
+		safeTemplateName = "template"
+	}
+	logDir := fmt.Sprintf("%s/users/%s/packer/log-history", ludusInstallPath, user.ProxmoxUsername())
+	os.MkdirAll(logDir, 0755)
+	return fmt.Sprintf("%s/%s-%s.log", logDir, safeTemplateName, startTime.UTC().Format("2006-01-02T15-04-05.000000000Z"))
+}
+
+func setLatestPackerLogForUser(user *models.User, sourceLogPath string) error {
+	logBytes, err := os.ReadFile(sourceLogPath)
+	if err != nil {
+		return err
+	}
+	latestPackerLogPath := fmt.Sprintf("%s/users/%s/packer.log", ludusInstallPath, user.ProxmoxUsername())
+	return os.WriteFile(latestPackerLogPath, logBytes, 0644)
+}
+
+func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templateName string, verbose bool, packerLogFile string) error {
 	proxmoxToken, err := DecryptStringFromDatabase(user.ProxmoxTokenSecret())
 	if err != nil {
 		logger.Error(fmt.Sprintf("Unable to decrypt proxmox token secret: %v\n", err))
@@ -142,8 +163,6 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 	// There should be a better way to do this, but apparently not: https://devops.stackexchange.com/questions/14181/is-it-possible-to-control-packer-from-golang
 
 	workingDir := filepath.Dir(packerFile)
-	packerLogFile := fmt.Sprintf("%s/users/%s/packer.log", ludusInstallPath, user.ProxmoxUsername())
-	packerLogFileDebug := fmt.Sprintf("%s/users/%s/packer-debug.log", ludusInstallPath, user.ProxmoxUsername())
 	usersPackerDir := fmt.Sprintf("%s/users/%s/packer", ludusInstallPath, user.ProxmoxUsername())
 	usersAnsibleDir := fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername())
 	os.MkdirAll(fmt.Sprintf("%s/users/%s/packer/tmp", ludusInstallPath, user.ProxmoxUsername()), 0755)
@@ -170,28 +189,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 		`-var 'ludus_nat_interface={{.LudusNATInterface}}' ` +
 		`{{.PackerFile}}`
 
-	var packerVerbose string
-	if verbose {
-		packerVerbose = "1"
-		// Remove the verbose log file, if this packer build fails in verbose mode we append the debug log to the regular log file
-		// so we need to make sure we don't spam the user with a ton of debug logs from old builds
-		os.Remove(packerLogFileDebug)
-	} else {
-		packerVerbose = "0"
-		// Since the log file is only used in verbose mode, we need to write to the log file path with a message to alert the user that
-		// no logs will be written in parallel mode
-		file, err := os.OpenFile(packerLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Printf("Error opening file: %v\n", err)
-			return fmt.Errorf("error opening file: %v", err)
-		}
-		defer file.Close()
-
-		if _, err := file.Write([]byte("\n\n=>================\n=> No logs will be written in parallel mode\n=>================\n\n")); err != nil {
-			fmt.Printf("Error writing to file: %v\n", err)
-			return fmt.Errorf("error writing to file: %v", err)
-		}
-	}
+	packerVerbose := "1"
 
 	data := struct {
 		LudusInstallPath       string
@@ -250,14 +248,14 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 	packerBuildCommandID := uuid.New().String()
 	packerBuildCommandMetadata := map[string]string{
 		"command_type":     "packer_build",
-		"template_name":    extractTemplateNameFromHCL(packerFile, templateStringRegex),
+		"template_name":    templateName,
 		"template_file":    packerFile,
 		"proxmox_username": user.ProxmoxUsername(),
 	}
-	_, packerCommandError := commandManager.StartCommandInShellAndWait(packerBuildCommandID, renderedOutputString, packerLogFileDebug, workingDir, packerBuildCommandMetadata)
+	_, packerCommandError := commandManager.StartCommandInShellAndWait(packerBuildCommandID, renderedOutputString, packerLogFile, workingDir, packerBuildCommandMetadata)
 
-	// Write 'Build complete' to the packerLogFile to indicate the end of the build so the user knows it's done
-	if verbose && packerCommandError == nil {
+	// Write 'Build complete' to the per-template packer log so the user knows this build has finished.
+	if packerCommandError == nil {
 		file, err := os.OpenFile(packerLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			logger.Error(fmt.Sprintf("Error opening file: %v\n", err))
@@ -269,12 +267,9 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 			logger.Error(fmt.Sprintf("Error writing to file: %v\n", err))
 			return fmt.Errorf("error writing to file: %v", err)
 		}
-	} else if verbose && packerCommandError != nil {
-		// Copy the debug log to the regular log if the command failed
-		if err := copyFileContents(packerLogFileDebug, packerLogFile); err != nil {
-			logger.Error(fmt.Sprintf("Failed to copy file contents: %v\n", err))
-			return fmt.Errorf("failed to copy file contents: %v", err)
-		}
+	}
+	if !verbose {
+		logger.Debug("Template build logs captured in parallel mode for template " + templateName)
 	}
 
 	return packerCommandError
@@ -283,9 +278,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, verbose
 func buildVMsFromTemplates(app core.App, templateStatusArray []TemplateStatus, user *models.User, templateNames []string, parallel int, verbose bool) error {
 	// Create a WaitGroup to wait for all goroutines to finish.
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	anyFailed := false
-	startTime := time.Now()
+	var latestLogMu sync.Mutex
 
 	// Create a semaphore (buffered channel of empty structs) to limit the number of concurrent goroutines.
 	semaphoreChannel := make(chan struct{}, parallel)
@@ -378,10 +371,26 @@ func buildVMsFromTemplates(app core.App, templateStatusArray []TemplateStatus, u
 				logger.Debug("Canary check failed - not building template " + templateStatus.Name)
 				return
 			}
-			if err := buildVMFromTemplateWithPacker(user, templateStatus.FilePath, verbose); err != nil {
-				mu.Lock()
-				anyFailed = true
-				mu.Unlock()
+			buildStartTime := time.Now()
+			templateLogPath := getTemplateBuildLogPath(user, templateStatus.Name, buildStartTime)
+			runningLogID := createRunningLogHistory(app, user.Id, "", templateStatus.Name, templateLogPath, buildStartTime)
+
+			status := "success"
+			if err := buildVMFromTemplateWithPacker(user, templateStatus.FilePath, templateStatus.Name, verbose, templateLogPath); err != nil {
+				status = "failure"
+			}
+
+			if runningLogID != "" {
+				finalizeRunningLogHistoryByID(app, runningLogID, status, templateLogPath, time.Now())
+			} else {
+				saveLogHistory(app, user.Id, "", templateStatus.Name, status, templateLogPath, buildStartTime)
+			}
+
+			latestLogMu.Lock()
+			err := setLatestPackerLogForUser(user, templateLogPath)
+			latestLogMu.Unlock()
+			if err != nil {
+				logger.Error(fmt.Sprintf("Failed to update latest packer log for template %s: %v", templateStatus.Name, err))
 			}
 		}(templateStatus, username)
 
@@ -390,14 +399,6 @@ func buildVMsFromTemplates(app core.App, templateStatusArray []TemplateStatus, u
 	}
 
 	wg.Wait()
-
-	// Save log history
-	status := "success"
-	if anyFailed {
-		status = "failure"
-	}
-	packerLogPath := fmt.Sprintf("%s/users/%s/packer.log", ludusInstallPath, user.ProxmoxUsername())
-	saveLogHistory(app, user.Id, "", status, packerLogPath, startTime)
 
 	return nil
 }
@@ -500,6 +501,125 @@ func getTemplateNameArray(e *core.RequestEvent, onlyBuilt bool) ([]string, error
 	return templateSlice, nil
 }
 
+func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus) error {
+	templatesCollection, err := app.FindCollectionByNameOrId("templates")
+	if err != nil {
+		return fmt.Errorf("unable to find templates collection: %w", err)
+	}
+
+	for _, templateStatus := range templateStatusArray {
+		templateName := strings.TrimSpace(templateStatus.Name)
+		if templateName == "" {
+			continue
+		}
+
+		existingRecord, err := app.FindFirstRecordByData("templates", "name", templateName)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("unable to query template '%s' in templates collection: %w", templateName, err)
+		}
+		if existingRecord != nil {
+			continue
+		}
+
+		templateRecord := core.NewRecord(templatesCollection)
+		template := &models.Templates{}
+		template.SetProxyRecord(templateRecord)
+		template.SetName(templateName)
+
+		templateOS := string(templateStatus.Os)
+		if templateOS == "" {
+			templateOS = string(osFromTemplateName(templateName))
+		}
+		templateRecord.Set("os", templateOS)
+		template.SetShared(true)
+
+		if err := app.Save(template); err != nil {
+			return fmt.Errorf("unable to create template '%s' in templates collection: %w", templateName, err)
+		}
+	}
+
+	return nil
+}
+
+func discoverTemplateStatusesForStartup(app core.App) ([]TemplateStatus, error) {
+	templateRegexCompiled, err := regexp.Compile(templateRegex)
+	if err != nil {
+		return nil, fmt.Errorf("unable to compile template regex: %w", err)
+	}
+
+	templateStatusByName := make(map[string]TemplateStatus)
+	addTemplateFromFile := func(templateFile string) {
+		templateName := strings.TrimSpace(extractTemplateNameFromHCL(templateFile, templateRegexCompiled))
+		if templateName == "" || strings.HasPrefix(templateName, "error reading file:") || strings.HasPrefix(templateName, "could not find template name in ") {
+			return
+		}
+		if _, exists := templateStatusByName[templateName]; exists {
+			return
+		}
+		templateOS := extractOSFromHCL(templateFile)
+		if templateOS == "" {
+			templateOS = osFromTemplateName(templateName)
+		}
+		templateStatusByName[templateName] = TemplateStatus{
+			Name: templateName,
+			Os:   templateOS,
+		}
+	}
+
+	globalTemplateFiles, err := findFiles(fmt.Sprintf("%s/packer/", ludusInstallPath), "pkr.hcl", "pkr.json")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("unable to list global templates: %w", err)
+	}
+	for _, templateFile := range globalTemplateFiles {
+		addTemplateFromFile(templateFile)
+	}
+
+	userRecords, err := app.FindAllRecords("users")
+	if err != nil {
+		return nil, fmt.Errorf("unable to list users for template startup sync: %w", err)
+	}
+	for _, userRecord := range userRecords {
+		user := &models.User{}
+		user.SetProxyRecord(userRecord)
+		if user.UserId() == "ROOT" {
+			continue
+		}
+		proxmoxUsername := strings.TrimSpace(user.ProxmoxUsername())
+		if proxmoxUsername == "" {
+			continue
+		}
+		userTemplateRoot := fmt.Sprintf("%s/users/%s/packer/", ludusInstallPath, proxmoxUsername)
+		userTemplateFiles, err := findFiles(userTemplateRoot, ".hcl", ".json")
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("unable to list templates for user %s: %w", user.UserId(), err)
+		}
+		userTemplateFiles = slices.DeleteFunc(userTemplateFiles, func(template string) bool {
+			return strings.HasSuffix(template, "pkrvars.hcl")
+		})
+		for _, templateFile := range userTemplateFiles {
+			addTemplateFromFile(templateFile)
+		}
+	}
+
+	templateStatuses := make([]TemplateStatus, 0, len(templateStatusByName))
+	for _, templateStatus := range templateStatusByName {
+		templateStatuses = append(templateStatuses, templateStatus)
+	}
+
+	return templateStatuses, nil
+}
+
+func startupSyncTemplatesCollection(app core.App) error {
+	templateStatuses, err := discoverTemplateStatusesForStartup(app)
+	if err != nil {
+		return err
+	}
+	return syncTemplatesCollection(app, templateStatuses)
+}
+
 func templateActions(e *core.RequestEvent, buildTemplates bool, templateNames []string, parallel int, verbose bool) error {
 
 	if parallel == 0 {
@@ -512,6 +632,9 @@ func templateActions(e *core.RequestEvent, buildTemplates bool, templateNames []
 	}
 
 	if !buildTemplates {
+		if err := syncTemplatesCollection(e.App, templateStatusArray); err != nil {
+			return JSONError(e, http.StatusInternalServerError, "Unable to sync templates collection: "+err.Error())
+		}
 		return e.JSON(http.StatusOK, templateStatusArray)
 	}
 
@@ -587,6 +710,16 @@ func BuildTemplates(e *core.RequestEvent) error {
 // GetPackerLogs - retrieves the latest packer logs
 func GetPackerLogs(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
+	logID := e.Request.URL.Query().Get("logID")
+	if logID != "" {
+		if runningLogPath, ok := getRunningTemplateLogPathByLogID(e.App, user.Id, logID); ok {
+			return GetLogsFromFile(e, runningLogPath)
+		}
+		return JSONError(e, http.StatusBadRequest, "The provided log history ID is not currently running. Follow mode is only supported for active template builds.")
+	}
+	if runningLogPath, ok := getLatestRunningTemplateLogPath(e.App, user.Id); ok {
+		return GetLogsFromFile(e, runningLogPath)
+	}
 	packerLogPath := fmt.Sprintf("%s/users/%s/packer.log", ludusInstallPath, user.ProxmoxUsername())
 	return GetLogsFromFile(e, packerLogPath)
 }
@@ -787,9 +920,13 @@ func AbortPacker(e *core.RequestEvent) error {
 	for _, packerCommand := range commands {
 		if packerCommand.Metadata["command_type"] == "packer_build" && packerCommand.Metadata["proxmox_username"] == user.ProxmoxUsername() && packerCommand.Status == commandmanager.StatusRunning {
 			logger.Debug(fmt.Sprintf("Killing packer command for template %s with PID %d", packerCommand.Metadata["template_name"], packerCommand.PID))
+			templateName := packerCommand.Metadata["template_name"]
 			err := commandManager.KillCommand(packerCommand.ID)
 			if err != nil {
-				return JSONError(e, http.StatusInternalServerError, "Error killing packer command for template "+packerCommand.Metadata["template_name"]+": "+err.Error())
+				return JSONError(e, http.StatusInternalServerError, "Error killing packer command for template "+templateName+": "+err.Error())
+			}
+			if runningLogPath, ok := getRunningTemplateLogPathByUserAndName(user.Id, templateName); ok {
+				finalizeRunningTemplateLogHistory(e.App, user.Id, templateName, "aborted", runningLogPath, time.Now())
 			}
 			commandManager.RemoveCommand(packerCommand.ID)
 			foundCommand = true

@@ -103,6 +103,11 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 
 	InitDb()
 	LudusVersion = ludusVersion
+	if os.Geteuid() != 0 {
+		if err := startupSyncTemplatesCollection(app); err != nil {
+			logger.Error(fmt.Sprintf("Error syncing templates collection on startup: %v", err))
+		}
+	}
 
 	// Setup NAT VNet for cluster mode, this function checks if we are in cluster mode first
 	setupNATVNet()

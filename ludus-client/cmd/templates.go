@@ -162,6 +162,33 @@ var templateLogsCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, false, verbose, LudusVersion)
+		if follow && history && historyID == "" {
+			logger.Logger.Fatal("`ludus templates logs --history -f` requires `--id` for a specific running build.")
+		}
+
+		if follow && historyID != "" {
+			apiString := buildURLWithRangeAndUserID("/templates/logs")
+			apiString = addQueryParameterToURL(apiString, "logID", historyID)
+			var newLogs string
+			var cursor int = 0
+
+			for {
+				apiStringWithCursor := addQueryParameterToURL(apiString, "cursor", strconv.Itoa(cursor))
+				responseJSON, success := rest.GenericGet(client, apiStringWithCursor)
+				if !success {
+					// If the selected build is no longer running, show archived content once and exit.
+					if displayLogHistory(client, "/templates/logs/history") {
+						return
+					}
+					return
+				}
+				newLogs, cursor = stringAndCursorFromResult(responseJSON)
+				if len(newLogs) > 0 {
+					filterAndPrintTemplateLogs(newLogs, verboseTemplateLogs)
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}
 
 		if displayLogHistory(client, "/templates/logs/history") {
 			return
