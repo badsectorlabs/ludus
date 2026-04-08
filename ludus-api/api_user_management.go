@@ -400,7 +400,7 @@ func DeleteUser(e *core.RequestEvent) error {
 	}
 	output, err := RunDeleteUserPlaybookStandalone(extraVars)
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running ansible playbook: %w (output: %v)", err, output))
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running ansible playbook: %v (output: %v)", err, output))
 	}
 
 	err = removeUserFromProxmox(user.ProxmoxUsername(), "pam")

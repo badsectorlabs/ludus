@@ -91,14 +91,6 @@
         client_private_key: "{{ wg_client_private_key_slurp['content'] | b64decode | trim }}"
         client_public_key: "{{ wg_client_public_key_slurp['content'] | b64decode | trim }}"
 
-    - name: Create client wireguard config
-      ansible.builtin.template:
-        dest: /etc/wireguard/{{ user_id }}_client.conf
-        src: wg_client.conf.j2
-        owner: root
-        group: root
-        mode: '0600'
-
     - name: Add the user to wireguard
       ansible.builtin.blockinfile:
         path: /etc/wireguard/wg0.conf
@@ -115,12 +107,6 @@
     #   ansible.builtin.service:
     #     name: wg-quick@wg0
     #     state: restarted
-
-    - name: Get the client config
-      ansible.builtin.copy:
-        src: "/etc/wireguard/{{ user_id }}_client.conf"
-        dest: "{{ ludus_users_dir }}/{{ username }}/"
-        mode: "0600"
 
     # Get the user up to speed with collections and roles without having to download
     # them for every user that gets added. Speeds up user creation and allows for offline usage!

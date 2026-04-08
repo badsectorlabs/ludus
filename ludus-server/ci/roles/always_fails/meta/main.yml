@@ -1,0 +1,17 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: always_fails
+  author: badsectorlabs
+  description: Always fails - for use in CI testing error handling
+  company: Bad Sector Labs
+  license: GPLv3
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+
+collections: []
