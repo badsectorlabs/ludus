@@ -1341,6 +1341,8 @@ post-deploy ranges-as-admin:
     - ludus range logs --history --json | jq -e '.[0].status == "success"'
     - export RANGE_LOG_ID=$(ludus range logs --history --json | jq -r '.[0].id')
     - ludus range logs --history --id "$RANGE_LOG_ID" | grep -q "PLAY"
+    # Regression: live range logs must still work after log history finalization (ansible.log must not be deleted)
+    - ludus range logs | grep -q "PLAY"
     # Log history: verify an invalid ID returns an error
     - set +o pipefail
     - 'ludus range logs --history --id nonexistent 2>&1 | grep "Log entry not found"'
@@ -1356,6 +1358,8 @@ post-deploy ranges-as-admin:
     - ludus range logs --history --json -r CIA-log-err | jq -e '.[0].status == "failure"'
     - export ERR_LOG_ID=$(ludus range logs --history --json -r CIA-log-err | jq -r '.[0].id')
     - ludus range logs --history --id "$ERR_LOG_ID" -r CIA-log-err | grep -q "This role always fails"
+    # Regression: live range logs must survive failed deploy finalization too
+    - ludus range logs -r CIA-log-err | grep -q "This role always fails"
     - ludus range rm-range -r CIA-log-err --no-prompt --force
     # Clean up potential leftovers (ignore errors)
     - ludus range rm-range -r CIA-extra-1 --no-prompt --force || true
