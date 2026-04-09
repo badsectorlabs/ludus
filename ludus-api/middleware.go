@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
 )
@@ -150,6 +151,31 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		rangeRecord := &models.Range{}
 		rangeRecord.SetProxyRecord(rawRangeRecord)
 		e.Set("range", rangeRecord)
+
+		// When an admin specifies a rangeID without an explicit userID, auto-resolve
+		// the range owner and swap the user context. This ensures operations like
+		// abort, etc-hosts, RDP, and inventory use the correct user's credentials
+		// and file paths instead of the admin's.
+		if requestedUserID == "" && e.Auth.GetBool("isAdmin") && e.Auth.GetString("userID") != "" {
+			ownerRecords, err := e.App.FindRecordsByFilter(
+				"users",
+				"ranges.id ?= {:range_id}",
+				"-created",
+				1, // only need the first owner
+				0,
+				dbx.Params{"range_id": rawRangeRecord.Id},
+			)
+			if err == nil && len(ownerRecords) > 0 {
+				ownerUserID := ownerRecords[0].GetString("userID")
+				if ownerUserID != e.Auth.GetString("userID") {
+					userRecord = ownerRecords[0]
+					user = &models.User{}
+					user.SetProxyRecord(userRecord)
+					e.App.ExpandRecord(userRecord, []string{"ranges", "groups"}, nil)
+					e.Set("user", user)
+				}
+			}
+		}
 	}
 
 	return e.Next()
