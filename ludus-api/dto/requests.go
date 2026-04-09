@@ -178,3 +178,19 @@ type BulkShareBlueprintWithUsersRequest struct {
 type BulkUnshareBlueprintWithUsersRequest struct {
 	UserIDs []string `json:"userIDs"`
 }
+
+type SetUserQuotaRequest struct {
+	UserIDs     []string `json:"userIDs"`
+	QuotaRAM    *int     `json:"quotaRAM"`
+	QuotaCPU    *int     `json:"quotaCPU"`
+	QuotaVMs    *int     `json:"quotaVMs"`
+	QuotaRanges *int     `json:"quotaRanges"`
+}
+
+type SetGroupQuotaRequest struct {
+	GroupNames         []string `json:"groupNames"`
+	DefaultQuotaRAM    *int     `json:"defaultQuotaRAM"`
+	DefaultQuotaCPU    *int     `json:"defaultQuotaCPU"`
+	DefaultQuotaVMs    *int     `json:"defaultQuotaVMs"`
+	DefaultQuotaRanges *int     `json:"defaultQuotaRanges"`
+}

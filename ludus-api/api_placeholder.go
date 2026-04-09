@@ -23,19 +23,21 @@ func NewHandlerManager() *HandlerManager {
 }
 
 // RegisterHandler allows a plugin to register its handler for a specific route.
-func (hm *HandlerManager) RegisterHandler(path string, handler func(*core.RequestEvent) error) {
+// The key is "METHOD path" to support different handlers for GET vs PUT on the same path.
+func (hm *HandlerManager) RegisterHandler(method string, path string, handler func(*core.RequestEvent) error) {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
-	hm.handlers[path] = handler
+	hm.handlers[method+" "+path] = handler
 }
 
 // GetHandler retrieves the handler for a specific route.
-func (hm *HandlerManager) GetHandler(path string) (func(*core.RequestEvent) error, bool) {
+func (hm *HandlerManager) GetHandler(method string, path string) (func(*core.RequestEvent) error, bool) {
 	hm.mu.RLock()
 	defer hm.mu.RUnlock()
-	handler, exists := hm.handlers[path]
+	handler, exists := hm.handlers[method+" "+path]
 	return handler, exists
 }
+
 
 func PlaceholderHandler(e *core.RequestEvent) error {
 	path := e.Request.URL.Path
@@ -45,7 +47,7 @@ func PlaceholderHandler(e *core.RequestEvent) error {
 			path = "/"
 		}
 	}
-	handler, exists := LudusPluginHandlerManager.GetHandler(path)
+	handler, exists := LudusPluginHandlerManager.GetHandler(e.Request.Method, path)
 	if exists {
 		return handler(e)
 	}
@@ -111,6 +113,43 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 			Pattern:     "/kms/license",
 			HandlerFunc: PlaceholderHandler,
 		},
+		// Quota Management routes (Enterprise)
+		PocketBaseRoute{
+			Name:        "GetQuotaStatus",
+			Method:      http.MethodGet,
+			Pattern:     "/user/quotas",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "GetAllQuotaStatus",
+			Method:      http.MethodGet,
+			Pattern:     "/user/quotas/all",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "GetQuotaDefaults",
+			Method:      http.MethodGet,
+			Pattern:     "/user/quotas/defaults",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "GetGroupQuotas",
+			Method:      http.MethodGet,
+			Pattern:     "/groups/quotas",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "SetUserQuota",
+			Method:      http.MethodPut,
+			Pattern:     "/user/quotas",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "SetGroupQuota",
+			Method:      http.MethodPut,
+			Pattern:     "/groups/quotas",
+			HandlerFunc: PlaceholderHandler,
+		},
 	}
 
 	RegisterRoutesWithPocketBase(se, pluginRoutes)
@@ -119,6 +158,6 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 func RegisterPluginActualRoutes(routes PocketBaseRoutes) {
 	for _, route := range routes {
 		logger.Debug(fmt.Sprintf("Registering actual route for plugin: %s %s", route.Method, route.Pattern))
-		LudusPluginHandlerManager.RegisterHandler(route.Pattern, route.HandlerFunc)
+		LudusPluginHandlerManager.RegisterHandler(route.Method, route.Pattern, route.HandlerFunc)
 	}
 }

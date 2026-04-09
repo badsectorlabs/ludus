@@ -17,6 +17,7 @@ stages:
   - post-deploy-admin-ansible
   - post-deploy-admin-user
   - post-deploy-admin-groups
+
   - post-deploy-admin-blueprints
   - post-deploy-admin-ranges
   - post-deploy-admin-templates
