@@ -50,8 +50,8 @@ After updating the config, restart the ludus processes with `systemctl restart l
 If you changed the datastores you are using with Ludus, you will need to give permissions to the `ludus_users` and `ludus_admins` group. As root on your Promox host, run the following:
 
 ```shell
-pveum acl modify /storage/<your new storage> -group ludus_users -role DatastoreUser
-pveum acl modify /storage/<your new storage> -group ludus_admins -role PVEDatastoreAdmin
+pveum acl modify /storage/<your new storage> -group ludus_users -roles DatastoreUser
+pveum acl modify /storage/<your new storage> -group ludus_admins -roles PVEDatastoreAdmin
 ```
 
 If you encounter networking issues like VMs not getting IP addresses or having internet access, see [this guide](../troubleshooting/network.md).
