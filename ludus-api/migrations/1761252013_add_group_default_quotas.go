@@ -13,27 +13,29 @@ func init() {
 			return err
 		}
 
+		minZero := float64(0)
+
 		// Add default quota fields to the groups collection
 		groupsCollection.Fields.Add(
 			&core.NumberField{
 				Name:    "defaultQuotaRAM",
 				OnlyInt: true,
-				Min:     func() *float64 { v := float64(0); return &v }(),
+				Min:     &minZero,
 			},
 			&core.NumberField{
 				Name:    "defaultQuotaCPU",
 				OnlyInt: true,
-				Min:     func() *float64 { v := float64(0); return &v }(),
+				Min:     &minZero,
 			},
 			&core.NumberField{
 				Name:    "defaultQuotaVMs",
 				OnlyInt: true,
-				Min:     func() *float64 { v := float64(0); return &v }(),
+				Min:     &minZero,
 			},
 			&core.NumberField{
 				Name:    "defaultQuotaRanges",
 				OnlyInt: true,
-				Min:     func() *float64 { v := float64(0); return &v }(),
+				Min:     &minZero,
 			},
 		)
 
