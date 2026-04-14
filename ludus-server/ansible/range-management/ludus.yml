@@ -1145,9 +1145,9 @@
     - name: Generate an /etc/hosts formatted file for use on WG clients
       ansible.builtin.template:
         src: etc-hosts.j2
-        dest: "{{ ludus_install_path }}/users/{{ username }}/etc-hosts"
+        dest: "{{ ludus_install_path }}/ranges/{{ range_id }}/etc-hosts"
       # Skip this when doing a destroy-range, but run for every other tag
-      when: 
+      when:
         - '"destroy-range" not in ansible_run_tags'
         - ansible_limit is undefined
         - '"nexus" not in ansible_run_tags'

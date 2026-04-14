@@ -1325,6 +1325,9 @@ post-deploy ranges-as-admin:
       - ludus-api/api_log_history.go
       - ludus-api/range_access.go
       - ludus-api/middleware.go
+      - ludus-api/process.go
+      - ludus-server/ansible/range-management/tasks/make-rdp-files.yml
+      - ludus-server/ansible/range-management/ludus.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1357,6 +1360,17 @@ post-deploy ranges-as-admin:
     - export ERR_LOG_ID=$(ludus range logs --history --json -r CIA-log-err | jq -r '.[0].id')
     - ludus range logs --history --id "$ERR_LOG_ID" -r CIA-log-err | grep -q "This role always fails"
     - ludus range rm-range -r CIA-log-err --no-prompt --force
+    # Regression: admin abort with -r (no --user) should find the process by LUDUS_RANGE_ID
+    - ludus range rm-range -r CIU-abort-test --no-prompt --force || true
+    - ludus range create -n "CIU Abort Test" -r CIU-abort-test --user CIU
+    - ludus range config set -f /opt/ludus/ci/configs/small-range.yml -r CIU-abort-test --user CIU
+    - ludus range deploy -r CIU-abort-test --user CIU
+    - sleep 5 # Wait for ansible process to start
+    - ludus range list --json -r CIU-abort-test --user CIU | jq -e '.rangeState == "DEPLOYING"'
+    # Abort using only -r (no --user) — previously failed with "no ansible process found for user CIA"
+    - ludus range abort -r CIU-abort-test
+    - ludus range list --json -r CIU-abort-test --user CIU | jq -e '.rangeState == "ABORTED"'
+    - ludus range rm-range -r CIU-abort-test --no-prompt --force
     # Clean up potential leftovers (ignore errors)
     - ludus range rm-range -r CIA-extra-1 --no-prompt --force || true
     - ludus range rm-range -r CIU-extra-1 --no-prompt --force || true
