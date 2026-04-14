@@ -328,8 +328,11 @@ func GetConfigExample(e *core.RequestEvent) error {
 
 // GetEtcHosts - retrieves an /etc/hosts file for the range
 func GetEtcHosts(e *core.RequestEvent) error {
-	user := e.Get("user").(*models.User)
-	etcHosts, err := GetFileContents(fmt.Sprintf("%s/users/%s/etc-hosts", ludusInstallPath, user.ProxmoxUsername()))
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
+	etcHosts, err := GetFileContents(fmt.Sprintf("%s/ranges/%s/etc-hosts", ludusInstallPath, targetRange.RangeId()))
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
@@ -338,17 +341,17 @@ func GetEtcHosts(e *core.RequestEvent) error {
 
 // GetRDP - retrieves RDP files as a zip for the range
 func GetRDP(e *core.RequestEvent) error {
-	user := e.Get("user").(*models.User)
-	playbook := []string{ludusInstallPath + "/ansible/range-management/ludus.yml"}
-	extraVars := map[string]interface{}{
-		"username": user.ProxmoxUsername(),
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
 	}
-	output, err := server.RunAnsiblePlaybookWithVariables(e, playbook, []string{}, extraVars, "generate-rdp", false, "")
+	playbook := []string{ludusInstallPath + "/ansible/range-management/ludus.yml"}
+	output, err := server.RunAnsiblePlaybookWithVariables(e, playbook, []string{}, nil, "generate-rdp", false, "")
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, output)
 	}
 
-	filePath := fmt.Sprintf("%s/users/%s/rdp.zip", ludusInstallPath, user.ProxmoxUsername())
+	filePath := fmt.Sprintf("%s/ranges/%s/rdp.zip", ludusInstallPath, targetRange.RangeId())
 	fileContents, err := os.ReadFile(filePath)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
@@ -667,15 +670,16 @@ func GetAnsibleTagsForDeployment(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, response)
 }
 
-// Find the ansible process for this user and kill it
+// AbortAnsible finds the ansible process deploying the requested range and
+// terminates it. The process is identified by LUDUS_RANGE_ID, so admins can
+// abort any range with `-r` regardless of which user owns the deploy.
 func AbortAnsible(e *core.RequestEvent) error {
 	targetRange, err := GetRange(e)
 	if err != nil {
 		return err
 	}
-	targetUser := e.Get("user").(*models.User)
 
-	ansiblePidString, err := findAnsiblePidForUser(targetUser.ProxmoxUsername())
+	ansiblePidString, err := findAnsiblePidForRange(targetRange.RangeId())
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
@@ -692,6 +696,8 @@ func AbortAnsible(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
+	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId())
+	finalizeRunningRangeLogHistory(e.App, targetRange.Id, "aborted", ansibleLogPath, time.Now())
 
 	return JSONResult(e, http.StatusOK, "Ansible process aborted")
 }

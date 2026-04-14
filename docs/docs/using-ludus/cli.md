@@ -1213,9 +1213,33 @@ Usage:
   ludus range logs
 
 Flags:
-    -f, --follow     continuously poll the log and print new lines as they are written
-    -t, --tail int   number of lines of the log from the end to print
+    -f, --follow        continuously poll the log and print new lines as they are written
+        --history       show log history entries
+        --id string     view a specific historical log entry by ID
+    -t, --tail int      number of lines of the log from the end to print
 ```
+
+Ludus now creates a running history entry when a deploy starts, then finalizes that entry when the deploy completes. Use `--history` to list entries and `--id` to view a specific one.
+
+`ludus range logs -f` follows the current deployment log only. The `--id` flag cannot be combined with `-f` for range logs.
+
+When a history entry is still running, its `end` field is the Go `time.Time` zero value and the CLI displays `Still running...` in place of an end timestamp.
+
+```
+ludus range logs --history
++-----------------+---------+---------------------+---------------------+
+|       ID        | STATUS  |        START        |         END         |
++-----------------+---------+---------------------+---------------------+
+| njec0ungvnc5ctk | failure | 2026-03-27 22:43:21 | 2026-03-27 22:44:16 |
+| ab12c3defg45678 | success | 2026-03-26 14:10:05 | 2026-03-26 14:32:41 |
++-----------------+---------+---------------------+---------------------+
+```
+
+```
+ludus range logs --history --id njec0ungvnc5ctk
+```
+
+By default the server keeps the last 100 logs per range. This can be changed with `max_log_history` in `/opt/ludus/config.yml` (see [Admin Notes](../administration/admin)).
 
 ### Range Rdp
 
@@ -1438,9 +1462,23 @@ Usage:
 
 Flags:
     -f, --follow           continuously poll the log and print new lines as they are written
+        --history          show log history entries
+        --id string        view a specific historical log entry by ID
     -t, --tail int         number of lines of the log from the end to print
     -v, --verbose-packer   print all lines from the packer log
 ```
+
+Like range logs, template builds create running history entries at build start and finalize them when the build ends. Use `--history` to list entries and `--id` to view one. When building multiple templates in parallel, each template build creates its own history entry.
+
+`ludus templates logs -f` follows the latest active template build at the time of the request.
+
+To follow a specific running template build, use:
+
+```
+ludus templates logs --id <logID> -f
+```
+
+If that build has already completed, the command falls back to showing the archived history content.
 
 ### Templates RM
 

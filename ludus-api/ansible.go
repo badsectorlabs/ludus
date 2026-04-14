@@ -370,14 +370,30 @@ func RunRangeManagementAnsibleWithTag(e *core.RequestEvent, tag string, verbose 
 		return "", err
 	}
 
+	user := e.Get("user").(*models.User)
+
 	onlyRolesArray := removeEmptyStrings(onlyRoles)
 	extraVars := map[string]interface{}{"only_roles": onlyRolesArray}
+
+	startTime := time.Now()
+	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, usersRange.RangeId())
+	runningLogID := createRunningLogHistory(e.App, user.Id, usersRange.Id, "", ansibleLogPath, startTime)
 
 	// Run the deploy
 	output, err := server.RunAnsiblePlaybookWithVariables(e, nil, nil, extraVars, tag, verbose, limit)
 
+	status := "success"
 	if err != nil {
-		usersRange.SetRangeState(LudusRangeStateError)
+		latestRangeRecord, findErr := e.App.FindRecordById("ranges", usersRange.Id)
+		if findErr == nil {
+			usersRange.SetProxyRecord(latestRangeRecord)
+		}
+		if usersRange.RangeState() == LudusRangeStateAborted {
+			status = "aborted"
+		} else {
+			status = "failure"
+			usersRange.SetRangeState(LudusRangeStateError)
+		}
 		if saveErr := e.App.Save(usersRange); saveErr != nil {
 			return "", fmt.Errorf("error saving range: %w", saveErr)
 		}
@@ -387,6 +403,12 @@ func RunRangeManagementAnsibleWithTag(e *core.RequestEvent, tag string, verbose 
 			return "", fmt.Errorf("error saving range: %w", saveErr)
 		}
 	}
+	if runningLogID != "" {
+		finalizeRunningLogHistoryByID(e.App, runningLogID, status, ansibleLogPath, time.Now())
+	} else {
+		saveLogHistory(e.App, user.Id, usersRange.Id, "", status, ansibleLogPath, startTime)
+	}
+
 	return output, err
 }
 

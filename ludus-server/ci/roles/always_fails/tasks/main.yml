@@ -1,0 +1,4 @@
+---
+- name: Intentional failure for CI testing
+  ansible.builtin.fail:
+    msg: This role always fails - used to test error handling in CI
