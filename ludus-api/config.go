@@ -36,6 +36,12 @@ type Configuration struct {
 	ClusterMode  bool   `mapstructure:"cluster_mode" yaml:"cluster_mode"`     // Auto-detected via API during startup, can be overridden
 	SDNZone      string `mapstructure:"sdn_zone" yaml:"sdn_zone"`             // The SDN zone name for Ludus networking (default: "ludus")
 	VXLANTagBase int    `mapstructure:"vxlan_tag_base" yaml:"vxlan_tag_base"` // Base VXLAN tag (VNI) added to range number (default: 0)
+	// Quota defaults - applied to users who don't have explicit quotas or group defaults
+	// 0 means unlimited
+	DefaultQuotaRAM    int `mapstructure:"default_quota_ram" yaml:"default_quota_ram"`
+	DefaultQuotaCPU    int `mapstructure:"default_quota_cpu" yaml:"default_quota_cpu"`
+	DefaultQuotaVMs    int `mapstructure:"default_quota_vms" yaml:"default_quota_vms"`
+	DefaultQuotaRanges int `mapstructure:"default_quota_ranges" yaml:"default_quota_ranges"`
 }
 
 var ServerConfiguration Configuration
@@ -67,9 +73,13 @@ func (s *Server) ParseConfig() {
 	// Do not set a default for cluster_mode to force viper to leave it unset unless provided,
 	// so we can detect if user has explicitly set it or not and fallback to API if unset.
 	// (See IsClusterMode in sdn.go for logic)
+	viper.SetDefault("sdn_zone", "ludus") // Default SDN zone name
+	viper.SetDefault("vxlan_tag_base", 0) // Base VXLAN tag added to range number
+	viper.SetDefault("default_quota_ram", 0)
+	viper.SetDefault("default_quota_cpu", 0)
+	viper.SetDefault("default_quota_vms", 0)
+	viper.SetDefault("default_quota_ranges", 0)
 	viper.SetDefault("max_log_history", 100) // Max log history entries per range/user
-	viper.SetDefault("sdn_zone", "ludus")    // Default SDN zone name
-	viper.SetDefault("vxlan_tag_base", 0)    // Base VXLAN tag added to range number
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)
 	}
