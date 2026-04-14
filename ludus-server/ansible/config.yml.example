@@ -6,3 +6,4 @@ proxmox_public_ip: "192.168.0.0"  # The IP users will connect to via WireGuard t
 proxmox_gateway: "192.168.0.0"    # The default gateway for this machine
 proxmox_netmask: "255.255.255.0"  # The netmask for this machine's network
 proxmox_storage: local            # The storage pool to use for templates and VMs (default: local; if you set up ZFS manually after install, change this)
+# boot_disk: /dev/sda             # Optional: override the auto-detected boot disk used for grub-pc recovery (e.g. /dev/nvme0n1 on EC2/NVMe hosts)
