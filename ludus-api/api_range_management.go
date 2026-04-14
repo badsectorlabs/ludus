@@ -92,6 +92,18 @@ func DeployRange(e *core.RequestEvent) error {
 		}
 	}
 
+	// Check quota before deploying
+	e.App.ExpandRecord(user.Record, []string{"ranges", "groups"}, nil)
+	if server.HasEntitlement("ENTERPRISE_PLUGIN") {
+		violations, err := CheckDeployQuota(e.App, user, usersRange.RangeId())
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error checking quota: %s", err.Error()))
+			// Log error but don't block — quota check is best-effort if there's an internal error
+		} else if len(violations) > 0 {
+			return JSONError(e, http.StatusForbidden, FormatQuotaViolations(violations))
+		}
+	}
+
 	// Set range state to "DEPLOYING"
 	usersRange.SetRangeState(LudusRangeStateDeploying)
 	usersRange.SetLastDeployment(types.NowDateTime())
@@ -579,6 +591,18 @@ func PutConfig(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, "Unable to save the range config")
 	}
 
+	// Check if the new config would exceed quotas (warning only, don't block)
+	if server.HasEntitlement("ENTERPRISE_PLUGIN") {
+		user := e.Get("user").(*models.User)
+		e.App.ExpandRecord(user.Record, []string{"ranges", "groups"}, nil)
+		violations, quotaErr := CheckDeployQuota(e.App, user, targetRange.RangeId())
+		if quotaErr != nil {
+			logger.Debug(fmt.Sprintf("Quota check warning failed: %s", quotaErr.Error()))
+		} else if len(violations) > 0 {
+			return JSONResult(e, http.StatusOK, fmt.Sprintf("Your range config has been successfully updated.\nWarning: deploying this config would exceed your quota: %s\nYou may need to free resources from other ranges before deploying.", FormatQuotaViolations(violations)))
+		}
+	}
+
 	// File saved successfully. Return proper result
 	return JSONResult(e, http.StatusOK, "Your range config has been successfully updated.")
 }
@@ -696,6 +720,26 @@ func CreateRange(e *core.RequestEvent) error {
 		_, err := e.App.FindFirstRecordByData("users", "userID", userID)
 		if err != nil {
 			return e.JSON(http.StatusInternalServerError, dto.CreateRangeResponseError{Errors: []dto.CreateRangeResponseErrorItem{{UserID: userID, Error: fmt.Sprintf("Error finding user: %v", err)}}})
+		}
+	}
+
+	// Check range quota for each user being assigned
+	if server.HasEntitlement("ENTERPRISE_PLUGIN") {
+		for _, uid := range payload.UserID {
+			userRecord, err := e.App.FindFirstRecordByData("users", "userID", uid)
+			if err != nil {
+				continue // Already validated above
+			}
+			userObj := &models.User{}
+			userObj.SetProxyRecord(userRecord)
+			e.App.ExpandRecord(userObj.Record, []string{"ranges", "groups"}, nil)
+
+			rangeViolations, quotaErr := CheckRangeQuota(e.App, userObj)
+			if quotaErr != nil {
+				logger.Error(fmt.Sprintf("Error checking range quota for user %s: %s", uid, quotaErr.Error()))
+			} else if len(rangeViolations) > 0 {
+				return JSONError(e, http.StatusForbidden, fmt.Sprintf("User %s: %s", uid, FormatQuotaViolations(rangeViolations)))
+			}
 		}
 	}
 
