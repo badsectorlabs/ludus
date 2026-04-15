@@ -22,18 +22,18 @@ func NewHandlerManager() *HandlerManager {
 	}
 }
 
-// RegisterHandler allows a plugin to register its handler for a specific route.
-func (hm *HandlerManager) RegisterHandler(path string, handler func(*core.RequestEvent) error) {
+// RegisterHandler allows a plugin to register its handler for a specific route (keyed by method+path).
+func (hm *HandlerManager) RegisterHandler(method, path string, handler func(*core.RequestEvent) error) {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
-	hm.handlers[path] = handler
+	hm.handlers[method+":"+path] = handler
 }
 
-// GetHandler retrieves the handler for a specific route.
-func (hm *HandlerManager) GetHandler(path string) (func(*core.RequestEvent) error, bool) {
+// GetHandler retrieves the handler for a specific route (keyed by method+path).
+func (hm *HandlerManager) GetHandler(method, path string) (func(*core.RequestEvent) error, bool) {
 	hm.mu.RLock()
 	defer hm.mu.RUnlock()
-	handler, exists := hm.handlers[path]
+	handler, exists := hm.handlers[method+":"+path]
 	return handler, exists
 }
 
@@ -45,7 +45,7 @@ func PlaceholderHandler(e *core.RequestEvent) error {
 			path = "/"
 		}
 	}
-	handler, exists := LudusPluginHandlerManager.GetHandler(path)
+	handler, exists := LudusPluginHandlerManager.GetHandler(e.Request.Method, path)
 	if exists {
 		return handler(e)
 	}
@@ -111,6 +111,18 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 			Pattern:     "/kms/license",
 			HandlerFunc: PlaceholderHandler,
 		},
+		PocketBaseRoute{
+			Name:        "GetRangeSettings",
+			Method:      http.MethodGet,
+			Pattern:     "/range/settings",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "UpdateRangeSettings",
+			Method:      http.MethodPut,
+			Pattern:     "/range/settings",
+			HandlerFunc: PlaceholderHandler,
+		},
 	}
 
 	RegisterRoutesWithPocketBase(se, pluginRoutes)
@@ -119,6 +131,6 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 func RegisterPluginActualRoutes(routes PocketBaseRoutes) {
 	for _, route := range routes {
 		logger.Debug(fmt.Sprintf("Registering actual route for plugin: %s %s", route.Method, route.Pattern))
-		LudusPluginHandlerManager.RegisterHandler(route.Pattern, route.HandlerFunc)
+		LudusPluginHandlerManager.RegisterHandler(route.Method, route.Pattern, route.HandlerFunc)
 	}
 }

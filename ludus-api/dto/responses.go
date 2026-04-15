@@ -547,3 +547,13 @@ type LogHistoryDetailResponse struct {
 	Created time.Time `json:"created"`
 	Result  string    `json:"result"`
 }
+
+type RangeSettingsTimeoutDetail struct {
+	ServerDefault string `json:"serverDefault"`
+	RangeOverride string `json:"rangeOverride"`
+	Effective     string `json:"effective"`
+}
+
+type RangeSettingsResponse struct {
+	AutoShutdownTimeout RangeSettingsTimeoutDetail `json:"autoShutdownTimeout"`
+}

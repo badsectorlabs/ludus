@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
 )
@@ -150,6 +151,25 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		rangeRecord := &models.Range{}
 		rangeRecord.SetProxyRecord(rawRangeRecord)
 		e.Set("range", rangeRecord)
+
+		// Bump the range's lastActive timestamp for the inactivity shutdown feature.
+		// ROOT requests are admin/plumbing, not user interaction, so excluded.
+		// Use a raw UPDATE so this narrow write can't clobber other fields
+		// being written by concurrent request handlers (e.g. the deploy pipeline).
+		// Throttle to at most once every 30s to avoid write amplification from
+		// polling clients (the scheduler only runs every 5min).
+		if e.Auth.GetString("userID") != "ROOT" {
+			lastActive := rangeRecord.LastActive().Time()
+			if time.Since(lastActive) > 30*time.Second {
+				nowUTC := time.Now().UTC().Format("2006-01-02 15:04:05.000Z")
+				_, updateErr := e.App.DB().NewQuery("UPDATE ranges SET lastActive = {:now} WHERE id = {:id}").
+					Bind(dbx.Params{"now": nowUTC, "id": rawRangeRecord.Id}).
+					Execute()
+				if updateErr != nil {
+					logger.Debug(fmt.Sprintf("Error updating range lastActive: %v", updateErr))
+				}
+			}
+		}
 	}
 
 	return e.Next()

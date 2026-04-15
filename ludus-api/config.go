@@ -2,7 +2,10 @@ package ludusapi
 
 import (
 	"log"
+	"sync"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 )
 
@@ -11,27 +14,28 @@ const LudusInstallPath = ludusInstallPath // Export the path for use in plugins
 
 // Configurations exported
 type Configuration struct {
-	ProxmoxNode            string  `mapstructure:"proxmox_node" yaml:"proxmox_node"`
-	ProxmoxInterface       string  `mapstructure:"proxmox_interface" yaml:"proxmox_interface"`
-	ProxmoxInvalidCert     bool    `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
-	ProxmoxURL             string  `mapstructure:"proxmox_url" yaml:"proxmox_url"`
-	ProxmoxHostname        string  `mapstructure:"proxmox_hostname" yaml:"proxmox_hostname"`
-	ProxmoxLocalIP         string  `mapstructure:"proxmox_local_ip" yaml:"proxmox_local_ip"`
-	ProxmoxPublicIP        string  `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"`
-	ProxmoxGateway         string  `mapstructure:"proxmox_gateway" yaml:"proxmox_gateway"`
-	ProxmoxNetmask         string  `mapstructure:"proxmox_netmask" yaml:"proxmox_netmask"`
-	ProxmoxVMStoragePool   string  `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
-	ProxmoxVMStorageFormat string  `mapstructure:"proxmox_vm_storage_format" yaml:"proxmox_vm_storage_format"`
-	ProxmoxISOStoragePool  string  `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
-	LudusNATInterface      string  `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
-	PreventUserAnsibleAdd  bool    `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
-	LicenseKey             string  `mapstructure:"license_key" yaml:"license_key"`
-	ExposeAdminPort        bool    `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
-	ReservedRangeNumbers   []int32 `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
-	DataDirectory          string  `mapstructure:"data_directory" yaml:"data_directory"`
-	DatabaseEncryptionKey  string  `mapstructure:"database_encryption_key" yaml:"database_encryption_key"`
-	WireguardPort          int     `mapstructure:"wireguard_port" yaml:"wireguard_port"`
-	MaxLogHistory          int     `mapstructure:"max_log_history" yaml:"max_log_history"` // Max number of log history entries to keep per range/user (default: 100)
+	ProxmoxNode               string        `mapstructure:"proxmox_node" yaml:"proxmox_node"`
+	ProxmoxInterface          string        `mapstructure:"proxmox_interface" yaml:"proxmox_interface"`
+	ProxmoxInvalidCert        bool          `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
+	ProxmoxURL                string        `mapstructure:"proxmox_url" yaml:"proxmox_url"`
+	ProxmoxHostname           string        `mapstructure:"proxmox_hostname" yaml:"proxmox_hostname"`
+	ProxmoxLocalIP            string        `mapstructure:"proxmox_local_ip" yaml:"proxmox_local_ip"`
+	ProxmoxPublicIP           string        `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"`
+	ProxmoxGateway            string        `mapstructure:"proxmox_gateway" yaml:"proxmox_gateway"`
+	ProxmoxNetmask            string        `mapstructure:"proxmox_netmask" yaml:"proxmox_netmask"`
+	ProxmoxVMStoragePool      string        `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
+	ProxmoxVMStorageFormat    string        `mapstructure:"proxmox_vm_storage_format" yaml:"proxmox_vm_storage_format"`
+	ProxmoxISOStoragePool     string        `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
+	LudusNATInterface         string        `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
+	PreventUserAnsibleAdd     bool          `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
+	LicenseKey                string        `mapstructure:"license_key" yaml:"license_key"`
+	ExposeAdminPort           bool          `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
+	ReservedRangeNumbers      []int32       `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
+	DataDirectory             string        `mapstructure:"data_directory" yaml:"data_directory"`
+	DatabaseEncryptionKey     string        `mapstructure:"database_encryption_key" yaml:"database_encryption_key"`
+	WireguardPort             int           `mapstructure:"wireguard_port" yaml:"wireguard_port"`
+	MaxLogHistory             int           `mapstructure:"max_log_history" yaml:"max_log_history"` // Max number of log history entries to keep per range/user (default: 100)
+	InactivityShutdownTimeout time.Duration `mapstructure:"inactivity_shutdown_timeout" yaml:"inactivity_shutdown_timeout"`
 	// Cluster mode settings
 	ClusterMode  bool   `mapstructure:"cluster_mode" yaml:"cluster_mode"`     // Auto-detected via API during startup, can be overridden
 	SDNZone      string `mapstructure:"sdn_zone" yaml:"sdn_zone"`             // The SDN zone name for Ludus networking (default: "ludus")
@@ -39,6 +43,7 @@ type Configuration struct {
 }
 
 var ServerConfiguration Configuration
+var ConfigMu sync.RWMutex
 
 func (s *Server) ParseConfig() {
 	// Set the file name of the configurations file
@@ -67,14 +72,20 @@ func (s *Server) ParseConfig() {
 	// Do not set a default for cluster_mode to force viper to leave it unset unless provided,
 	// so we can detect if user has explicitly set it or not and fallback to API if unset.
 	// (See IsClusterMode in sdn.go for logic)
-	viper.SetDefault("max_log_history", 100) // Max log history entries per range/user
-	viper.SetDefault("sdn_zone", "ludus")    // Default SDN zone name
-	viper.SetDefault("vxlan_tag_base", 0)    // Base VXLAN tag added to range number
+	viper.SetDefault("max_log_history", 100)           // Max log history entries per range/user
+	viper.SetDefault("inactivity_shutdown_timeout", 0) // Disabled by default
+	viper.SetDefault("sdn_zone", "ludus")              // Default SDN zone name
+	viper.SetDefault("vxlan_tag_base", 0)              // Base VXLAN tag added to range number
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)
 	}
 
+	// Hold the write lock around the initial unmarshal for symmetry with
+	// OnConfigChange — the scheduler hasn't started yet, but future concurrent
+	// readers during ParseConfig wouldn't have a safe time-window without this.
+	ConfigMu.Lock()
 	err := viper.Unmarshal(&ServerConfiguration)
+	ConfigMu.Unlock()
 	if err != nil {
 		log.Fatalf("Unable to decode into struct, %v", err)
 	}
@@ -97,4 +108,15 @@ func (s *Server) ParseConfig() {
 		s.checkLicense()
 	}
 	log.Println("Using configuration file: ", viper.ConfigFileUsed())
+
+	viper.WatchConfig()
+	viper.OnConfigChange(func(e fsnotify.Event) {
+		ConfigMu.Lock()
+		defer ConfigMu.Unlock()
+		if err := viper.Unmarshal(&ServerConfiguration); err != nil {
+			log.Printf("Error reloading config: %v", err)
+		} else {
+			log.Println("Configuration reloaded from file")
+		}
+	})
 }

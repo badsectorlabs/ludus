@@ -3109,6 +3109,133 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /range/settings:
+    get:
+      summary: Get range settings
+      deprecated: false
+      description: >
+        Retrieve the current settings for a range, including the effective
+        auto-shutdown timeout (server default, per-range override, and
+        resolved effective value).
+
+        Admins can pass a userID parameter to query other users' range settings.
+      operationId: getRangeSettings
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to query. If not provided, uses the user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to query. Defaults to the authenticated user.
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: current range settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autoShutdownTimeout:
+                    type: object
+                    properties:
+                      serverDefault:
+                        type: string
+                        description: Server-wide default timeout (Go duration format, empty if disabled)
+                        example: "4h"
+                      rangeOverride:
+                        type: string
+                        description: Per-range override (empty means use server default, "0" means disabled for this range)
+                        example: ""
+                      effective:
+                        type: string
+                        description: Effective timeout after applying override resolution
+                        example: "4h"
+        '500':
+          description: error retrieving settings
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Update range settings
+      deprecated: false
+      description: >
+        Update per-range settings. For the auto-shutdown timeout:
+
+        - Set to a Go duration string (e.g., "4h", "30m") to configure a per-range override
+
+        - Set to "0" to explicitly disable inactivity shutdown for this range
+
+        - Set to empty string "" to clear the override and fall back to the server default
+
+        Admins can pass a userID parameter to update other users' range settings.
+      operationId: updateRangeSettings
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to update. If not provided, uses the user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to update. Defaults to the authenticated user.
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                autoShutdownTimeout:
+                  type: string
+                  description: Go duration string ("4h", "30m"), "0" to disable, or "" to clear override
+                  example: "4h"
+      responses:
+        '200':
+          description: updated range settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autoShutdownTimeout:
+                    type: object
+                    properties:
+                      serverDefault:
+                        type: string
+                        example: "4h"
+                      rangeOverride:
+                        type: string
+                        example: "2h"
+                      effective:
+                        type: string
+                        example: "2h"
+        '400':
+          description: invalid timeout value
+          headers: {}
+        '500':
+          description: error updating settings
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /testing/start:
     put:
       summary: Snapshot and enter testing state

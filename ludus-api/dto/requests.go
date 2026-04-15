@@ -178,3 +178,6 @@ type BulkShareBlueprintWithUsersRequest struct {
 type BulkUnshareBlueprintWithUsersRequest struct {
 	UserIDs []string `json:"userIDs"`
 }
+type RangeSettingsRequest struct {
+	AutoShutdownTimeout string `json:"autoShutdownTimeout,omitempty"`
+}

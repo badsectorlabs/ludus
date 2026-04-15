@@ -29,7 +29,7 @@ func IsClusterMode() (bool, error) {
 		return ServerConfiguration.ClusterMode, nil
 	}
 
-	client, err := getRootGoProxmoxClient()
+	client, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return false, fmt.Errorf("failed to get proxmox client: %w", err)
 	}
@@ -326,7 +326,7 @@ func manageRangeVNet(rangeID string, rangeNumber int, present bool) error {
 	ctx := context.Background()
 
 	// Get root proxmox client for SDN operations
-	client, err := getRootGoProxmoxClient()
+	client, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return fmt.Errorf("failed to get proxmox client: %w", err)
 	}
@@ -417,7 +417,7 @@ func manageRangeVNet(rangeID string, rangeNumber int, present bool) error {
 func setupNATVNet() error {
 	ctx := context.Background()
 
-	client, err := getRootGoProxmoxClient()
+	client, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return fmt.Errorf("failed to get proxmox client: %w", err)
 	}
@@ -469,7 +469,7 @@ func setupNATVNet() error {
 	}
 
 	// Make sure all ludus users have SDN.Use on the ludusnat vnet
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -495,7 +495,7 @@ func setupNATVNet() error {
 // Non-cluster hosts skip this entirely and use vmbr management.
 // In cluster mode, requires a pre-configured zone (user must create it with correct VXLAN peer IPs).
 func setupSDNZone() error {
-	client, err := getRootGoProxmoxClient()
+	client, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return fmt.Errorf("failed to get proxmox client: %w", err)
 	}

@@ -28,7 +28,7 @@ func MigrateSQLiteToPocketBaseHandler(e *core.RequestEvent) error {
 
 // GetSDNMigrationStatus checks if the system needs SDN migration
 func GetSDNMigrationStatus(e *core.RequestEvent) error {
-	client, err := getRootGoProxmoxClient()
+	client, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Failed to get Proxmox client: "+err.Error())
 	}
@@ -109,7 +109,7 @@ func MigrateToSDN(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "Migration must be run via ludus-admin on 127.0.0.1:8081")
 	}
 
-	client, err := getRootGoProxmoxClient()
+	client, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Failed to get Proxmox client: "+err.Error())
 	}
