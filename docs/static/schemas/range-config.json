@@ -116,7 +116,7 @@
                 "wireguard_vlan_default": {
                     "type": "string",
                     "enum": [ "ACCEPT", "REJECT", "DROP" ],
-                    "description": "The default rule to apply to traffic leaving the range to the WireGuard subnet. Default: ACCEPT"
+                    "description": "The default rule to apply to traffic leaving the range to the WireGuard subnet. Default: REJECT"
                 },
                 "always_blocked_networks": {
                     "type": "array",
