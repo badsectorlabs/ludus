@@ -108,18 +108,18 @@ func finalizeRunningLogHistoryByID(app core.App, logID string, status string, lo
 		logger.Error(fmt.Sprintf("Failed to finalize log history record %s: %v", logID, err))
 		return
 	}
-	if logFilePath != "" {
-		if err := os.Remove(logFilePath); err != nil && !os.IsNotExist(err) {
-			logger.Error(fmt.Sprintf("Failed to remove finalized local log file %s: %v", logFilePath, err))
-		}
-	}
-
 	runningLogFilePathByLogID.Delete(logID)
 	if rangeID := record.GetString("range"); rangeID != "" {
 		runningRangeLogIDByRangeID.Delete(rangeID)
 		pruneLogHistory(app, "range = {:value}", rangeID)
 	} else {
 		pruneLogHistory(app, "user = {:value} && range = ''", record.GetString("user"))
+		// Clean up per-build template log files now that they're stored in PocketBase
+		if logFilePath != "" {
+			if err := os.Remove(logFilePath); err != nil && !os.IsNotExist(err) {
+				logger.Error(fmt.Sprintf("Failed to remove finalized local log file %s: %v", logFilePath, err))
+			}
+		}
 	}
 }
 

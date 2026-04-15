@@ -380,18 +380,19 @@ func buildVMsFromTemplates(app core.App, templateStatusArray []TemplateStatus, u
 				status = "failure"
 			}
 
-			if runningLogID != "" {
-				finalizeRunningLogHistoryByID(app, runningLogID, status, templateLogPath, time.Now())
-			} else {
-				saveLogHistory(app, user.Id, "", templateStatus.Name, status, templateLogPath, buildStartTime)
-			}
-
 			latestLogMu.Lock()
 			err := setLatestPackerLogForUser(user, templateLogPath)
 			latestLogMu.Unlock()
 			if err != nil {
 				logger.Error(fmt.Sprintf("Failed to update latest packer log for template %s: %v", templateStatus.Name, err))
 			}
+
+			if runningLogID != "" {
+				finalizeRunningLogHistoryByID(app, runningLogID, status, templateLogPath, time.Now())
+			} else {
+				saveLogHistory(app, user.Id, "", templateStatus.Name, status, templateLogPath, buildStartTime)
+			}
+
 		}(templateStatus, username)
 
 		// Sleep for 3 seconds so the server isn't flooded with builds all at exactly the same time if the user gives a high number for parallel
