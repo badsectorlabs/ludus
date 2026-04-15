@@ -573,6 +573,7 @@ type GetGroupQuotaResponseItem struct {
 	DefaultQuotaVMs    int    `json:"defaultQuotaVMs"`
 	DefaultQuotaRanges int    `json:"defaultQuotaRanges"`
 	MemberCount        int    `json:"memberCount"`
+}
 
 type LogHistoryEntry struct {
 	Id       string    `json:"id"`
