@@ -89,7 +89,7 @@ func AddUser(e *core.RequestEvent) error {
 	}
 
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus users add command with --url https://127.0.0.1:8081")
+		return JSONError(e, http.StatusForbidden, adminEndpointError("ludus users add"))
 	}
 
 	var addUserJSON dto.AddUserRequest
@@ -362,7 +362,7 @@ func DeleteUser(e *core.RequestEvent) error {
 	}
 
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus users rm command with --url https://127.0.0.1:8081")
+		return JSONError(e, http.StatusForbidden, adminEndpointError("ludus users rm"))
 	}
 
 	userID := e.Request.PathValue("userID")

@@ -129,16 +129,16 @@ func serve() {
 
 	// If we're running as a non-root user, bind to all interfaces, else (running as root) bind to localhost unless the user has opted to expose the admin API globally
 	if os.Geteuid() != 0 {
-		serveConfig.HttpsAddr = "0.0.0.0:8080"
-		logger.Debug("Starting server on 0.0.0.0:8080")
+		serveConfig.HttpsAddr = fmt.Sprintf("0.0.0.0:%d", config.Port)
+		logger.Debug("Starting server on " + serveConfig.HttpsAddr)
 		if err := apis.Serve(ludusApp, serveConfig); err != nil {
 			logger.Error(fmt.Sprintf("Failed to start the server: %v", err))
 		}
 	} else {
 		if config.ExposeAdminPort {
-			serveConfig.HttpsAddr = "0.0.0.0:8081"
+			serveConfig.HttpsAddr = fmt.Sprintf("0.0.0.0:%d", config.AdminPort)
 		} else {
-			serveConfig.HttpsAddr = "127.0.0.1:8081"
+			serveConfig.HttpsAddr = fmt.Sprintf("127.0.0.1:%d", config.AdminPort)
 		}
 		logger.Debug("Starting server on " + serveConfig.HttpsAddr)
 		if err := apis.Serve(ludusApp, serveConfig); err != nil {
