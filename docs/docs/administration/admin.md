@@ -53,6 +53,18 @@ max_log_history: 25
 systemctl restart ludus
 ```
 
+## Auto shutdown (enterprise)
+
+Ludus can automatically power off idle ranges after a configurable timeout. Set a server-wide default in the config file:
+
+```yaml title="/opt/ludus/config.yml"
+inactivity_shutdown_timeout: 4h
+```
+
+The value is a Go duration string (e.g. `4h`, `30m`, `1h30m`). Set to `0` or omit to disable. Changes are picked up automatically without restarting the services.
+
+Individual ranges can override the server default with `ludus range auto-shutdown set --timeout <duration>`. See the [Auto Shutdown](../enterprise/auto-shutdown.md) docs for details.
+
 ## Get the total resources for a range config
 
 ```

@@ -548,12 +548,12 @@ type LogHistoryDetailResponse struct {
 	Result  string    `json:"result"`
 }
 
-type RangeSettingsTimeoutDetail struct {
+type AutoShutdownDetail struct {
 	ServerDefault string `json:"serverDefault"`
 	RangeOverride string `json:"rangeOverride"`
 	Effective     string `json:"effective"`
 }
 
-type RangeSettingsResponse struct {
-	AutoShutdownTimeout RangeSettingsTimeoutDetail `json:"autoShutdownTimeout"`
+type AutoShutdownResponse struct {
+	AutoShutdownTimeout AutoShutdownDetail `json:"autoShutdownTimeout"`
 }

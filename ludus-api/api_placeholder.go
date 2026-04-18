@@ -112,15 +112,15 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 			HandlerFunc: PlaceholderHandler,
 		},
 		PocketBaseRoute{
-			Name:        "GetRangeSettings",
+			Name:        "GetAutoShutdown",
 			Method:      http.MethodGet,
-			Pattern:     "/range/settings",
+			Pattern:     "/range/auto-shutdown",
 			HandlerFunc: PlaceholderHandler,
 		},
 		PocketBaseRoute{
-			Name:        "UpdateRangeSettings",
+			Name:        "UpdateAutoShutdown",
 			Method:      http.MethodPut,
-			Pattern:     "/range/settings",
+			Pattern:     "/range/auto-shutdown",
 			HandlerFunc: PlaceholderHandler,
 		},
 	}

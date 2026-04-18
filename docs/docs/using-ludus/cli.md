@@ -888,10 +888,11 @@ Usage:
   ludus range [command]
 
 Available Commands:
-  abort       Kill the ansible process deploying a range
-  accessible  List all ranges accessible to the current user
-  assign      Assign a range to a user (admin only)
-  config      Get or set a range configuration
+  abort          Kill the ansible process deploying a range
+  accessible     List all ranges accessible to the current user
+  assign         Assign a range to a user (admin only)
+  auto-shutdown  Get, set, or reset the auto-shutdown timeout (enterprise)
+  config         Get or set a range configuration
   create      Create a new range
   default     Get or set the default range ID for a user
   deploy      Deploy a range, running specific tags if specified
@@ -938,6 +939,50 @@ Assign an existing range to a user, granting them direct access. Admin privilege
 ```
 Usage:
   ludus range assign [userID] [rangeID] [flags]
+```
+
+### Range Auto-Shutdown
+
+Get, set, or reset the auto-shutdown timeout for a range (enterprise)
+
+```
+Usage:
+  ludus range auto-shutdown [command]
+
+Available Commands:
+  get    Get the current auto-shutdown configuration
+  reset  Reset the per-range override to the server default
+  set    Set a per-range auto-shutdown timeout
+```
+
+#### Range Auto-Shutdown Get
+
+Get the current auto-shutdown configuration for a range, showing the server default, per-range override, and effective timeout
+
+```
+Usage:
+  ludus range auto-shutdown get
+```
+
+#### Range Auto-Shutdown Set
+
+Set the per-range auto-shutdown timeout
+
+```
+Usage:
+  ludus range auto-shutdown set [flags]
+
+Flags:
+    -t, --timeout string   inactivity timeout duration (e.g. '4h', '30m', '0' to disable)
+```
+
+#### Range Auto-Shutdown Reset
+
+Clear the per-range override so the range falls back to the server default
+
+```
+Usage:
+  ludus range auto-shutdown reset
 ```
 
 ### Range Config
