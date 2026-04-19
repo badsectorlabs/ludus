@@ -16,6 +16,7 @@ var (
 	Vendor                 string
 	Product                string
 	dropFiles              bool
+	browserData            bool
 	processorName          string
 	processorVendor        string
 	processorSpeed         string
@@ -68,18 +69,19 @@ var antiSandboxEnableCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		type AntiSandboxPayload struct {
-			VMIDs               string `json:"vmIDs"`
-			Owner               string `json:"registeredOwner,omitempty"`
-			Org                 string `json:"registeredOrganization,omitempty"`
-			Vendor              string `json:"vendor,omitempty"`
-			Product             string `json:"product,omitempty"`
-			DropFiles           bool   `json:"dropFiles,omitempty"`
-			ProcessorName       string `json:"processorName,omitempty"`
-			ProcessorVendor     string `json:"processorVendor,omitempty"`
-			ProcessorSpeed      string `json:"processorSpeed,omitempty"`
-			ProcessorIdentifier string `json:"processorIdentifier,omitempty"`
-			SystemBiosVersion   string `json:"systemBiosVersion,omitempty"`
-			Persist             bool   `json:"persist,omitempty"`
+			VMIDs                string `json:"vmIDs"`
+			Owner                string `json:"registeredOwner,omitempty"`
+			Org                  string `json:"registeredOrganization,omitempty"`
+			Vendor               string `json:"vendor,omitempty"`
+			Product              string `json:"product,omitempty"`
+			DropFiles            bool   `json:"dropFiles,omitempty"`
+			BrowserData          bool   `json:"browserData,omitempty"`
+			ProcessorName        string `json:"processorName,omitempty"`
+			ProcessorVendor      string `json:"processorVendor,omitempty"`
+			ProcessorSpeed       string `json:"processorSpeed,omitempty"`
+			ProcessorIdentifier  string `json:"processorIdentifier,omitempty"`
+			SystemBiosVersion    string `json:"systemBiosVersion,omitempty"`
+			Persist              bool   `json:"persist,omitempty"`
 		}
 		var antiSandboxPayload AntiSandboxPayload
 		antiSandboxPayload.VMIDs = VMIDs
@@ -88,6 +90,7 @@ var antiSandboxEnableCmd = &cobra.Command{
 		antiSandboxPayload.Vendor = Vendor
 		antiSandboxPayload.Product = Product
 		antiSandboxPayload.DropFiles = dropFiles
+		antiSandboxPayload.BrowserData = browserData
 		antiSandboxPayload.ProcessorName = processorName
 		antiSandboxPayload.ProcessorVendor = processorVendor
 		antiSandboxPayload.ProcessorSpeed = processorSpeed
@@ -132,6 +135,7 @@ func setupAntiSandboxEnableCmd(command *cobra.Command) {
 	command.Flags().BoolVar(&noPrompt, "no-prompt", false, "skip the confirmation prompt")
 	command.Flags().StringVar(&Product, "product", "", "The Product value to use for the SMBIOS information (e.g. Latitude 7420)")
 	command.Flags().BoolVar(&dropFiles, "drop-files", false, "drop random pdf, doc, ppt, and xlsx files on the desktop and downloads folder of the VMs")
+	command.Flags().BoolVar(&browserData, "browser-data", false, "populate browser history, bookmarks, cookies, and saved credentials for detected Chromium browsers. Sets the machine-level ApplicationBoundEncryptionEnabled=0 policy so v10 DPAPI encryption is used — not intended for VMs where users will sign in with a real Microsoft/Google account to sync data")
 	command.Flags().StringVar(&processorName, "processor-name", "", "The ProcessorNameString value to use for the VMs (e.g. Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz)")
 	command.Flags().StringVar(&processorVendor, "processor-vendor", "", "The VendorIdentifier value to use for the VMs (e.g. GenuineIntel or AuthenticAMD)")
 	command.Flags().StringVar(&processorSpeed, "processor-speed", "", "The ~Mhz value to use for the VMs in MHz (e.g. 2600)")

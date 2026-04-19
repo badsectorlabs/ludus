@@ -3814,6 +3814,19 @@ paths:
                     autologon_user's desktop and in the autologon_user's
                     download folder (default false)
                   example: true
+                browserData:
+                  type: boolean
+                  description: >-
+                    If true, populate Chromium-based browsers (Edge, Chrome)
+                    with realistic history, bookmarks, autofill, encrypted
+                    saved credentials, encrypted cookies, and TypedURLs
+                    registry entries. Any existing profile data is
+                    overwritten. Sets the machine-level
+                    ApplicationBoundEncryptionEnabled=0 policy so v10 DPAPI
+                    encryption is used; not intended for VMs where users
+                    will sign in with a real browser account to sync data
+                    (default false).
+                  example: true
                 processorName:
                   type: string
                   description: The ProcessorNameString value to use for the VMs
