@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -149,11 +150,130 @@ type Model struct {
 	confirmed         bool
 }
 
+// vmStoragePoolField returns either a datastore-filtered Select or the
+// legacy free-text Input, depending on enumeration results. Same Key and
+// bound Value in both cases so callers downstream are unchanged.
+func vmStoragePoolField(vmStores []Datastore, hadEnumeration bool) huh.Field {
+	if len(vmStores) > 0 {
+		opts := make([]huh.Option[string], 0, len(vmStores))
+		for _, s := range vmStores {
+			opts = append(opts, huh.NewOption(labelFor(s), s.Name))
+		}
+		return huh.NewSelect[string]().
+			Key("proxmox_vm_storage_pool").
+			Title("What pool will store VMs?").
+			Description("Filtered to datastores that allow VM images").
+			Options(opts...).
+			Value(&config.ProxmoxVMStoragePool)
+	}
+	desc := "The default is 'local'"
+	if hadEnumeration {
+		desc = "No active datastores found that accept VM images — enter a name manually"
+	}
+	return huh.NewInput().
+		Key("proxmox_vm_storage_pool").
+		Validate(func(s string) error {
+			if s == "" {
+				return fmt.Errorf("Proxmox VM Storage Pool cannot be empty")
+			}
+			return nil
+		}).
+		Title("What pool will store VMs?").
+		Description(desc).
+		Value(&config.ProxmoxVMStoragePool)
+}
+
+func isoStoragePoolField(isoStores []Datastore, hadEnumeration bool) huh.Field {
+	if len(isoStores) > 0 {
+		opts := make([]huh.Option[string], 0, len(isoStores))
+		for _, s := range isoStores {
+			opts = append(opts, huh.NewOption(labelFor(s), s.Name))
+		}
+		return huh.NewSelect[string]().
+			Key("proxmox_iso_storage_pool").
+			Title("What pool will store ISO files?").
+			Description("Filtered to datastores that allow ISOs").
+			Options(opts...).
+			Value(&config.ProxmoxISOStoragePool)
+	}
+	desc := "The default is 'local'"
+	if hadEnumeration {
+		desc = "No active datastores found that accept ISOs — enter a name manually"
+	}
+	return huh.NewInput().
+		Key("proxmox_iso_storage_pool").
+		Validate(func(s string) error {
+			if s == "" {
+				return fmt.Errorf("Proxmox ISO Storage Pool cannot be empty")
+			}
+			return nil
+		}).
+		Title("What pool will store ISO files?").
+		Description(desc).
+		Value(&config.ProxmoxISOStoragePool)
+}
+
+// vmStorageFormatField returns a Select whose options reactively re-evaluate
+// when config.ProxmoxVMStoragePool changes. Side effect: the callback
+// pre-selects a type-appropriate default in config.ProxmoxVMStorageFormat
+// (still user-overridable), so picking a zfspool auto-switches to "raw" etc.
+// On fresh-install / enumeration-failure paths, returns the legacy free-text
+// input so behavior matches today.
+func vmStorageFormatField(vmStores []Datastore) huh.Field {
+	if len(vmStores) == 0 {
+		return huh.NewInput().
+			Key("proxmox_vm_storage_format").
+			Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("Proxmox VM Storage Format cannot be empty")
+				} else if s != "qcow2" && s != "raw" && s != "vmdk" {
+					return fmt.Errorf("Proxmox VM Storage Format must be 'qcow2', 'raw', or 'vmdk'")
+				}
+				return nil
+			}).
+			Title("In what format should VMs be stored?").
+			Description("Use 'qcow2' for dir storage (local), 'raw' for ZFS").
+			Value(&config.ProxmoxVMStorageFormat)
+	}
+
+	// Lookup table for mutation inside OptionsFunc.
+	byName := make(map[string]Datastore, len(vmStores))
+	for _, s := range vmStores {
+		byName[s.Name] = s
+	}
+
+	return huh.NewSelect[string]().
+		Key("proxmox_vm_storage_format").
+		Title("In what format should VMs be stored?").
+		Description("Pre-selected from the VM pool's backend type; override if needed").
+		// Rebinding to &config.ProxmoxVMStoragePool: huh re-runs this func
+		// whenever the bound variable changes, letting us update both the
+		// option list and (as a side-effect) the default selection.
+		OptionsFunc(func() []huh.Option[string] {
+			if pool, ok := byName[config.ProxmoxVMStoragePool]; ok {
+				if derived := formatForPoolType(pool.Type); derived != "" {
+					config.ProxmoxVMStorageFormat = derived
+				}
+			}
+			return huh.NewOptions("qcow2", "raw", "vmdk")
+		}, &config.ProxmoxVMStoragePool).
+		Value(&config.ProxmoxVMStorageFormat)
+}
+
 func NewModel() Model {
 	m := Model{width: maxWidth}
 	m.lg = lipgloss.DefaultRenderer()
 	m.styles = NewStyles(m.lg)
 	m.confirmed = false
+
+	// Enumerate Proxmox datastores once, before building the form.
+	// nil slice means fallback to free-text (fresh Debian or CLI error).
+	allStores, enumErr := enumerateDatastores()
+	if enumErr != nil {
+		log.Printf("warning: datastore enumeration failed: %v — falling back to manual entry", enumErr)
+	}
+	vmStores := filterByContent(allStores, "images")
+	isoStores := filterByContent(allStores, "iso")
 
 	m.form = huh.NewForm(
 		// Page 1
@@ -247,46 +367,14 @@ func NewModel() Model {
 				Description("The suggestion is usually correct").
 				Value(&config.ProxmoxNetmask),
 
-			huh.NewInput().
-				Key("proxmox_vm_storage_pool").
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("Proxmox VM Storage Pool cannot be empty")
-					}
-					return nil
-				}).
-				Title("What pool will store VMs").
-				Description("The default is 'local'").
-				Value(&config.ProxmoxVMStoragePool),
+			vmStoragePoolField(vmStores, allStores != nil),
 
-			huh.NewInput().
-				Key("proxmox_vm_storage_format").
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("Proxmox VM Storage Format cannot be empty")
-					} else if s != "qcow2" && s != "raw" && s != "vmdk" {
-						return fmt.Errorf("Proxmox VM Storage Format must be 'qcow2', 'raw', or 'vmdk'")
-					}
-					return nil
-				}).
-				Title("In what format should VMs be stored?").
-				Description("Use 'qcow2' for dir storage (local), 'raw' for ZFS").
-				Value(&config.ProxmoxVMStorageFormat),
+			vmStorageFormatField(vmStores),
 		),
 		// Page 3
 
 		huh.NewGroup(
-			huh.NewInput().
-				Key("proxmox_iso_storage_pool").
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("Proxmox ISO Storage Pool cannot be empty")
-					}
-					return nil
-				}).
-				Title("What pool will store ISO files?").
-				Description("The default is 'local'").
-				Value(&config.ProxmoxISOStoragePool),
+			isoStoragePoolField(isoStores, allStores != nil),
 
 			huh.NewConfirm().
 				Key("prevent_user_ansible_add").
