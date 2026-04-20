@@ -136,6 +136,31 @@ func (p *Groups) SetUpdatedAt(updatedAt types.DateTime) {
 	p.Set("updatedAt", updatedAt)
 }
 
+func (p *Groups) DefaultQuotaRam() int {
+	return p.GetInt("defaultQuotaRAM")
+}
+func (p *Groups) SetDefaultQuotaRam(v int) {
+	p.Set("defaultQuotaRAM", v)
+}
+func (p *Groups) DefaultQuotaCpu() int {
+	return p.GetInt("defaultQuotaCPU")
+}
+func (p *Groups) SetDefaultQuotaCpu(v int) {
+	p.Set("defaultQuotaCPU", v)
+}
+func (p *Groups) DefaultQuotaVms() int {
+	return p.GetInt("defaultQuotaVMs")
+}
+func (p *Groups) SetDefaultQuotaVms(v int) {
+	p.Set("defaultQuotaVMs", v)
+}
+func (p *Groups) DefaultQuotaRanges() int {
+	return p.GetInt("defaultQuotaRanges")
+}
+func (p *Groups) SetDefaultQuotaRanges(v int) {
+	p.Set("defaultQuotaRanges", v)
+}
+
 type LogsStatusOptions int
 
 const (

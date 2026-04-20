@@ -57,17 +57,13 @@ func getAvailableTemplates(user *models.User) ([]string, error) {
 	if err != nil {
 		return nil, errors.New("unable to get global packer templates")
 	}
-	userTemplates, err := findFiles(fmt.Sprintf("%s/users/%s/packer/", ludusInstallPath, user.ProxmoxUsername()), ".hcl", ".json")
+	userTemplates, err := findFiles(fmt.Sprintf("%s/users/%s/packer/", ludusInstallPath, user.ProxmoxUsername()), "pkr.hcl", "pkr.json")
 	if err != nil {
 		if user.Name() == "ROOT" {
 			return nil, errors.New("ROOT user should not be used for this action. Use a normal user instead.")
 		}
 		return nil, errors.New("unable to get user packer templates")
 	}
-	// Filter out pkrvars.hcl files from userTemplates, re: https://gitlab.com/badsectorlabs/ludus/-/issues/103
-	userTemplates = slices.DeleteFunc(userTemplates, func(template string) bool {
-		return strings.HasSuffix(template, "pkrvars.hcl")
-	})
 	allTemplates := append(globalTemplates, userTemplates...)
 	return allTemplates, nil
 }
@@ -380,18 +376,19 @@ func buildVMsFromTemplates(app core.App, templateStatusArray []TemplateStatus, u
 				status = "failure"
 			}
 
-			if runningLogID != "" {
-				finalizeRunningLogHistoryByID(app, runningLogID, status, templateLogPath, time.Now())
-			} else {
-				saveLogHistory(app, user.Id, "", templateStatus.Name, status, templateLogPath, buildStartTime)
-			}
-
 			latestLogMu.Lock()
 			err := setLatestPackerLogForUser(user, templateLogPath)
 			latestLogMu.Unlock()
 			if err != nil {
 				logger.Error(fmt.Sprintf("Failed to update latest packer log for template %s: %v", templateStatus.Name, err))
 			}
+
+			if runningLogID != "" {
+				finalizeRunningLogHistoryByID(app, runningLogID, status, templateLogPath, time.Now())
+			} else {
+				saveLogHistory(app, user.Id, "", templateStatus.Name, status, templateLogPath, buildStartTime)
+			}
+
 		}(templateStatus, username)
 
 		// Sleep for 3 seconds so the server isn't flooded with builds all at exactly the same time if the user gives a high number for parallel

@@ -17,6 +17,7 @@ stages:
   - post-deploy-admin-ansible
   - post-deploy-admin-user
   - post-deploy-admin-groups
+
   - post-deploy-admin-blueprints
   - post-deploy-admin-ranges
   - post-deploy-admin-templates
@@ -1325,6 +1326,9 @@ post-deploy ranges-as-admin:
       - ludus-api/api_log_history.go
       - ludus-api/range_access.go
       - ludus-api/middleware.go
+      - ludus-api/process.go
+      - ludus-server/ansible/range-management/tasks/make-rdp-files.yml
+      - ludus-server/ansible/range-management/ludus.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1357,6 +1361,17 @@ post-deploy ranges-as-admin:
     - export ERR_LOG_ID=$(ludus range logs --history --json -r CIA-log-err | jq -r '.[0].id')
     - ludus range logs --history --id "$ERR_LOG_ID" -r CIA-log-err | grep -q "This role always fails"
     - ludus range rm-range -r CIA-log-err --no-prompt --force
+    # Regression: admin abort with -r (no --user) should find the process by LUDUS_RANGE_ID
+    - ludus range rm-range -r CIU-abort-test --no-prompt --force || true
+    - ludus range create -n "CIU Abort Test" -r CIU-abort-test --user CIU
+    - ludus range config set -f /opt/ludus/ci/configs/small-range.yml -r CIU-abort-test --user CIU
+    - ludus range deploy -r CIU-abort-test --user CIU
+    - sleep 5 # Wait for ansible process to start
+    - ludus range list --json -r CIU-abort-test --user CIU | jq -e '.rangeState == "DEPLOYING"'
+    # Abort using only -r (no --user) — previously failed with "no ansible process found for user CIA"
+    - ludus range abort -r CIU-abort-test
+    - ludus range list --json -r CIU-abort-test --user CIU | jq -e '.rangeState == "ABORTED"'
+    - ludus range rm-range -r CIU-abort-test --no-prompt --force
     # Clean up potential leftovers (ignore errors)
     - ludus range rm-range -r CIA-extra-1 --no-prompt --force || true
     - ludus range rm-range -r CIU-extra-1 --no-prompt --force || true
@@ -2474,12 +2489,48 @@ keygen-upload:
     - export KEYGEN_ACCOUNT_ID=${LUDUS_ENTERPRISE_KEYGEN_ACCOUNT_ID}
     - export KEYGEN_PRODUCT_ID=${LUDUS_KEYGEN_PRODUCT_ID}
     - export KEYGEN_TOKEN=${LUDUS_ENTERPRISE_KEYGEN_TOKEN}
-    - output=$(keygen new --channel stable --version ${CI_COMMIT_TAG} --package a8ecdfa4-6cf7-4a7c-93cc-95fe44c94d14 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
-    - keygen upload ludus-enterprise.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-enterprise_${CI_COMMIT_TAG}.so --package a8ecdfa4-6cf7-4a7c-93cc-95fe44c94d14
-    - keygen publish --release ${CI_COMMIT_TAG} --package a8ecdfa4-6cf7-4a7c-93cc-95fe44c94d14
-    - output=$(keygen new --channel stable --version ${CI_COMMIT_TAG} --package a335f37d-e603-405c-8c99-0bb3185a87e8 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
-    - keygen upload ludus-antisandbox.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-antisandbox_${CI_COMMIT_TAG}.so --package a335f37d-e603-405c-8c99-0bb3185a87e8
-    - keygen publish --release ${CI_COMMIT_TAG} --package a335f37d-e603-405c-8c99-0bb3185a87e8
+    - output=$(keygen new --channel stable --version ${CI_COMMIT_TAG} --package ${LUDUS_ENTERPRISE_PACKAGE_ID} 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
+    - |
+      export RELEASE_ID=$(curl -s "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases?package=${LUDUS_ENTERPRISE_PACKAGE_ID}&limit=10" -H "Authorization: Bearer $KEYGEN_TOKEN" -H "Accept: application/vnd.api+json" | jq -r --arg ver "${CI_COMMIT_TAG}" '.data[] | select(.attributes.version == $ver) | .id')
+    - echo "Enterprise Release ID for version ${CI_COMMIT_TAG} = $RELEASE_ID"
+    # Add the enterprise plugin entitlement to the release
+    - |
+      curl -X POST "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases/${RELEASE_ID}/constraints" \
+      -H "Authorization: Bearer $KEYGEN_TOKEN" \
+      -H "Content-Type: application/vnd.api+json" \
+      -d '{
+        "data":[{
+          "type": "constraints",
+          "relationships": {
+            "entitlement": {
+              "data": { "type": "entitlements", "id": "${LUDUS_ENTERPRISE_ENTITLEMENT_ID}" }
+            }
+          }
+        }]
+      }'
+    - keygen upload ludus-enterprise.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-enterprise_${CI_COMMIT_TAG}.so --package ${LUDUS_ENTERPRISE_PACKAGE_ID}
+    - keygen publish --release ${CI_COMMIT_TAG} --package ${LUDUS_ENTERPRISE_PACKAGE_ID}
+    - output=$(keygen new --channel stable --version ${CI_COMMIT_TAG} --package ${LUDUS_ANTISANDBOX_PACKAGE_ID} 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
+    - |
+      export RELEASE_ID=$(curl -s "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases?package=${LUDUS_ENTERPRISE_PACKAGE_ID}&limit=10" -H "Authorization: Bearer $KEYGEN_TOKEN" -H "Accept: application/vnd.api+json" | jq -r --arg ver "${CI_COMMIT_TAG}" '.data[] | select(.attributes.version == $ver) | .id')
+    - echo "Anti-Sandbox Release ID for version ${CI_COMMIT_TAG} = $RELEASE_ID"
+    # Add the anti-sandbox plugin entitlement to the release
+    - |
+      curl -X POST "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases/${RELEASE_ID}/constraints" \
+      -H "Authorization: Bearer $KEYGEN_TOKEN" \
+      -H "Content-Type: application/vnd.api+json" \
+      -d '{
+        "data":[{
+          "type": "constraints",
+          "relationships": {
+            "entitlement": {
+              "data": { "type": "entitlements", "id": "${LUDUS_ANTISANDBOX_ENTITLEMENT_ID}" }
+            }
+          }
+        }]
+      }'
+    - keygen upload ludus-antisandbox.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-antisandbox_${CI_COMMIT_TAG}.so --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
+    - keygen publish --release ${CI_COMMIT_TAG} --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
 
 release:
   stage: release

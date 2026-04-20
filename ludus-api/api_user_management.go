@@ -628,6 +628,10 @@ func ListAllUsers(e *core.RequestEvent) error {
 			DateLastActive:  userModel.LastActive().Time(),
 			IsAdmin:         userModel.IsAdmin(),
 			ProxmoxUsername: userModel.ProxmoxUsername(),
+			QuotaRAM:        userModel.QuotaRam(),
+			QuotaCPU:        userModel.QuotaCpu(),
+			QuotaVMs:        userModel.QuotaVms(),
+			QuotaRanges:     userModel.QuotaRanges(),
 		})
 	}
 	return e.JSON(http.StatusOK, users)
@@ -645,6 +649,10 @@ func ListUser(e *core.RequestEvent) error {
 		IsAdmin:         userModel.IsAdmin(),
 		ProxmoxUsername: userModel.ProxmoxUsername(),
 		UserNumber:      userModel.UserNumber(),
+		QuotaRAM:        userModel.QuotaRam(),
+		QuotaCPU:        userModel.QuotaCpu(),
+		QuotaVMs:        userModel.QuotaVms(),
+		QuotaRanges:     userModel.QuotaRanges(),
 	}
 	response := []dto.ListUserResponseItem{user}
 	return e.JSON(http.StatusOK, response)

@@ -975,4 +975,5 @@ var routes = PocketBaseRoutes{
 		"/ansible/role/scope",
 		MoveRoleScope,
 	},
+
 }
