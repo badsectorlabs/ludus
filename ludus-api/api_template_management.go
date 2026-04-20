@@ -57,17 +57,13 @@ func getAvailableTemplates(user *models.User) ([]string, error) {
 	if err != nil {
 		return nil, errors.New("unable to get global packer templates")
 	}
-	userTemplates, err := findFiles(fmt.Sprintf("%s/users/%s/packer/", ludusInstallPath, user.ProxmoxUsername()), ".hcl", ".json")
+	userTemplates, err := findFiles(fmt.Sprintf("%s/users/%s/packer/", ludusInstallPath, user.ProxmoxUsername()), "pkr.hcl", "pkr.json")
 	if err != nil {
 		if user.Name() == "ROOT" {
 			return nil, errors.New("ROOT user should not be used for this action. Use a normal user instead.")
 		}
 		return nil, errors.New("unable to get user packer templates")
 	}
-	// Filter out pkrvars.hcl files from userTemplates, re: https://gitlab.com/badsectorlabs/ludus/-/issues/103
-	userTemplates = slices.DeleteFunc(userTemplates, func(template string) bool {
-		return strings.HasSuffix(template, "pkrvars.hcl")
-	})
 	allTemplates := append(globalTemplates, userTemplates...)
 	return allTemplates, nil
 }
