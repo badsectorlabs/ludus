@@ -32,9 +32,10 @@ var (
 	config ludusapi.Configuration
 
 	finalConfirm              = false
-	shouldShowAnsibleField    = false
 	shouldShowAdminPortExpose = false
 	initialAdmin              initialAdminConfig
+	// initialAdminPasswordConfirm is only for interactive matching; it is not written to initial-admin.yml.
+	initialAdminPasswordConfirm string
 )
 
 // initialAdminConfig holds the initial admin user details collected during interactive install.
@@ -137,7 +138,18 @@ type state int
 const (
 	statusNormal state = iota
 	stateDone
-	numberOfFields = 16 // 11 config + 4 initial admin + 1 confirm, update this if you add any new fields
+	// Interactive field counts (Tab order): existing Proxmox includes 3 storage fields.
+	numberOfFieldsWithStorage = 17 // 11 config + 5 initial admin (incl. password confirm) + 1 confirm
+	numberOfFieldsFreshDebian = 14 // same minus vm pool, vm format, iso pool
+	// Tab-order field indices when existingProxmox (storage on pages 2–3); see NewModel.
+	idxSidebarVMPoolField   = 6
+	idxSidebarVMFormatField = 7
+	idxSidebarISOField      = 8
+	// prevent_user_ansible_add and license_key field indices (Tab order).
+	idxExistingPreventAnsibleField = 9
+	idxExistingLicenseField        = 10
+	idxFreshPreventAnsibleField    = 6
+	idxFreshLicenseField           = 7
 )
 
 type Model struct {
@@ -148,6 +160,9 @@ type Model struct {
 	width             int
 	currentFieldIndex int
 	confirmed         bool
+	fieldCount        int
+	// Furthest field index reached via Tab/Shift+Tab; used to reveal sidebar lines only after the user passes each field.
+	sidebarStorageMaxIdx int
 }
 
 // vmStoragePoolField returns either a datastore-filtered Select or the
@@ -162,7 +177,7 @@ func vmStoragePoolField(vmStores []Datastore, hadEnumeration bool) huh.Field {
 		return huh.NewSelect[string]().
 			Key("proxmox_vm_storage_pool").
 			Title("What pool will store VMs?").
-			Description("Filtered to datastores that allow VM images").
+			Description("Filtered to datastores that allow VM images (use arrow keys to select)").
 			Options(opts...).
 			Value(&config.ProxmoxVMStoragePool)
 	}
@@ -192,7 +207,7 @@ func isoStoragePoolField(isoStores []Datastore, hadEnumeration bool) huh.Field {
 		return huh.NewSelect[string]().
 			Key("proxmox_iso_storage_pool").
 			Title("What pool will store ISO files?").
-			Description("Filtered to datastores that allow ISOs").
+			Description("Filtered to datastores that allow ISOs (use arrow keys to select)").
 			Options(opts...).
 			Value(&config.ProxmoxISOStoragePool)
 	}
@@ -266,14 +281,76 @@ func NewModel() Model {
 	m.styles = NewStyles(m.lg)
 	m.confirmed = false
 
-	// Enumerate Proxmox datastores once, before building the form.
-	// nil slice means fallback to free-text (fresh Debian or CLI error).
-	allStores, enumErr := enumerateDatastores()
-	if enumErr != nil {
-		log.Printf("warning: datastore enumeration failed: %v — falling back to manual entry", enumErr)
+	if existingProxmox {
+		m.fieldCount = numberOfFieldsWithStorage
+	} else {
+		m.fieldCount = numberOfFieldsFreshDebian
+		config.ProxmoxVMStoragePool = "local"
+		config.ProxmoxISOStoragePool = "local"
+		config.ProxmoxVMStorageFormat = "qcow2"
+	}
+
+	var allStores []Datastore
+	if existingProxmox {
+		var enumErr error
+		allStores, enumErr = enumerateDatastores()
+		if enumErr != nil {
+			log.Printf("warning: datastore enumeration failed: %v — falling back to manual entry", enumErr)
+		}
 	}
 	vmStores := filterByContent(allStores, "images")
 	isoStores := filterByContent(allStores, "iso")
+
+	page2Fields := []huh.Field{
+		huh.NewInput().
+			Key("proxmox_gateway").
+			Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("Proxmox gateway cannot be empty")
+				} else if net.ParseIP(s) == nil {
+					return fmt.Errorf("Proxmox gateway is not a valid IP address")
+				}
+
+				return nil
+			}).
+			Title("What is the gateway IP for this host?").
+			Description("The suggestion is usually correct").
+			Value(&config.ProxmoxGateway),
+
+		huh.NewInput().
+			Key("proxmox_netmask").
+			Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("Proxmox netmask cannot be empty")
+				} else if net.ParseIP(s) == nil {
+					return fmt.Errorf("Proxmox netmask is not a valid IP address")
+				}
+				return nil
+			}).
+			Title(fmt.Sprintf("What is the netmask for interface %s", config.ProxmoxInterface)).
+			Description("The suggestion is usually correct").
+			Value(&config.ProxmoxNetmask),
+	}
+	if existingProxmox {
+		page2Fields = append(page2Fields,
+			vmStoragePoolField(vmStores, allStores != nil),
+			vmStorageFormatField(vmStores),
+		)
+	}
+
+	page3Fields := []huh.Field{}
+	if existingProxmox {
+		page3Fields = append(page3Fields, isoStoragePoolField(isoStores, allStores != nil))
+	}
+	page3Fields = append(page3Fields,
+		huh.NewConfirm().
+			Key("prevent_user_ansible_add").
+			Title("Should users be allowed to add ansible roles?").
+			Description("Admins can always add ansible roles").
+			Affirmative("Deny"). // Yea... this is backwards, but the field is named prevent_user_ansible_add...
+			Negative("Allow").
+			Value(&config.PreventUserAnsibleAdd),
+	)
 
 	m.form = huh.NewForm(
 		// Page 1
@@ -337,53 +414,9 @@ func NewModel() Model {
 				Value(&config.ProxmoxPublicIP),
 		),
 		// Page 2
-		huh.NewGroup(
-			huh.NewInput().
-				Key("proxmox_gateway").
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("Proxmox gateway cannot be empty")
-					} else if net.ParseIP(s) == nil {
-						return fmt.Errorf("Proxmox gateway is not a valid IP address")
-					}
-
-					return nil
-				}).
-				Title("What is the gateway IP for this host?").
-				Description("The suggestion is usually correct").
-				Value(&config.ProxmoxGateway),
-
-			huh.NewInput().
-				Key("proxmox_netmask").
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("Proxmox netmask cannot be empty")
-					} else if net.ParseIP(s) == nil {
-						return fmt.Errorf("Proxmox netmask is not a valid IP address")
-					}
-					return nil
-				}).
-				Title(fmt.Sprintf("What is the netmask for interface %s", config.ProxmoxInterface)).
-				Description("The suggestion is usually correct").
-				Value(&config.ProxmoxNetmask),
-
-			vmStoragePoolField(vmStores, allStores != nil),
-
-			vmStorageFormatField(vmStores),
-		),
+		huh.NewGroup(page2Fields...),
 		// Page 3
-
-		huh.NewGroup(
-			isoStoragePoolField(isoStores, allStores != nil),
-
-			huh.NewConfirm().
-				Key("prevent_user_ansible_add").
-				Title("Should users be allowed to add ansible roles?").
-				Description("Admins can always add ansible roles").
-				Affirmative("Deny"). // Yea... this is backwards, but the field is named prevent_user_ansible_add...
-				Negative("Allow").
-				Value(&config.PreventUserAnsibleAdd),
-		),
+		huh.NewGroup(page3Fields...),
 
 		huh.NewGroup(
 			huh.NewInput().
@@ -452,6 +485,21 @@ func NewModel() Model {
 				Description("At least 8 characters - for web UI and Proxmox").
 				Value(&initialAdmin.Password).
 				EchoMode(huh.EchoModePassword),
+			huh.NewInput().
+				Key("initial_admin_password_confirm").
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("Please confirm the password")
+					}
+					if s != initialAdmin.Password {
+						return fmt.Errorf("Passwords do not match")
+					}
+					return nil
+				}).
+				Title("Confirm initial admin password").
+				Description("Must match the password above").
+				Value(&initialAdminPasswordConfirm).
+				EchoMode(huh.EchoModePassword),
 		),
 
 		huh.NewGroup(
@@ -474,6 +522,10 @@ func NewModel() Model {
 		WithShowHelp(false).
 		WithShowErrors(false).
 		WithTheme(customHuhTheme())
+	if existingProxmox {
+		// Erase the wait line printed in runInteractiveInstall before the TUI draws.
+		fmt.Fprint(os.Stdout, "\033[1A\033[2K")
+	}
 	return m
 }
 
@@ -490,12 +542,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc", "ctrl+c":
 			return m, tea.Quit
 		case "down", "tab", "enter":
-			m.currentFieldIndex = (m.currentFieldIndex + 1) % numberOfFields
+			m.currentFieldIndex = (m.currentFieldIndex + 1) % m.fieldCount
+			m.sidebarStorageMaxIdx = max(m.sidebarStorageMaxIdx, m.currentFieldIndex)
 		case "up", "shift+tab":
 			m.currentFieldIndex--
 			if m.currentFieldIndex < 0 {
-				m.currentFieldIndex = numberOfFields - 1
+				m.currentFieldIndex = m.fieldCount - 1
 			}
+			m.sidebarStorageMaxIdx = max(m.sidebarStorageMaxIdx, m.currentFieldIndex)
 		}
 
 	}
@@ -527,17 +581,12 @@ func (m Model) View() string {
 	default:
 
 		var (
-			proxmox_node              string
-			proxmox_interface         string
-			proxmox_local_ip          string
-			proxmox_public_ip         string
-			proxmox_gateway           string
-			proxmox_netmask           string
-			proxmox_vm_storage_pool   string
-			proxmox_vm_storage_format string
-			proxmox_iso_storage_pool  string
-			prevent_user_ansible_add  string
-			license_key               string
+			proxmox_node      string
+			proxmox_interface string
+			proxmox_local_ip  string
+			proxmox_public_ip string
+			proxmox_gateway   string
+			proxmox_netmask   string
 		)
 		if m.form.GetString("proxmox_node") != "" {
 			proxmox_node = "proxmox_node: " + m.form.GetString("proxmox_node")
@@ -557,24 +606,12 @@ func (m Model) View() string {
 		if m.form.GetString("proxmox_netmask") != "" {
 			proxmox_netmask = "proxmox_netmask: " + m.form.GetString("proxmox_netmask")
 		}
-		if m.form.GetString("proxmox_vm_storage_pool") != "" {
-			proxmox_vm_storage_pool = "proxmox_vm_storage_pool: " + m.form.GetString("proxmox_vm_storage_pool")
+		preventIdx := idxFreshPreventAnsibleField
+		licenseIdx := idxFreshLicenseField
+		if existingProxmox {
+			preventIdx = idxExistingPreventAnsibleField
+			licenseIdx = idxExistingLicenseField
 		}
-		if m.form.GetString("proxmox_vm_storage_format") != "" {
-			proxmox_vm_storage_format = "proxmox_vm_storage_format: " + m.form.GetString("proxmox_vm_storage_format")
-		}
-		if m.form.GetString("proxmox_iso_storage_pool") != "" {
-			proxmox_iso_storage_pool = "proxmox_iso_storage_pool: " + m.form.GetString("proxmox_iso_storage_pool")
-		}
-		if m.currentFieldIndex >= 11 || shouldShowAnsibleField {
-			prevent_user_ansible_add = "prevent_user_ansible_add: " + strconv.FormatBool(m.form.GetBool("prevent_user_ansible_add"))
-			shouldShowAnsibleField = true
-		}
-		if m.form.GetString("license_key") != "" {
-			license_key = "license_key: " + m.form.GetString("license_key")
-		}
-		// Use this to debug the current field counter
-		// prevent_user_ansible_add = fmt.Sprintf("Current field: %d", m.currentFieldIndex)
 
 		// Form (left side)
 		v := strings.TrimSuffix(m.form.View(), "\n\n")
@@ -585,6 +622,33 @@ func (m Model) View() string {
 		{
 			const statusWidth = 35
 			statusMarginLeft := m.width - statusWidth - lipgloss.Width(form) - s.Status.GetMarginRight()
+			storageBlock := ""
+			if existingProxmox {
+				var storageLines []string
+				if m.sidebarStorageMaxIdx > idxSidebarVMPoolField && config.ProxmoxVMStoragePool != "" {
+					storageLines = append(storageLines, "proxmox_vm_storage_pool: "+config.ProxmoxVMStoragePool)
+				}
+				if m.sidebarStorageMaxIdx > idxSidebarVMFormatField && config.ProxmoxVMStorageFormat != "" {
+					storageLines = append(storageLines, "proxmox_vm_storage_format: "+config.ProxmoxVMStorageFormat)
+				}
+				if m.sidebarStorageMaxIdx > idxSidebarISOField && config.ProxmoxISOStoragePool != "" {
+					storageLines = append(storageLines, "proxmox_iso_storage_pool: "+config.ProxmoxISOStoragePool)
+				}
+				if len(storageLines) > 0 {
+					storageBlock = strings.Join(storageLines, "\n") + "\n"
+				}
+			}
+			var tailLines []string
+			if m.sidebarStorageMaxIdx > preventIdx {
+				tailLines = append(tailLines, "prevent_user_ansible_add: "+strconv.FormatBool(m.form.GetBool("prevent_user_ansible_add")))
+			}
+			if m.sidebarStorageMaxIdx > licenseIdx && m.form.GetString("license_key") != "" {
+				tailLines = append(tailLines, "license_key: "+m.form.GetString("license_key"))
+			}
+			tailBlock := ""
+			if len(tailLines) > 0 {
+				tailBlock = strings.Join(tailLines, "\n") + "\n"
+			}
 			status = s.Status.
 				Height(lipgloss.Height(form)).
 				Width(statusWidth).
@@ -596,11 +660,8 @@ func (m Model) View() string {
 					proxmox_public_ip + "\n" +
 					proxmox_gateway + "\n" +
 					proxmox_netmask + "\n" +
-					proxmox_vm_storage_pool + "\n" +
-					proxmox_vm_storage_format + "\n" +
-					proxmox_iso_storage_pool + "\n" +
-					prevent_user_ansible_add + "\n" +
-					license_key + "\n")
+					storageBlock +
+					tailBlock)
 		}
 
 		errors := m.form.Errors()
@@ -695,6 +756,10 @@ to function. The Ludus install process will not reboot your host.
 	} else {
 		automatedConfigGenerator(false)
 	}
+	if existingProxmox {
+		fmt.Fprintln(os.Stdout, "Enumerating existing data pools, please wait...")
+		_ = os.Stdout.Sync()
+	}
 	finalModel, err := tea.NewProgram(NewModel()).Run()
 	if err != nil {
 		fmt.Println("Oh no:", err)
@@ -704,7 +769,13 @@ to function. The Ludus install process will not reboot your host.
 		fmt.Println("Exiting")
 		os.Exit(1)
 	}
+	initialAdminPasswordConfirm = ""
 	// Now that the form is done, write the config
+	if !existingProxmox {
+		config.ProxmoxVMStoragePool = "local"
+		config.ProxmoxISOStoragePool = "local"
+		config.ProxmoxVMStorageFormat = "qcow2"
+	}
 	config.ProxmoxHostname = config.ProxmoxNode
 	writeConfigToFile(config, fmt.Sprintf("%s/config.yml", ludusInstallPath))
 
