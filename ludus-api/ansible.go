@@ -722,7 +722,7 @@ func computeTargetNodes(e *core.RequestEvent, rangeID string) (string, map[strin
 	}
 	if defaultTargetNode == "" {
 		// Try auto-selection based on resource usage
-		client, err := getRootGoProxmoxClient()
+		client, err := GetRootGoProxmoxClient()
 		if err == nil {
 			selectedNode, err := SelectOptimalNode(client)
 			if err == nil {

@@ -592,3 +592,13 @@ type LogHistoryDetailResponse struct {
 	Created time.Time `json:"created"`
 	Result  string    `json:"result"`
 }
+
+type AutoShutdownDetail struct {
+	ServerDefault string `json:"serverDefault"`
+	RangeOverride string `json:"rangeOverride"`
+	Effective     string `json:"effective"`
+}
+
+type AutoShutdownResponse struct {
+	AutoShutdownTimeout AutoShutdownDetail `json:"autoShutdownTimeout"`
+}

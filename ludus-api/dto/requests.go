@@ -194,3 +194,7 @@ type SetGroupQuotaRequest struct {
 	DefaultQuotaVMs    *int     `json:"defaultQuotaVMs"`
 	DefaultQuotaRanges *int     `json:"defaultQuotaRanges"`
 }
+
+type AutoShutdownRequest struct {
+	AutoShutdownTimeout string `json:"autoShutdownTimeout"`
+}

@@ -38,7 +38,6 @@ func (hm *HandlerManager) GetHandler(method string, path string) (func(*core.Req
 	return handler, exists
 }
 
-
 func PlaceholderHandler(e *core.RequestEvent) error {
 	path := e.Request.URL.Path
 	if strings.HasPrefix(path, APIBasePath) {
@@ -148,6 +147,18 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 			Name:        "SetGroupQuota",
 			Method:      http.MethodPut,
 			Pattern:     "/groups/quotas",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "GetAutoShutdown",
+			Method:      http.MethodGet,
+			Pattern:     "/range/auto-shutdown",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "UpdateAutoShutdown",
+			Method:      http.MethodPut,
+			Pattern:     "/range/auto-shutdown",
 			HandlerFunc: PlaceholderHandler,
 		},
 	}

@@ -3468,6 +3468,137 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /range/auto-shutdown:
+    get:
+      summary: Retrieve the auto-shutdown configuration for a range
+      deprecated: false
+      description: >
+        Returns the current auto-shutdown timeout for the range, including the
+        server-wide default, per-range override, and resolved effective value.
+
+
+        Use rangeID to specify which range to query. If rangeID is not provided,
+        the user's default range will be used. Use userID to query a different
+        user's range (admins only).
+      operationId: getAutoShutdown
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to query. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to query.
+
+            Defaults to the current user (admins can query other users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: successfully retrieved auto-shutdown configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autoShutdownTimeout:
+                    type: object
+                    properties:
+                      serverDefault:
+                        type: string
+                        example: "4h"
+                      rangeOverride:
+                        type: string
+                        example: ""
+                      effective:
+                        type: string
+                        example: "4h"
+        '500':
+          description: error retrieving auto-shutdown configuration
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Update the auto-shutdown configuration for a range
+      deprecated: false
+      description: >
+        Updates the per-range auto-shutdown timeout. Set to a Go duration string
+        (e.g. "4h", "30m") to override the server default, "0" to explicitly
+        disable for this range, or "" to clear the override and fall back to the
+        server default.
+
+
+        Use rangeID to specify which range to update. If rangeID is not provided,
+        the user's default range will be used. Use userID to update a different
+        user's range (admins only).
+      operationId: updateAutoShutdown
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to update. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to update.
+
+            Defaults to the current user (admins can update other users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                autoShutdownTimeout:
+                  type: string
+                  example: "4h"
+      responses:
+        '200':
+          description: successfully updated auto-shutdown configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autoShutdownTimeout:
+                    type: object
+                    properties:
+                      serverDefault:
+                        type: string
+                        example: "4h"
+                      rangeOverride:
+                        type: string
+                        example: "2h"
+                      effective:
+                        type: string
+                        example: "2h"
+        '400':
+          description: bad input parameter
+          headers: {}
+        '500':
+          description: error updating auto-shutdown configuration
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /testing/start:
     put:
       summary: Snapshot and enter testing state

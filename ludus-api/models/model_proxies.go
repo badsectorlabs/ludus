@@ -432,6 +432,22 @@ func (p *Ranges) SetUpdated(updated types.DateTime) {
 	p.Set("updated", updated)
 }
 
+func (p *Ranges) InactivityShutdownTimeout() string {
+	return p.GetString("inactivityShutdownTimeout")
+}
+
+func (p *Ranges) SetInactivityShutdownTimeout(timeout string) {
+	p.Set("inactivityShutdownTimeout", timeout)
+}
+
+func (p *Ranges) LastActive() types.DateTime {
+	return p.GetDateTime("lastActive")
+}
+
+func (p *Ranges) SetLastActive(lastActive types.DateTime) {
+	p.Set("lastActive", lastActive)
+}
+
 type TemplatesOsOptions int
 
 const (

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	ludusapi "ludusapi"
+	"ludusapi/scheduler"
 
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
@@ -48,6 +49,7 @@ func serve() {
 		VersionString:    VersionString,
 		LudusInstallPath: ludusInstallPath,
 		Logger:           logger,
+		Scheduler:        scheduler.New(logger),
 	}
 
 	// Setup PocketBase app
@@ -84,6 +86,9 @@ func serve() {
 
 	// Initialize plugins
 	server.InitializePlugins()
+
+	// Start all registered scheduler jobs
+	server.Scheduler.Start()
 
 	// Register plugin routes
 	server.RegisterPluginRoutes(app)
@@ -145,6 +150,7 @@ func serve() {
 			logger.Error(fmt.Sprintf("Failed to start the server: %v", err))
 		}
 	}
+	server.Scheduler.Stop()
 	server.ShutdownPlugins()
 
 }
