@@ -167,26 +167,3 @@ func (c *Configuration) ApplyPortDefaultsAndValidate() error {
 	}
 	return nil
 }
-
-// ApplyPortDefaultsAndValidate backfills DefaultPort / DefaultAdminPort for
-// unset values (zero) and validates that both ports are in range 1-65535 and
-// distinct. Callers across ludus-api and ludus-server share this to keep the
-// three config load paths (Viper, plain yaml.Decode, plain yaml.Unmarshal) in sync.
-func (c *Configuration) ApplyPortDefaultsAndValidate() error {
-	if c.Port == 0 {
-		c.Port = DefaultPort
-	}
-	if c.AdminPort == 0 {
-		c.AdminPort = DefaultAdminPort
-	}
-	if c.Port < 1 || c.Port > 65535 {
-		return fmt.Errorf("port must be between 1 and 65535, got %d", c.Port)
-	}
-	if c.AdminPort < 1 || c.AdminPort > 65535 {
-		return fmt.Errorf("admin_port must be between 1 and 65535, got %d", c.AdminPort)
-	}
-	if c.Port == c.AdminPort {
-		return fmt.Errorf("port and admin_port must differ (got %d for both)", c.Port)
-	}
-	return nil
-}
