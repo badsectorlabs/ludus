@@ -10,9 +10,9 @@ While efforts have been made to secure Ludus against malicious users, only trust
 
 ## External Access
 
-By default, Ludus listens on port 8080 on all interfaces. This allows users to deploy Ludus in a private network (like on a small form factor computer or laptop) and be able to access it immediately. However, if Ludus is deployed on a system with a public IP, access to port 8080 should be restricted. Ideally, a firewall should be used to disable all access to port 8080 except over WireGuard.
+By default, Ludus listens on port 8080 (configurable via `port` in `config.yml`) on all interfaces. This allows users to deploy Ludus in a private network (like on a small form factor computer or laptop) and be able to access it immediately. However, if Ludus is deployed on a system with a public IP, access to this port should be restricted. Ideally, a firewall should be used to disable all access except over WireGuard.
 
-The following iptables command can be run on the Ludus host to restrict traffic to the Ludus server to only hosts that are connected via WireGuard.
+The following iptables command can be run on the Ludus host to restrict traffic to the Ludus server to only hosts that are connected via WireGuard. Replace `8080` with your configured `port` if changed.
 
 ```bash
 sudo iptables -I INPUT -p tcp --dport 8080 ! -i wg0 -j DROP

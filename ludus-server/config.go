@@ -82,6 +82,8 @@ func automatedConfigGenerator(writeToFile bool) {
 				config.ProxmoxURL = "https://127.0.0.1:8006"
 				config.LicenseKey = "community"
 				config.ExposeAdminPort = false
+				config.Port = ludusapi.DefaultPort
+				config.AdminPort = ludusapi.DefaultAdminPort
 				config.DataDirectory = fmt.Sprintf("%s/db", ludusInstallPath)
 				config.DatabaseEncryptionKey = security.RandomString(32)
 				config.WireguardPort = 51820
@@ -116,6 +118,8 @@ func automatedConfigGenerator(writeToFile bool) {
 					f.WriteString("prevent_user_ansible_add: false\n")
 					f.WriteString("license_key: community\n")
 					f.WriteString("expose_admin_port: false\n")
+					f.WriteString(fmt.Sprintf("port: %d\n", config.Port))
+					f.WriteString(fmt.Sprintf("admin_port: %d\n", config.AdminPort))
 					f.WriteString(fmt.Sprintf("data_directory: %s/db\n", ludusInstallPath))
 					f.WriteString(fmt.Sprintf("database_encryption_key: %s\n", config.DatabaseEncryptionKey))
 					f.WriteString(fmt.Sprintf("wireguard_port: %d\n", 51820))
@@ -144,6 +148,9 @@ func loadConfig() {
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
 		log.Fatalf("Error unmarshalling config: %v", err)
+	}
+	if err := config.ApplyPortDefaultsAndValidate(); err != nil {
+		log.Fatalf("%v", err)
 	}
 }
 

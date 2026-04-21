@@ -58,6 +58,10 @@ func checkConfig() {
 	if err := d.Decode(&config); err != nil {
 		log.Fatalf("Error decoding config: %v", err)
 	}
+
+	if err := config.ApplyPortDefaultsAndValidate(); err != nil {
+		log.Fatalf("%v", err)
+	}
 }
 
 // check if the current uid is zero (root) and throw a fatal error if not

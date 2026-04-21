@@ -24,7 +24,7 @@ Ludus will make the following changes - **do NOT do any actions below yourself b
 - Create user ranges with IPs in the 10.0.0.0/16 network starting at 10.2.0.0/8 and incrementing the second octet for each user
 - Create user interfaces starting at `vmbr1002` incrementing for each user
 - Create the pam user `ludus` and pam users for all Ludus users added
-- Create the `ludus-admin` and `ludus` systemd services that listen on 127.0.0.1:8081 and 0.0.0.0:8080
+- Create the `ludus-admin` and `ludus` systemd services that listen on 127.0.0.1:8081 and 0.0.0.0:8080 (configurable via `admin_port` and `port` in `config.yml`)
 
 ## Install
 

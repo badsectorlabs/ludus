@@ -315,7 +315,8 @@ stages:
       sudo cp -f binaries/ludus-client_linux-amd64 /usr/local/bin/ludus
     fi
   - mkdir -p ~/.config/ludus/
-  - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
+  # Cluster install uses custom port (9090) to exercise the configurable-port path
+  - 'echo "url: https://127.0.0.1:9090" > ~/.config/ludus/config.yml'
   - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
   # Create cluster CI admin user
   - for i in {1..5}; do (ludus users list all | grep -q 'Cluster CI Admin' || ludus users add -a -n "Cluster CI Admin" -i CCIA -e "ccia@ludus.internal" -p "cicdpassword") && break || sleep 5; done
@@ -2123,6 +2124,8 @@ cluster install kickoff:
       ludus_nat_interface: ludusnat
       prevent_user_ansible_add: false
       expose_admin_port: false
+      port: 9090
+      admin_port: 9091
       reserved_range_numbers: []
       data_directory: /opt/ludus/db
       wireguard_port: 51820

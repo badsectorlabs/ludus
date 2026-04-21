@@ -1,6 +1,7 @@
 package ludusapi
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/spf13/viper"
@@ -8,6 +9,12 @@ import (
 
 const ludusInstallPath string = "/opt/ludus"
 const LudusInstallPath = ludusInstallPath // Export the path for use in plugins
+
+// Default listen ports used when config.yml omits the corresponding keys
+const (
+	DefaultPort = 8080
+	DefaultAdminPort = 8081
+)
 
 // Configurations exported
 type Configuration struct {
@@ -27,6 +34,8 @@ type Configuration struct {
 	PreventUserAnsibleAdd  bool    `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
 	LicenseKey             string  `mapstructure:"license_key" yaml:"license_key"`
 	ExposeAdminPort        bool    `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
+	Port                   int     `mapstructure:"port" yaml:"port"`
+	AdminPort              int     `mapstructure:"admin_port" yaml:"admin_port"`
 	ReservedRangeNumbers   []int32 `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
 	DataDirectory          string  `mapstructure:"data_directory" yaml:"data_directory"`
 	DatabaseEncryptionKey  string  `mapstructure:"database_encryption_key" yaml:"database_encryption_key"`
@@ -70,6 +79,8 @@ func (s *Server) ParseConfig() {
 	viper.SetDefault("data_directory", "/opt/ludus/db")
 	viper.SetDefault("database_encryption_key", "hZD6RwYxrcQ7CS4lRxjdKI7thWp3jg48")
 	viper.SetDefault("wireguard_port", 51820)
+	viper.SetDefault("port", DefaultPort)
+	viper.SetDefault("admin_port", DefaultAdminPort)
 	// Do not set a default for cluster_mode to force viper to leave it unset unless provided,
 	// so we can detect if user has explicitly set it or not and fallback to API if unset.
 	// (See IsClusterMode in sdn.go for logic)
@@ -96,6 +107,9 @@ func (s *Server) ParseConfig() {
 	if len(ServerConfiguration.DatabaseEncryptionKey) != 32 {
 		log.Fatalf("Database encryption key must be 32 characters long")
 	}
+	if err := ServerConfiguration.ApplyPortDefaultsAndValidate(); err != nil {
+		log.Fatalf("%v", err)
+	}
 	// If there is no license in the config, set it to community
 	if ServerConfiguration.LicenseKey == "" || ServerConfiguration.LicenseKey == "community" {
 		s.Entitlements = []string{}
@@ -107,4 +121,27 @@ func (s *Server) ParseConfig() {
 		s.checkLicense()
 	}
 	log.Println("Using configuration file: ", viper.ConfigFileUsed())
+}
+
+// ApplyPortDefaultsAndValidate backfills DefaultPort / DefaultAdminPort for
+// unset values (zero) and validates that both ports are in range 1-65535 and
+// distinct. Callers across ludus-api and ludus-server share this to keep the
+// three config load paths (Viper, plain yaml.Decode, plain yaml.Unmarshal) in sync.
+func (c *Configuration) ApplyPortDefaultsAndValidate() error {
+	if c.Port == 0 {
+		c.Port = DefaultPort
+	}
+	if c.AdminPort == 0 {
+		c.AdminPort = DefaultAdminPort
+	}
+	if c.Port < 1 || c.Port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535, got %d", c.Port)
+	}
+	if c.AdminPort < 1 || c.AdminPort > 65535 {
+		return fmt.Errorf("admin_port must be between 1 and 65535, got %d", c.AdminPort)
+	}
+	if c.Port == c.AdminPort {
+		return fmt.Errorf("port and admin_port must differ (got %d for both)", c.Port)
+	}
+	return nil
 }
