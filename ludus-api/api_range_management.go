@@ -191,7 +191,7 @@ func deleteRangeResources(targetRange *models.Range, force bool, e *core.Request
 func DeleteRange(e *core.RequestEvent) error {
 
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus range rm command with --url https://127.0.0.1:8081")
+		return JSONError(e, http.StatusForbidden, adminEndpointError("ludus range rm"))
 	}
 
 	// Check if force parameter is provided
@@ -707,7 +707,7 @@ func CreateRange(e *core.RequestEvent) error {
 
 	// Make sure this is the admin server (root) as we need to create a vmbr interface for the range
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus range create command with --url https://127.0.0.1:8081")
+		return JSONError(e, http.StatusForbidden, adminEndpointError("ludus range create"))
 	}
 
 	var payload dto.CreateRangeRequest

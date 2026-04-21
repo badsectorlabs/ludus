@@ -106,7 +106,7 @@ func GetSDNMigrationStatus(e *core.RequestEvent) error {
 // This is only applicable to cluster mode - non-cluster hosts use vmbr management
 func MigrateToSDN(e *core.RequestEvent) error {
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, "Migration must be run via ludus-admin on 127.0.0.1:8081")
+		return JSONError(e, http.StatusForbidden, fmt.Sprintf("Migration must be run via ludus-admin on 127.0.0.1:%d", ServerConfiguration.AdminPort))
 	}
 
 	client, err := getRootGoProxmoxClient()
@@ -274,7 +274,7 @@ func migrateRangeVMsToVNet(client *goproxmox.Client, ctx context.Context, rangeI
 // Non-cluster hosts skip this and use vmbr management.
 func SetupSDNInfrastructure(e *core.RequestEvent) error {
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, "SDN setup must be run via ludus-admin on 127.0.0.1:8081")
+		return JSONError(e, http.StatusForbidden, fmt.Sprintf("SDN setup must be run via ludus-admin on 127.0.0.1:%d", ServerConfiguration.AdminPort))
 	}
 
 	// Check if we're in cluster mode

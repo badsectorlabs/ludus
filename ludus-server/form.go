@@ -585,7 +585,7 @@ func runInteractiveInstall(existingProxmox bool) {
 !!! Ludus will create user interfaces starting at vmbr1001 incrementing for each user    !!!
 !!! Ludus will create the pam user 'ludus' and pam users for all Ludus users added       !!!
 !!! Ludus will create the 'ludus-admin' and 'ludus' systemd services                     !!!
-!!! Ludus will listen on 127.0.0.1:8081 and 0.0.0.0:8080                                 !!!
+!!! Ludus will listen on 127.0.0.1:8081 and 0.0.0.0:8080 by default (configurable)       !!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 Carefully consider the above block. If all items are compatible with your existing setup, you

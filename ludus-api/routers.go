@@ -116,7 +116,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	webUIAvailable := checkEmbeddedWebUI()
 
 	// Setup a reverse proxy for the admin API
-	adminURL, _ := url.Parse("https://127.0.0.1:8081")
+	adminURL, _ := url.Parse(fmt.Sprintf("https://127.0.0.1:%d", ServerConfiguration.AdminPort))
 	adminProxy = httputil.NewSingleHostReverseProxy(adminURL)
 	customTransport := &http.Transport{
 		TLSClientConfig: &tls.Config{

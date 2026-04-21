@@ -47,9 +47,10 @@ print_initial_admin_credentials() {
     root_api_key="$(tr -d '\n' < "$root_api_key_path")"
     initial_admin_userid="$(tr -d '\n' < "$initial_admin_userid_path")"
 
+    # `| default(8081)` guards upgrades where config.yml predates the admin_port setting.
     creds_response="$(curl -sSk \
         -H "X-API-Key: $root_api_key" \
-        "https://127.0.0.1:8081/api/v2/user/credentials?userID=$initial_admin_userid")"
+        "https://127.0.0.1:{{ admin_port | default(8081) }}/api/v2/user/credentials?userID=$initial_admin_userid")"
     username="$(echo "$creds_response" | jq -r '.result.proxmoxUsername // empty')"
     password="$(echo "$creds_response" | jq -r '.result.proxmoxPassword // empty')"
     web_username="$(echo "$creds_response" | jq -r '.result.ludusEmail // empty')"

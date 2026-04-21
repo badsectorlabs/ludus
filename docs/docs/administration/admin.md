@@ -16,7 +16,7 @@ set-environment LUDUS_ENABLE_SUPERADMIN=ill-be-careful
 systemctl restart ludus
 ```
 
-You can then browse to the pocketbase admin page at `https://<Ludus IP>:8080/admin`
+You can then browse to the pocketbase admin page at `https://<Ludus IP>:<port>/admin` (default port: 8080)
 
 Log in with the username `root@ludus.internal` and the password the full ROOT API key from `/opt/ludus/install/root-api-key`
 
