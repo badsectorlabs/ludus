@@ -49,8 +49,8 @@ type initialAdminConfig struct {
 // reservedUserIDs are not allowed for the initial admin (same as AddUser in ludus-api).
 var reservedUserIDs = []string{"ADMIN", "ROOT", "CICD", "SHARED", "0"}
 
-// initialAdminUserIDRegex matches valid user IDs: ^[A-Za-z0-9]{1,20}$
-var initialAdminUserIDRegex = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
+// initialAdminUserIDRegex matches valid user IDs: ^[A-Za-z][A-Za-z0-9]{0,20}$
+var initialAdminUserIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,20}$`)
 
 // userExistsOnHostSystem checks if a user exists on the host (same logic as ludus-api).
 // Used to validate the initial admin display name, since proxmoxUsername is derived from it.
@@ -463,7 +463,7 @@ func NewModel() Model {
 						return fmt.Errorf("User ID cannot be empty")
 					}
 					if !initialAdminUserIDRegex.MatchString(s) {
-						return fmt.Errorf("User ID must match ^[A-Za-z0-9]{1,20}$")
+						return fmt.Errorf("User ID must match ^[A-Za-z][A-Za-z0-9]{0,20}$")
 					}
 					if slices.Contains(reservedUserIDs, strings.ToUpper(s)) {
 						return fmt.Errorf("%s is a reserved user ID", s)

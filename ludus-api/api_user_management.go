@@ -21,7 +21,7 @@ import (
 	"github.com/pocketbase/pocketbase/tools/security"
 )
 
-var UserIDRegex = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
+var UserIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,20}$`)
 
 // provisionNewUser handles the common provisioning steps for a new Ludus user:
 // assigns a user number, creates a default range, runs the add-user ansible playbook,
