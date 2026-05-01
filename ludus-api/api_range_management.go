@@ -417,10 +417,16 @@ func ListRange(e *core.RequestEvent) error {
 		AllowedDomains: usersRange.AllowedDomains(),
 	}
 
+	details := e.Request.URL.Query().Get("details") == "true"
+	var vmDetails map[int]VMDetails
+	if details {
+		vmDetails = fetchVMDetails(e, usersRange.RangeId(), proxmoxClient)
+	}
+
 	for _, vm := range rangeVMs {
 		vmRecord := &models.VMs{}
 		vmRecord.SetProxyRecord(vm)
-		response.VMs = append(response.VMs, dto.ListRangeResponseVMsItem{
+		item := dto.ListRangeResponseVMsItem{
 			ProxmoxID:   int32(vmRecord.ProxmoxId()),
 			RangeNumber: int32(usersRange.RangeNumber()),
 			Name:        vmRecord.Name(),
@@ -429,7 +435,15 @@ func ListRange(e *core.RequestEvent) error {
 			IsRouter:    vmRecord.IsRouter(),
 			CPU:         int32(vmRecord.Cpu()),
 			RAM:         int32(vmRecord.Ram()),
-		})
+		}
+		if details {
+			if d, ok := vmDetails[int(vmRecord.ProxmoxId())]; ok {
+				item.OsVersion = d.OsVersion
+				item.LicenseStatus = d.LicenseStatus
+				item.LastUpdate = d.LastUpdate
+			}
+		}
+		response.VMs = append(response.VMs, item)
 	}
 
 	return e.JSON(http.StatusOK, response)
@@ -469,6 +483,8 @@ func ListAllRanges(e *core.RequestEvent) error {
 		return int(a.RangeNumber() - b.RangeNumber())
 	})
 
+	allDetails := e.Request.URL.Query().Get("details") == "true"
+
 	// Update VM data for all ranges
 	for _, rangeRecord := range ranges {
 		err = updateRangeVMData(e, rangeRecord, proxmoxClient)
@@ -476,6 +492,12 @@ func ListAllRanges(e *core.RequestEvent) error {
 			logger.Error(fmt.Sprintf("Error updating VM data for range %s: %s", rangeRecord.RangeId(), err.Error()))
 			continue
 		}
+
+		var vmDetails map[int]VMDetails
+		if allDetails {
+			vmDetails = fetchVMDetails(e, rangeRecord.RangeId(), proxmoxClient)
+		}
+
 		responseItem := dto.ListAllRangeResponseItem{
 			VMs:            make([]dto.ListAllRangeResponseItemVMsItem, 0),
 			RangeID:        rangeRecord.RangeId(),
@@ -500,9 +522,7 @@ func ListAllRanges(e *core.RequestEvent) error {
 			vmRecordObj := &models.VM{}
 			vmRecordObj.SetProxyRecord(vmRecord)
 
-			// Use rangeRecord from outer loop rather than expanding VM's range relation
-			// for efficiency. We already queried VMs by range ID, so they must belong to this range.
-			responseItem.VMs = append(responseItem.VMs, dto.ListAllRangeResponseItemVMsItem{
+			item := dto.ListAllRangeResponseItemVMsItem{
 				Ip:          vmRecordObj.Ip(),
 				IsRouter:    vmRecordObj.IsRouter(),
 				ProxmoxID:   int32(vmRecordObj.ProxmoxId()),
@@ -511,7 +531,18 @@ func ListAllRanges(e *core.RequestEvent) error {
 				PoweredOn:   vmRecordObj.PoweredOn(),
 				CPU:         int32(vmRecordObj.Cpu()),
 				RAM:         int32(vmRecordObj.Ram()),
-			})
+			}
+			if allDetails {
+				if d, ok := vmDetails[int(vmRecordObj.ProxmoxId())]; ok {
+					item.OsVersion = d.OsVersion
+					item.LicenseStatus = d.LicenseStatus
+					item.LastUpdate = d.LastUpdate
+				}
+			}
+
+			// Use rangeRecord from outer loop rather than expanding VM's range relation
+			// for efficiency. We already queried VMs by range ID, so they must belong to this range.
+			responseItem.VMs = append(responseItem.VMs, item)
 		}
 		response = append(response, responseItem)
 	}

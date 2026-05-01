@@ -5,13 +5,16 @@ import (
 )
 
 type VmObject struct {
-	ID          int32  `json:"ID"`
-	ProxmoxID   int32  `json:"proxmoxID"`
-	RangeNumber int32  `json:"rangeNumber"`
-	Name        string `json:"name"`
-	PoweredOn   bool   `json:"poweredOn"`
-	Ip          string `json:"ip,omitempty"`
-	IsRouter    bool   `json:"isRouter"`
+	ID            int32  `json:"ID"`
+	ProxmoxID     int32  `json:"proxmoxID"`
+	RangeNumber   int32  `json:"rangeNumber"`
+	Name          string `json:"name"`
+	PoweredOn     bool   `json:"poweredOn"`
+	Ip            string `json:"ip,omitempty"`
+	IsRouter      bool   `json:"isRouter"`
+	OsVersion     string `json:"osVersion,omitempty"`
+	LicenseStatus string `json:"licenseStatus,omitempty"`
+	LastUpdate    string `json:"lastUpdate,omitempty"`
 }
 
 type AnsibleItem struct {

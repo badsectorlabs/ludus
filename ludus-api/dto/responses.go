@@ -230,15 +230,18 @@ type ListAllRangeResponseItem struct {
 	TestingEnabled bool                              `json:"testingEnabled"`
 }
 type ListAllRangeResponseItemVMsItem struct {
-	Ip          string `json:"ip,omitempty"`
-	IsRouter    bool   `json:"isRouter,omitempty"`
-	ID          int32  `json:"ID"`
-	ProxmoxID   int32  `json:"proxmoxID"`
-	RangeNumber int32  `json:"rangeNumber"`
-	Name        string `json:"name"`
-	PoweredOn   bool   `json:"poweredOn"`
-	CPU         int32  `json:"cpu"`
-	RAM         int32  `json:"ram"`
+	Ip            string `json:"ip,omitempty"`
+	IsRouter      bool   `json:"isRouter,omitempty"`
+	ID            int32  `json:"ID"`
+	ProxmoxID     int32  `json:"proxmoxID"`
+	RangeNumber   int32  `json:"rangeNumber"`
+	Name          string `json:"name"`
+	PoweredOn     bool   `json:"poweredOn"`
+	CPU           int32  `json:"cpu"`
+	RAM           int32  `json:"ram"`
+	OsVersion     string `json:"osVersion,omitempty"`
+	LicenseStatus string `json:"licenseStatus,omitempty"`
+	LastUpdate    string `json:"lastUpdate,omitempty"`
 }
 
 type ListAllUsersResponseItem struct {
@@ -316,15 +319,18 @@ type ListRangeResponse struct {
 	AllowedDomains []string                   `json:"allowedDomains,omitempty"`
 }
 type ListRangeResponseVMsItem struct {
-	ProxmoxID   int32  `json:"proxmoxID"`
-	RangeNumber int32  `json:"rangeNumber"`
-	Name        string `json:"name"`
-	PoweredOn   bool   `json:"poweredOn"`
-	Ip          string `json:"ip,omitempty"`
-	IsRouter    bool   `json:"isRouter,omitempty"`
-	CPU         int32  `json:"cpu"`
-	RAM         int32  `json:"ram"`
-	ID          int32  `json:"ID"`
+	ProxmoxID     int32  `json:"proxmoxID"`
+	RangeNumber   int32  `json:"rangeNumber"`
+	Name          string `json:"name"`
+	PoweredOn     bool   `json:"poweredOn"`
+	Ip            string `json:"ip,omitempty"`
+	IsRouter      bool   `json:"isRouter,omitempty"`
+	CPU           int32  `json:"cpu"`
+	RAM           int32  `json:"ram"`
+	ID            int32  `json:"ID"`
+	OsVersion     string `json:"osVersion,omitempty"`
+	LicenseStatus string `json:"licenseStatus,omitempty"`
+	LastUpdate    string `json:"lastUpdate,omitempty"`
 }
 type ListRangeTagsResponse struct {
 	Tags []string `json:"tags"`
