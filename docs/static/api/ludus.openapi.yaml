@@ -4,7 +4,7 @@ info:
   description: >-
     This API controls Ludus user management, range deployment, power state, and
     testing state.
-  version: 2.0.0
+  version: 2.1.0
   license:
     name: GNU AGPLv3
     url: https://www.gnu.org/licenses/agpl-3.0.txt/
@@ -23,9 +23,9 @@ tags:
   - name: Snapshot Management
   - name: KMS Management
   - name: Group Management
-  - name: Quota Management
   - name: Migration
   - name: Blueprint Management
+  - name: Quota Management
 paths:
   /:
     get:
@@ -143,6 +143,43 @@ paths:
                     size: 1966606663680
                     free: 376010477568
                     disk_type: unknown
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /openapi:
+    get:
+      summary: Retrieve the Ludus OpenAPI specification
+      deprecated: false
+      description: >
+        Returns the embedded OpenAPI 3.0 specification for the Ludus API as a
+        YAML document.
+
+        Useful for importing into API tooling (API Dog, Postman, Insomnia,
+        etc.).
+      operationId: getOpenAPISpec
+      tags:
+        - Host Management
+      parameters: []
+      responses:
+        '200':
+          description: OpenAPI specification document (YAML)
+          content:
+            text/yaml:
+              schema:
+                type: string
+          headers: {}
+        '404':
+          description: OpenAPI spec not available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
           headers: {}
       security:
         - JWT: []
@@ -1015,6 +1052,8 @@ paths:
                         type: integer
                       quotaRanges:
                         type: integer
+                      quotaStorage:
+                        type: integer
                       quotaVMs:
                         type: integer
                       ranges:
@@ -1047,6 +1086,7 @@ paths:
                       - quotaCPU
                       - quotaRAM
                       - quotaRanges
+                      - quotaStorage
                       - quotaVMs
                       - ranges
                       - updated
@@ -1149,6 +1189,7 @@ paths:
                     "quotaCPU": 0,
                     "quotaRAM": 0,
                     "quotaRanges": 0,
+                    "quotaStorage": 0,
                     "quotaVMs": 0,
                     "ranges": [
                       "3lbupcsqp1ebiub",
@@ -1704,368 +1745,6 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /user/quotas:
-    get:
-      summary: Get quota status for the current user
-      deprecated: false
-      description: |
-        Returns the effective quota limits and current resource usage for the authenticated user.
-        Limits are resolved using the priority chain: user quota > group default > system default > unlimited (0).
-      operationId: getQuotaStatus
-      tags:
-        - Quota Management
-      parameters:
-        - name: userID
-          in: query
-          description: pass an optional userID to view quotas for a specific user (admin only)
-          required: false
-          schema:
-            $ref: '#/components/schemas/userID'
-      responses:
-        '200':
-          description: quota status
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  limitRAM:
-                    type: integer
-                    description: Effective RAM limit in GB (0 = unlimited)
-                    example: 64
-                  limitCPU:
-                    type: integer
-                    description: Effective CPU core limit (0 = unlimited)
-                    example: 16
-                  limitVMs:
-                    type: integer
-                    description: Effective VM count limit (0 = unlimited)
-                    example: 10
-                  limitRanges:
-                    type: integer
-                    description: Effective range count limit (0 = unlimited)
-                    example: 3
-                  usedRAM:
-                    type: integer
-                    description: Current RAM usage in GB
-                    example: 24
-                  usedCPU:
-                    type: integer
-                    description: Current CPU core usage
-                    example: 12
-                  usedVMs:
-                    type: integer
-                    description: Current VM count
-                    example: 5
-                  usedRanges:
-                    type: integer
-                    description: Current range count
-                    example: 2
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    put:
-      summary: Set quotas for one or more users (admin only)
-      deprecated: false
-      description: |
-        Set resource quota limits for one or more users. Only provided fields are updated.
-        Set a value to 0 to remove a limit. Negative values are rejected.
-        Supports bulk operations via the userIDs array.
-      operationId: setUserQuota
-      tags:
-        - Quota Management
-      parameters: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - userIDs
-              properties:
-                userIDs:
-                  type: array
-                  items:
-                    type: string
-                  description: One or more userIDs to set quotas for
-                  example: ["JD", "AB"]
-                quotaRAM:
-                  type: integer
-                  description: RAM limit in GB (0 = remove limit)
-                  example: 64
-                quotaCPU:
-                  type: integer
-                  description: CPU core limit (0 = remove limit)
-                  example: 16
-                quotaVMs:
-                  type: integer
-                  description: VM count limit (0 = remove limit)
-                  example: 10
-                quotaRanges:
-                  type: integer
-                  description: Range count limit (0 = remove limit)
-                  example: 3
-      responses:
-        '200':
-          description: quotas updated
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: string
-                    example: "Quotas updated for 2 user(s)"
-        '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: "quota values must be >= 0"
-        '403':
-          description: Unauthorized - not an admin
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: You are not an admin and cannot set user quotas
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /user/quotas/all:
-    get:
-      summary: Get quota status for all users (admin only)
-      deprecated: false
-      description: |
-        Returns effective quota limits, current usage, and quota source for all users.
-        Source indicates where the effective quota comes from: U (user), G (group default), S (system default).
-      operationId: getAllQuotaStatus
-      tags:
-        - Quota Management
-      parameters: []
-      responses:
-        '200':
-          description: all users' quota status
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    userID:
-                      type: string
-                      example: JD
-                    name:
-                      type: string
-                      example: John Doe
-                    limitRAM:
-                      type: integer
-                      example: 64
-                    limitCPU:
-                      type: integer
-                      example: 16
-                    limitVMs:
-                      type: integer
-                      example: 10
-                    limitRanges:
-                      type: integer
-                      example: 3
-                    usedRAM:
-                      type: integer
-                      example: 24
-                    usedCPU:
-                      type: integer
-                      example: 12
-                    usedVMs:
-                      type: integer
-                      example: 5
-                    usedRanges:
-                      type: integer
-                      example: 2
-                    sourceRAM:
-                      type: string
-                      description: "Source of RAM limit: U (user), G (group), S (system), empty (unlimited)"
-                      example: U
-                    sourceCPU:
-                      type: string
-                      example: G
-                    sourceVMs:
-                      type: string
-                      example: G
-                    sourceRanges:
-                      type: string
-                      example: S
-        '403':
-          description: Unauthorized - not an admin
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: You are not an admin and cannot view all quotas
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /user/quotas/defaults:
-    get:
-      summary: Get system-wide default quotas (admin only)
-      deprecated: false
-      description: |
-        Returns the system-wide default quota values configured in /opt/ludus/config.yml.
-        These are the fallback values when neither user nor group quotas are set.
-      operationId: getQuotaDefaults
-      tags:
-        - Quota Management
-      parameters: []
-      responses:
-        '200':
-          description: system default quotas
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  limitRAM:
-                    type: integer
-                    example: 64
-                  limitCPU:
-                    type: integer
-                    example: 16
-                  limitVMs:
-                    type: integer
-                    example: 10
-                  limitRanges:
-                    type: integer
-                    example: 3
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /groups/quotas:
-    get:
-      summary: Get default quotas for all groups (admin only)
-      deprecated: false
-      description: |
-        Returns the default quota values and member count for all groups.
-      operationId: getGroupQuotas
-      tags:
-        - Quota Management
-      parameters: []
-      responses:
-        '200':
-          description: group quota defaults
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    name:
-                      type: string
-                      example: students
-                    defaultQuotaRAM:
-                      type: integer
-                      example: 32
-                    defaultQuotaCPU:
-                      type: integer
-                      example: 8
-                    defaultQuotaVMs:
-                      type: integer
-                      example: 5
-                    defaultQuotaRanges:
-                      type: integer
-                      example: 2
-                    memberCount:
-                      type: integer
-                      example: 30
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    put:
-      summary: Set default quotas for one or more groups (admin only)
-      deprecated: false
-      description: |
-        Set default resource quota limits for one or more groups. These apply to members
-        who don't have explicit per-user quotas. Only provided fields are updated.
-        Set a value to 0 to remove a limit. Supports bulk operations via the groupNames array.
-      operationId: setGroupQuota
-      tags:
-        - Quota Management
-      parameters: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - groupNames
-              properties:
-                groupNames:
-                  type: array
-                  items:
-                    type: string
-                  description: One or more group names to set quotas for
-                  example: ["students", "red-team"]
-                defaultQuotaRAM:
-                  type: integer
-                  description: Default RAM limit in GB (0 = remove limit)
-                  example: 32
-                defaultQuotaCPU:
-                  type: integer
-                  description: Default CPU core limit (0 = remove limit)
-                  example: 8
-                defaultQuotaVMs:
-                  type: integer
-                  description: Default VM count limit (0 = remove limit)
-                  example: 5
-                defaultQuotaRanges:
-                  type: integer
-                  description: Default range count limit (0 = remove limit)
-                  example: 2
-      responses:
-        '200':
-          description: group quotas updated
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: string
-                    example: "Quotas updated for 2 group(s)"
-        '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: "quota values must be >= 0"
-        '403':
-          description: Unauthorized - not an admin
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: You are not an admin and cannot set group quotas
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
   /vm/{vmID}:
     delete:
       summary: Destroy VM
@@ -2128,6 +1807,15 @@ paths:
           required: false
           schema:
             $ref: '#/components/schemas/userID'
+        - name: details
+          in: query
+          description: >-
+            Set to true to return OS version, license, and update information
+            for VMs. This will execute commands on the VMs via the guest agent
+            to gather the information.
+          required: false
+          schema:
+            type: boolean
       responses:
         '200':
           description: search results matching criteria
@@ -3204,7 +2892,13 @@ paths:
       operationId: listUserAccessibleRanges
       tags:
         - Range Management
-      parameters: []
+      parameters:
+        - name: userID
+          in: query
+          description: The userID to impersonate for this request (Admins only)
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: List of accessible ranges
@@ -3315,6 +3009,12 @@ paths:
           example: abc123
           schema:
             type: string
+        - name: rangeID
+          in: query
+          description: The rangeID to use for this request
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: The full log history entry including log content
@@ -3331,6 +3031,136 @@ paths:
           headers: {}
         '404':
           description: Log entry not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/auto-shutdown:
+    get:
+      summary: Retrieve auto-shutdown configuration (enterprise)
+      deprecated: false
+      description: >-
+        Returns the current auto-shutdown timeout for the range, including the
+        server-wide default, per-range override, and resolved effective value.
+      operationId: getAutoShutdown
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to query. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            type: string
+            schema:
+              $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: |
+            The userID to query.
+            Defaults to the current user (admins can query other users' ranges)
+          required: false
+          schema:
+            type: string
+            schema:
+              $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: successfully retrieved auto-shutdown configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autoShutdownTimeout:
+                    type: object
+                    properties:
+                      serverDefault:
+                        type: string
+                        example: 4h
+                      rangeOverride:
+                        type: string
+                        example: ''
+                      effective:
+                        type: string
+                        example: 4h
+          headers: {}
+        '500':
+          description: error retrieving auto-shutdown configuration
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Update auto-shutdown (enterprise)
+      deprecated: false
+      description: >
+        Updates the per-range auto-shutdown timeout. Set to a Go duration string
+        (e.g. "4h", "30m") to override the server default, "0" to explicitly
+        disable for this range, or "" to clear the override and fall back to the
+        server default.
+      operationId: updateAutoShutdown
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to update. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            schema:
+              $ref: '#/components/schemas/rangeID'
+            type: string
+        - name: userID
+          in: query
+          description: |
+            The userID to update.
+            Defaults to the current user (admins can update other users' ranges)
+          required: false
+          schema:
+            type: string
+            schema:
+              $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                autoShutdownTimeout:
+                  type: string
+                  example: 4h
+            examples: {}
+      responses:
+        '200':
+          description: successfully updated auto-shutdown configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autoShutdownTimeout:
+                    type: object
+                    properties:
+                      serverDefault:
+                        type: string
+                        example: 4h
+                      rangeOverride:
+                        type: string
+                        example: 2h
+                      effective:
+                        type: string
+                        example: 2h
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+        '500':
+          description: error updating auto-shutdown configuration
           headers: {}
       security:
         - JWT: []
@@ -3464,137 +3294,6 @@ paths:
           headers: {}
         '500':
           description: error with range VM power off
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /range/auto-shutdown:
-    get:
-      summary: Retrieve the auto-shutdown configuration for a range
-      deprecated: false
-      description: >
-        Returns the current auto-shutdown timeout for the range, including the
-        server-wide default, per-range override, and resolved effective value.
-
-
-        Use rangeID to specify which range to query. If rangeID is not provided,
-        the user's default range will be used. Use userID to query a different
-        user's range (admins only).
-      operationId: getAutoShutdown
-      tags:
-        - Range Management
-      parameters:
-        - name: rangeID
-          in: query
-          description: >
-            The range ID to query. If not provided, uses the user's default
-            range.
-          required: false
-          schema:
-            $ref: '#/components/schemas/rangeID'
-        - name: userID
-          in: query
-          description: >
-            The userID to query.
-
-            Defaults to the current user (admins can query other users' ranges)
-          required: false
-          schema:
-            $ref: '#/components/schemas/userID'
-      responses:
-        '200':
-          description: successfully retrieved auto-shutdown configuration
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  autoShutdownTimeout:
-                    type: object
-                    properties:
-                      serverDefault:
-                        type: string
-                        example: "4h"
-                      rangeOverride:
-                        type: string
-                        example: ""
-                      effective:
-                        type: string
-                        example: "4h"
-        '500':
-          description: error retrieving auto-shutdown configuration
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    put:
-      summary: Update the auto-shutdown configuration for a range
-      deprecated: false
-      description: >
-        Updates the per-range auto-shutdown timeout. Set to a Go duration string
-        (e.g. "4h", "30m") to override the server default, "0" to explicitly
-        disable for this range, or "" to clear the override and fall back to the
-        server default.
-
-
-        Use rangeID to specify which range to update. If rangeID is not provided,
-        the user's default range will be used. Use userID to update a different
-        user's range (admins only).
-      operationId: updateAutoShutdown
-      tags:
-        - Range Management
-      parameters:
-        - name: rangeID
-          in: query
-          description: >
-            The range ID to update. If not provided, uses the user's default
-            range.
-          required: false
-          schema:
-            $ref: '#/components/schemas/rangeID'
-        - name: userID
-          in: query
-          description: >
-            The userID to update.
-
-            Defaults to the current user (admins can update other users' ranges)
-          required: false
-          schema:
-            $ref: '#/components/schemas/userID'
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                autoShutdownTimeout:
-                  type: string
-                  example: "4h"
-      responses:
-        '200':
-          description: successfully updated auto-shutdown configuration
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  autoShutdownTimeout:
-                    type: object
-                    properties:
-                      serverDefault:
-                        type: string
-                        example: "4h"
-                      rangeOverride:
-                        type: string
-                        example: "2h"
-                      effective:
-                        type: string
-                        example: "2h"
-        '400':
-          description: bad input parameter
-          headers: {}
-        '500':
-          description: error updating auto-shutdown configuration
           headers: {}
       security:
         - JWT: []
@@ -3899,6 +3598,12 @@ paths:
       tags:
         - Anti-Sandbox Management
       parameters:
+        - name: rangeID
+          in: query
+          description: The rangeID to use for this request
+          required: false
+          schema:
+            type: string
         - name: userID
           in: query
           description: >
@@ -3938,6 +3643,13 @@ paths:
                     - Google
                     - IBM
                   description: The computer vendor to use for all hardware values
+                product:
+                  type: string
+                  description: >-
+                    Override the auto-detected hardware product string used for
+                    SMBIOS spoofing. When empty, a default is chosen based on
+                    vendor
+                  example: Latitude 7420
                 dropFiles:
                   type: boolean
                   description: >-
@@ -3949,15 +3661,14 @@ paths:
                   type: boolean
                   description: >-
                     If true, populate Chromium-based browsers (Edge, Chrome)
-                    with realistic history, bookmarks, autofill, encrypted
-                    saved credentials, encrypted cookies, and TypedURLs
-                    registry entries. Any existing profile data is
-                    overwritten. Sets the machine-level
-                    ApplicationBoundEncryptionEnabled=0 policy so v10 DPAPI
-                    encryption is used; not intended for VMs where users
-                    will sign in with a real browser account to sync data
+                    with realistic history, bookmarks, autofill, encrypted saved
+                    credentials, encrypted cookies, and TypedURLs registry
+                    entries. Any existing profile data is overwritten. Sets the
+                    machine-level ApplicationBoundEncryptionEnabled=0 policy so
+                    v10 DPAPI encryption is used; not intended for VMs where
+                    users will sign in with a real browser account to sync data
                     (default false).
-                  example: true
+                  default: false
                 processorName:
                   type: string
                   description: The ProcessorNameString value to use for the VMs
@@ -4593,6 +4304,8 @@ paths:
                     enum:
                       - success
                       - failure
+                      - running
+                      - aborted
                     example: success
                   start:
                     type: string
@@ -4941,6 +4654,13 @@ paths:
           required: false
           schema:
             $ref: '#/components/schemas/userID'
+        - name: rangeID
+          in: query
+          description: pass an optional rangeID to specify the range to act on
+          required: false
+          example: JD
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -5951,6 +5671,394 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /user/quotas:
+    get:
+      summary: Get quota status for the current user
+      deprecated: false
+      description: >
+        Returns the effective quota limits and current resource usage for the
+        authenticated user.
+
+        Limits are resolved using the priority chain: user quota > group default
+        > system default > unlimited (0).
+      operationId: getQuotaStatus
+      tags:
+        - Quota Management
+      parameters:
+        - name: userID
+          in: query
+          description: >-
+            pass an optional userID to view quotas for a specific user (admin
+            only)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: quota status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limitRAM:
+                    type: integer
+                    description: Effective RAM limit in GB (0 = unlimited)
+                    example: 64
+                  limitCPU:
+                    type: integer
+                    description: Effective CPU core limit (0 = unlimited)
+                    example: 16
+                  limitVMs:
+                    type: integer
+                    description: Effective VM count limit (0 = unlimited)
+                    example: 10
+                  limitRanges:
+                    type: integer
+                    description: Effective range count limit (0 = unlimited)
+                    example: 3
+                  usedRAM:
+                    type: integer
+                    description: Current RAM usage in GB
+                    example: 24
+                  usedCPU:
+                    type: integer
+                    description: Current CPU core usage
+                    example: 12
+                  usedVMs:
+                    type: integer
+                    description: Current VM count
+                    example: 5
+                  usedRanges:
+                    type: integer
+                    description: Current range count
+                    example: 2
+          headers: {}
+      security: []
+    put:
+      summary: Set quotas for one or more users (admin only)
+      deprecated: false
+      description: >
+        Set resource quota limits for one or more users. Only provided fields
+        are updated.
+
+        Set a value to 0 to remove a limit. Negative values are rejected.
+
+        Supports bulk operations via the userIDs array.
+      operationId: setUserQuota
+      tags:
+        - Quota Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - userIDs
+              properties:
+                userIDs:
+                  type: array
+                  items:
+                    type: string
+                  description: One or more userIDs to set quotas for
+                  example:
+                    - JD
+                    - AB
+                quotaRAM:
+                  type: integer
+                  description: RAM limit in GB (0 = remove limit)
+                  example: 64
+                quotaCPU:
+                  type: integer
+                  description: CPU core limit (0 = remove limit)
+                  example: 16
+                quotaVMs:
+                  type: integer
+                  description: VM count limit (0 = remove limit)
+                  example: 10
+                quotaRanges:
+                  type: integer
+                  description: Range count limit (0 = remove limit)
+                  example: 3
+      responses:
+        '200':
+          description: quotas updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Quotas updated for 2 user(s)
+          headers: {}
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: quota values must be >= 0
+          headers: {}
+        '403':
+          description: Unauthorized - not an admin
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not an admin and cannot set user quotas
+          headers: {}
+      security: []
+  /user/quotas/all:
+    get:
+      summary: Get quota status for all users (admin only)
+      deprecated: false
+      description: >
+        Returns effective quota limits, current usage, and quota source for all
+        users.
+
+        Source indicates where the effective quota comes from: U (user), G
+        (group default), S (system default).
+      operationId: getAllQuotaStatus
+      tags:
+        - Quota Management
+      parameters: []
+      responses:
+        '200':
+          description: all users' quota status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    userID:
+                      type: string
+                      example: JD
+                    name:
+                      type: string
+                      example: John Doe
+                    limitRAM:
+                      type: integer
+                      example: 64
+                    limitCPU:
+                      type: integer
+                      example: 16
+                    limitVMs:
+                      type: integer
+                      example: 10
+                    limitRanges:
+                      type: integer
+                      example: 3
+                    usedRAM:
+                      type: integer
+                      example: 24
+                    usedCPU:
+                      type: integer
+                      example: 12
+                    usedVMs:
+                      type: integer
+                      example: 5
+                    usedRanges:
+                      type: integer
+                      example: 2
+                    sourceRAM:
+                      type: string
+                      description: >-
+                        Source of RAM limit: U (user), G (group), S (system),
+                        empty (unlimited)
+                      example: U
+                    sourceCPU:
+                      type: string
+                      example: G
+                    sourceVMs:
+                      type: string
+                      example: G
+                    sourceRanges:
+                      type: string
+                      example: S
+          headers: {}
+        '403':
+          description: Unauthorized - not an admin
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not an admin and cannot view all quotas
+          headers: {}
+      security: []
+  /user/quotas/defaults:
+    get:
+      summary: Get system-wide default quotas (admin only)
+      deprecated: false
+      description: >
+        Returns the system-wide default quota values configured in
+        /opt/ludus/config.yml.
+
+        These are the fallback values when neither user nor group quotas are
+        set.
+      operationId: getQuotaDefaults
+      tags:
+        - Quota Management
+      parameters: []
+      responses:
+        '200':
+          description: system default quotas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limitRAM:
+                    type: integer
+                    example: 64
+                  limitCPU:
+                    type: integer
+                    example: 16
+                  limitVMs:
+                    type: integer
+                    example: 10
+                  limitRanges:
+                    type: integer
+                    example: 3
+          headers: {}
+      security: []
+  /groups/quotas:
+    get:
+      summary: Get default quotas for all groups (admin only)
+      deprecated: false
+      description: |
+        Returns the default quota values and member count for all groups.
+      operationId: getGroupQuotas
+      tags:
+        - Quota Management
+      parameters: []
+      responses:
+        '200':
+          description: group quota defaults
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      example: students
+                    defaultQuotaRAM:
+                      type: integer
+                      example: 32
+                    defaultQuotaCPU:
+                      type: integer
+                      example: 8
+                    defaultQuotaVMs:
+                      type: integer
+                      example: 5
+                    defaultQuotaRanges:
+                      type: integer
+                      example: 2
+                    memberCount:
+                      type: integer
+                      example: 30
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Set default quotas for one or more groups (admin only)
+      deprecated: false
+      description: >
+        Set default resource quota limits for one or more groups. These apply to
+        members
+
+        who don't have explicit per-user quotas. Only provided fields are
+        updated.
+
+        Set a value to 0 to remove a limit. Supports bulk operations via the
+        groupNames array.
+      operationId: setGroupQuota
+      tags:
+        - Quota Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - groupNames
+              properties:
+                groupNames:
+                  type: array
+                  items:
+                    type: string
+                  description: One or more group names to set quotas for
+                  example:
+                    - students
+                    - red-team
+                defaultQuotaRAM:
+                  type: integer
+                  description: Default RAM limit in GB (0 = remove limit)
+                  example: 32
+                defaultQuotaCPU:
+                  type: integer
+                  description: Default CPU core limit (0 = remove limit)
+                  example: 8
+                defaultQuotaVMs:
+                  type: integer
+                  description: Default VM count limit (0 = remove limit)
+                  example: 5
+                defaultQuotaRanges:
+                  type: integer
+                  description: Default range count limit (0 = remove limit)
+                  example: 2
+      responses:
+        '200':
+          description: group quotas updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Quotas updated for 2 group(s)
+          headers: {}
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: quota values must be >= 0
+          headers: {}
+        '403':
+          description: Unauthorized - not an admin
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not an admin and cannot set group quotas
+          headers: {}
+      security: []
 components:
   schemas:
     ErrorInfo:
@@ -6037,6 +6145,8 @@ components:
           enum:
             - success
             - failure
+            - running
+            - aborted
           example: success
         start:
           type: string
@@ -6070,6 +6180,8 @@ components:
           enum:
             - success
             - failure
+            - running
+            - aborted
           example: success
         start:
           type: string
@@ -6266,6 +6378,12 @@ components:
           format: int32
           description: Amount of RAM allocated to the VM in GB
           example: 8
+        osVersion:
+          type: string
+        licenseStatus:
+          type: string
+        lastUpdate:
+          type: string
     Domain:
       type: string
       pattern: >-
