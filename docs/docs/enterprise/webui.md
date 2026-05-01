@@ -116,7 +116,7 @@ User preferences (theme, telemetry) and admin-only Enterprise toggles.
 |---|---|---|
 | KMS server | Admin | [Windows Licensing (KMS)](kms) |
 | Anti-Sandbox | Admin (Enterprise add-on) | [Anti-Sandbox](anti-sandbox) |
-| License | Admin | [Pro/Enterprise Overview](enterprise) |
+| License | Admin | [Pro/Enterprise Overview](./enterprise.md) |
 | Quota defaults | Admin | [Quotas](quotas) |
 | Telemetry | Everyone | [Telemetry](#telemetry) |
 | Theme | Everyone | — |
