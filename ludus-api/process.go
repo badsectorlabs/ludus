@@ -10,44 +10,48 @@ import (
 	"strings"
 )
 
-func findAnsiblePidForUser(username string) (string, error) {
-	// Get the list of all ansible processes
+// findAnsiblePidForRange returns the PID of the ansible process deploying the
+// given range, identified by the LUDUS_RANGE_ID environment variable that
+// ansible.go injects into every range-management ansible run.
+func findAnsiblePidForRange(rangeID string) (string, error) {
 	out, err := exec.Command("bash", "-c", "ps aux | egrep 'ansibl[e]'").Output()
 	if err != nil {
 		if err.Error() == "exit status 1" {
-			// egrep failed, no ansible running
 			return "", errors.New("no ansible processes are running")
 		}
 		logger.Error(fmt.Sprintf("Error executing command: %v\n", err))
 		return "", err
 	}
 
+	target := fmt.Sprintf("LUDUS_RANGE_ID=%s", rangeID)
 	processes := strings.Split(string(out), "\n")
 
 	for _, process := range processes {
-		if strings.Contains(process, "ansible") {
-			fields := strings.Fields(process)
-			if len(fields) > 1 {
-				pid := fields[1]
+		if !strings.Contains(process, "ansible") {
+			continue
+		}
+		fields := strings.Fields(process)
+		if len(fields) < 2 {
+			continue
+		}
+		pid := fields[1]
 
-				// Get the environment variables for the process
-				envOut, err := exec.Command("bash", "-c", fmt.Sprintf("cat /proc/%s/environ", pid)).Output()
-				if err != nil {
-					logger.Debug(fmt.Sprintf("Error executing command: cat /proc/%s/environ: %v\n", pid, err))
-					continue
-				}
+		envBytes, err := os.ReadFile(fmt.Sprintf("/proc/%s/environ", pid))
+		if err != nil {
+			logger.Debug(fmt.Sprintf("Error reading /proc/%s/environ: %v\n", pid, err))
+			continue
+		}
 
-				envVars := strings.Split(string(envOut), "\\0")
-				for _, envVar := range envVars {
-					if strings.Contains(envVar, fmt.Sprintf("%s@pam", username)) {
-						logger.Debug(fmt.Sprintf("Process %s has '%s@pam' in its environment variables\n", pid, username))
-						return pid, nil
-					}
-				}
+		// /proc/PID/environ separates entries with NUL bytes; an exact match
+		// on the entry avoids LUDUS_RANGE_ID=AB matching LUDUS_RANGE_ID=ABC.
+		for _, envVar := range strings.Split(string(envBytes), "\x00") {
+			if envVar == target {
+				logger.Debug(fmt.Sprintf("Process %s is deploying range %s\n", pid, rangeID))
+				return pid, nil
 			}
 		}
 	}
-	return "", fmt.Errorf("no ansible process found for user %s", username)
+	return "", fmt.Errorf("no ansible process found for range %s", rangeID)
 }
 
 func RunWithOutput(command string) (string, error) {

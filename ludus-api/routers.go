@@ -103,6 +103,11 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 
 	InitDb()
 	LudusVersion = ludusVersion
+	if os.Geteuid() != 0 {
+		if err := startupSyncTemplatesCollection(app); err != nil {
+			logger.Error(fmt.Sprintf("Error syncing templates collection on startup: %v", err))
+		}
+	}
 
 	// Setup NAT VNet for cluster mode, this function checks if we are in cluster mode first
 	setupNATVNet()
@@ -111,7 +116,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	webUIAvailable := checkEmbeddedWebUI()
 
 	// Setup a reverse proxy for the admin API
-	adminURL, _ := url.Parse("https://127.0.0.1:8081")
+	adminURL, _ := url.Parse(fmt.Sprintf("https://127.0.0.1:%d", ServerConfiguration.AdminPort))
 	adminProxy = httputil.NewSingleHostReverseProxy(adminURL)
 	customTransport := &http.Transport{
 		TLSClientConfig: &tls.Config{
@@ -428,6 +433,31 @@ var routes = PocketBaseRoutes{
 		http.MethodGet,
 		"/templates/logs",
 		GetPackerLogs,
+	},
+
+	{
+		"GetRangeLogHistory",
+		http.MethodGet,
+		"/range/logs/history",
+		GetRangeLogHistory,
+	},
+	{
+		"GetRangeLogHistoryByID",
+		http.MethodGet,
+		"/range/logs/history/{logID}",
+		GetRangeLogHistoryByID,
+	},
+	{
+		"GetTemplateLogHistory",
+		http.MethodGet,
+		"/templates/logs/history",
+		GetTemplateLogHistory,
+	},
+	{
+		"GetTemplateLogHistoryByID",
+		http.MethodGet,
+		"/templates/logs/history/{logID}",
+		GetTemplateLogHistoryByID,
 	},
 
 	{
@@ -945,4 +975,5 @@ var routes = PocketBaseRoutes{
 		"/ansible/role/scope",
 		MoveRoleScope,
 	},
+
 }

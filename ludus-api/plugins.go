@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"ludusapi/scheduler"
 	"os"
 	"path/filepath"
 	"plugin"
@@ -35,6 +36,7 @@ type Server struct {
 	LicenseName      string
 	LicenseExpiry    *time.Time
 	Logger           *slog.Logger
+	Scheduler        *scheduler.Scheduler
 }
 
 func (s *Server) LoadPlugin(path string) error {

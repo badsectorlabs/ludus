@@ -5,13 +5,16 @@ import (
 )
 
 type VmObject struct {
-	ID          int32  `json:"ID"`
-	ProxmoxID   int32  `json:"proxmoxID"`
-	RangeNumber int32  `json:"rangeNumber"`
-	Name        string `json:"name"`
-	PoweredOn   bool   `json:"poweredOn"`
-	Ip          string `json:"ip,omitempty"`
-	IsRouter    bool   `json:"isRouter"`
+	ID            int32  `json:"ID"`
+	ProxmoxID     int32  `json:"proxmoxID"`
+	RangeNumber   int32  `json:"rangeNumber"`
+	Name          string `json:"name"`
+	PoweredOn     bool   `json:"poweredOn"`
+	Ip            string `json:"ip,omitempty"`
+	IsRouter      bool   `json:"isRouter"`
+	OsVersion     string `json:"osVersion,omitempty"`
+	LicenseStatus string `json:"licenseStatus,omitempty"`
+	LastUpdate    string `json:"lastUpdate,omitempty"`
 }
 
 type AnsibleItem struct {
@@ -44,9 +47,50 @@ type UserObject struct {
 	DateLastActive  time.Time `json:"dateLastActive"`
 	IsAdmin         bool      `json:"isAdmin"`
 	ProxmoxUsername string    `json:"proxmoxUsername"`
+	QuotaRAM        int       `json:"quotaRAM,omitempty"`
+	QuotaCPU        int       `json:"quotaCPU,omitempty"`
+	QuotaVMs        int       `json:"quotaVMs,omitempty"`
+	QuotaRanges     int       `json:"quotaRanges,omitempty"`
 }
 
 type RangeAccessObject struct {
 	TargetUserID  string   `json:"targetUserID"`
 	SourceUserIDs []string `json:"sourceUserIDs"`
+}
+
+type QuotaStatusObject struct {
+	LimitRAM    int `json:"limitRAM"`
+	LimitCPU    int `json:"limitCPU"`
+	LimitVMs    int `json:"limitVMs"`
+	LimitRanges int `json:"limitRanges"`
+	UsedRAM     int `json:"usedRAM"`
+	UsedCPU     int `json:"usedCPU"`
+	UsedVMs     int `json:"usedVMs"`
+	UsedRanges  int `json:"usedRanges"`
+}
+
+type AllQuotaStatusObject struct {
+	UserID       string `json:"userID"`
+	Name         string `json:"name"`
+	LimitRAM     int    `json:"limitRAM"`
+	LimitCPU     int    `json:"limitCPU"`
+	LimitVMs     int    `json:"limitVMs"`
+	LimitRanges  int    `json:"limitRanges"`
+	UsedRAM      int    `json:"usedRAM"`
+	UsedCPU      int    `json:"usedCPU"`
+	UsedVMs      int    `json:"usedVMs"`
+	UsedRanges   int    `json:"usedRanges"`
+	SourceRAM    string `json:"sourceRAM"`
+	SourceCPU    string `json:"sourceCPU"`
+	SourceVMs    string `json:"sourceVMs"`
+	SourceRanges string `json:"sourceRanges"`
+}
+
+type GroupQuotaObject struct {
+	Name               string `json:"name"`
+	DefaultQuotaRAM    int    `json:"defaultQuotaRAM"`
+	DefaultQuotaCPU    int    `json:"defaultQuotaCPU"`
+	DefaultQuotaVMs    int    `json:"defaultQuotaVMs"`
+	DefaultQuotaRanges int    `json:"defaultQuotaRanges"`
+	MemberCount        int    `json:"memberCount"`
 }

@@ -45,6 +45,10 @@ The Ludus Anti-Sandbox plugin uses custom compiled QEMU and OVMF packages that h
   * Can configure custom processor speed
   * Can configure custom processor identifier
 
+* Optionally populates browser profile data (with `--browser-data`):
+  * Adds history, bookmarks, Top Sites, saved passwords, cookies, autofill entries, and address profiles to Microsoft Edge and Google Chrome
+  * Adds `TypedURLs` registry entries
+
 ## Comparison
 
 This is a comparison of the Ludus Anti-Sandbox plugin and the standard Windows 11 template.
@@ -127,7 +131,7 @@ ludus --url https://127.0.0.1:8081 antisandbox enable -n 179
 
 You can also specify `--drop-files` to populate the autologon user's desktop and download folders with random files (PPTX, DOC, XLSX, and PDF). The `--org` and `--owner` flags can be used to specify the organization and owner of the Machine set in the registry.
 
-If there are any errors during the enable process, you can check the logs with `ludus range logs` or `ludus range errors`.
+If there are any errors during the enable process, check the logs with `ludus range logs` or `ludus range errors`.
 
 :::note
 
@@ -145,6 +149,36 @@ options kvm report_ignored_msrs=0
 ```
 
 :::
+
+### Browser data
+
+Use `--browser-data` to populate Microsoft Edge and Google Chrome on the VM with profile data. This adds browsing history, bookmarks, Top Sites, saved passwords, cookies, autofill entries, address profiles, and `TypedURLs` registry entries.
+
+Edge is pre-installed on Windows 11, so it will be populated by default. To also populate Chrome, add `googlechrome` to the `chocolatey_packages` list in the range config so it is installed before the range is deployed.
+
+```shell-session
+#terminal-command-local
+ludus antisandbox enable -n 179 --browser-data
+[INFO]  Enabling Anti-Sandbox settings for VM(s), this can take some time. Please wait.
+[INFO]  Successfully enabled anti-sandbox for VM(s): 179
+```
+
+The seed data is generated offline with the [Faker](https://github.com/joke2k/faker) library and contains no real user data.
+
+:::note
+
+`--browser-data` sets a machine-wide `ApplicationBoundEncryptionEnabled=0` policy for Edge and Chrome. This disables Chrome's App-Bound Encryption (introduced in Chrome 127, July 2024) and forces the browser to fall back to v10 DPAPI encryption for cookies and saved passwords, so the seeded data can be decrypted by the browser. Do not use this flag on VMs where users will sign in with a real Microsoft or Google account.
+
+:::
+
+After the command completes, log in as the autologon user and open Edge to verify:
+
+* `edge://history`
+* `edge://favorites`
+* `edge://settings/autofill/passwords`
+* `edge://settings/privacy/cookies/AllCookies`
+* `edge://settings/autofill/personalInfo`
+* The new tab page for Top Sites
 
 ## Example Anti-Sandbox Configuration
 

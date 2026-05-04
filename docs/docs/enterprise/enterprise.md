@@ -27,6 +27,8 @@ While Ludus is free and open source, Ludus Pro or Enterprise are paid licenses t
 | Inbound WireGuard Server per range            | ❌         | ❌                 | ✅                 |
 | CTFd integration                              | ❌         | ❌                 | ✅                 |
 | [Windows Licensing](./kms.md)                 | ❌         | ❌                 | ✅                 |
+| [Quotas](./quotas.md)                         | ❌         | ❌                 | ✅                 |
+| [Auto Shutdown](./auto-shutdown.md)           | ❌         | ❌                 | ✅                 |
 | [Anti-Sandbox](./anti-sandbox.md)             | ❌         | ❌                 | 🔌 Add-on          |
 | Arbitrary credential support                  | ❌         | 🚧 In development | 🚧 In development   |
 

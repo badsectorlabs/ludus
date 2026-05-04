@@ -101,10 +101,13 @@ proxmox_netmask: 255.255.255.0    # The netmask for the proxmox_interface
 proxmox_vm_storage_pool: local    # The name of the VM storage pool - can be changed after install for custom pools
 proxmox_vm_storage_format: qcow2  # The VM storage format - can be changed after install (i.e. raw)
 proxmox_iso_storage_pool: local   # The storage pool used to store ISOs as they are downloaded for templates - can be changed after install
+# boot_disk: /dev/sda             # Optional: override the auto-detected boot disk used for grub-pc recovery (e.g. /dev/nvme0n1 on EC2/NVMe hosts)
 ludus_nat_interface: ludus        # The name of the interface Ludus will create on the proxmox host that Ludus will use as the "WAN" for range routers
 prevent_user_ansible_add: false   # Set this to true to prevent non-admin users from adding Ansible roles or collections to the server
 license_key: community            # Set this to your license key if you have one, or leave as community for community edition
 expose_admin_port: false          # Set this to true to expose the admin API globally
+port: 8080                        # The TCP port the web UI and user-facing API listen on
+admin_port: 8081                  # The TCP port the admin API listens on (localhost only by default, all interfaces if expose_admin_port is true)
 reserved_range_numbers:           # An array of range numbers that should not be used by users (see networking docs for more info), example: [1,2,3,4]
 data_directory: /opt/ludus/db     # The directory to store the ludus database and some ludus data
 database_encryption_key: abc12... # The key used to encrypt data in the database. DO NOT CHANGE AFTER INSTALL
@@ -112,4 +115,5 @@ wireguard_port: 51820             # The port WireGuard listens on
 cluster_mode: false               # Override cluster detection and for cluster mode on (true) or off (false)
 sdn_zone: ludus                   # The SDN Zone name Ludus will use for the `ludusnat` VNet and range VNets in cluster mode
 vxlan_tag_base: 0                 # The number that will be added to the VXLAN tag used for each range's VNet (vxlan_tag_base + range_number = Range VNet VXLAN tag)
+max_log_history: 100              # The number of log entries to keep per range and user (user logs for template builds)
 ```

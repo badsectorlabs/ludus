@@ -92,6 +92,18 @@ func DeployRange(e *core.RequestEvent) error {
 		}
 	}
 
+	// Check quota before deploying
+	e.App.ExpandRecord(user.Record, []string{"ranges", "groups"}, nil)
+	if server.HasEntitlement("ENTERPRISE_PLUGIN") {
+		violations, err := CheckDeployQuota(e.App, user, usersRange.RangeId())
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error checking quota: %s", err.Error()))
+			// Log error but don't block — quota check is best-effort if there's an internal error
+		} else if len(violations) > 0 {
+			return JSONError(e, http.StatusForbidden, FormatQuotaViolations(violations))
+		}
+	}
+
 	// Set range state to "DEPLOYING"
 	usersRange.SetRangeState(LudusRangeStateDeploying)
 	usersRange.SetLastDeployment(types.NowDateTime())
@@ -179,7 +191,7 @@ func deleteRangeResources(targetRange *models.Range, force bool, e *core.Request
 func DeleteRange(e *core.RequestEvent) error {
 
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus range rm command with --url https://127.0.0.1:8081")
+		return JSONError(e, http.StatusForbidden, adminEndpointError("ludus range rm"))
 	}
 
 	// Check if force parameter is provided
@@ -316,8 +328,11 @@ func GetConfigExample(e *core.RequestEvent) error {
 
 // GetEtcHosts - retrieves an /etc/hosts file for the range
 func GetEtcHosts(e *core.RequestEvent) error {
-	user := e.Get("user").(*models.User)
-	etcHosts, err := GetFileContents(fmt.Sprintf("%s/users/%s/etc-hosts", ludusInstallPath, user.ProxmoxUsername()))
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
+	etcHosts, err := GetFileContents(fmt.Sprintf("%s/ranges/%s/etc-hosts", ludusInstallPath, targetRange.RangeId()))
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
@@ -326,17 +341,17 @@ func GetEtcHosts(e *core.RequestEvent) error {
 
 // GetRDP - retrieves RDP files as a zip for the range
 func GetRDP(e *core.RequestEvent) error {
-	user := e.Get("user").(*models.User)
-	playbook := []string{ludusInstallPath + "/ansible/range-management/ludus.yml"}
-	extraVars := map[string]interface{}{
-		"username": user.ProxmoxUsername(),
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
 	}
-	output, err := server.RunAnsiblePlaybookWithVariables(e, playbook, []string{}, extraVars, "generate-rdp", false, "")
+	playbook := []string{ludusInstallPath + "/ansible/range-management/ludus.yml"}
+	output, err := server.RunAnsiblePlaybookWithVariables(e, playbook, []string{}, nil, "generate-rdp", false, "")
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, output)
 	}
 
-	filePath := fmt.Sprintf("%s/users/%s/rdp.zip", ludusInstallPath, user.ProxmoxUsername())
+	filePath := fmt.Sprintf("%s/ranges/%s/rdp.zip", ludusInstallPath, targetRange.RangeId())
 	fileContents, err := os.ReadFile(filePath)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
@@ -402,10 +417,16 @@ func ListRange(e *core.RequestEvent) error {
 		AllowedDomains: usersRange.AllowedDomains(),
 	}
 
+	details := e.Request.URL.Query().Get("details") == "true"
+	var vmDetails map[int]VMDetails
+	if details {
+		vmDetails = fetchVMDetails(e, usersRange.RangeId(), proxmoxClient)
+	}
+
 	for _, vm := range rangeVMs {
 		vmRecord := &models.VMs{}
 		vmRecord.SetProxyRecord(vm)
-		response.VMs = append(response.VMs, dto.ListRangeResponseVMsItem{
+		item := dto.ListRangeResponseVMsItem{
 			ProxmoxID:   int32(vmRecord.ProxmoxId()),
 			RangeNumber: int32(usersRange.RangeNumber()),
 			Name:        vmRecord.Name(),
@@ -414,7 +435,15 @@ func ListRange(e *core.RequestEvent) error {
 			IsRouter:    vmRecord.IsRouter(),
 			CPU:         int32(vmRecord.Cpu()),
 			RAM:         int32(vmRecord.Ram()),
-		})
+		}
+		if details {
+			if d, ok := vmDetails[int(vmRecord.ProxmoxId())]; ok {
+				item.OsVersion = d.OsVersion
+				item.LicenseStatus = d.LicenseStatus
+				item.LastUpdate = d.LastUpdate
+			}
+		}
+		response.VMs = append(response.VMs, item)
 	}
 
 	return e.JSON(http.StatusOK, response)
@@ -454,6 +483,8 @@ func ListAllRanges(e *core.RequestEvent) error {
 		return int(a.RangeNumber() - b.RangeNumber())
 	})
 
+	allDetails := e.Request.URL.Query().Get("details") == "true"
+
 	// Update VM data for all ranges
 	for _, rangeRecord := range ranges {
 		err = updateRangeVMData(e, rangeRecord, proxmoxClient)
@@ -461,6 +492,12 @@ func ListAllRanges(e *core.RequestEvent) error {
 			logger.Error(fmt.Sprintf("Error updating VM data for range %s: %s", rangeRecord.RangeId(), err.Error()))
 			continue
 		}
+
+		var vmDetails map[int]VMDetails
+		if allDetails {
+			vmDetails = fetchVMDetails(e, rangeRecord.RangeId(), proxmoxClient)
+		}
+
 		responseItem := dto.ListAllRangeResponseItem{
 			VMs:            make([]dto.ListAllRangeResponseItemVMsItem, 0),
 			RangeID:        rangeRecord.RangeId(),
@@ -485,9 +522,7 @@ func ListAllRanges(e *core.RequestEvent) error {
 			vmRecordObj := &models.VM{}
 			vmRecordObj.SetProxyRecord(vmRecord)
 
-			// Use rangeRecord from outer loop rather than expanding VM's range relation
-			// for efficiency. We already queried VMs by range ID, so they must belong to this range.
-			responseItem.VMs = append(responseItem.VMs, dto.ListAllRangeResponseItemVMsItem{
+			item := dto.ListAllRangeResponseItemVMsItem{
 				Ip:          vmRecordObj.Ip(),
 				IsRouter:    vmRecordObj.IsRouter(),
 				ProxmoxID:   int32(vmRecordObj.ProxmoxId()),
@@ -496,7 +531,18 @@ func ListAllRanges(e *core.RequestEvent) error {
 				PoweredOn:   vmRecordObj.PoweredOn(),
 				CPU:         int32(vmRecordObj.Cpu()),
 				RAM:         int32(vmRecordObj.Ram()),
-			})
+			}
+			if allDetails {
+				if d, ok := vmDetails[int(vmRecordObj.ProxmoxId())]; ok {
+					item.OsVersion = d.OsVersion
+					item.LicenseStatus = d.LicenseStatus
+					item.LastUpdate = d.LastUpdate
+				}
+			}
+
+			// Use rangeRecord from outer loop rather than expanding VM's range relation
+			// for efficiency. We already queried VMs by range ID, so they must belong to this range.
+			responseItem.VMs = append(responseItem.VMs, item)
 		}
 		response = append(response, responseItem)
 	}
@@ -576,6 +622,18 @@ func PutConfig(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, "Unable to save the range config")
 	}
 
+	// Check if the new config would exceed quotas (warning only, don't block)
+	if server.HasEntitlement("ENTERPRISE_PLUGIN") {
+		user := e.Get("user").(*models.User)
+		e.App.ExpandRecord(user.Record, []string{"ranges", "groups"}, nil)
+		violations, quotaErr := CheckDeployQuota(e.App, user, targetRange.RangeId())
+		if quotaErr != nil {
+			logger.Debug(fmt.Sprintf("Quota check warning failed: %s", quotaErr.Error()))
+		} else if len(violations) > 0 {
+			return JSONResult(e, http.StatusOK, fmt.Sprintf("Your range config has been successfully updated.\nWarning: deploying this config would exceed your quota: %s\nYou may need to free resources from other ranges before deploying.", FormatQuotaViolations(violations)))
+		}
+	}
+
 	// File saved successfully. Return proper result
 	return JSONResult(e, http.StatusOK, "Your range config has been successfully updated.")
 }
@@ -643,15 +701,16 @@ func GetAnsibleTagsForDeployment(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, response)
 }
 
-// Find the ansible process for this user and kill it
+// AbortAnsible finds the ansible process deploying the requested range and
+// terminates it. The process is identified by LUDUS_RANGE_ID, so admins can
+// abort any range with `-r` regardless of which user owns the deploy.
 func AbortAnsible(e *core.RequestEvent) error {
 	targetRange, err := GetRange(e)
 	if err != nil {
 		return err
 	}
-	targetUser := e.Get("user").(*models.User)
 
-	ansiblePidString, err := findAnsiblePidForUser(targetUser.ProxmoxUsername())
+	ansiblePidString, err := findAnsiblePidForRange(targetRange.RangeId())
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
@@ -668,6 +727,8 @@ func AbortAnsible(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
+	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId())
+	finalizeRunningRangeLogHistory(e.App, targetRange.Id, "aborted", ansibleLogPath, time.Now())
 
 	return JSONResult(e, http.StatusOK, "Ansible process aborted")
 }
@@ -677,7 +738,7 @@ func CreateRange(e *core.RequestEvent) error {
 
 	// Make sure this is the admin server (root) as we need to create a vmbr interface for the range
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus range create command with --url https://127.0.0.1:8081")
+		return JSONError(e, http.StatusForbidden, adminEndpointError("ludus range create"))
 	}
 
 	var payload dto.CreateRangeRequest
@@ -690,6 +751,26 @@ func CreateRange(e *core.RequestEvent) error {
 		_, err := e.App.FindFirstRecordByData("users", "userID", userID)
 		if err != nil {
 			return e.JSON(http.StatusInternalServerError, dto.CreateRangeResponseError{Errors: []dto.CreateRangeResponseErrorItem{{UserID: userID, Error: fmt.Sprintf("Error finding user: %v", err)}}})
+		}
+	}
+
+	// Check range quota for each user being assigned
+	if server.HasEntitlement("ENTERPRISE_PLUGIN") {
+		for _, uid := range payload.UserID {
+			userRecord, err := e.App.FindFirstRecordByData("users", "userID", uid)
+			if err != nil {
+				continue // Already validated above
+			}
+			userObj := &models.User{}
+			userObj.SetProxyRecord(userRecord)
+			e.App.ExpandRecord(userObj.Record, []string{"ranges", "groups"}, nil)
+
+			rangeViolations, quotaErr := CheckRangeQuota(e.App, userObj)
+			if quotaErr != nil {
+				logger.Error(fmt.Sprintf("Error checking range quota for user %s: %s", uid, quotaErr.Error()))
+			} else if len(rangeViolations) > 0 {
+				return JSONError(e, http.StatusForbidden, fmt.Sprintf("User %s: %s", uid, FormatQuotaViolations(rangeViolations)))
+			}
 		}
 	}
 

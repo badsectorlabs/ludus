@@ -30,6 +30,9 @@ var (
 	purpose         string
 	userIDsForRange string
 	rangeNumber     int
+	history         bool
+	historyID       string
+	rangeDetails    bool
 )
 
 var rangeCmd = &cobra.Command{
@@ -53,7 +56,7 @@ func getRangeStateColor(data RangeObject) tablewriter.Colors {
 	}
 }
 
-func formatRangeResponse(data RangeObject, withVMs bool) {
+func formatRangeResponse(data RangeObject, withVMs bool, withDetails bool) {
 	// Create table
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetAlignment(tablewriter.ALIGN_CENTER)
@@ -83,8 +86,16 @@ func formatRangeResponse(data RangeObject, withVMs bool) {
 
 	if withVMs {
 		vmTable := tablewriter.NewWriter(os.Stdout)
-		vmTable.SetColumnAlignment([]int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT})
-		vmTable.SetHeader([]string{"Proxmox ID", "VM Name", "Power", "IP"})
+		vmTable.SetAutoWrapText(false)
+
+		headers := []string{"Proxmox ID", "VM Name", "Power", "IP"}
+		alignments := []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT}
+		if withDetails {
+			headers = append(headers, "OS Version", "License Status", "Last Update")
+			alignments = append(alignments, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT)
+		}
+		vmTable.SetHeader(headers)
+		vmTable.SetColumnAlignment(alignments)
 
 		for _, vm := range data.VMs {
 			var powerString string
@@ -93,7 +104,11 @@ func formatRangeResponse(data RangeObject, withVMs bool) {
 			} else {
 				powerString = "Off"
 			}
-			vmTable.Append([]string{fmt.Sprint(vm.ProxmoxID), vm.Name, powerString, vm.Ip})
+			row := []string{fmt.Sprint(vm.ProxmoxID), vm.Name, powerString, vm.Ip}
+			if withDetails {
+				row = append(row, vm.OsVersion, vm.LicenseStatus, vm.LastUpdate)
+			}
+			vmTable.Append(row)
 		}
 
 		vmTable.Render()
@@ -112,12 +127,20 @@ var rangeListCmd = &cobra.Command{
 		var success bool
 		all := false
 		if len(args) == 1 && args[0] == "all" {
-			responseJSON, success = rest.GenericGet(client, "/range/all")
+			apiURL := "/range/all"
+			if rangeDetails {
+				apiURL = addQueryParameterToURL(apiURL, "details", "true")
+			}
+			responseJSON, success = rest.GenericGet(client, apiURL)
 			all = true
 		} else if len(args) == 1 {
 			logger.Logger.Fatal("Unknown argument:", args[0])
 		} else {
-			responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/range"))
+			apiURL := buildURLWithRangeAndUserID("/range")
+			if rangeDetails {
+				apiURL = addQueryParameterToURL(apiURL, "details", "true")
+			}
+			responseJSON, success = rest.GenericGet(client, apiURL)
 		}
 		if !success {
 			return
@@ -133,7 +156,7 @@ var rangeListCmd = &cobra.Command{
 				fmt.Printf("%s\n", responseJSON)
 				return
 			}
-			formatRangeResponse(data, true)
+			formatRangeResponse(data, true, rangeDetails)
 		} else {
 			var data []RangeObject
 			err := json.Unmarshal(responseJSON, &data)
@@ -379,6 +402,13 @@ var rangeLogsCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+		if follow && historyID != "" {
+			logger.Logger.Fatal("`ludus range logs -f` only supports following the current deployment. Remove `--id` to use follow mode.")
+		}
+
+		if displayLogHistory(client, "/range/logs/history") {
+			return
+		}
 
 		if follow {
 			var newLogs string
@@ -416,6 +446,8 @@ var rangeLogsCmd = &cobra.Command{
 func setupRangeLogsCmd(command *cobra.Command) {
 	command.Flags().BoolVarP(&follow, "follow", "f", false, "continuously poll the log and print new lines as they are written")
 	command.Flags().IntVarP(&tail, "tail", "t", 0, "number of lines of the log from the end to print")
+	command.Flags().BoolVar(&history, "history", false, "show log history entries")
+	command.Flags().StringVar(&historyID, "id", "", "view a specific historical log entry by ID")
 }
 
 var rangeErrorsCmd = &cobra.Command{
@@ -955,6 +987,7 @@ func init() {
 	setupRangeLogsCmd(rangeLogsCmd)
 	rangeCmd.AddCommand(rangeLogsCmd)
 	rangeCmd.AddCommand(rangeErrorsCmd)
+	rangeListCmd.Flags().BoolVar(&rangeDetails, "details", false, "show additional VM details: OS version, license status (Windows), and last update (Windows)")
 	rangeCmd.AddCommand(rangeListCmd)
 	setupDeleteCmd(rangeDeleteCmd)
 	rangeCmd.AddCommand(rangeDeleteCmd)

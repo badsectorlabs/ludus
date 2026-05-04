@@ -12,9 +12,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
 )
+
+// adminEndpointError returns the standard "use the ludus-admin server" message
+// for endpoints that can only be invoked via the admin (root) daemon. The
+// admin port is read from the live configuration so customized ports appear
+// correctly in the operator-facing instructions.
+func adminEndpointError(command string) string {
+	port := ServerConfiguration.AdminPort
+	return fmt.Sprintf(
+		"You must use the ludus-admin server on 127.0.0.1:%d to use this endpoint.\n"+
+			"Use SSH to tunnel to this port with the command: ssh -L %d:127.0.0.1:%d root@<ludus IP>\n"+
+			"In a different terminal re-run the %s command with --url https://127.0.0.1:%d",
+		port, port, port, command, port,
+	)
+}
 
 func APIKeyAuthenticationMiddleware(e *core.RequestEvent) error {
 	apiKey := e.Request.Header.Get("X-API-KEY")
@@ -120,6 +135,10 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		rangeID = user.DefaultRangeId()
 		// Allow ROOT to bypass the default range check
 		if rangeID == "" && e.Auth.GetString("userID") == "ROOT" {
+			// The ROOT key should only be used for user actions, so check the request and fail if it's not a user action
+			if !strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") {
+				return JSONError(e, http.StatusForbidden, "The ROOT key can only be used for user actions")
+			}
 			rangeCollection, err := e.App.FindCollectionByNameOrId("ranges")
 			if err != nil {
 				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding ranges collection: %v", err))
@@ -146,12 +165,31 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 		rangeRecord := &models.Range{}
 		rangeRecord.SetProxyRecord(rawRangeRecord)
 		e.Set("range", rangeRecord)
+
+		// Bump the range's lastActive timestamp for the inactivity shutdown feature.
+		// ROOT requests are admin/plumbing, not user interaction, so excluded.
+		// Use a raw UPDATE so this narrow write can't clobber other fields
+		// being written by concurrent request handlers (e.g. the deploy pipeline).
+		// Throttle to at most once every 30s to avoid write amplification from
+		// polling clients (the scheduler only runs every 5min).
+		if e.Auth.GetString("userID") != "ROOT" {
+			lastActive := rangeRecord.LastActive().Time()
+			if time.Since(lastActive) > 30*time.Second {
+				nowUTC := time.Now().UTC().Format("2006-01-02 15:04:05.000Z")
+				_, updateErr := e.App.DB().NewQuery("UPDATE ranges SET lastActive = {:now} WHERE id = {:id}").
+					Bind(dbx.Params{"now": nowUTC, "id": rawRangeRecord.Id}).
+					Execute()
+				if updateErr != nil {
+					logger.Debug(fmt.Sprintf("Error updating range lastActive: %v", updateErr))
+				}
+			}
+		}
 	}
 
 	return e.Next()
 }
 
-// This function makes sure the request is to a user endpoint if the server is running as root (i.e. :8081)
+// This function makes sure the request is to a user endpoint if the server is running as root (i.e. the admin port)
 func limitRootEndpoints(e *core.RequestEvent) error {
 	logger.Debug(fmt.Sprintf("Request: %s %s", e.Request.Method, e.Request.URL.Path))
 	if os.Geteuid() == 0 &&
@@ -162,7 +200,7 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/migrate/") {
-		return JSONError(e, http.StatusInternalServerError, "The :8081 endpoint can only be used for user, range creation/deletion, migrations, and anti-sandbox actions. Use the :8080 endpoint for all other actions.")
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("The :%d endpoint can only be used for user, range creation/deletion, migrations, and anti-sandbox actions. Use the :%d endpoint for all other actions.", ServerConfiguration.AdminPort, ServerConfiguration.Port))
 	} else if os.Geteuid() != 0 &&
 		(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") ||

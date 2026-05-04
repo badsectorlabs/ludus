@@ -28,22 +28,32 @@
             seconds: 1
           when: '"You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout'
 
-        - name: Check for sda
+        - name: Reconfigure grub-pc for the detected boot disk
           ansible.builtin.shell: |
-            df | egrep '/$' | grep sda
-          register: sda_check
-          ignore_errors: true
+            set -eo pipefail
+            OVERRIDE={{ (boot_disk | default('')) | quote }}
+            if [ -n "$OVERRIDE" ]; then
+              DISK="$OVERRIDE"
+            else
+              ROOT_SOURCE="$(findmnt -no SOURCE / 2>/dev/null || true)"
+              DISK=""
+              if [ -n "$ROOT_SOURCE" ]; then
+                PARENT="$(lsblk -nso pkname "$ROOT_SOURCE" 2>/dev/null | awk 'NF' | tail -n1 || true)"
+                if [ -n "$PARENT" ]; then
+                  DISK="/dev/$PARENT"
+                fi
+              fi
+            fi
+            if [ -z "$DISK" ] || [ ! -b "$DISK" ]; then
+              echo "ERROR: Unable to determine a valid boot disk for grub-pc auto-recovery." >&2
+              echo "Run \`dpkg --configure grub-pc\` to manually fix this, or set \`boot_disk\` in /opt/ludus/config.yml." >&2
+              exit 1
+            fi
+            echo "grub-pc grub-pc/install_devices multiselect $DISK" | debconf-set-selections
+            echo "grub-pc grub-pc/install_devices_empty boolean false" | debconf-set-selections
+            echo "grub-pc grub-pc/install_devices_disks_changed multiselect $DISK" | debconf-set-selections
+            dpkg --configure grub-pc
           when: '"You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout'
-
-        - name: Fail if sda is not the disk
-          ansible.builtin.fail:
-            msg: "Unable to determine boot disk, Run `dpkg --configure grub-pc` to manually fix this error."
-          when: sda_check.failed is true and "You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout
-
-        - name: Select SDA for grub-pc
-          ansible.builtin.shell: |
-            echo "grub-pc grub-pc/install_devices multiselect /dev/sda" | debconf-set-selections && dpkg --configure grub-pc
-          when: sda_check.failed is false and "You must correct your GRUB install devices before proceeding" in _system_upgrade.stdout
 
         - name: Check error 2
           ansible.builtin.debug:

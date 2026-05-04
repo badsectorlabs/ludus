@@ -230,15 +230,18 @@ type ListAllRangeResponseItem struct {
 	TestingEnabled bool                              `json:"testingEnabled"`
 }
 type ListAllRangeResponseItemVMsItem struct {
-	Ip          string `json:"ip,omitempty"`
-	IsRouter    bool   `json:"isRouter,omitempty"`
-	ID          int32  `json:"ID"`
-	ProxmoxID   int32  `json:"proxmoxID"`
-	RangeNumber int32  `json:"rangeNumber"`
-	Name        string `json:"name"`
-	PoweredOn   bool   `json:"poweredOn"`
-	CPU         int32  `json:"cpu"`
-	RAM         int32  `json:"ram"`
+	Ip            string `json:"ip,omitempty"`
+	IsRouter      bool   `json:"isRouter,omitempty"`
+	ID            int32  `json:"ID"`
+	ProxmoxID     int32  `json:"proxmoxID"`
+	RangeNumber   int32  `json:"rangeNumber"`
+	Name          string `json:"name"`
+	PoweredOn     bool   `json:"poweredOn"`
+	CPU           int32  `json:"cpu"`
+	RAM           int32  `json:"ram"`
+	OsVersion     string `json:"osVersion,omitempty"`
+	LicenseStatus string `json:"licenseStatus,omitempty"`
+	LastUpdate    string `json:"lastUpdate,omitempty"`
 }
 
 type ListAllUsersResponseItem struct {
@@ -249,6 +252,10 @@ type ListAllUsersResponseItem struct {
 	DateLastActive  time.Time `json:"dateLastActive,omitempty"`
 	IsAdmin         bool      `json:"isAdmin"`
 	ProxmoxUsername string    `json:"proxmoxUsername,omitempty"`
+	QuotaRAM        int       `json:"quotaRAM,omitempty"`
+	QuotaCPU        int       `json:"quotaCPU,omitempty"`
+	QuotaVMs        int       `json:"quotaVMs,omitempty"`
+	QuotaRanges     int       `json:"quotaRanges,omitempty"`
 }
 
 type ListGroupMembersResponseItem struct {
@@ -312,15 +319,18 @@ type ListRangeResponse struct {
 	AllowedDomains []string                   `json:"allowedDomains,omitempty"`
 }
 type ListRangeResponseVMsItem struct {
-	ProxmoxID   int32  `json:"proxmoxID"`
-	RangeNumber int32  `json:"rangeNumber"`
-	Name        string `json:"name"`
-	PoweredOn   bool   `json:"poweredOn"`
-	Ip          string `json:"ip,omitempty"`
-	IsRouter    bool   `json:"isRouter,omitempty"`
-	CPU         int32  `json:"cpu"`
-	RAM         int32  `json:"ram"`
-	ID          int32  `json:"ID"`
+	ProxmoxID     int32  `json:"proxmoxID"`
+	RangeNumber   int32  `json:"rangeNumber"`
+	Name          string `json:"name"`
+	PoweredOn     bool   `json:"poweredOn"`
+	Ip            string `json:"ip,omitempty"`
+	IsRouter      bool   `json:"isRouter,omitempty"`
+	CPU           int32  `json:"cpu"`
+	RAM           int32  `json:"ram"`
+	ID            int32  `json:"ID"`
+	OsVersion     string `json:"osVersion,omitempty"`
+	LicenseStatus string `json:"licenseStatus,omitempty"`
+	LastUpdate    string `json:"lastUpdate,omitempty"`
 }
 type ListRangeTagsResponse struct {
 	Tags []string `json:"tags"`
@@ -373,6 +383,10 @@ type ListUserResponseItem struct {
 	DateLastActive  time.Time `json:"dateLastActive,omitempty"`
 	IsAdmin         bool      `json:"isAdmin"`
 	ProxmoxUsername string    `json:"proxmoxUsername,omitempty"`
+	QuotaRAM        int       `json:"quotaRAM,omitempty"`
+	QuotaCPU        int       `json:"quotaCPU,omitempty"`
+	QuotaVMs        int       `json:"quotaVMs,omitempty"`
+	QuotaRanges     int       `json:"quotaRanges,omitempty"`
 }
 type ProvisionOAuth2UserResponse struct {
 	RecordID string `json:"recordID"`
@@ -528,4 +542,69 @@ type SDNStatus struct {
 type VersionResponse struct {
 	Version string `json:"version"`
 	Result  string `json:"result"`
+}
+
+type GetQuotaStatusResponse struct {
+	LimitRAM    int `json:"limitRAM"`
+	LimitCPU    int `json:"limitCPU"`
+	LimitVMs    int `json:"limitVMs"`
+	LimitRanges int `json:"limitRanges"`
+	UsedRAM     int `json:"usedRAM"`
+	UsedCPU     int `json:"usedCPU"`
+	UsedVMs     int `json:"usedVMs"`
+	UsedRanges  int `json:"usedRanges"`
+}
+
+type GetAllQuotaStatusResponseItem struct {
+	UserID       string `json:"userID"`
+	Name         string `json:"name"`
+	LimitRAM     int    `json:"limitRAM"`
+	LimitCPU     int    `json:"limitCPU"`
+	LimitVMs     int    `json:"limitVMs"`
+	LimitRanges  int    `json:"limitRanges"`
+	UsedRAM      int    `json:"usedRAM"`
+	UsedCPU      int    `json:"usedCPU"`
+	UsedVMs      int    `json:"usedVMs"`
+	UsedRanges   int    `json:"usedRanges"`
+	SourceRAM    string `json:"sourceRAM"`
+	SourceCPU    string `json:"sourceCPU"`
+	SourceVMs    string `json:"sourceVMs"`
+	SourceRanges string `json:"sourceRanges"`
+}
+
+type GetGroupQuotaResponseItem struct {
+	Name               string `json:"name"`
+	DefaultQuotaRAM    int    `json:"defaultQuotaRAM"`
+	DefaultQuotaCPU    int    `json:"defaultQuotaCPU"`
+	DefaultQuotaVMs    int    `json:"defaultQuotaVMs"`
+	DefaultQuotaRanges int    `json:"defaultQuotaRanges"`
+	MemberCount        int    `json:"memberCount"`
+}
+
+type LogHistoryEntry struct {
+	Id       string    `json:"id"`
+	Template string    `json:"template,omitempty"`
+	Status   string    `json:"status"`
+	Start    time.Time `json:"start,omitempty"`
+	End      time.Time `json:"end,omitempty"`
+	Created  time.Time `json:"created"`
+}
+
+type LogHistoryDetailResponse struct {
+	Id      string    `json:"id"`
+	Status  string    `json:"status"`
+	Start   time.Time `json:"start,omitempty"`
+	End     time.Time `json:"end,omitempty"`
+	Created time.Time `json:"created"`
+	Result  string    `json:"result"`
+}
+
+type AutoShutdownDetail struct {
+	ServerDefault string `json:"serverDefault"`
+	RangeOverride string `json:"rangeOverride"`
+	Effective     string `json:"effective"`
+}
+
+type AutoShutdownResponse struct {
+	AutoShutdownTimeout AutoShutdownDetail `json:"autoShutdownTimeout"`
 }

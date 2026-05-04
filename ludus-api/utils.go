@@ -239,6 +239,157 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 	return nil
 }
 
+// VMDetails holds per-VM information fetched on demand via the QEMU guest agent.
+type VMDetails struct {
+	OsVersion     string
+	LicenseStatus string
+	LastUpdate    string
+}
+
+// fetchVMDetails calls the QEMU guest agent for each running VM in the pool and
+// returns a map of ProxmoxID → VMDetails. Any VM that is off or has no guest
+// agent will receive "N/A" values rather than an error.
+func fetchVMDetails(e *core.RequestEvent, rangeID string, proxmoxClient *goproxmox.Client) map[int]VMDetails {
+	result := make(map[int]VMDetails)
+
+	cached := e.Get("getVMsForPool_" + rangeID)
+	if cached == nil {
+		return result
+	}
+	vms := cached.([]goproxmox.ClusterResource)
+
+	for _, vmResource := range vms {
+		result[int(vmResource.VMID)] = func(vmResource goproxmox.ClusterResource) VMDetails {
+			details := VMDetails{OsVersion: "N/A", LicenseStatus: "N/A", LastUpdate: "N/A"}
+			if vmResource.Status != goproxmox.StatusVirtualMachineRunning {
+				return details
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			node, err := proxmoxClient.Node(ctx, vmResource.Node)
+			if err != nil {
+				return details
+			}
+			vm, err := node.VirtualMachine(ctx, int(vmResource.VMID))
+			if err != nil {
+				return details
+			}
+
+			osInfo, err := vm.AgentOsInfo(ctx)
+			if err == nil && osInfo != nil {
+				isWindows := strings.EqualFold(osInfo.ID, "mswindows") ||
+					strings.Contains(strings.ToLower(osInfo.Name), "windows")
+				if isWindows {
+					details.OsVersion = getWindowsOsVersion(ctx, vm)
+					details.LicenseStatus = getWindowsLicenseInfo(ctx, vm)
+					details.LastUpdate = getWindowsLastUpdate(ctx, vm)
+				} else {
+					details.OsVersion = osInfo.PrettyName
+					if details.OsVersion == "" {
+						details.OsVersion = strings.TrimSpace(osInfo.Name + " " + osInfo.Version)
+					}
+				}
+			}
+
+			return details
+		}(vmResource)
+	}
+
+	return result
+}
+
+// getWindowsOsVersion queries Win32_OperatingSystem via PowerShell for an
+// accurate OS name, falling back to "N/A" if the guest agent exec fails.
+func getWindowsOsVersion(ctx context.Context, vm *goproxmox.VirtualMachine) string {
+	pid, err := vm.AgentExec(ctx, []string{"powershell", "-Command", "(Get-CimInstance Win32_OperatingSystem).Caption"}, "")
+	if err != nil {
+		return "N/A"
+	}
+	result, err := vm.WaitForAgentExecExit(ctx, pid, 15)
+	if err != nil || result == nil || result.ExitCode != 0 {
+		return "N/A"
+	}
+	output := strings.TrimSpace(result.OutData)
+	if output == "" {
+		return "N/A"
+	}
+	return output
+}
+
+// getWindowsLicenseInfo runs slmgr.vbs /dlv inside the VM via the guest agent
+// and returns a single formatted string combining license status, days remaining
+// (for time-based eval licenses), and remaining rearm count, e.g.
+// "Licensed (42 days, 1 rearm)" or "Notification (2 rearms)".
+func getWindowsLicenseInfo(ctx context.Context, vm *goproxmox.VirtualMachine) string {
+	pid, err := vm.AgentExec(ctx, []string{"cscript", "/nologo", `C:\Windows\system32\slmgr.vbs`, "/dlv"}, "")
+	if err != nil {
+		return "N/A"
+	}
+	result, err := vm.WaitForAgentExecExit(ctx, pid, 15)
+	if err != nil || result == nil || result.ExitCode != 0 {
+		return "N/A"
+	}
+
+	var licenseStatus, daysRemaining, rearmCount string
+	for _, line := range strings.Split(result.OutData, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "License Status:"):
+			licenseStatus = strings.TrimSpace(strings.TrimPrefix(line, "License Status:"))
+		case strings.HasPrefix(line, "Timebased activation expiration:"):
+			// "Timebased activation expiration: 60204 minute(s) (42 day(s))"
+			// Find " day" first, then look left for its opening "("
+			if dayIdx := strings.Index(line, " day"); dayIdx >= 0 {
+				if open := strings.LastIndex(line[:dayIdx], "("); open >= 0 {
+					daysRemaining = strings.TrimSpace(line[open+1:dayIdx]) + " days"
+				}
+			}
+		case strings.HasPrefix(line, "Remaining Windows rearm count:"):
+			rearmCount = strings.TrimSpace(strings.TrimPrefix(line, "Remaining Windows rearm count:"))
+		}
+	}
+
+	if licenseStatus == "" {
+		return "N/A"
+	}
+
+	var parts []string
+	if daysRemaining != "" {
+		parts = append(parts, daysRemaining)
+	}
+	if rearmCount != "" {
+		parts = append(parts, rearmCount+" rearms")
+	}
+	if len(parts) > 0 {
+		return licenseStatus + " (" + strings.Join(parts, ", ") + ")"
+	}
+	return licenseStatus
+}
+
+// getWindowsLastUpdate runs a PowerShell command to find the most recently
+// installed hotfix date, returning "N/A" on any failure.
+func getWindowsLastUpdate(ctx context.Context, vm *goproxmox.VirtualMachine) string {
+	cmd := []string{
+		"powershell", "-Command",
+		"(Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn.ToString('yyyy-MM-dd')",
+	}
+	pid, err := vm.AgentExec(ctx, cmd, "")
+	if err != nil {
+		return "N/A"
+	}
+	status, err := vm.WaitForAgentExecExit(ctx, pid, 15)
+	if err != nil || status == nil || status.ExitCode != 0 {
+		return "N/A"
+	}
+	output := strings.TrimSpace(status.OutData)
+	if output == "" {
+		return "N/A"
+	}
+	return output
+}
+
 func getDomainIPString(rangeSlice []string, domain string) string {
 	for _, item := range rangeSlice {
 		// Extract the domain part from the current item.

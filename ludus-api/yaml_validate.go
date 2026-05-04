@@ -144,7 +144,7 @@ func validateTargetNode(e *core.RequestEvent, targetNode string) error {
 		}
 	}
 
-	client, err := getRootGoProxmoxClient()
+	client, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return fmt.Errorf("failed to get proxmox client: %w", err)
 	}
@@ -174,6 +174,8 @@ type VM struct {
 	Template    string `json:"template"`
 	VLAN        int    `json:"vlan"`
 	IPLastOctet int    `json:"ip_last_octet"`
+	CPUs        int    `json:"cpus"`
+	RamGB       int    `json:"ram_gb"`
 	Domain      struct {
 		FQDN string `json:"fqdn"`
 		Role string `json:"role"`

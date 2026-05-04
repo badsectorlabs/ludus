@@ -23,6 +23,7 @@ tags:
   - name: Snapshot Management
   - name: KMS Management
   - name: Group Management
+  - name: Quota Management
   - name: Migration
   - name: Blueprint Management
 paths:
@@ -1014,8 +1015,6 @@ paths:
                         type: integer
                       quotaRanges:
                         type: integer
-                      quotaStorage:
-                        type: integer
                       quotaVMs:
                         type: integer
                       ranges:
@@ -1048,7 +1047,6 @@ paths:
                       - quotaCPU
                       - quotaRAM
                       - quotaRanges
-                      - quotaStorage
                       - quotaVMs
                       - ranges
                       - updated
@@ -1151,7 +1149,6 @@ paths:
                     "quotaCPU": 0,
                     "quotaRAM": 0,
                     "quotaRanges": 0,
-                    "quotaStorage": 0,
                     "quotaVMs": 0,
                     "ranges": [
                       "3lbupcsqp1ebiub",
@@ -1704,6 +1701,368 @@ paths:
                           AllowedIPs = 10.3.0.0/16, 198.51.100.1/32 Endpoint =
                           198.18.0.25:51820 PersistentKeepalive = 25
           headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/quotas:
+    get:
+      summary: Get quota status for the current user
+      deprecated: false
+      description: |
+        Returns the effective quota limits and current resource usage for the authenticated user.
+        Limits are resolved using the priority chain: user quota > group default > system default > unlimited (0).
+      operationId: getQuotaStatus
+      tags:
+        - Quota Management
+      parameters:
+        - name: userID
+          in: query
+          description: pass an optional userID to view quotas for a specific user (admin only)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: quota status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limitRAM:
+                    type: integer
+                    description: Effective RAM limit in GB (0 = unlimited)
+                    example: 64
+                  limitCPU:
+                    type: integer
+                    description: Effective CPU core limit (0 = unlimited)
+                    example: 16
+                  limitVMs:
+                    type: integer
+                    description: Effective VM count limit (0 = unlimited)
+                    example: 10
+                  limitRanges:
+                    type: integer
+                    description: Effective range count limit (0 = unlimited)
+                    example: 3
+                  usedRAM:
+                    type: integer
+                    description: Current RAM usage in GB
+                    example: 24
+                  usedCPU:
+                    type: integer
+                    description: Current CPU core usage
+                    example: 12
+                  usedVMs:
+                    type: integer
+                    description: Current VM count
+                    example: 5
+                  usedRanges:
+                    type: integer
+                    description: Current range count
+                    example: 2
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Set quotas for one or more users (admin only)
+      deprecated: false
+      description: |
+        Set resource quota limits for one or more users. Only provided fields are updated.
+        Set a value to 0 to remove a limit. Negative values are rejected.
+        Supports bulk operations via the userIDs array.
+      operationId: setUserQuota
+      tags:
+        - Quota Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - userIDs
+              properties:
+                userIDs:
+                  type: array
+                  items:
+                    type: string
+                  description: One or more userIDs to set quotas for
+                  example: ["JD", "AB"]
+                quotaRAM:
+                  type: integer
+                  description: RAM limit in GB (0 = remove limit)
+                  example: 64
+                quotaCPU:
+                  type: integer
+                  description: CPU core limit (0 = remove limit)
+                  example: 16
+                quotaVMs:
+                  type: integer
+                  description: VM count limit (0 = remove limit)
+                  example: 10
+                quotaRanges:
+                  type: integer
+                  description: Range count limit (0 = remove limit)
+                  example: 3
+      responses:
+        '200':
+          description: quotas updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: "Quotas updated for 2 user(s)"
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "quota values must be >= 0"
+        '403':
+          description: Unauthorized - not an admin
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not an admin and cannot set user quotas
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/quotas/all:
+    get:
+      summary: Get quota status for all users (admin only)
+      deprecated: false
+      description: |
+        Returns effective quota limits, current usage, and quota source for all users.
+        Source indicates where the effective quota comes from: U (user), G (group default), S (system default).
+      operationId: getAllQuotaStatus
+      tags:
+        - Quota Management
+      parameters: []
+      responses:
+        '200':
+          description: all users' quota status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    userID:
+                      type: string
+                      example: JD
+                    name:
+                      type: string
+                      example: John Doe
+                    limitRAM:
+                      type: integer
+                      example: 64
+                    limitCPU:
+                      type: integer
+                      example: 16
+                    limitVMs:
+                      type: integer
+                      example: 10
+                    limitRanges:
+                      type: integer
+                      example: 3
+                    usedRAM:
+                      type: integer
+                      example: 24
+                    usedCPU:
+                      type: integer
+                      example: 12
+                    usedVMs:
+                      type: integer
+                      example: 5
+                    usedRanges:
+                      type: integer
+                      example: 2
+                    sourceRAM:
+                      type: string
+                      description: "Source of RAM limit: U (user), G (group), S (system), empty (unlimited)"
+                      example: U
+                    sourceCPU:
+                      type: string
+                      example: G
+                    sourceVMs:
+                      type: string
+                      example: G
+                    sourceRanges:
+                      type: string
+                      example: S
+        '403':
+          description: Unauthorized - not an admin
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not an admin and cannot view all quotas
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/quotas/defaults:
+    get:
+      summary: Get system-wide default quotas (admin only)
+      deprecated: false
+      description: |
+        Returns the system-wide default quota values configured in /opt/ludus/config.yml.
+        These are the fallback values when neither user nor group quotas are set.
+      operationId: getQuotaDefaults
+      tags:
+        - Quota Management
+      parameters: []
+      responses:
+        '200':
+          description: system default quotas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limitRAM:
+                    type: integer
+                    example: 64
+                  limitCPU:
+                    type: integer
+                    example: 16
+                  limitVMs:
+                    type: integer
+                    example: 10
+                  limitRanges:
+                    type: integer
+                    example: 3
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /groups/quotas:
+    get:
+      summary: Get default quotas for all groups (admin only)
+      deprecated: false
+      description: |
+        Returns the default quota values and member count for all groups.
+      operationId: getGroupQuotas
+      tags:
+        - Quota Management
+      parameters: []
+      responses:
+        '200':
+          description: group quota defaults
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      example: students
+                    defaultQuotaRAM:
+                      type: integer
+                      example: 32
+                    defaultQuotaCPU:
+                      type: integer
+                      example: 8
+                    defaultQuotaVMs:
+                      type: integer
+                      example: 5
+                    defaultQuotaRanges:
+                      type: integer
+                      example: 2
+                    memberCount:
+                      type: integer
+                      example: 30
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Set default quotas for one or more groups (admin only)
+      deprecated: false
+      description: |
+        Set default resource quota limits for one or more groups. These apply to members
+        who don't have explicit per-user quotas. Only provided fields are updated.
+        Set a value to 0 to remove a limit. Supports bulk operations via the groupNames array.
+      operationId: setGroupQuota
+      tags:
+        - Quota Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - groupNames
+              properties:
+                groupNames:
+                  type: array
+                  items:
+                    type: string
+                  description: One or more group names to set quotas for
+                  example: ["students", "red-team"]
+                defaultQuotaRAM:
+                  type: integer
+                  description: Default RAM limit in GB (0 = remove limit)
+                  example: 32
+                defaultQuotaCPU:
+                  type: integer
+                  description: Default CPU core limit (0 = remove limit)
+                  example: 8
+                defaultQuotaVMs:
+                  type: integer
+                  description: Default VM count limit (0 = remove limit)
+                  example: 5
+                defaultQuotaRanges:
+                  type: integer
+                  description: Default range count limit (0 = remove limit)
+                  example: 2
+      responses:
+        '200':
+          description: group quotas updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: "Quotas updated for 2 group(s)"
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "quota values must be >= 0"
+        '403':
+          description: Unauthorized - not an admin
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not an admin and cannot set group quotas
       security:
         - JWT: []
         - ApiKeyAuth: []
@@ -2894,6 +3253,88 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /range/logs/history:
+    get:
+      summary: List range deploy log history
+      deprecated: false
+      description: >
+        Returns a list of historical log entries for the user's range. Each
+        entry includes the log id, status, start/end times, and created
+        timestamp. A `running` entry is created when deployment starts and
+        finalized to `success`, `failure`, or `aborted` when deployment ends.
+        Use the log id to retrieve the full log content via
+        /range/logs/history/{logID}.
+      operationId: getRangeLogHistory
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to get log history for. If not provided, uses the
+            user's default range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to get log history for. Defaults to the current user
+            (admins can query other users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: A list of log history entries for the range
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogHistoryEntry'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/logs/history/{logID}:
+    get:
+      summary: Retrieve a specific range log history entry
+      deprecated: false
+      description: >
+        Returns the full log content for a specific historical range deploy log
+        entry. The log entry must belong to the user's range.
+      operationId: getRangeLogHistoryByID
+      tags:
+        - Range Management
+      parameters:
+        - name: logID
+          in: path
+          description: The id of the log history entry to retrieve
+          required: true
+          example: abc123
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The full log history entry including log content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogHistoryDetailResponse'
+          headers: {}
+        '400':
+          description: logID not provided
+          headers: {}
+        '403':
+          description: Log entry does not belong to this range
+          headers: {}
+        '404':
+          description: Log entry not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /range/poweron:
     put:
       summary: Power on range VMs
@@ -3023,6 +3464,137 @@ paths:
           headers: {}
         '500':
           description: error with range VM power off
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/auto-shutdown:
+    get:
+      summary: Retrieve the auto-shutdown configuration for a range
+      deprecated: false
+      description: >
+        Returns the current auto-shutdown timeout for the range, including the
+        server-wide default, per-range override, and resolved effective value.
+
+
+        Use rangeID to specify which range to query. If rangeID is not provided,
+        the user's default range will be used. Use userID to query a different
+        user's range (admins only).
+      operationId: getAutoShutdown
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to query. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to query.
+
+            Defaults to the current user (admins can query other users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: successfully retrieved auto-shutdown configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autoShutdownTimeout:
+                    type: object
+                    properties:
+                      serverDefault:
+                        type: string
+                        example: "4h"
+                      rangeOverride:
+                        type: string
+                        example: ""
+                      effective:
+                        type: string
+                        example: "4h"
+        '500':
+          description: error retrieving auto-shutdown configuration
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Update the auto-shutdown configuration for a range
+      deprecated: false
+      description: >
+        Updates the per-range auto-shutdown timeout. Set to a Go duration string
+        (e.g. "4h", "30m") to override the server default, "0" to explicitly
+        disable for this range, or "" to clear the override and fall back to the
+        server default.
+
+
+        Use rangeID to specify which range to update. If rangeID is not provided,
+        the user's default range will be used. Use userID to update a different
+        user's range (admins only).
+      operationId: updateAutoShutdown
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to update. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: >
+            The userID to update.
+
+            Defaults to the current user (admins can update other users' ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                autoShutdownTimeout:
+                  type: string
+                  example: "4h"
+      responses:
+        '200':
+          description: successfully updated auto-shutdown configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autoShutdownTimeout:
+                    type: object
+                    properties:
+                      serverDefault:
+                        type: string
+                        example: "4h"
+                      rangeOverride:
+                        type: string
+                        example: "2h"
+                      effective:
+                        type: string
+                        example: "2h"
+        '400':
+          description: bad input parameter
+          headers: {}
+        '500':
+          description: error updating auto-shutdown configuration
           headers: {}
       security:
         - JWT: []
@@ -3372,6 +3944,19 @@ paths:
                     If true, will drop a random assortment of files on the
                     autologon_user's desktop and in the autologon_user's
                     download folder (default false)
+                  example: true
+                browserData:
+                  type: boolean
+                  description: >-
+                    If true, populate Chromium-based browsers (Edge, Chrome)
+                    with realistic history, bookmarks, autofill, encrypted
+                    saved credentials, encrypted cookies, and TypedURLs
+                    registry entries. Any existing profile data is
+                    overwritten. Sets the machine-level
+                    ApplicationBoundEncryptionEnabled=0 policy so v10 DPAPI
+                    encryption is used; not intended for VMs where users
+                    will sign in with a real browser account to sync data
+                    (default false).
                   example: true
                 processorName:
                   type: string
@@ -3832,8 +4417,9 @@ paths:
     get:
       summary: Retrieve the latest packer logs
       deprecated: false
-      description: |
-        Returns the latest logs from packer
+      description: >-
+        Returns live packer logs. When one or more template builds are currently
+        running, this endpoint returns logs for the latest active build.
       operationId: getPackerLogs
       tags:
         - Template Management
@@ -3862,6 +4448,12 @@ paths:
           schema:
             type: integer
             example: 274
+        - name: logID
+          in: query
+          description: Follow a specific running template build by history log ID.
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: >-
@@ -3932,6 +4524,106 @@ paths:
           headers: {}
         '500':
           description: error getting templates status
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /templates/logs/history:
+    get:
+      summary: List template build log history
+      deprecated: false
+      description: >
+        Returns a list of historical log entries for the user's template builds.
+        Each entry includes the log id, status, start/end times, and created
+        timestamp. A `running` entry is created for each build start and
+        finalized to `success`, `failure`, or `aborted` when that build ends.
+        Parallel template builds create one history entry per template build.
+        Use the log id to retrieve the full log content via
+        /templates/logs/history/{logID}.
+      operationId: getTemplateLogHistory
+      tags:
+        - Template Management
+      parameters: []
+      responses:
+        '200':
+          description: A list of log history entries for the user's template builds
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogHistoryEntry'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /templates/logs/history/{logID}:
+    get:
+      summary: Retrieve a specific template log history entry
+      deprecated: false
+      description: >
+        Returns the full log content for a specific historical template build
+        log entry. The log entry must belong to the requesting user.
+      operationId: getTemplateLogHistoryByID
+      tags:
+        - Template Management
+      parameters:
+        - name: logID
+          in: path
+          description: The id of the log history entry to retrieve
+          required: true
+          example: abc123
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The full log history entry including log content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    description: The unique identifier for the log history entry
+                    example: abc123def456
+                  status:
+                    type: string
+                    description: The final status of the operation
+                    enum:
+                      - success
+                      - failure
+                    example: success
+                  start:
+                    type: string
+                    format: date-time
+                    description: When the operation started
+                    example: '2024-01-15T10:30:00.000Z'
+                  end:
+                    type: string
+                    format: date-time
+                    description: When the operation completed
+                    example: '2024-01-15T10:45:00.000Z'
+                  created:
+                    type: string
+                    format: date-time
+                    description: When the log history entry was created
+                    example: '2024-01-15T10:45:01.000Z'
+                  result:
+                    type: string
+                    description: The full log content
+                    example: >
+                      2024-01-15 10:30:00,810 p=2034571 u=john-doe n=ansible |
+                      PLAY [Deploy test range] *****
+          headers: {}
+        '400':
+          description: logID not provided
+          headers: {}
+        '403':
+          description: Log entry does not belong to this user
+          headers: {}
+        '404':
+          description: Log entry not found
           headers: {}
       security:
         - JWT: []
@@ -5261,6 +5953,403 @@ paths:
         - ApiKeyAuth: []
 components:
   schemas:
+    ErrorInfo:
+      type: object
+      properties:
+        vmid:
+          type: integer
+          format: int32
+          description: The VMID of the VM
+          example: 180
+        vmname:
+          type: string
+          description: The name of the VM
+          example: JD-ad-win11-22h2-enterprise-x64-2
+        error:
+          type: string
+          description: Error message
+          example: 'Error parsing VM ID abc: strconv.Atoi: parsing "abc": invalid syntax'
+    SnapshotCreatePayload:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Snapshot name
+          example: My cool snapshot
+        description:
+          type: string
+          description: Snapshot Description
+          example: Taking this snapshot before doing some testing
+        vmids:
+          type: array
+          items:
+            type: integer
+            format: int32
+          description: >-
+            Array of VMIDs to snapshot, if blank all VMs in the range will be
+            snapshotted
+          example:
+            - 179
+            - 180
+        includeRAM:
+          type: boolean
+          description: >-
+            Include RAM in the snapshot. If false, the VM will be powered off
+            when restored to this snapshot.
+          example: true
+    LicenseDataObject:
+      type: object
+      properties:
+        entitlements:
+          type: array
+          items:
+            type: string
+            description: Individual entitlement code
+          description: The entitlements granted by the license
+          example: ENTERPRISE_PLUGIN
+        licensed_to:
+          type: string
+          description: The name of the person or organization the license is licensed to
+          example: John Doe
+        expires_at:
+          type: string
+          format: date-time
+          description: The date and time the license expires
+          example: '2022-08-29T09:12:33.001Z'
+        active:
+          type: boolean
+          description: Whether the license is active
+          example: true
+        message:
+          type: string
+          description: The message associated with the license
+          example: 'License active, expires: 2022-08-29 14:12:33, licensed to John Doe'
+    LogHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The unique identifier for the log history entry
+          example: abc123def456
+        status:
+          type: string
+          description: The final status of the operation
+          enum:
+            - success
+            - failure
+          example: success
+        start:
+          type: string
+          format: date-time
+          description: When the operation started
+          example: '2024-01-15T10:30:00.000Z'
+        end:
+          type: string
+          format: date-time
+          description: When the operation completed
+          example: '2024-01-15T10:45:00.000Z'
+        created:
+          type: string
+          format: date-time
+          description: When the log history entry was created
+          example: '2024-01-15T10:45:01.000Z'
+        template:
+          type: string
+          description: The template this log relates to
+          example: debian-12-x64-server-template
+    LogHistoryDetailResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The unique identifier for the log history entry
+          example: abc123def456
+        status:
+          type: string
+          description: The final status of the operation
+          enum:
+            - success
+            - failure
+          example: success
+        start:
+          type: string
+          format: date-time
+          description: When the operation started
+          example: '2024-01-15T10:30:00.000Z'
+        end:
+          type: string
+          format: date-time
+          description: When the operation completed
+          example: '2024-01-15T10:45:00.000Z'
+        created:
+          type: string
+          format: date-time
+          description: When the log history entry was created
+          example: '2024-01-15T10:45:01.000Z'
+        result:
+          type: string
+          description: The full log content
+          example: >
+            2024-01-15 10:30:00,810 p=2034571 u=john-doe n=ansible | PLAY
+            [Deploy test range] *****
+    RangeObject:
+      type: object
+      required:
+        - rangeID
+        - rangeNumber
+        - lastDeployment
+        - numberOfVMs
+        - testingEnabled
+        - VMs
+      properties:
+        rangeID:
+          $ref: '#/components/schemas/userID'
+        rangeNumber:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 3
+        name:
+          type: string
+          example: Red Team Range
+        description:
+          type: string
+          example: Range for red team
+        purpose:
+          type: string
+          example: Testing
+        lastDeployment:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2022-08-29T09:12:33.001Z'
+        numberOfVMs:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 7
+        testingEnabled:
+          type: boolean
+          readOnly: true
+          example: true
+        allowedIPs:
+          type: array
+          items:
+            type: string
+            example: 1.2.3.4
+        allowedDomains:
+          type: array
+          items:
+            type: string
+            example: example.com
+        rangeState:
+          type: string
+          example: SUCCESS
+        VMs:
+          type: array
+          items:
+            $ref: '#/components/schemas/VMObject'
+    userID:
+      type: string
+      pattern: ^[A-Za-z0-9]{1,20}$
+      description: |
+        Must be a unique 1-20 character alpha-numeric string.
+        Initials are commonly used.
+      example: JD
+    rangeID:
+      type: string
+      pattern: ^[A-Za-z0-9_\-]+(\/[A-Za-z0-9_\-]+){0,2}$
+      description: >
+        Must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or
+        'New_Range'). Use only letters, numbers, hyphens, and underscores.
+
+        This is the rangeID, which is used to identify the range.
+      example: DEMO
+    UserObject:
+      type: object
+      required:
+        - name
+        - userID
+        - isAdmin
+      properties:
+        name:
+          type: string
+          example: John Doe
+        userID:
+          $ref: '#/components/schemas/userID'
+        dateCreated:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2022-08-29T09:12:33.001Z'
+        dateLastActive:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2022-08-29T09:12:33.001Z'
+        isAdmin:
+          type: boolean
+          example: true
+        proxmoxUsername:
+          type: string
+          readOnly: true
+          example: john-doe
+    UserCredentialObject:
+      properties:
+        proxmoxUsername:
+          readOnly: true
+          type: string
+          example: john-doe
+        proxmoxPassword:
+          readOnly: true
+          type: string
+          example: 5cy5@plhik4g&Yk12sG
+        ludusEmail:
+          readOnly: true
+          type: string
+          example: john.doe@example.com
+        proxmoxRealm:
+          readOnly: true
+          type: string
+          example: pam
+      type: object
+      example:
+        ludusEmail: john.doe@example.com
+        proxmoxPassword: 5cy5@plhik4g&Yk12sG
+        proxmoxUsername: john-doe
+        proxmoxRealm: pam
+    VMObject:
+      type: object
+      required:
+        - ID
+        - proxmoxID
+        - rangeNumber
+        - name
+        - poweredOn
+        - cpu
+        - ram
+      properties:
+        ID:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 53
+        proxmoxID:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 146
+        rangeNumber:
+          type: integer
+          format: int32
+          readOnly: true
+          example: 3
+        name:
+          type: string
+          example: JD-ad-dc-win2019-server-x64
+        poweredOn:
+          type: boolean
+          example: true
+        ip:
+          type: string
+        isRouter:
+          type: boolean
+          description: Indicates whether this VM is the router for the range
+          example: false
+        cpu:
+          type: integer
+          format: int32
+          description: Number of CPU cores allocated to the VM
+          example: 4
+        ram:
+          type: integer
+          format: int32
+          description: Amount of RAM allocated to the VM in GB
+          example: 8
+    Domain:
+      type: string
+      pattern: >-
+        ^(?!.*?_.*?)(?!(?:[\d\w]+?\.)?\-[\w\d\.\-]*?)(?![\w\d]+?\-\.(?:[\d\w\.\-]+?))(?=[\w\d])(?=[\w\d\.\-]*?\.+[\w\d\.\-]*?)(?![\w\d\.\-]{254})(?!(?:\.?[\w\d\-\.]*?[\w\d\-]{64,}\.)+?)[\w\d\.\-]+?(?<![\w\d\-\.]*?\.[\d]+?)(?<=[\w\d\-]{2,})(?<![\w\d\-]{25})$
+      description: A domain to allow during testing (along with HTTPS CRL domains)
+      example: example.com
+    IP:
+      type: string
+      pattern: >-
+        ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+      example: 203.0.113.4
+    AllowPayload:
+      type: object
+      properties:
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/Domain'
+        ips:
+          type: array
+          items:
+            $ref: '#/components/schemas/IP'
+    SnapshotInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Snapshot identifier. Value 'current' identifies the current VM
+          example: My snapshot
+        includesRAM:
+          type: boolean
+          description: 1 if the snapshot includes RAM, 0 if it does not
+          example: true
+        description:
+          type: string
+          description: Description of the snapshot
+          example: Took this snapshot before testing something
+        snaptime:
+          type: integer
+          format: uint
+          description: Snapshot creation time (unix)
+          example: 1740779020
+        parent:
+          type: string
+          description: Parent snapshot identifier
+          example: Other snapshot
+        vmid:
+          type: integer
+          format: int32
+          description: The VMID of the VM
+          example: 179
+        vmname:
+          type: string
+          description: The name of the VM
+          example: JD-ad-win11-22h2-enterprise-x64-1
+    UserAPIKeyObject:
+      type: object
+      properties:
+        apiKey:
+          type: string
+          pattern: ^[a-zA-Z0-9!@#%^&*()_+\-=\[\]{}:\\|<>\/?]{40}$
+          readOnly: true
+          example: G0rO+G+8Zlu%CAEDyYC2ZdW3pBWW+alAJ2_tli1h
+    UserMembershipObject:
+      type: object
+      required:
+        - groupName
+        - role
+      properties:
+        groupName:
+          type: string
+          description: The name of the group
+          example: Security Team
+        description:
+          type: string
+          description: Optional description of the group
+          example: Security team members
+        role:
+          type: string
+          description: The user's role in the group
+          enum:
+            - member
+            - manager
+          example: manager
     BulkAddUsersToGroupRequest:
       type: object
       required:
@@ -5518,335 +6607,6 @@ components:
           type: array
           items:
             type: string
-    RangeObject:
-      type: object
-      required:
-        - rangeID
-        - rangeNumber
-        - lastDeployment
-        - numberOfVMs
-        - testingEnabled
-        - VMs
-      properties:
-        rangeID:
-          $ref: '#/components/schemas/userID'
-        rangeNumber:
-          type: integer
-          format: int32
-          readOnly: true
-          example: 3
-        name:
-          type: string
-          example: Red Team Range
-        description:
-          type: string
-          example: Range for red team
-        purpose:
-          type: string
-          example: Testing
-        lastDeployment:
-          type: string
-          format: date-time
-          readOnly: true
-          example: '2022-08-29T09:12:33.001Z'
-        numberOfVMs:
-          type: integer
-          format: int32
-          readOnly: true
-          example: 7
-        testingEnabled:
-          type: boolean
-          readOnly: true
-          example: true
-        allowedIPs:
-          type: array
-          items:
-            type: string
-            example: 1.2.3.4
-        allowedDomains:
-          type: array
-          items:
-            type: string
-            example: example.com
-        rangeState:
-          type: string
-          example: SUCCESS
-        VMs:
-          type: array
-          items:
-            $ref: '#/components/schemas/VMObject'
-    userID:
-      type: string
-      pattern: ^[A-Za-z0-9]{1,20}$
-      description: |
-        Must be a unique 1-20 character alpha-numeric string.
-        Initials are commonly used.
-      example: JD
-    rangeID:
-      type: string
-      pattern: ^[A-Za-z0-9_\-]+(\/[A-Za-z0-9_\-]+){0,2}$
-      description: >
-        Must be a valid proxmox pool name (e.g. 'DEMO', 'my-range' or
-        'New_Range'). Use only letters, numbers, hyphens, and underscores.
-
-        This is the rangeID, which is used to identify the range.
-      example: DEMO
-    UserObject:
-      type: object
-      required:
-        - name
-        - userID
-        - isAdmin
-      properties:
-        name:
-          type: string
-          example: John Doe
-        userID:
-          $ref: '#/components/schemas/userID'
-        dateCreated:
-          type: string
-          format: date-time
-          readOnly: true
-          example: '2022-08-29T09:12:33.001Z'
-        dateLastActive:
-          type: string
-          format: date-time
-          readOnly: true
-          example: '2022-08-29T09:12:33.001Z'
-        isAdmin:
-          type: boolean
-          example: true
-        proxmoxUsername:
-          type: string
-          readOnly: true
-          example: john-doe
-    UserCredentialObject:
-      properties:
-        proxmoxUsername:
-          readOnly: true
-          type: string
-          example: john-doe
-        proxmoxPassword:
-          readOnly: true
-          type: string
-          example: 5cy5@plhik4g&Yk12sG
-        ludusEmail:
-          readOnly: true
-          type: string
-          example: john.doe@example.com
-        proxmoxRealm:
-          readOnly: true
-          type: string
-          example: pam
-      type: object
-      example:
-        ludusEmail: john.doe@example.com
-        proxmoxPassword: 5cy5@plhik4g&Yk12sG
-        proxmoxUsername: john-doe
-        proxmoxRealm: pam
-    VMObject:
-      type: object
-      required:
-        - ID
-        - proxmoxID
-        - rangeNumber
-        - name
-        - poweredOn
-        - cpu
-        - ram
-      properties:
-        ID:
-          type: integer
-          format: int32
-          readOnly: true
-          example: 53
-        proxmoxID:
-          type: integer
-          format: int32
-          readOnly: true
-          example: 146
-        rangeNumber:
-          type: integer
-          format: int32
-          readOnly: true
-          example: 3
-        name:
-          type: string
-          example: JD-ad-dc-win2019-server-x64
-        poweredOn:
-          type: boolean
-          example: true
-        ip:
-          type: string
-        isRouter:
-          type: boolean
-          description: Indicates whether this VM is the router for the range
-          example: false
-        cpu:
-          type: integer
-          format: int32
-          description: Number of CPU cores allocated to the VM
-          example: 4
-        ram:
-          type: integer
-          format: int32
-          description: Amount of RAM allocated to the VM in GB
-          example: 8
-    Domain:
-      type: string
-      pattern: >-
-        ^(?!.*?_.*?)(?!(?:[\d\w]+?\.)?\-[\w\d\.\-]*?)(?![\w\d]+?\-\.(?:[\d\w\.\-]+?))(?=[\w\d])(?=[\w\d\.\-]*?\.+[\w\d\.\-]*?)(?![\w\d\.\-]{254})(?!(?:\.?[\w\d\-\.]*?[\w\d\-]{64,}\.)+?)[\w\d\.\-]+?(?<![\w\d\-\.]*?\.[\d]+?)(?<=[\w\d\-]{2,})(?<![\w\d\-]{25})$
-      description: A domain to allow during testing (along with HTTPS CRL domains)
-      example: example.com
-    IP:
-      type: string
-      pattern: >-
-        ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
-      example: 203.0.113.4
-    AllowPayload:
-      type: object
-      properties:
-        domains:
-          type: array
-          items:
-            $ref: '#/components/schemas/Domain'
-        ips:
-          type: array
-          items:
-            $ref: '#/components/schemas/IP'
-    SnapshotInfo:
-      type: object
-      properties:
-        name:
-          type: string
-          description: Snapshot identifier. Value 'current' identifies the current VM
-          example: My snapshot
-        includesRAM:
-          type: boolean
-          description: 1 if the snapshot includes RAM, 0 if it does not
-          example: true
-        description:
-          type: string
-          description: Description of the snapshot
-          example: Took this snapshot before testing something
-        snaptime:
-          type: integer
-          format: uint
-          description: Snapshot creation time (unix)
-          example: 1740779020
-        parent:
-          type: string
-          description: Parent snapshot identifier
-          example: Other snapshot
-        vmid:
-          type: integer
-          format: int32
-          description: The VMID of the VM
-          example: 179
-        vmname:
-          type: string
-          description: The name of the VM
-          example: JD-ad-win11-22h2-enterprise-x64-1
-    ErrorInfo:
-      type: object
-      properties:
-        vmid:
-          type: integer
-          format: int32
-          description: The VMID of the VM
-          example: 180
-        vmname:
-          type: string
-          description: The name of the VM
-          example: JD-ad-win11-22h2-enterprise-x64-2
-        error:
-          type: string
-          description: Error message
-          example: 'Error parsing VM ID abc: strconv.Atoi: parsing "abc": invalid syntax'
-    SnapshotCreatePayload:
-      type: object
-      properties:
-        name:
-          type: string
-          description: Snapshot name
-          example: My cool snapshot
-        description:
-          type: string
-          description: Snapshot Description
-          example: Taking this snapshot before doing some testing
-        vmids:
-          type: array
-          items:
-            type: integer
-            format: int32
-          description: >-
-            Array of VMIDs to snapshot, if blank all VMs in the range will be
-            snapshotted
-          example:
-            - 179
-            - 180
-        includeRAM:
-          type: boolean
-          description: >-
-            Include RAM in the snapshot. If false, the VM will be powered off
-            when restored to this snapshot.
-          example: true
-    LicenseDataObject:
-      type: object
-      properties:
-        entitlements:
-          type: array
-          items:
-            type: string
-            description: Individual entitlement code
-          description: The entitlements granted by the license
-          example: ENTERPRISE_PLUGIN
-        licensed_to:
-          type: string
-          description: The name of the person or organization the license is licensed to
-          example: John Doe
-        expires_at:
-          type: string
-          format: date-time
-          description: The date and time the license expires
-          example: '2022-08-29T09:12:33.001Z'
-        active:
-          type: boolean
-          description: Whether the license is active
-          example: true
-        message:
-          type: string
-          description: The message associated with the license
-          example: 'License active, expires: 2022-08-29 14:12:33, licensed to John Doe'
-    UserAPIKeyObject:
-      type: object
-      properties:
-        apiKey:
-          type: string
-          pattern: ^[a-zA-Z0-9!@#%^&*()_+\-=\[\]{}:\\|<>\/?]{40}$
-          readOnly: true
-          example: G0rO+G+8Zlu%CAEDyYC2ZdW3pBWW+alAJ2_tli1h
-    UserMembershipObject:
-      type: object
-      required:
-        - groupName
-        - role
-      properties:
-        groupName:
-          type: string
-          description: The name of the group
-          example: Security Team
-        description:
-          type: string
-          description: Optional description of the group
-          example: Security team members
-        role:
-          type: string
-          description: The user's role in the group
-          enum:
-            - member
-            - manager
-          example: manager
   responses: {}
   securitySchemes:
     ApiKeyAuth:

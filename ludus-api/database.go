@@ -325,6 +325,7 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 		}
 	}
 	logger.Info("Successfully created initial admin user")
+	Run("ludus-install-status", "/tmp", "/tmp/ludus-install-status.log")
 	return nil
 }
 
@@ -559,7 +560,7 @@ func populateUserFieldsFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEve
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
-	httpReq, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:8081/api/v2/user/provision-oauth2", bytes.NewReader(bodyBytes))
+	httpReq, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://127.0.0.1:%d/api/v2/user/provision-oauth2", ServerConfiguration.AdminPort), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("creating provision request: %w", err)
 	}

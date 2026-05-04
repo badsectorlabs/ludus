@@ -67,6 +67,7 @@ Available Commands:
   kms          Manage Windows license tasks (enterprise only)
   migrate      Migration commands
   power        Control the power state of range VMs
+  quotas       Perform actions related to quotas (enterprise only)
   range        Perform actions on your range
   snapshots    Manage snapshots for VMs
   templates    List, build, add, or get the status of templates
@@ -879,6 +880,101 @@ Flags:
     -n, --name string   A VM ID (100) or name (JS-win10-21h2-enterprise-x64-1) or names/IDs separated by commas or 'all'
 ```
 
+## Quotas
+
+Perform actions related to quotas (enterprise only)
+
+```
+Usage:
+  ludus quotas [command]
+
+Aliases:
+  quota
+
+Available Commands:
+  group  Perform quota actions for a group (admin only)
+  user   Perform quota actions for a specific user (admin only)
+  view   View effective quotas and current usage
+```
+
+### Quotas View
+
+Show effective quota limits and current usage for RAM (GB), CPU cores, VM count, and range count. A limit of `unlimited` means no cap. The admin views annotate each cell with the source of the limit: `(U)` user override, `(G)` group default, `(S)` system default.
+
+```
+Usage:
+  ludus quotas view [users|groups|defaults] [flags]
+
+Aliases:
+  status, show
+```
+
+Without arguments, shows your own quotas. With an argument (admin only): `users` lists all users, `groups` lists each group's default quotas and member counts, `defaults` shows system-wide defaults from server configuration. Use `--json` for machine-readable output.
+
+### Quotas User Set
+
+Set per-user quota overrides for one or more users (admin only). Pass comma-separated user IDs with `-i` / `--userid`. Only the resource flags you pass are updated; omit a flag to leave that quota unchanged. Use `ludus quotas user reset` to clear overrides.
+
+```
+Usage:
+  ludus quotas user set [flags]
+
+Flags:
+      --cpu int         CPU core limit
+      --ram int         RAM limit in GB
+      --ranges int      range count limit
+  -i, --userid string   the UserID of the user to set quotas for (comma-separated for multiple)
+      --vms int         VM count limit
+```
+
+### Quotas User Reset
+
+Remove per-user quota overrides so limits fall back to group or system defaults (admin only). With `--ram`, `--cpu`, `--vms`, and/or `--ranges`, only those dimensions are cleared. With no resource flags, all per-user overrides for the listed users are cleared.
+
+```
+Usage:
+  ludus quotas user reset [flags]
+
+Flags:
+      --cpu             reset CPU quota
+      --ram             reset RAM quota
+      --ranges          reset ranges quota
+  -i, --userid string   the UserID of the user to reset quotas for (comma-separated for multiple)
+      --vms             reset VMs quota
+```
+
+### Quotas Group Set
+
+Set default quotas for a group (admin only). Members without per-user overrides inherit these limits. Pass comma-separated group names with `-g` / `--group`. Only flags you provide are updated.
+
+```
+Usage:
+  ludus quotas group set [flags]
+
+Flags:
+      --cpu int        CPU core limit
+  -g, --group string   the group name(s) to set quotas for (comma-separated for multiple)
+      --ram int        RAM limit in GB
+      --ranges int     range count limit
+      --vms int        VM count limit
+```
+
+### Quotas Group Reset
+
+Remove default quotas for a group (admin only) so members use system defaults unless they have user overrides. With resource flags, only those quotas are cleared on the group; with no resource flags, all group default quotas are cleared.
+
+```
+Usage:
+  ludus quotas group reset [flags]
+
+Flags:
+      --cpu            reset CPU quota
+  -g, --group string   the group name(s) to reset quotas for (comma-separated for multiple)
+      --ram            reset RAM quota
+      --ranges         reset ranges quota
+      --vms            reset VMs quota
+```
+
 ## Range
 
 Perform actions on your range
@@ -888,10 +984,11 @@ Usage:
   ludus range [command]
 
 Available Commands:
-  abort       Kill the ansible process deploying a range
-  accessible  List all ranges accessible to the current user
-  assign      Assign a range to a user (admin only)
-  config      Get or set a range configuration
+  abort          Kill the ansible process deploying a range
+  accessible     List all ranges accessible to the current user
+  assign         Assign a range to a user (admin only)
+  auto-shutdown  Get, set, or reset the auto-shutdown timeout (enterprise)
+  config         Get or set a range configuration
   create      Create a new range
   default     Get or set the default range ID for a user
   deploy      Deploy a range, running specific tags if specified
@@ -938,6 +1035,50 @@ Assign an existing range to a user, granting them direct access. Admin privilege
 ```
 Usage:
   ludus range assign [userID] [rangeID] [flags]
+```
+
+### Range Auto-Shutdown
+
+Get, set, or reset the auto-shutdown timeout for a range (enterprise)
+
+```
+Usage:
+  ludus range auto-shutdown [command]
+
+Available Commands:
+  get    Get the current auto-shutdown configuration
+  reset  Reset the per-range override to the server default
+  set    Set a per-range auto-shutdown timeout
+```
+
+#### Range Auto-Shutdown Get
+
+Get the current auto-shutdown configuration for a range, showing the server default, per-range override, and effective timeout
+
+```
+Usage:
+  ludus range auto-shutdown get
+```
+
+#### Range Auto-Shutdown Set
+
+Set the per-range auto-shutdown timeout
+
+```
+Usage:
+  ludus range auto-shutdown set [flags]
+
+Flags:
+    -t, --timeout string   inactivity timeout duration (e.g. '4h', '30m', '0' to disable)
+```
+
+#### Range Auto-Shutdown Reset
+
+Clear the per-range override so the range falls back to the server default
+
+```
+Usage:
+  ludus range auto-shutdown reset
 ```
 
 ### Range Config
@@ -1117,9 +1258,33 @@ Usage:
   ludus range logs
 
 Flags:
-    -f, --follow     continuously poll the log and print new lines as they are written
-    -t, --tail int   number of lines of the log from the end to print
+    -f, --follow        continuously poll the log and print new lines as they are written
+        --history       show log history entries
+        --id string     view a specific historical log entry by ID
+    -t, --tail int      number of lines of the log from the end to print
 ```
+
+Ludus now creates a running history entry when a deploy starts, then finalizes that entry when the deploy completes. Use `--history` to list entries and `--id` to view a specific one.
+
+`ludus range logs -f` follows the current deployment log only. The `--id` flag cannot be combined with `-f` for range logs.
+
+When a history entry is still running, its `end` field is the Go `time.Time` zero value and the CLI displays `Still running...` in place of an end timestamp.
+
+```
+ludus range logs --history
++-----------------+---------+---------------------+---------------------+
+|       ID        | STATUS  |        START        |         END         |
++-----------------+---------+---------------------+---------------------+
+| njec0ungvnc5ctk | failure | 2026-03-27 22:43:21 | 2026-03-27 22:44:16 |
+| ab12c3defg45678 | success | 2026-03-26 14:10:05 | 2026-03-26 14:32:41 |
++-----------------+---------+---------------------+---------------------+
+```
+
+```
+ludus range logs --history --id njec0ungvnc5ctk
+```
+
+By default the server keeps the last 100 logs per range. This can be changed with `max_log_history` in `/opt/ludus/config.yml` (see [Admin Notes](../administration/admin)).
 
 ### Range Rdp
 
@@ -1342,9 +1507,23 @@ Usage:
 
 Flags:
     -f, --follow           continuously poll the log and print new lines as they are written
+        --history          show log history entries
+        --id string        view a specific historical log entry by ID
     -t, --tail int         number of lines of the log from the end to print
     -v, --verbose-packer   print all lines from the packer log
 ```
+
+Like range logs, template builds create running history entries at build start and finalize them when the build ends. Use `--history` to list entries and `--id` to view one. When building multiple templates in parallel, each template build creates its own history entry.
+
+`ludus templates logs -f` follows the latest active template build at the time of the request.
+
+To follow a specific running template build, use:
+
+```
+ludus templates logs --id <logID> -f
+```
+
+If that build has already completed, the command falls back to showing the archived history content.
 
 ### Templates RM
 

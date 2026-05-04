@@ -1,19 +1,19 @@
 - name: Delete RDP directory
   ansible.builtin.file:
     state: absent
-    path: "{{ ludus_users_dir }}/{{ username }}/rdp/"
+    path: "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp/"
   ignore_errors: true
 
-- name: Create rdp directory for this user
+- name: Create rdp directory for this range
   ansible.builtin.file:
-    path: "{{ ludus_users_dir }}/{{ username }}/rdp"
+    path: "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp"
     state: directory
     mode: '0770'
 
 - name: Create RDP files for each Windows host for domainuser
   ansible.builtin.template:
     src: RDP.j2
-    dest: "{{ ludus_users_dir }}/{{ username }}/rdp/{{ item }}-domainuser.rdp"
+    dest: "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp/{{ item }}-domainuser.rdp"
   with_inventory_hostnames:
     - all
   when:
@@ -33,7 +33,7 @@
 - name: Create RDP files for each Windows host for autologon_user
   ansible.builtin.template:
     src: RDP.j2
-    dest: "{{ ludus_users_dir }}/{{ username }}/rdp/{{ item }}-{{ rdp_username }}.rdp"
+    dest: "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp/{{ item }}-{{ rdp_username }}.rdp"
   with_inventory_hostnames:
     - all
   when:
@@ -53,7 +53,7 @@
 - name: Create RDP files for each Windows host for domainadmin
   ansible.builtin.template:
     src: RDP.j2
-    dest: "{{ ludus_users_dir }}/{{ username }}/rdp/{{ item }}-domainadmin.rdp"
+    dest: "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp/{{ item }}-domainadmin.rdp"
   with_inventory_hostnames:
     - all
   when:
@@ -73,7 +73,7 @@
 - name: Create RDP files for each Windows host for localuser
   ansible.builtin.template:
     src: RDP.j2
-    dest: "{{ ludus_users_dir }}/{{ username }}/rdp/{{ item }}-localuser.rdp"
+    dest: "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp/{{ item }}-localuser.rdp"
   with_inventory_hostnames:
     - all
   when:
@@ -86,7 +86,7 @@
 
 - name: Find RDP files to zip
   ansible.builtin.find:
-    paths: "{{ ludus_users_dir }}/{{ username }}/rdp"
+    paths: "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp"
     patterns: "*.rdp"
   register: rdp_files_found
 
@@ -94,6 +94,6 @@
   community.general.archive:
     format: zip
     path:
-      - "{{ ludus_users_dir }}/{{ username }}/rdp/*"
-    dest: "{{ ludus_users_dir }}/{{ username }}/rdp.zip"
+      - "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp/*"
+    dest: "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp.zip"
   when: rdp_files_found.files | length > 0

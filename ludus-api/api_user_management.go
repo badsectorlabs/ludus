@@ -21,7 +21,7 @@ import (
 	"github.com/pocketbase/pocketbase/tools/security"
 )
 
-var UserIDRegex = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
+var UserIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,20}$`)
 
 // provisionNewUser handles the common provisioning steps for a new Ludus user:
 // assigns a user number, creates a default range, runs the add-user ansible playbook,
@@ -89,7 +89,7 @@ func AddUser(e *core.RequestEvent) error {
 	}
 
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus users add command with --url https://127.0.0.1:8081")
+		return JSONError(e, http.StatusForbidden, adminEndpointError("ludus users add"))
 	}
 
 	var addUserJSON dto.AddUserRequest
@@ -362,7 +362,7 @@ func DeleteUser(e *core.RequestEvent) error {
 	}
 
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, "You must use the ludus-admin server on 127.0.0.1:8081 to use this endpoint.\nUse SSH to tunnel to this port with the command: ssh -L 8081:127.0.0.1:8081 root@<ludus IP>\nIn a different terminal re-run the ludus users rm command with --url https://127.0.0.1:8081")
+		return JSONError(e, http.StatusForbidden, adminEndpointError("ludus users rm"))
 	}
 
 	userID := e.Request.PathValue("userID")
@@ -400,7 +400,7 @@ func DeleteUser(e *core.RequestEvent) error {
 	}
 	output, err := RunDeleteUserPlaybookStandalone(extraVars)
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running ansible playbook: %w (output: %v)", err, output))
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running ansible playbook: %v (output: %v)", err, output))
 	}
 
 	err = removeUserFromProxmox(user.ProxmoxUsername(), "pam")
@@ -628,6 +628,10 @@ func ListAllUsers(e *core.RequestEvent) error {
 			DateLastActive:  userModel.LastActive().Time(),
 			IsAdmin:         userModel.IsAdmin(),
 			ProxmoxUsername: userModel.ProxmoxUsername(),
+			QuotaRAM:        userModel.QuotaRam(),
+			QuotaCPU:        userModel.QuotaCpu(),
+			QuotaVMs:        userModel.QuotaVms(),
+			QuotaRanges:     userModel.QuotaRanges(),
 		})
 	}
 	return e.JSON(http.StatusOK, users)
@@ -645,6 +649,10 @@ func ListUser(e *core.RequestEvent) error {
 		IsAdmin:         userModel.IsAdmin(),
 		ProxmoxUsername: userModel.ProxmoxUsername(),
 		UserNumber:      userModel.UserNumber(),
+		QuotaRAM:        userModel.QuotaRam(),
+		QuotaCPU:        userModel.QuotaCpu(),
+		QuotaVMs:        userModel.QuotaVms(),
+		QuotaRanges:     userModel.QuotaRanges(),
 	}
 	response := []dto.ListUserResponseItem{user}
 	return e.JSON(http.StatusOK, response)

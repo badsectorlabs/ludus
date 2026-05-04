@@ -34,7 +34,7 @@ func GetDiagnostics(e *core.RequestEvent) error {
 	}
 
 	// Get Proxmox client (using root client for diagnostics)
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error creating Proxmox client: %v", err))
 	}

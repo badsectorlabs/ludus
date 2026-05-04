@@ -13,7 +13,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-func getGroupObjectFromRequest(e *core.RequestEvent) (*models.Group, error) {
+func GetGroupObjectFromRequest(e *core.RequestEvent) (*models.Group, error) {
 	groupName := e.Request.PathValue("groupName")
 
 	if groupName == "" {
@@ -87,7 +87,7 @@ func DeleteGroup(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot delete groups")
 	}
 
-	group, err := getGroupObjectFromRequest(e)
+	group, err := GetGroupObjectFromRequest(e)
 	if err != nil {
 		return err
 	}
@@ -155,7 +155,7 @@ func ListGroups(e *core.RequestEvent) error {
 // AddUsersToGroup adds one or more users to a group
 func AddUsersToGroup(e *core.RequestEvent) error {
 
-	group, err := getGroupObjectFromRequest(e)
+	group, err := GetGroupObjectFromRequest(e)
 	if err != nil {
 		return err
 	}
@@ -293,7 +293,7 @@ func AddUsersToGroup(e *core.RequestEvent) error {
 // RemoveUsersFromGroup removes one or more users from a group
 func RemoveUsersFromGroup(e *core.RequestEvent) error {
 
-	group, err := getGroupObjectFromRequest(e)
+	group, err := GetGroupObjectFromRequest(e)
 	if err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ func RemoveUsersFromGroup(e *core.RequestEvent) error {
 // AddRangesToGroup grants group access to one or more ranges
 func AddRangesToGroup(e *core.RequestEvent) error {
 
-	group, err := getGroupObjectFromRequest(e)
+	group, err := GetGroupObjectFromRequest(e)
 	if err != nil {
 		return err
 	}
@@ -522,7 +522,7 @@ func AddRangesToGroup(e *core.RequestEvent) error {
 // RemoveRangesFromGroup revokes group access from one or more ranges
 func RemoveRangesFromGroup(e *core.RequestEvent) error {
 
-	group, err := getGroupObjectFromRequest(e)
+	group, err := GetGroupObjectFromRequest(e)
 	if err != nil {
 		return err
 	}
@@ -617,7 +617,7 @@ func ListGroupMembers(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot list group members")
 	}
 
-	group, err := getGroupObjectFromRequest(e)
+	group, err := GetGroupObjectFromRequest(e)
 	if err != nil {
 		return err
 	}
@@ -651,7 +651,7 @@ func ListGroupRanges(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot list group ranges")
 	}
 
-	group, err := getGroupObjectFromRequest(e)
+	group, err := GetGroupObjectFromRequest(e)
 	if err != nil {
 		return err
 	}

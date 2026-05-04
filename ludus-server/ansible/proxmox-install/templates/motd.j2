@@ -1,11 +1,12 @@
 #!/bin/bash
+{# `| default(8080)` guards upgrades where config.yml predates the port setting. #}
 cat << EOF
 
 This is a Ludus host. Learn more at https://ludus.cloud
 
-Web UI:  https://{{ proxmox_public_ip }}:8080/ui
-API:     https://{{ proxmox_public_ip }}:8080/api/v2
-Docs:    https://{{ proxmox_public_ip }}:8080/ludus
+Web UI:  https://{{ proxmox_public_ip }}:{{ port | default(8080) }}/ui
+API:     https://{{ proxmox_public_ip }}:{{ port | default(8080) }}/api/v2
+Docs:    https://{{ proxmox_public_ip }}:{{ port | default(8080) }}/ludus
 Proxmox: https://{{ proxmox_public_ip }}:8006
 
 EOF

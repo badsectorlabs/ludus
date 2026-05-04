@@ -54,11 +54,6 @@
         path: "/etc/wireguard/{{ user_id }}-client-private-key"
         state: absent
 
-    - name: Remove wireguard config
-      ansible.builtin.file:
-        path: "/etc/wireguard/{{ user_id }}_client.conf"
-        state: absent
-
     # This can be used to sync the config, but it causes a hiccup in all client's connections
     # Use the sync below instead
     # - name: Restart wireguard

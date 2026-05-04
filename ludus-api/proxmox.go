@@ -53,7 +53,7 @@ func setProxmoxSystemPassword(username string, realm string, password string) er
 	// https://pve.proxmox.com/pve-docs/api-viewer/#/access/password
 	// "This API endpoint is not available for API tokens."
 
-	// proxmoxClient, err := getRootGoProxmoxClient()
+	// proxmoxClient, err := GetRootGoProxmoxClient()
 	// if err != nil {
 	// 	return errors.New("unable to create proxmox client: " + err.Error())
 	// }
@@ -145,7 +145,7 @@ func GetGoProxmoxClientForUserUsingToken(e *core.RequestEvent) (*goproxmox.Clien
 	return client, nil
 }
 
-func getRootGoProxmoxClient() (*goproxmox.Client, error) {
+func GetRootGoProxmoxClient() (*goproxmox.Client, error) {
 
 	rawCachedClient := app.Store().Get("proxmoxClient_root")
 	cachedClient, ok := rawCachedClient.(*goproxmox.Client)
@@ -286,7 +286,7 @@ func createRootAPITokenWithShell() (string, string, error) {
 }
 
 func createPool(poolName string) error {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -298,7 +298,7 @@ func createPool(poolName string) error {
 }
 
 func removePool(poolName string) error {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -335,7 +335,7 @@ func removeUserAccessFromRange(username string, realm string, poolName string, r
 }
 
 func poolACLAction(username string, realm string, poolName string, revoke bool) error {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -355,7 +355,7 @@ func poolACLAction(username string, realm string, poolName string, revoke bool) 
 }
 
 func sdnVNetACLAction(username string, realm string, rangeNumber int, revoke bool) error {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -378,7 +378,7 @@ func sdnVNetACLAction(username string, realm string, rangeNumber int, revoke boo
 var proxmoxGroupNameRegex = regexp.MustCompile(`^[A-Za-z0-9_\-]+$`)
 
 func poolExists(poolName string) bool {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return false
 	}
@@ -404,7 +404,7 @@ func createGroupInProxmox(groupName string) error {
 		return errors.New("group name must be alphanumeric, hyphens, and underscores only")
 	}
 
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -416,7 +416,7 @@ func createGroupInProxmox(groupName string) error {
 }
 
 func removeGroupFromProxmox(groupName string) error {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -432,7 +432,7 @@ func removeGroupFromProxmox(groupName string) error {
 }
 
 func addUserToGroupInProxmox(username string, realm string, groupName string) error {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -461,7 +461,7 @@ func addUserToGroupInProxmox(username string, realm string, groupName string) er
 }
 
 func removeUserFromGroupInProxmox(username string, realm string, groupName string) error {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -511,7 +511,7 @@ func revokeGroupAccessToRangeInProxmox(groupID string, poolName string, rangeNum
 }
 
 func groupACLAction(groupID string, poolName string, revoke bool) error {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -534,7 +534,7 @@ func groupACLAction(groupID string, poolName string, revoke bool) error {
 }
 
 func removeUserFromProxmox(username string, realm string) error {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
@@ -811,7 +811,7 @@ func revokeGroupAccessToSDNVNet(groupID string, rangeNumber int) error {
 }
 
 func sdnGroupVNetACLAction(groupID string, rangeNumber int, revoke bool) error {
-	proxmoxClient, err := getRootGoProxmoxClient()
+	proxmoxClient, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return errors.New("unable to create proxmox client: " + err.Error())
 	}
