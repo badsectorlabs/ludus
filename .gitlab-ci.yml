@@ -2,46 +2,7 @@ stages:
   - pages
   - documentation
   - build
-  - install-kickoff
-  - install-check
-  - install-snapshot
-  - templates-build
-  - templates-check
-  - templates-snapshot
-  - client
-  - range-admin-deploy
-  - range-admin-check
-  - range-admin-snapshot
-  - post-deploy-admin-testing
-  - post-deploy-admin-power
-  - post-deploy-admin-ansible
-  - post-deploy-admin-user
-  - post-deploy-admin-groups
-  - post-deploy-admin-blueprints
-  - post-deploy-admin-ranges
-  - post-deploy-admin-templates
-  - range-user-deploy
-  - range-user-check
-  - range-user-snapshot
-  - post-deploy-user-testing
-  - post-deploy-user-power
-  - post-deploy-user-ansible
-  - post-deploy-user-user
-  - post-deploy-user-blueprints
-  - post-deploy-user-templates
-  - post-deploy-user-snapshots
-  - integration
-  - cluster-install-kickoff
-  - cluster-install-check
-  - cluster-verify-sdn
-  - cluster-templates-build
-  - cluster-templates-check
-  - cluster-range-deploy
-  - cluster-verify-placement
-  - cluster-verify-vxlan
-  - cluster-test-range-default
-  - cluster-test-migration-api
-  - manual
+  - test      # All install/template/range/post-deploy/integration/cluster jobs (DAG via needs)
   - upload
   - release
 
@@ -492,9 +453,11 @@ build all:
 # INSTALL #
 ###########
 install kickoff:
-  stage: install-kickoff
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
@@ -520,9 +483,11 @@ install kickoff:
     - sudo ./ludus-server --no-prompt ludus-$CI_PIPELINE_ID # This causes a reboot, handle it in the run.sh ci script
 
 install check:
-  stage: install-check
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - install kickoff
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -547,9 +512,11 @@ install check:
     - echo "root:$CI_PIPELINE_ID" | sudo chpasswd # allow root login via the web interface for debugging
 
 install snapshot:
-  stage: install-snapshot
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - install check
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -577,9 +544,13 @@ install snapshot:
 # TEMPLATES #
 #############
 templates build:
-  stage: templates-build
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: install snapshot
+      optional: true
   dependencies:
     - build all
   rules:
@@ -617,9 +588,11 @@ templates build:
     - ludus templates build --parallel 6
 
 templates check:
-  stage: templates-check
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - templates build
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -660,9 +633,11 @@ templates check:
     - ludus templates list
 
 templates snapshot:
-  stage: templates-snapshot
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - templates check
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -698,9 +673,11 @@ templates snapshot:
 # CLIENT #
 ##########
 client basic-commands:
-  stage: client
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
   dependencies:
     - build all
   rules:
@@ -750,9 +727,13 @@ client basic-commands:
 # RANGE - ADMIN #
 #################
 range deploy-admin:
-  stage: range-admin-deploy
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: templates snapshot
+      optional: true
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
@@ -794,9 +775,11 @@ range deploy-admin:
     - ludus range deploy
 
 range check-admin:
-  stage: range-admin-check
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - range deploy-admin
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -855,9 +838,11 @@ range check-admin:
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
 
 range snapshot-admin:
-  stage: range-admin-snapshot
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - range check-admin
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -895,9 +880,13 @@ range snapshot-admin:
 # POST-DEPLOY - ADMIN #
 #######################
 post-deploy testing-as-admin:
-  stage: post-deploy-admin-testing
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: range snapshot-admin
+      optional: true
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
@@ -935,9 +924,13 @@ post-deploy testing-as-admin:
     - *testing-mode-tests
 
 post-deploy power-as-admin:
-  stage: post-deploy-admin-power
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy testing-as-admin
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -976,9 +969,13 @@ post-deploy power-as-admin:
     - *power-tests
 
 post-deploy ansible-as-admin:
-  stage: post-deploy-admin-ansible
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy power-as-admin
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1018,9 +1015,13 @@ post-deploy ansible-as-admin:
     - *ansible-tests
 
 post-deploy user-cmds-as-admin:
-  stage: post-deploy-admin-user
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy ansible-as-admin
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1086,9 +1087,13 @@ post-deploy user-cmds-as-admin:
     - '! ludus users list all | grep "Test User"'
 
 post-deploy groups-as-admin:
-  stage: post-deploy-admin-groups
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy user-cmds-as-admin
+      optional: true
   dependencies:
     - build all
   rules:
@@ -1218,9 +1223,13 @@ post-deploy groups-as-admin:
     - ludus user rm -i GTU
 
 post-deploy blueprints-as-admin:
-  stage: post-deploy-admin-blueprints
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy groups-as-admin
+      optional: true
   dependencies:
     - build all
   rules:
@@ -1282,9 +1291,13 @@ post-deploy blueprints-as-admin:
     - '! ludus blueprint list | grep ci-bp-main'
 
 post-deploy ranges-as-admin:
-  stage: post-deploy-admin-ranges
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy blueprints-as-admin
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1404,9 +1417,13 @@ post-deploy ranges-as-admin:
     - ludus --user CIU range default get --json | jq -r '.defaultRangeID' | grep "$CIU_ORIGINAL_DEFAULT"
 
 post-deploy templates-as-admin:
-  stage: post-deploy-admin-templates
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy ranges-as-admin
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1445,9 +1462,13 @@ post-deploy templates-as-admin:
 # RANGE - USER #
 ################
 range deploy-user:
-  stage: range-user-deploy
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: range snapshot-admin
+      optional: true
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
@@ -1487,9 +1508,11 @@ range deploy-user:
     - ludus range deploy
 
 range check-user:
-  stage: range-user-check
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - range deploy-user
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1529,9 +1552,11 @@ range check-user:
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
 
 range snapshot-user:
-  stage: range-user-snapshot
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - range check-user
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1567,9 +1592,13 @@ range snapshot-user:
 # POST-DEPLOY - USER #
 #######################
 post-deploy testing-as-user:
-  stage: post-deploy-user-testing
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: range snapshot-user
+      optional: true
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
@@ -1604,9 +1633,13 @@ post-deploy testing-as-user:
     - *testing-mode-tests
 
 post-deploy power-as-user:
-  stage: post-deploy-user-power
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy testing-as-user
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1644,9 +1677,13 @@ post-deploy power-as-user:
     - *power-tests
 
 post-deploy ansible-as-user:
-  stage: post-deploy-user-ansible
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy power-as-user
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1681,9 +1718,13 @@ post-deploy ansible-as-user:
     - *ansible-tests
 
 post-deploy user-cmds-as-user:
-  stage: post-deploy-user-user
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy ansible-as-user
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1744,9 +1785,13 @@ post-deploy user-cmds-as-user:
     - ludus user apikey --no-prompt --value > /opt/ludus/ci/.apikey-user
 
 post-deploy blueprints-as-user:
-  stage: post-deploy-user-blueprints
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy user-cmds-as-user
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1867,9 +1912,13 @@ post-deploy blueprints-as-user:
     - '! ludus blueprint list | grep ci-acl-copy-ciu'
 
 post-deploy templates-as-user:
-  stage: post-deploy-user-templates
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy blueprints-as-user
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1903,9 +1952,13 @@ post-deploy templates-as-user:
     - *template-tests
 
 post-deploy snapshots-as-user:
-  stage: post-deploy-user-snapshots
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy templates-as-user
+      optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1942,9 +1995,13 @@ post-deploy snapshots-as-user:
 # FINAL BOSS FIGHT #
 ####################
 test-everything:
-  stage: integration
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - job: post-deploy snapshots-as-user
+      optional: true
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
@@ -2041,9 +2098,11 @@ test-everything:
 # CLUSTER #
 ###########
 cluster install kickoff:
-  stage: cluster-install-kickoff
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
   dependencies:
     - build all
   <<: *cluster-rules
@@ -2080,9 +2139,11 @@ cluster install kickoff:
     - sudo ./ludus-server --no-prompt $(hostname)
 
 cluster-install-check:
-  stage: cluster-install-check
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - cluster install kickoff
   dependencies: []
   <<: *cluster-rules
   variables:
@@ -2095,7 +2156,7 @@ cluster-install-check:
     - echo "Install check completed via custom executor check loop"
 
 cluster-verify-sdn:
-  stage: cluster-verify-sdn
+  stage: test
   tags:
     - ludus-proxmox-runner
   dependencies: []
@@ -2120,9 +2181,12 @@ cluster-verify-sdn:
     - sudo pvesh get /cluster/status --output-format=json | jq -e '[.[] | select(.type == "node")] | length == 2'
 
 cluster-templates-build:
-  stage: cluster-templates-build
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - cluster-verify-sdn
   dependencies:
     - build all
   <<: *cluster-rules
@@ -2137,9 +2201,11 @@ cluster-templates-build:
     - ludus templates build -n debian-11-x64-server-template
 
 cluster-templates-check:
-  stage: cluster-templates-check
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - cluster-templates-build
   dependencies: []
   <<: *cluster-rules
   variables:
@@ -2161,9 +2227,12 @@ cluster-templates-check:
     - test $(sudo pvesh get /nodes/EH-Ludus-2/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
 
 cluster-range-deploy:
-  stage: cluster-range-deploy
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - cluster-templates-check
   dependencies:
     - build all
   <<: *cluster-rules
@@ -2187,9 +2256,11 @@ cluster-range-deploy:
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
 
 cluster-verify-placement:
-  stage: cluster-verify-placement
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - cluster-range-deploy
   dependencies: []
   <<: *cluster-rules
   variables:
@@ -2219,7 +2290,7 @@ cluster-verify-placement:
       echo "Cluster placement verified: $TOTAL VMs across both nodes, 1 on Node1, 2 on Node2"
 
 cluster-verify-vxlan:
-  stage: cluster-verify-vxlan
+  stage: test
   tags:
     - ludus-proxmox-runner
   dependencies: []
@@ -2246,9 +2317,12 @@ cluster-verify-vxlan:
       sudo qm guest exec $DEB1_VMID -- ping -c 3 -w 5 $(ludus -r CCIA range list --json | jq '.rangeNumber' | awk '{printf "10.%d.10.254", $0}')
 
 cluster-test-range-default:
-  stage: cluster-test-range-default
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
+    - cluster-verify-vxlan
   dependencies:
     - build all
   <<: *cluster-rules
@@ -2306,13 +2380,52 @@ cluster-test-range-default:
       fi
       echo "Cluster placement verified: $TOTAL VMs across both nodes, 1 on Node1, 2 on Node2"
 
+################
+# POOL RELEASE #
+################
+# Dedicated job to release the VM pool after all test chains complete.
+# Uses optional needs so it runs once all triggered chains finish (or are skipped).
+# Must wait for ALL chains to avoid releasing the pool while parallel chains are still running.
+pool-release:
+  stage: test
+  tags:
+    - ludus-proxmox-runner
+  needs:
+    - job: post-deploy templates-as-admin
+      optional: true
+    - job: post-deploy snapshots-as-user
+      optional: true
+    - job: test-everything
+      optional: true
+    - job: client basic-commands
+      optional: true
+    - job: cluster-test-range-default
+      optional: true
+    - job: manual testing
+      optional: true
+  variables:
+    LUDUS_RELEASE_POOL: "true"
+    LUDUS_BUILD_TYPE: any-built
+    GIT_STRATEGY: none
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - when: always
+  timeout: 5m
+  script:
+    - echo "Pool released"
+
 ##########
 # MANUAL #
 ##########
 manual testing:
-  stage: manual
+  stage: test
   tags:
     - ludus-proxmox-runner
+  needs:
+    - build all
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
