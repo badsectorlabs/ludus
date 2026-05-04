@@ -456,7 +456,7 @@
       ansible.builtin.replace:
         path: "/etc/gitlab-runner/config.toml"
         regexp: "concurrent *= *\\d+"
-        replace: "concurrent = 3"
+        replace: "concurrent = 12"
 
     - name: Restart GitLab runner
       ansible.builtin.shell: gitlab-runner restart

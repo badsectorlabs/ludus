@@ -1,0 +1,504 @@
+---
+# /opt/ludus/ci/ci-vm-setup.yml
+#
+# Creates 12 CI VMs from the debian-13-x64-server-ludus-ci-template,
+# brings each to its target state, and takes a "clean" snapshot.
+#
+# Prerequisites:
+#   - debian-13-x64-server-ludus-ci-template exists (run ci-setup.yml first)
+#   - gitlab-runner user/ssh keys are configured
+#   - Proxmox API credentials available
+#
+# Usage:
+#   ansible-playbook ci-vm-setup.yml \
+#     -e api_user=gitlab-runner@pam \
+#     -e api_password=$(cat /opt/ludus/ci/.gitlab-runner-password) \
+#     -e api_host=127.0.0.1 \
+#     -e node_name=ludus \
+#     -e ludus_install_path=/opt/ludus \
+#     -e proxmox_vm_storage_pool=local-zfs \
+#     -e proxmox_vm_storage_format=raw
+#
+# VM Layout:
+#   Pool A: 1000 (base), 1001 (installed), 1002 (templates), 1003 (range-admin), 1004 (range-user)
+#   Cluster: 1005 (node1), 1006 (node2)
+#   Pool B: 1007 (base), 1008 (installed), 1009 (templates), 1010 (range-admin), 1011 (range-user)
+#   Build:  1012 (dedicated build machine)
+
+- name: Clone all CI VMs from template
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ci_template_name: debian-13-x64-server-ludus-ci-template
+    ci_bridge: ludusci
+    # VM definitions: vmid, name, role, memory (MB), cores
+    ci_vms:
+      - { vmid: 1000, name: "ci-pool-a-base",          role: base,         memory: 32768, cores: 8 }
+      - { vmid: 1001, name: "ci-pool-a-installed",      role: installed,    memory: 32768, cores: 8 }
+      - { vmid: 1002, name: "ci-pool-a-templates",      role: templates,    memory: 32768, cores: 8 }
+      - { vmid: 1003, name: "ci-pool-a-range-admin",    role: range-admin,  memory: 32768, cores: 8 }
+      - { vmid: 1004, name: "ci-pool-a-range-user",     role: range-user,   memory: 32768, cores: 8 }
+      - { vmid: 1005, name: "ci-cluster-node1",         role: cluster,      memory: 32768, cores: 8 }
+      - { vmid: 1006, name: "ci-cluster-node2",         role: cluster,      memory: 32768, cores: 8 }
+      - { vmid: 1007, name: "ci-pool-b-base",           role: base,         memory: 32768, cores: 8 }
+      - { vmid: 1008, name: "ci-pool-b-installed",      role: installed,    memory: 32768, cores: 8 }
+      - { vmid: 1009, name: "ci-pool-b-templates",      role: templates,    memory: 32768, cores: 8 }
+      - { vmid: 1010, name: "ci-pool-b-range-admin",    role: range-admin,  memory: 32768, cores: 8 }
+      - { vmid: 1011, name: "ci-pool-b-range-user",     role: range-user,   memory: 32768, cores: 8 }
+      - { vmid: 1012, name: "ci-build-machine",         role: build,        memory: 32768, cores: 8 }
+
+  tasks:
+    - name: Create pool-assignments directory
+      ansible.builtin.file:
+        path: "{{ ludus_install_path }}/ci/pool-assignments"
+        state: directory
+        owner: gitlab-runner
+        group: gitlab-runner
+        mode: "0755"
+
+    - name: Clone VMs from CI template
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        clone: "{{ ci_template_name }}"
+        name: "{{ item.name }}"
+        newid: "{{ item.vmid }}"
+        pool: CICD
+        full: true
+        storage: "{{ proxmox_vm_storage_pool }}"
+        format: "{{ proxmox_vm_storage_format }}"
+        timeout: 600
+      loop: "{{ ci_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+      register: cloned_vms
+
+    - name: Configure VM resources
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ item.vmid }}"
+        memory: "{{ item.memory }}"
+        cores: "{{ item.cores }}"
+        vcpus: "{{ item.cores }}"
+        cpu: host
+        description: '{ "groups": ["cicd"], "role": "{{ item.role }}" }'
+        update: true
+      loop: "{{ ci_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
+    - name: Set VM network to CI bridge
+      community.general.proxmox_nic:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        vmid: "{{ item.vmid }}"
+        interface: net0
+        bridge: "{{ ci_bridge }}"
+      loop: "{{ ci_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
+    - name: Start all VMs
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ item.vmid }}"
+        state: started
+      loop: "{{ ci_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+      retries: 3
+      delay: 5
+
+    - name: Wait for all VMs to get IP addresses via qemu-guest-agent
+      ansible.builtin.shell: |
+        COOKIE=$(curl -s -k -d "username={{ api_user }}" --data-urlencode "password={{ api_password }}" \
+          https://127.0.0.1:8006/api2/json/access/ticket | jq -r '.data.ticket')
+        for i in $(seq 1 60); do
+          IP=$(curl -s -k -b "PVEAuthCookie=$COOKIE" \
+            "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ item.vmid }}/agent/network-get-interfaces" \
+            | jq -r '.data.result[] | ."ip-addresses" | .[]? | ."ip-address"' \
+            | grep 203.0.113)
+          if [ -n "$IP" ]; then
+            echo "$IP"
+            exit 0
+          fi
+          sleep 5
+        done
+        echo "TIMEOUT"
+        exit 1
+      loop: "{{ ci_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+      register: vm_ips
+      changed_when: false
+
+    - name: Build IP lookup dictionary
+      ansible.builtin.set_fact:
+        vm_ip_map: "{{ vm_ip_map | default({}) | combine({ item.item.vmid | string: item.stdout | trim }) }}"
+      loop: "{{ vm_ips.results }}"
+      loop_control:
+        label: "{{ item.item.vmid }}"
+
+    - name: Display VM IP assignments
+      ansible.builtin.debug:
+        msg: "VMID {{ item.key }}: {{ item.value }}"
+      loop: "{{ vm_ip_map | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Wait for SSH on all VMs
+      ansible.builtin.wait_for:
+        host: "{{ vm_ip_map[item.vmid | string] }}"
+        port: 22
+        delay: 3
+        timeout: 300
+      loop: "{{ ci_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
+    # --- Snapshot base VMs immediately (they just need the CI template state) ---
+    - name: Snapshot base VMs (1000, 1007) as 'clean'
+      ansible.builtin.command: >
+        qm snapshot {{ item.vmid }} clean --vmstate true
+      loop: "{{ ci_vms | selectattr('role', 'equalto', 'base') | list }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
+# --- Install Ludus on VMs that need it (all except base VMs) ---
+- name: Install Ludus on non-base VMs
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ssh_config: /home/gitlab-runner/.ssh/config
+    # VMs that need Ludus installed (everything except base and cluster)
+    install_vms:
+      - { vmid: 1001, role: installed }
+      - { vmid: 1002, role: templates }
+      - { vmid: 1003, role: range-admin }
+      - { vmid: 1004, role: range-user }
+      - { vmid: 1008, role: installed }
+      - { vmid: 1009, role: templates }
+      - { vmid: 1010, role: range-admin }
+      - { vmid: 1011, role: range-user }
+      - { vmid: 1012, role: build }
+  tasks:
+    - name: Copy Ludus server binary to VMs
+      ansible.builtin.shell: |
+        scp -F {{ ssh_config }} {{ ludus_install_path }}/ci/binaries/ludus-server \
+          gitlab-runner@{{ vm_ip_map[item.vmid | string] }}:/tmp/ludus-server
+        scp -F {{ ssh_config }} {{ ludus_install_path }}/ci/binaries/ludus-client_linux-amd64 \
+          gitlab-runner@{{ vm_ip_map[item.vmid | string] }}:/tmp/ludus-client
+      loop: "{{ install_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+      when: vm_ip_map is defined
+
+    - name: Run Ludus installer on each VM (kicks off install, causes reboot)
+      ansible.builtin.shell: |
+        ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+          "cd /tmp && sudo chmod +x ludus-server && sudo ./ludus-server --no-prompt $(hostname)"
+      loop: "{{ install_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+      ignore_errors: true  # SSH connection may drop during reboot
+
+    - name: Wait for VMs to reboot and SSH to come back (up to 10 minutes)
+      ansible.builtin.shell: |
+        for i in $(seq 1 120); do
+          ssh -o ConnectTimeout=3 -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} "echo ready" 2>/dev/null && exit 0
+          sleep 5
+        done
+        exit 1
+      loop: "{{ install_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Wait for Ludus install to complete (check install status)
+      ansible.builtin.shell: |
+        for i in $(seq 1 180); do
+          RESULT=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+            "sudo cat /opt/ludus/install/install.log 2>/dev/null | tail -5" 2>/dev/null || echo "")
+          if echo "$RESULT" | grep -q "Ludus install completed successfully"; then
+            echo "Install complete on {{ item.vmid }}"
+            exit 0
+          fi
+          sleep 10
+        done
+        echo "Install timed out on {{ item.vmid }}"
+        exit 1
+      loop: "{{ install_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+      register: install_results
+
+    - name: Copy ludus client to /usr/local/bin on each VM
+      ansible.builtin.shell: |
+        ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+          "sudo cp /tmp/ludus-client /usr/local/bin/ludus && sudo chmod +x /usr/local/bin/ludus"
+      loop: "{{ install_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Snapshot 'installed' VMs (1001, 1008, 1012) as 'clean'
+      ansible.builtin.command: >
+        qm snapshot {{ item.vmid }} clean --vmstate true
+      loop: "{{ install_vms | selectattr('role', 'in', ['installed', 'build']) | list }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+# --- Build templates on VMs that need them ---
+- name: Build templates on template/range VMs
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ssh_config: /home/gitlab-runner/.ssh/config
+    template_vms:
+      - { vmid: 1002, role: templates }
+      - { vmid: 1003, role: range-admin }
+      - { vmid: 1004, role: range-user }
+      - { vmid: 1009, role: templates }
+      - { vmid: 1010, role: range-admin }
+      - { vmid: 1011, role: range-user }
+  tasks:
+    - name: Create admin user and start template builds
+      ansible.builtin.shell: |
+        ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} bash -l <<'REMOTE'
+        export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
+        # Create the CI admin user
+        ludus users add -a -n "Continuous Integration Admin" -i CIA -e "cia@ludus.internal" -p "cicdpassword" || true
+        ludus --user CIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-admin
+        export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
+        # Build all templates in parallel
+        ludus templates build --parallel 6
+        REMOTE
+      loop: "{{ template_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Wait for template builds to complete (up to 3 hours)
+      ansible.builtin.shell: |
+        for i in $(seq 1 360); do
+          REMAINING=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+            "export LUDUS_API_KEY=\$(cat /opt/ludus/ci/.apikey-admin) && \
+             ludus templates list --json | jq '[.[] | select(.built == false)] | length'" 2>/dev/null || echo "99")
+          if [ "$REMAINING" = "0" ]; then
+            echo "Templates built on {{ item.vmid }}"
+            exit 0
+          fi
+          echo "{{ item.vmid }}: $REMAINING templates remaining..."
+          sleep 30
+        done
+        echo "Template build timed out on {{ item.vmid }}"
+        exit 1
+      loop: "{{ template_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Snapshot 'templates' VMs (1002, 1009) as 'clean'
+      ansible.builtin.command: >
+        qm snapshot {{ item.vmid }} clean --vmstate true
+      loop: "{{ template_vms | selectattr('role', 'equalto', 'templates') | list }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+# --- Deploy admin range on VMs that need it ---
+- name: Deploy admin range
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ssh_config: /home/gitlab-runner/.ssh/config
+    admin_range_vms:
+      - { vmid: 1003, role: range-admin }
+      - { vmid: 1004, role: range-user }
+      - { vmid: 1010, role: range-admin }
+      - { vmid: 1011, role: range-user }
+  tasks:
+    - name: Set range config and deploy admin range
+      ansible.builtin.shell: |
+        ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} bash -l <<'REMOTE'
+        export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
+        ludus range config set -f /opt/ludus/ci/configs/simple-domain.yml
+        ludus range deploy
+        REMOTE
+      loop: "{{ admin_range_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Wait for admin range deployment (up to 3 hours)
+      ansible.builtin.shell: |
+        for i in $(seq 1 360); do
+          STATE=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+            "export LUDUS_API_KEY=\$(cat /opt/ludus/ci/.apikey-admin) && \
+             ludus range list --json | jq -r '.rangeState'" 2>/dev/null || echo "UNKNOWN")
+          if [ "$STATE" = "SUCCESS" ]; then
+            echo "Admin range deployed on {{ item.vmid }}"
+            exit 0
+          fi
+          if [ "$STATE" = "ERROR" ]; then
+            echo "Range deployment FAILED on {{ item.vmid }}"
+            ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+              "export LUDUS_API_KEY=\$(cat /opt/ludus/ci/.apikey-admin) && ludus range errors" 2>/dev/null || true
+            exit 1
+          fi
+          echo "{{ item.vmid }}: range state = $STATE"
+          sleep 30
+        done
+        echo "Range deployment timed out on {{ item.vmid }}"
+        exit 1
+      loop: "{{ admin_range_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Snapshot 'range-admin' VMs (1003, 1010) as 'clean'
+      ansible.builtin.command: >
+        qm snapshot {{ item.vmid }} clean --vmstate true
+      loop: "{{ admin_range_vms | selectattr('role', 'equalto', 'range-admin') | list }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+# --- Deploy user range on VMs that need it ---
+- name: Deploy user range
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ssh_config: /home/gitlab-runner/.ssh/config
+    user_range_vms:
+      - { vmid: 1004, role: range-user }
+      - { vmid: 1011, role: range-user }
+  tasks:
+    - name: Create CIU user and deploy user range
+      ansible.builtin.shell: |
+        ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} bash -l <<'REMOTE'
+        export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
+        # Power off admin range to save resources
+        ludus power off -n all
+        # Create the CI user
+        ludus users add -n "Continuous Integration User" -i CIU -e "ciu@ludus.internal" -p "cicdpassword" || true
+        ludus --user CIU users apikey --no-prompt --value > /opt/ludus/ci/.apikey-user
+        export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
+        ludus range config set -f /opt/ludus/ci/configs/simple-domain.yml
+        ludus range deploy
+        REMOTE
+      loop: "{{ user_range_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Wait for user range deployment (up to 3 hours)
+      ansible.builtin.shell: |
+        for i in $(seq 1 360); do
+          STATE=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+            "export LUDUS_API_KEY=\$(cat /opt/ludus/ci/.apikey-user) && \
+             ludus range list --json | jq -r '.rangeState'" 2>/dev/null || echo "UNKNOWN")
+          if [ "$STATE" = "SUCCESS" ]; then
+            echo "User range deployed on {{ item.vmid }}"
+            exit 0
+          fi
+          if [ "$STATE" = "ERROR" ]; then
+            echo "Range deployment FAILED on {{ item.vmid }}"
+            exit 1
+          fi
+          echo "{{ item.vmid }}: range state = $STATE"
+          sleep 30
+        done
+        echo "Range deployment timed out on {{ item.vmid }}"
+        exit 1
+      loop: "{{ user_range_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Snapshot 'range-user' VMs (1004, 1011) as 'clean'
+      ansible.builtin.command: >
+        qm snapshot {{ item.vmid }} clean --vmstate true
+      loop: "{{ user_range_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+# --- Set up cluster nodes ---
+- name: Set up cluster nodes
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ssh_config: /home/gitlab-runner/.ssh/config
+    cluster_vms:
+      - { vmid: 1005, name: "ci-cluster-node1" }
+      - { vmid: 1006, name: "ci-cluster-node2" }
+  tasks:
+    - name: Install Ludus on cluster nodes
+      ansible.builtin.shell: |
+        ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+          "cd /tmp && sudo chmod +x ludus-server && sudo ./ludus-server --no-prompt $(hostname)"
+      loop: "{{ cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+      ignore_errors: true
+
+    - name: Wait for cluster VMs to reboot and SSH to come back
+      ansible.builtin.shell: |
+        for i in $(seq 1 120); do
+          ssh -o ConnectTimeout=3 -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} "echo ready" 2>/dev/null && exit 0
+          sleep 5
+        done
+        exit 1
+      loop: "{{ cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Wait for Ludus install to complete on cluster nodes
+      ansible.builtin.shell: |
+        for i in $(seq 1 180); do
+          RESULT=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+            "sudo cat /opt/ludus/install/install.log 2>/dev/null | tail -5" 2>/dev/null || echo "")
+          if echo "$RESULT" | grep -q "Ludus install completed successfully"; then
+            echo "Install complete on {{ item.vmid }}"
+            exit 0
+          fi
+          sleep 10
+        done
+        echo "Install timed out on {{ item.vmid }}"
+        exit 1
+      loop: "{{ cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Snapshot cluster VMs as 'clean'
+      ansible.builtin.command: >
+        qm snapshot {{ item.vmid }} clean --vmstate true
+      loop: "{{ cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+# --- Update runner concurrency ---
+- name: Update runner concurrency for parallel CI
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Update GitLab runner config concurrency to 12
+      ansible.builtin.replace:
+        path: /etc/gitlab-runner/config.toml
+        regexp: "concurrent *= *\\d+"
+        replace: "concurrent = 12"
+
+    - name: Restart GitLab runner
+      ansible.builtin.command: gitlab-runner restart
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: |
+          CI VM setup complete!
+
+          Pool A: VMIDs 1000-1004 (base → range-user)
+          Pool B: VMIDs 1007-1011 (base → range-user)
+          Cluster: VMIDs 1005-1006
+          Build:   VMID 1012
+
+          All VMs have been snapshotted as 'clean'.
+          Runner concurrency set to 12.

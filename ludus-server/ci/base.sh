@@ -10,23 +10,158 @@ export PROXMOX_NODE=ludus
 export PROXMOX_INVALID_CERT=true
 export PROXMOX_HOSTNAME=127.0.0.1
 
-# Set the VM name for the runner
-export RUNNER_VM_NAME="runner-$CUSTOM_ENV_CI_RUNNER_ID-project-$CUSTOM_ENV_CI_PROJECT_ID-pipeline-$CUSTOM_ENV_CI_PIPELINE_ID"
-
-# Hardcoded VMIDs for the two cluster nodes on the physical host
-export NODE1_VMID=106  # EH-Ludus
-export NODE2_VMID=107  # EH-Ludus-2
-
-if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"cluster"* ]]; then
-    export RUNNER_VM_NAME="EH-Ludus-Dev"
-    export CLUSTER_NODE1=203.0.113.1
-    export CLUSTER_NODE2=203.0.113.2
-    export CLUSTER_NODE1_NAME=EH-Ludus
-    export CLUSTER_NODE2_NAME=EH-Ludus-2
-    export CLUSTER_NODES="$CLUSTER_NODE1 $CLUSTER_NODE2"
-    # Primary node is where Ludus gets installed
-    export CLUSTER_PRIMARY=$CLUSTER_NODE1
-fi
-
 # Set the ludus base dir
 export LUDUS_DIR=/opt/ludus
+
+# Pool assignment directory (must exist on the Proxmox host)
+export POOL_ASSIGNMENT_DIR=/opt/ludus/ci/pool-assignments
+mkdir -p "$POOL_ASSIGNMENT_DIR"
+
+# --- VM Pool Definitions ---
+# Pool A: non-cluster testing VMs
+export POOL_A_BASE=1000  # VMIDs 1000-1004
+
+# Pool B: non-cluster testing VMs
+export POOL_B_BASE=1007  # VMIDs 1007-1011
+
+# Shared VMs (not pool-locked)
+export CLUSTER_NODE1_VMID=1005
+export CLUSTER_NODE2_VMID=1006
+export BUILD_VMID=1012
+
+# Cluster network (unchanged)
+export CLUSTER_NODE1_IP=203.0.113.1
+export CLUSTER_NODE2_IP=203.0.113.2
+export CLUSTER_NODES="$CLUSTER_NODE1_IP $CLUSTER_NODE2_IP"
+export CLUSTER_PRIMARY=$CLUSTER_NODE1_IP
+
+# Pipeline ID for pool tracking
+export PIPELINE_ID="${CUSTOM_ENV_CI_PIPELINE_ID}"
+
+# --- Helper Functions ---
+
+# Map snapshot name to VM offset within a pool
+get_vm_offset() {
+    local SNAPSHOT_NAME="$1"
+    case "$SNAPSHOT_NAME" in
+        "clean_install")     echo 1 ;;
+        "templates_built")   echo 2 ;;
+        "range_built_admin") echo 3 ;;
+        "range_built_user")  echo 4 ;;
+        *)                   echo 0 ;;  # base VM
+    esac
+}
+
+# Compute VMID from pool name and offset
+get_vmid_for_pool() {
+    local POOL="$1"
+    local OFFSET="$2"
+    if [ "$POOL" = "A" ]; then
+        echo $(( POOL_A_BASE + OFFSET ))
+    else
+        echo $(( POOL_B_BASE + OFFSET ))
+    fi
+}
+
+# Authenticate to Proxmox API and return the VM's 203.0.113.x IP
+get_vm_ip_by_vmid() {
+    local VMID="$1"
+
+    if [[ -z "$VMID" ]]; then
+        echo "Error: VMID not provided" >&2
+        return 1
+    fi
+
+    # Authenticate
+    local TICKET_RESPONSE
+    TICKET_RESPONSE=$(curl -s -k -d "username=${PROXMOX_USERNAME}" \
+        --data-urlencode "password=$PROXMOX_PASSWORD" \
+        https://127.0.0.1:8006/api2/json/access/ticket)
+    local COOKIE
+    COOKIE=$(echo "${TICKET_RESPONSE}" | jq -r '.data.ticket')
+
+    # Retry loop - VM may be booting after rollback
+    local IP=""
+    for i in {1..30}; do
+        IP=$(curl -s -k -b "PVEAuthCookie=$COOKIE" \
+            "https://127.0.0.1:8006/api2/json/nodes/$PROXMOX_NODE/qemu/$VMID/agent/network-get-interfaces" \
+            | jq -r '.data.result[] | ."ip-addresses" | .[]? | ."ip-address"' \
+            | grep 203.0.113)
+        if [[ -n "$IP" ]]; then
+            echo "$IP"
+            return 0
+        fi
+        sleep 5
+    done
+
+    echo "Error: Could not get IP for VM $VMID after 30 attempts" >&2
+    return 1
+}
+
+# Resolve the target VMID for the current job based on build type, snapshot name, and pool
+# Sets: VM_ID, VM_IP
+resolve_vm() {
+    local BUILD_TYPE="$CUSTOM_ENV_LUDUS_BUILD_TYPE"
+    local SNAPSHOT_NAME="$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME"
+    local FULL_BUILD_VMID_FILE="$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}-full-build-vmid"
+
+    # Cluster builds use dedicated shared VMs
+    if [[ -n "$BUILD_TYPE" && "$BUILD_TYPE" == *"cluster"* ]]; then
+        VM_ID=$CLUSTER_NODE1_VMID
+        VM_IP=$CLUSTER_NODE1_IP
+        export VM_ID VM_IP
+        echo "Cluster build type, using VM ID: $VM_ID ($VM_IP)"
+        return 0
+    fi
+
+    # Build jobs use the dedicated build VM (supports concurrent builds)
+    if [[ "$BUILD_TYPE" == "any-built" ]]; then
+        VM_ID=$BUILD_VMID
+        export VM_ID
+        VM_IP=$(get_vm_ip_by_vmid "$VM_ID")
+        export VM_IP
+        echo "Build job, using dedicated build VM: $VM_ID ($VM_IP)"
+        return 0
+    fi
+
+    # Full build: always use offset 0 (base VM), track in per-pipeline file
+    if [[ "$BUILD_TYPE" == "full" ]]; then
+        if [[ -f "$FULL_BUILD_VMID_FILE" ]]; then
+            VM_ID=$(cat "$FULL_BUILD_VMID_FILE")
+        else
+            VM_ID=$(get_vmid_for_pool "$POOL" 0)
+            echo "$VM_ID" > "$FULL_BUILD_VMID_FILE"
+        fi
+        export VM_ID
+        VM_IP=$(get_vm_ip_by_vmid "$VM_ID")
+        export VM_IP
+        echo "Full build, using base VM: $VM_ID ($VM_IP)"
+        return 0
+    fi
+
+    # from-snapshot: check if part of a full-build pipeline first
+    if [[ "$BUILD_TYPE" == "from-snapshot" ]]; then
+        if [[ -f "$FULL_BUILD_VMID_FILE" ]]; then
+            # Full build in progress - continue on the same VM
+            VM_ID=$(cat "$FULL_BUILD_VMID_FILE")
+            export VM_ID
+            VM_IP=$(get_vm_ip_by_vmid "$VM_ID")
+            export VM_IP
+            echo "Full build pipeline, continuing on VM: $VM_ID ($VM_IP)"
+            return 0
+        fi
+
+        # Quick test: use the dedicated VM for this snapshot type
+        local OFFSET
+        OFFSET=$(get_vm_offset "$SNAPSHOT_NAME")
+        VM_ID=$(get_vmid_for_pool "$POOL" "$OFFSET")
+        export VM_ID
+        VM_IP=$(get_vm_ip_by_vmid "$VM_ID")
+        export VM_IP
+        echo "Quick test (snapshot=$SNAPSHOT_NAME), using VM: $VM_ID ($VM_IP)"
+        return 0
+    fi
+
+    echo "Error: Unknown LUDUS_BUILD_TYPE: $BUILD_TYPE" >&2
+    return 1
+}
