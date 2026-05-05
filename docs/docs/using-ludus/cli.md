@@ -369,23 +369,27 @@ Usage:
   ludus blueprint [command]
 
 Available Commands:
-  access   Inspect blueprint access by users or groups
+  access   Inspect blueprint access (users + groups)
   apply    Apply a blueprint configuration to a range
-  config   Get blueprint configuration content
-  create   Create a blueprint from a range or existing blueprint
+  config   Get or set blueprint configuration content
+  create   Create a blueprint from a range, existing blueprint, or exported tarball
+  export   Export a blueprint bundle to a gzipped tarball
+  info     Show blueprint metadata and dependency status
+  install  Install galaxy/git role dependencies for a blueprint
   list     List all blueprints you can access
   rm       Delete a blueprint you own
   share    Share a blueprint with groups or users
   unshare  Remove blueprint sharing from groups or users
+  update   Update local blueprint fields
 ```
 
 ### Blueprint Access
 
-Inspect blueprint access by users or groups
+Inspect blueprint access. With a `<blueprintID>` argument, prints both users and groups in one view; with no arguments, lists the available subcommands.
 
 ```
 Usage:
-  ludus blueprint access [command]
+  ludus blueprint access <id>
 
 Available Commands:
   groups  List shared groups and their users for a blueprint
@@ -398,7 +402,7 @@ List shared groups and their users for a blueprint
 
 ```
 Usage:
-  ludus blueprint access groups
+  ludus blueprint access groups <id>
 ```
 
 #### Blueprint Access Users
@@ -407,7 +411,7 @@ List users with access to a blueprint
 
 ```
 Usage:
-  ludus blueprint access users
+  ludus blueprint access users <id>
 ```
 
 ### Blueprint Apply
@@ -416,7 +420,7 @@ Apply a blueprint configuration to a range
 
 ```
 Usage:
-  ludus blueprint apply
+  ludus blueprint apply <id>
 
 Flags:
         --force                 force apply even when testing is enabled on the target range
@@ -425,14 +429,16 @@ Flags:
 
 ### Blueprint Config
 
-Get blueprint configuration content
+Get or set blueprint configuration content
 
 ```
 Usage:
   ludus blueprint config [command]
 
 Available Commands:
-  get  Get the raw configuration for a blueprint
+  edit  Edit a blueprint's range config in an editor
+  get   Get the raw configuration for a blueprint
+  set   Replace a blueprint's range config from a file
 ```
 
 #### Blueprint Config Get
@@ -441,33 +447,134 @@ Get the raw configuration for a blueprint
 
 ```
 Usage:
-  ludus blueprint config get
+  ludus blueprint config get <id>
 ```
+
+#### Blueprint Config Set
+
+Replace a blueprint's range config from a file
+
+```
+Usage:
+  ludus blueprint config set <id>
+
+Flags:
+    -f, --file string   path to the YAML config file to upload
+```
+
+#### Blueprint Config Edit
+
+Edit a blueprint's range config. Opens a built-in TUI by default; pass `--editor` or set `$LUDUS_EDITOR` to use an external editor.
+
+```
+Usage:
+  ludus blueprint config edit <id>
+
+Flags:
+    -e, --editor string   external editor to use (e.g., vim, nano, code); overrides $LUDUS_EDITOR
+```
+
+For metadata edits (name, description, tags, etc.), use `ludus blueprint update`.
 
 ### Blueprint Create
 
-Create a blueprint from a range or existing blueprint
+Create a new blueprint. With no source flag, creates an empty blueprint; pass `--from-range`, `--from-blueprint`, or `--import` to seed from elsewhere.
 
 ```
 Usage:
   ludus blueprint create
 
 Flags:
-    -d, --description string      description for the new blueprint (optional)
-    -b, --from-blueprint string   source blueprintID to copy from (optional)
-    -s, --from-range string       source rangeID to create the blueprint from (optional)
-        --id string               blueprint ID for the new blueprint (required for --from-range, optional for --from-blueprint)
-    -n, --name string             name for the new blueprint (optional)
+        --config string              seed range-config.yml from this file (from-scratch only)
+    -d, --description string         blueprint description
+    -b, --from-blueprint string      source blueprintID to copy from
+    -s, --from-range string          source rangeID to create from
+        --id string                  blueprint ID for the new blueprint
+        --import string              path to an exported blueprint tarball
+        --min-ludus-version string   minimum Ludus version
+    -n, --name string                blueprint display name
+        --tag strings                tag (repeatable, or comma-separated: --tag a,b,c)
+        --version string             semver version
+```
+
+At most one of `--from-range`, `--from-blueprint`, `--import` may be set.
+
+### Blueprint Export
+
+Export a blueprint as a `.tar.gz`. The archive contains:
+
+```
+<blueprint-id>/
+├── blueprint.yml         # display metadata
+├── range-config.yml      # the range config
+├── requirements.yml      # auto-generated; pins galaxy role versions
+├── roles/                # copies of any local Ansible roles
+├── templates/            # copies of any custom Packer template build dirs
+└── subscription_refs.yml # subscription role names (when applicable)
+```
+
+Subscription role bytes are not included — the importing instance must hold a license that grants those roles. See the [Private Role Catalog](../enterprise/subscription-roles/roles-overview.md).
+
+```
+Usage:
+  ludus blueprint export <id>
+
+Flags:
+    -o, --output string   output path (default <id>.tar.gz)
+```
+
+### Blueprint Info
+
+Show blueprint metadata and dependency status.
+
+```
+Usage:
+  ludus blueprint info <id>
+```
+
+### Blueprint Install
+
+Install the galaxy or git role dependencies a blueprint declares. Works on local blueprints and slug-prefixed source-blueprints (e.g. `bsl/goad`).
+
+```
+Usage:
+  ludus blueprint install <id>
+
+Flags:
+        --force-roles    overwrite already-installed roles
+        --global-roles   admin only: install roles instance-wide
 ```
 
 ### Blueprint List
 
-List all blueprints you can access
+List all blueprints you can access.
 
 ```
 Usage:
   ludus blueprint list
+
+Flags:
+        --tag string   filter blueprints by tag
 ```
+
+### Blueprint Update
+
+Update fields on a local blueprint. Pass an empty string to clear a field.
+
+```
+Usage:
+  ludus blueprint update <id>
+
+Flags:
+        --name string                blueprint display name
+        --description string         blueprint description
+        --version string             semver version
+        --tag strings                tag (repeatable, or comma-separated: --tag a,b,c)
+        --clear-tags                 remove all tags
+        --min-ludus-version string   minimum Ludus version
+```
+
+For the YAML body, use `ludus blueprint config edit` (interactive) or `ludus blueprint config set` (replace from a file).
 
 ### Blueprint RM
 
@@ -475,7 +582,7 @@ Delete a blueprint you own
 
 ```
 Usage:
-  ludus blueprint rm
+  ludus blueprint rm <id>
 
 Flags:
         --no-prompt   skip the confirmation prompt
@@ -500,7 +607,7 @@ Share a blueprint with one or more groups
 
 ```
 Usage:
-  ludus blueprint share group
+  ludus blueprint share group <id> <groupName...>
 ```
 
 #### Blueprint Share User
@@ -509,7 +616,7 @@ Share a blueprint with one or more users
 
 ```
 Usage:
-  ludus blueprint share user
+  ludus blueprint share user <id> <userID...>
 ```
 
 ### Blueprint Unshare
@@ -531,7 +638,7 @@ Unshare a blueprint from one or more groups
 
 ```
 Usage:
-  ludus blueprint unshare group
+  ludus blueprint unshare group <id> <groupName...>
 ```
 
 #### Blueprint Unshare User
@@ -540,7 +647,7 @@ Unshare a blueprint from one or more users
 
 ```
 Usage:
-  ludus blueprint unshare user
+  ludus blueprint unshare user <id> <userID...>
 ```
 
 ## Diagnostics
@@ -1003,6 +1110,7 @@ Available Commands:
   rm          Destroy all VMs in your range (keeps range)
   rm-range    Delete your range object from database and optionally destroy all VMs
   taskoutput  Get the output of a task by name from the latest deploy logs
+  update      Update label fields on a range (name, description, purpose)
   users       List users with access to a range (admin only)
 ```
 
@@ -1142,16 +1250,19 @@ Create a new range
 
 Create a new range with a name and pool name. Description, purpose, and userID are optional.
 
+Pass `--from-blueprint <id>` to seed the new range from an existing blueprint (local id or source-prefixed, e.g. `bsl/goad`).
+
 ```
 Usage:
   ludus range create [flags]
 
 Flags:
-    -d, --description string   Description of the range
-    -n, --name string          Name of the range
-    -o, --purpose string       Purpose of the range
-        --range-number int     Specific range number to assign (optional)
-        --users string         Comma-separated list of User IDs to assign the range to (optional). By default the current user is assigned. To assign no users to the range, use --users 'none'
+    -d, --description string      Description of the range
+        --from-blueprint string   blueprintID to apply to the new range (e.g. 'my-lab' or 'bsl/goad')
+    -n, --name string             Name of the range
+    -o, --purpose string          Purpose of the range
+        --range-number int        Specific range number to assign (optional)
+        --users string            Comma-separated list of User IDs to assign the range to (optional). By default the current user is assigned. To assign no users to the range, use --users 'none'
 ```
 
 ### Range Default
@@ -1353,6 +1464,20 @@ Usage:
   ludus range taskoutput
 ```
 
+### Range Update
+
+Update fields on a range. Pass an empty string to clear a field.
+
+```
+Usage:
+  ludus range update <rangeID>
+
+Flags:
+        --name string          range name
+        --description string   range description
+        --purpose string       range purpose
+```
+
 ### Range Users
 
 List users with access to a range (admin only)
@@ -1427,6 +1552,110 @@ Usage:
 
 Flags:
     -n, --vmids string   A VM ID (104) or multiple VM IDs (104,105) to remove snapshots from (default: all VMs in the range)
+```
+
+## Source
+
+Register and share sources of Packer templates, Ansible roles, and blueprints.
+
+```
+Usage:
+  ludus source [command]
+
+Available Commands:
+  add      Register a source
+  list     List registered sources
+  sync     Re-sync one or all sources
+  update   Change a source's tracked ref (git) or replace its content (upload)
+  rm       Remove a source
+  share    Share a source with users or groups
+  unshare  Unshare a source
+```
+
+### Source Add
+
+Register a source. The argument is auto-detected as a git URL, a tarball/zip file, or a local directory.
+
+```
+Usage:
+  ludus source add <url | tarball | directory> [flags]
+
+Flags:
+        --id string       explicit sourceID; overrides auto-derived slug
+        --ref string      git branch/tag/commit (git sources only)
+        --global-roles    admin only: install roles instance-wide
+        --force           overwrite already-installed templates and galaxy/local roles
+        --dry-run         preview without persisting or installing
+```
+
+### Source List
+
+List registered sources.
+
+```
+Usage:
+  ludus source list
+```
+
+### Source Sync
+
+Re-pull a git source (or all git sources when no ID is given). Upload sources are skipped — use `source update` to push new content.
+
+```
+Usage:
+  ludus source sync [<sourceID>] [flags]
+
+Flags:
+        --global-roles   admin only: install roles instance-wide
+        --force          overwrite already-installed templates and galaxy/local roles
+        --dry-run        preview without persisting or installing
+```
+
+### Source Update
+
+Change a source's tracked ref (git) or replace its content (upload). For uploads, the path argument is auto-detected as a tarball/zip or a local directory.
+
+```
+Usage:
+  ludus source update <sourceID> [<tarball-or-directory>] [flags]
+
+Flags:
+        --ref string      new git branch/tag/commit (git sources)
+        --global-roles    admin only: install roles instance-wide (upload only)
+        --force           overwrite already-installed templates and galaxy/local roles (upload only)
+```
+
+### Source RM
+
+Remove a source. Use `--purge` to also delete templates and roles claimed only by this source — meaning no other source registered them. Ludus does **not** check whether your ranges or blueprints (outside sources) still reference them, so purge with care.
+
+```
+Usage:
+  ludus source rm <sourceID> [flags]
+
+Flags:
+    --purge       delete templates/roles claimed only by this source (no cross-check against ranges or blueprints)
+    --no-prompt   skip confirmation prompt
+```
+
+### Source Share
+
+Share a source with users or groups.
+
+```
+Usage:
+  ludus source share user <sourceID> <userID...>
+  ludus source share group <sourceID> <groupName...>
+```
+
+### Source Unshare
+
+Remove share grants from users or groups.
+
+```
+Usage:
+  ludus source unshare user <sourceID> <userID...>
+  ludus source unshare group <sourceID> <groupName...>
 ```
 
 ## Templates

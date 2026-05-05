@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -245,62 +246,56 @@ func GenericDeleteWithBody(client *resty.Client, apiPath string, data any) ([]by
 	return processRESTResult(resp, err)
 }
 
-func GenericPutFile(client *resty.Client, apiPath string, data []byte) ([]byte, bool) {
+// FileUpload performs a multipart upload (POST or PUT) with `data` attached as
+// `fileField`/`filename` and any additional string `fields` set as form data.
+// All file-uploading helpers in this package are thin wrappers around this one.
+func FileUpload(client *resty.Client, method, apiPath, fileField, filename string, data []byte, fields map[string]string) ([]byte, bool) {
 	if !strings.HasPrefix(apiPath, APIBasePath) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
+	defer s.Stop()
 
-	resp, err := client.R().
-		SetFileReader("file", "file", bytes.NewReader(data)).
-		Put(apiPath)
+	req := client.R().SetFileReader(fileField, filename, bytes.NewReader(data))
+	if len(fields) > 0 {
+		req = req.SetFormData(fields)
+	}
 
-	s.Stop()
-
+	var (
+		resp *resty.Response
+		err  error
+	)
+	switch strings.ToUpper(method) {
+	case "POST":
+		resp, err = req.Post(apiPath)
+	case "PUT":
+		resp, err = req.Put(apiPath)
+	case "PATCH":
+		resp, err = req.Patch(apiPath)
+	default:
+		logger.Logger.Fatalf("FileUpload: unsupported method %q", method)
+		return nil, false
+	}
 	return processRESTResult(resp, err)
+}
+
+func GenericPutFile(client *resty.Client, apiPath string, data []byte) ([]byte, bool) {
+	return FileUpload(client, "PUT", apiPath, "file", "file", data, nil)
 }
 
 func PostFileAndForce(client *resty.Client, apiPath string, data []byte, filename string, force bool) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
-		apiPath = APIBasePath + apiPath
-	}
-	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
-	s.Suffix = " Waiting for server..."
-	s.Start()
-
-	resp, err := client.R().
-		SetFileReader("file", filename, bytes.NewReader(data)).
-		SetFormData(map[string]string{
-			"force": fmt.Sprintf("%t", force),
-		}).
-		Put(apiPath)
-
-	s.Stop()
-
-	return processRESTResult(resp, err)
+	return FileUpload(client, "PUT", apiPath, "file", filename, data, map[string]string{
+		"force": fmt.Sprintf("%t", force),
+	})
 }
 
-func PostFileAndForceAndGlobal(client *resty.Client, apiPath string, data []byte, filename string, force bool, ansibleGlobal bool) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
-		apiPath = APIBasePath + apiPath
-	}
-	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
-	s.Suffix = " Waiting for server..."
-	s.Start()
-
-	resp, err := client.R().
-		SetFileReader("file", filename, bytes.NewReader(data)).
-		SetFormData(map[string]string{
-			"force":  fmt.Sprintf("%t", force),
-			"global": fmt.Sprintf("%t", ansibleGlobal),
-		}).
-		Put(apiPath)
-
-	s.Stop()
-
-	return processRESTResult(resp, err)
+func PostFileAndForceAndGlobal(client *resty.Client, apiPath string, data []byte, filename string, force, ansibleGlobal bool) ([]byte, bool) {
+	return FileUpload(client, "PUT", apiPath, "file", filename, data, map[string]string{
+		"force":  fmt.Sprintf("%t", force),
+		"global": fmt.Sprintf("%t", ansibleGlobal),
+	})
 }
 
 func GenericJSONPut(client *resty.Client, apiPath string, data string) ([]byte, bool) {
@@ -341,30 +336,41 @@ func GenericJSONPatch(client *resty.Client, apiPath string, data string) ([]byte
 
 }
 
-func FileGet(client *resty.Client, apiPath string, outputPath string) {
+// FileGet streams a GET response body to dst on success. The transfer goes to
+// a sibling temp file first; on a non-2xx status the temp is deleted so the
+// user's chosen path is never overwritten with an error body. Returns
+// (errorBody, false) on failure, (nil, true) on success.
+func FileGet(client *resty.Client, apiPath, dst string) ([]byte, bool) {
 	if !strings.HasPrefix(apiPath, APIBasePath) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
+	defer s.Stop()
 
-	resp, err := client.R().Get(apiPath)
-
-	s.Stop()
-
+	dstDir := filepath.Dir(dst)
+	if dstDir == "" {
+		dstDir = "."
+	}
+	tmp, err := os.CreateTemp(dstDir, filepath.Base(dst)+".part-*")
 	if err != nil {
-		logger.Logger.Fatal(err)
+		return processRESTResult(nil, err)
 	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
 
-	if resp.StatusCode() == 200 {
-		err := os.WriteFile(outputPath, resp.Body(), 0644)
-		if err != nil {
-			logger.Logger.Fatalf("Failed to write file: %v", err)
-		}
-		logger.Logger.Infof("File downloaded and saved as %s", outputPath)
-	} else {
-		fmt.Printf("Received non-200 status code: %d\n", resp.StatusCode())
-		fmt.Printf("Error: %s\n", string(resp.Body()))
+	resp, err := client.R().SetOutput(tmpPath).Get(apiPath)
+	if err != nil {
+		return processRESTResult(resp, err)
 	}
+	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
+		body, _ := os.ReadFile(tmpPath)
+		return processRESTResult(resp, fmt.Errorf("%s", string(body)))
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		return processRESTResult(resp, err)
+	}
+	return nil, true
 }

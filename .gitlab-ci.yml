@@ -1365,7 +1365,15 @@ post-deploy blueprints-as-admin:
       when: never
     - changes:
       - ludus-client/cmd/blueprint.go
+      - ludus-client/cmd/source.go
       - ludus-api/api_blueprint_management.go
+      - ludus-api/api_source_management.go
+      - ludus-api/blueprint_bundle.go
+      - ludus-api/blueprint_resolver.go
+      - ludus-api/blueprint_access.go
+      - ludus-api/source_install.go
+      - ludus-api/source_sync.go
+      - ludus-api/source_walker.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1375,10 +1383,16 @@ post-deploy blueprints-as-admin:
     max: 2
     when: script_failure
   script:
+    - *ci-setup-user # source share tests need CIU
     - *ci-setup-admin
-    # Fast blueprint-only flow with no extra user/range fixture setup
+    # Pre-clean everything this job creates so a stale snapshot doesn't trip
+    # up the create/import calls below.
     - ludus blueprint rm ci-bp-main --no-prompt || true
     - ludus blueprint rm ci-bp-copy --no-prompt || true
+    - ludus blueprint rm ci-bp-scratch --no-prompt || true
+    - ludus blueprint rm ci-bp-roundtrip --no-prompt || true
+    - ludus source rm ci-src --no-prompt --purge || true
+    - ludus source rm ci-src2 --no-prompt --purge || true
     # Create, list, fetch config, copy, apply, and remove as admin
     - ludus blueprint create --id ci-bp-main --name "CI Blueprint Main" --description "created in CI" --from-range CIA
     - ludus blueprint list | grep ci-bp-main
@@ -1396,11 +1410,51 @@ post-deploy blueprints-as-admin:
     - ludus blueprint create --id ci-bp-main --name "Duplicate Blueprint" --from-range CIA 2>&1 | grep "already in use"
     - ludus blueprint create --id ci-bp-missing-range --name "Missing Range Blueprint" --from-range NOTARANGE 2>&1 | grep "Range NOTARANGE not found"
     - set -o pipefail
-    # Cleanup
+    # From-scratch + round-trip
+    - ludus blueprint create --id ci-bp-scratch --name "Scratch BP" --version 1.2.3 --tag alpha,beta --min-ludus-version 2.1.0
+    - 'ludus blueprint config get ci-bp-scratch | grep -q "^ludus:"'
+    - ludus blueprint info ci-bp-scratch | tee /tmp/ci-bp-scratch.info
+    - 'grep -q "Version:.*1.2.3" /tmp/ci-bp-scratch.info'
+    - 'grep -q "Min Ludus:.*2.1.0" /tmp/ci-bp-scratch.info'
+    - 'grep -q alpha /tmp/ci-bp-scratch.info && grep -q beta /tmp/ci-bp-scratch.info'
+    - ludus blueprint export ci-bp-scratch -o /tmp/ci-bp-scratch.tar.gz
+    - tar tzf /tmp/ci-bp-scratch.tar.gz | grep -q "^ci-bp-scratch/blueprint.yml$"
+    - ludus blueprint rm ci-bp-scratch --no-prompt
+    - ludus blueprint create --import /tmp/ci-bp-scratch.tar.gz
+    - ludus blueprint info ci-bp-scratch | tee /tmp/ci-bp-scratch.imported.info
+    - 'grep -q "Version:.*1.2.3" /tmp/ci-bp-scratch.imported.info'
+    - 'grep -q "Min Ludus:.*2.1.0" /tmp/ci-bp-scratch.imported.info'
+    # Copy must rewrite the bundle manifest id
+    - ludus blueprint create --from-blueprint ci-bp-scratch --id ci-bp-roundtrip
+    - ludus blueprint export ci-bp-roundtrip -o /tmp/ci-bp-roundtrip.tar.gz
+    - tar xzf /tmp/ci-bp-roundtrip.tar.gz -C /tmp
+    - 'grep -q "^id: ci-bp-roundtrip" /tmp/ci-bp-roundtrip/blueprint.yml'
+    - ludus blueprint rm ci-bp-roundtrip --no-prompt || true
+    - ludus blueprint rm ci-bp-scratch --no-prompt || true
     - ludus blueprint rm ci-bp-copy --no-prompt || true
     - '! ludus blueprint list | grep ci-bp-copy'
     - ludus blueprint rm ci-bp-main --no-prompt || true
     - '! ludus blueprint list | grep ci-bp-main'
+    # Sources — registered from a bundled fixture so CI never depends on a remote repo
+    - ludus source add /opt/ludus/ci/fixtures/source-template --id ci-src --force
+    - 'ludus source list | grep -q "ci-src "'
+    - 'ludus blueprint list | grep -q "ci-src/example"'
+    - ludus blueprint info ci-src/example | tee /tmp/ci-src-example.info
+    - 'grep -q "Authors:" /tmp/ci-src-example.info'
+    - ludus source share user ci-src CIU
+    - 'LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user) ludus source list | grep -q "ci-src "'
+    - 'LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user) ludus blueprint list | grep "ci-src/example" | grep -q source'
+    - set +o pipefail
+    - 'LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user) ludus source rm ci-src --no-prompt 2>&1 | grep -q "owner or an admin"'
+    - 'LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user) ludus source share user ci-src CIA 2>&1 | grep -q "owner or an admin"'
+    - set -o pipefail
+    - ludus source unshare user ci-src CIU
+    # Cross-claim purge preserves shared artifacts; solo-claim purge removes them
+    - ludus source add /opt/ludus/ci/fixtures/source-template --id ci-src2 --force
+    - ludus source rm ci-src --no-prompt --purge
+    - ludus ansible role list | grep -q geerlingguy.docker
+    - ludus source rm ci-src2 --no-prompt --purge
+    - '! ludus ansible role list | grep -q geerlingguy.docker'
 
 post-deploy ranges-as-admin:
   stage: test

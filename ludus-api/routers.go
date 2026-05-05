@@ -291,6 +291,11 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		return se.Next()
 	})
 
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		SyncAllSourcesOnStartup(app)
+		return se.Next()
+	})
+
 	return &app
 }
 
@@ -805,6 +810,13 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"UpdateRange",
+		http.MethodPatch,
+		"/ranges/{rangeID}",
+		UpdateRange,
+	},
+
+	{
 		"ListUserAccessibleRanges",
 		http.MethodGet,
 		"/ranges/accessible",
@@ -817,6 +829,20 @@ var routes = PocketBaseRoutes{
 		http.MethodGet,
 		"/blueprints",
 		ListBlueprints,
+	},
+
+	{
+		"GetBlueprintDetail",
+		http.MethodGet,
+		"/blueprints/{blueprintID}",
+		GetBlueprintDetail,
+	},
+
+	{
+		"CreateBlueprint",
+		http.MethodPost,
+		"/blueprints",
+		CreateBlueprint,
 	},
 
 	{
@@ -841,10 +867,31 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"ExportBlueprint",
+		http.MethodGet,
+		"/blueprints/{blueprintID}/export",
+		ExportBlueprint,
+	},
+
+	{
+		"ImportBlueprint",
+		http.MethodPost,
+		"/blueprints/import",
+		ImportBlueprint,
+	},
+
+	{
 		"DeleteBlueprint",
 		http.MethodDelete,
 		"/blueprints/{blueprintID}",
 		DeleteBlueprint,
+	},
+
+	{
+		"UpdateBlueprintMetadata",
+		http.MethodPatch,
+		"/blueprints/{blueprintID}",
+		UpdateBlueprintMetadata,
 	},
 
 	{
@@ -901,6 +948,105 @@ var routes = PocketBaseRoutes{
 		http.MethodDelete,
 		"/blueprints/{blueprintID}/share/users",
 		UnshareBlueprintWithUsers,
+	},
+
+	{
+		"InstallBlueprintDeps",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/install",
+		InstallBlueprintDeps,
+	},
+
+	// Blueprint source routes
+	{
+		"CreateBlueprintSource",
+		http.MethodPost,
+		"/sources",
+		CreateBlueprintSource,
+	},
+
+	{
+		"ListBlueprintSources",
+		http.MethodGet,
+		"/sources",
+		ListBlueprintSources,
+	},
+
+	{
+		"GetBlueprintSource",
+		http.MethodGet,
+		"/sources/{sourceID}",
+		GetBlueprintSource,
+	},
+
+	{
+		"UpdateBlueprintSource",
+		http.MethodPatch,
+		"/sources/{sourceID}",
+		UpdateBlueprintSource,
+	},
+
+	{
+		"DeleteBlueprintSource",
+		http.MethodDelete,
+		"/sources/{sourceID}",
+		DeleteBlueprintSource,
+	},
+
+	{
+		"SyncBlueprintSource",
+		http.MethodPost,
+		"/sources/{sourceID}/sync",
+		SyncBlueprintSource,
+	},
+
+	{
+		"ShareBlueprintSourceWithUsers",
+		http.MethodPost,
+		"/sources/{sourceID}/share/users",
+		ShareBlueprintSourceWithUsers,
+	},
+
+	{
+		"ShareBlueprintSourceWithGroups",
+		http.MethodPost,
+		"/sources/{sourceID}/share/groups",
+		ShareBlueprintSourceWithGroups,
+	},
+
+	{
+		"UnshareBlueprintSourceFromUsers",
+		http.MethodPost,
+		"/sources/{sourceID}/unshare/users",
+		UnshareBlueprintSourceFromUsers,
+	},
+
+	{
+		"UnshareBlueprintSourceFromGroups",
+		http.MethodPost,
+		"/sources/{sourceID}/unshare/groups",
+		UnshareBlueprintSourceFromGroups,
+	},
+
+	{
+		"ListSourceBlueprints",
+		http.MethodGet,
+		"/sources/{sourceID}/blueprints",
+		ListSourceBlueprints,
+	},
+
+	{
+		"ListAllSourceBlueprints",
+		http.MethodGet,
+		"/sources/blueprints",
+		ListAllSourceBlueprints,
+	},
+
+	{
+		"GetSourceBlueprintManifest",
+		http.MethodGet,
+		"/sources/blueprints/{id}/manifest",
+		GetSourceBlueprintManifest,
 	},
 
 	// Migration routes
