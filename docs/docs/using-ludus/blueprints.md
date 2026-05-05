@@ -7,7 +7,7 @@ keywords: [blueprints, range, config, sharing, reuse]
 
 # 🗺️ Blueprints
 
-A blueprint is a saved range configuration that can be applied to a range to quickly configure it.
+A blueprint is a range config bundled with its dependencies: pinned role versions, copies of any local roles, and template build configs.
 
 ```bash
 # Save your range config as a blueprint
@@ -16,19 +16,16 @@ ludus blueprint create --id ad-lab --name "AD Lab"
 # Share it with your team
 ludus blueprint share group ad-lab sec-team
 
-# A teammate applies it to their range
-ludus blueprint apply ad-lab
+# A teammate creates a new range from it
+ludus range create -r ad-lab -n "AD Lab" --from-blueprint ad-lab
 
 # Deploy the range
 ludus range deploy
 ```
 
-:::tip When to use blueprints
+:::tip Where blueprints come from
 
-- **Onboarding** — give new team members a ready-to-go range config
-- **Workshops** — distribute a standardized lab environment to a class
-- **Iteration** — save a config before experimenting with changes
-- **Standardization** — maintain approved configs that teams can self-serve
+Create blueprints from your own ranges with `ludus blueprint create --from-range`, or register them in bulk from a [source](./sources.md): a git repo or tarball that ships blueprints, roles, and templates together.
 
 :::
 
@@ -47,16 +44,26 @@ Every blueprint has a unique identifier and must follow these rules:
 - `org/team/prod-lab`
 ```
 
-### From Your Default Range
+### From Scratch
+
+By default, `blueprint create` seeds the new blueprint with the same example range config that `range create` uses (a small AD lab) so you start with a working layout to edit:
 
 ```bash
 # terminal-command-local
 ludus blueprint create --id <blueprintID>
+ludus blueprint config edit <blueprintID>
 ```
 
-You can also provide `--name` and `--description` to set a display name and description.
+Override the seed with your own YAML in one shot:
 
-### From a Different Range
+```bash
+# terminal-command-local
+ludus blueprint create --id <blueprintID> --config ./range-config.yml
+```
+
+The metadata flags (`--name`, `--description`, `--version`, `--tag`, `--min-ludus-version`) are accepted inline — no follow-up `update` needed.
+
+### From a Range
 
 ```bash
 # terminal-command-local
@@ -89,7 +96,7 @@ ludus blueprint list
 +--------------------+------------------+---------+--------+--------------+---------------+------------------+
 ```
 
-The `ACCESS` column shows your relationship to each blueprint: `admin`, `owner`, `direct` (shared with you), or `group` (shared via a group).
+The `ACCESS` column shows your relationship to each blueprint: `admin`, `owner`, `direct` (shared with you), `group` (shared via a group), or `source` (inherited from a shared [source](./sources.md)).
 
 ## Viewing a Blueprint Config
 
@@ -100,6 +107,18 @@ ludus blueprint config get <blueprintID>
 This will print the YAML config to stdout.
 
 ## Applying a Blueprint
+
+To create a new range from a blueprint, pass `--from-blueprint` to `range create`:
+
+```bash
+# terminal-command-local
+ludus range create -r ad-lab -n "AD Lab" --from-blueprint ad-lab
+ludus range deploy --range-id ad-lab
+```
+
+If the apply step fails after the range is created, the range still exists; the error includes the retry command.
+
+To apply a blueprint to a range that already exists:
 
 ```bash
 # Apply to your default range
@@ -199,7 +218,7 @@ ludus blueprint rm <blueprintID>
 Only the owner or an admin can delete a blueprint. You will be prompted for confirmation, unless you use `--no-prompt` to skip it.
 
 ## Permissions
-You may only see blueprints you have access. Admins have access to all blueprints. When a blueprint is shared with a group, all members and managers of that group gain access to the blueprint.
+You may only see blueprints you have access to. Admins have access to all blueprints. When a blueprint is shared with a group, all members and managers of that group gain access to the blueprint.
 
 | Action | Admin | Owner | Group Manager | Shared User | Group Member |
 |--------|:-----:|:-----:|:-------------:|:-----------:|:------------:|
@@ -214,10 +233,16 @@ You may only see blueprints you have access. Admins have access to all blueprint
 
 | Command | Description |
 |---------|-------------|
-| `ludus blueprint list` | List all accessible blueprints |
-| `ludus blueprint create` | Create a blueprint from a range or copy one |
+| `ludus blueprint list` | List all accessible blueprints; `--tag <tag>` filters |
+| `ludus blueprint create` | Create from scratch, a range, an existing blueprint, or an exported tarball |
+| `ludus blueprint info <id>` | Show metadata and dependency status |
 | `ludus blueprint apply <id>` | Apply a blueprint to a range |
-| `ludus blueprint config get <id>` | View blueprint YAML config |
+| `ludus blueprint install <id>` | (Re-)install a blueprint's role dependencies |
+| `ludus blueprint update <id>` | Update name, description, version, tags, etc. |
+| `ludus blueprint config get <id>` | Print the YAML config |
+| `ludus blueprint config edit <id>` | Edit the YAML config (built-in TUI or `$LUDUS_EDITOR`) |
+| `ludus blueprint config set <id> -f <file>` | Replace the YAML config from a file |
+| `ludus blueprint export <id>` | Export the bundle as a `.tar.gz` |
 | `ludus blueprint access users <id>` | List users with access |
 | `ludus blueprint access groups <id>` | List groups with access |
 | `ludus blueprint share user <id> <userID...>` | Share with users |
@@ -225,3 +250,48 @@ You may only see blueprints you have access. Admins have access to all blueprint
 | `ludus blueprint unshare user <id> <userID...>` | Unshare from users |
 | `ludus blueprint unshare group <id> <groupName...>` | Unshare from groups |
 | `ludus blueprint rm <id>` | Delete a blueprint |
+
+## Self-contained bundles
+
+Each blueprint is stored as a self-contained bundle: pinned galaxy role versions plus copies of any local roles and template build configs. Applying it always produces the same range.
+
+```
+<ludus_install_path>/blueprints/<record-id>/
+├── blueprint.yml         # display metadata
+├── range-config.yml      # the range config
+├── requirements.yml      # auto-generated; pins galaxy role versions
+├── roles/                # copies of any local Ansible roles
+├── templates/            # copies of any custom Packer template build dirs
+└── subscription_refs.yml # subscription role names (when applicable)
+```
+
+### Export and import
+
+Export a blueprint and move it to another instance:
+
+```bash
+# terminal-command-local
+ludus blueprint export my-lab -o my-lab.tar.gz
+```
+
+Import it elsewhere:
+
+```bash
+# terminal-command-local
+ludus blueprint create --import my-lab.tar.gz
+ludus blueprint apply my-lab
+ludus range deploy
+```
+
+### Subscription roles
+
+Subscription role bytes aren't included; `subscription_refs.yml` lists names only. Applying on an instance without a valid license returns `403` listing the unmet roles. See the [Private Role Catalog](../enterprise/subscription-roles/roles-overview.md) for the list of subscription roles.
+
+### Recovering from a failed install
+
+Dependencies install automatically when a blueprint is created, imported, or its source is synced. (Copies inherit the source bundle's installed deps.) If an install fails partway, retry with:
+
+```bash
+# terminal-command-local
+ludus blueprint install <id>
+```

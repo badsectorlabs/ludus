@@ -1,0 +1,14 @@
+# requirements.yml: pinned galaxy roles and roles hosted off galaxy.ansible.com.
+# Only required when you need to pin versions or pull from a git host.
+# Plain galaxy roles can be referenced by bare name in range-config.yml without
+# listing them here.
+
+roles:
+  # Pin a galaxy role to a specific version
+  - name: geerlingguy.docker
+    version: 7.4.4
+
+  # Pull a role hosted on GitHub or GitLab
+  # - name: badsectorlabs.ludus_adcs
+  #   src: https://github.com/badsectorlabs/ludus_adcs
+  #   version: v1.2.0

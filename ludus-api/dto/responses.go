@@ -358,6 +358,8 @@ type ListBlueprintsResponseItem struct {
 	SharedUsers  []string  `json:"sharedUsers,omitempty"`
 	SharedGroups []string  `json:"sharedGroups,omitempty"`
 	AccessType   string    `json:"accessType,omitempty"`
+	SourceID     string    `json:"sourceID,omitempty"`
+	Tags         []string  `json:"tags,omitempty"`
 	Created      time.Time `json:"created"`
 	Updated      time.Time `json:"updated"`
 }
@@ -607,4 +609,35 @@ type AutoShutdownDetail struct {
 
 type AutoShutdownResponse struct {
 	AutoShutdownTimeout AutoShutdownDetail `json:"autoShutdownTimeout"`
+}
+
+type SourceResponse struct {
+	ID             string   `json:"id"`
+	SourceID       string   `json:"sourceID"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description,omitempty"`
+	Authors        []string `json:"authors,omitempty"`
+	Homepage       string   `json:"homepage,omitempty"`
+	License        string   `json:"license,omitempty"`
+	Kind           string   `json:"kind"`
+	Type           string   `json:"type"`
+	URL            string   `json:"url,omitempty"`
+	Ref            string   `json:"ref,omitempty"`
+	OwnerUserID    string   `json:"ownerUserID"`
+	LastSyncedAt   string   `json:"lastSyncedAt,omitempty"`
+	LastSyncStatus string   `json:"lastSyncStatus,omitempty"`
+	LastSyncError  string   `json:"lastSyncError,omitempty"`
+}
+type SourceBlueprintListItem struct {
+	ID                string   `json:"id"`
+	SourceID          string   `json:"sourceID"`
+	SourceBlueprintID string   `json:"sourceBlueprintID"`
+	Name              string   `json:"name"`
+	Description       string   `json:"description,omitempty"`
+	Version           string   `json:"version,omitempty"`
+	Authors           []string `json:"authors,omitempty"`
+	Homepage          string   `json:"homepage,omitempty"`
+	License           string   `json:"license,omitempty"`
+	Tags              []string `json:"tags,omitempty"`
+	MinLudusVersion   string   `json:"min_ludus_version,omitempty"`
 }

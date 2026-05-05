@@ -43,6 +43,12 @@ type CreateRangeRequest struct {
 	UserID      []string `json:"userID,omitempty"`
 	RangeNumber int      `json:"rangeNumber,omitempty"`
 	Name        string   `json:"name"`
+	BlueprintID string   `json:"blueprintID,omitempty"`
+}
+type UpdateRangeRequest struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Purpose     *string `json:"purpose,omitempty"`
 }
 type DenyRequest struct {
 	Domains []string `json:"domains,omitempty"`
@@ -154,6 +160,20 @@ type CreateBlueprintFromRangeRequest struct {
 	Description string `json:"description,omitempty"`
 	RangeID     string `json:"rangeID,omitempty"`
 }
+// CreateBlueprintRequest is the body for POST /blueprints — creating a
+// blueprint from scratch (empty or seeded range-config). For other create
+// modes use POST /blueprints/from-range, /blueprints/{id}/copy, or
+// /blueprints/import.
+type CreateBlueprintRequest struct {
+	BlueprintID     string   `json:"blueprintID"`
+	Name            string   `json:"name,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	Version         string   `json:"version,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	MinLudusVersion string   `json:"min_ludus_version,omitempty"`
+	// Config is optional YAML for range-config.yml. Empty means `ludus: []`.
+	Config string `json:"config,omitempty"`
+}
 type CopyBlueprintRequest struct {
 	BlueprintID string `json:"blueprintID,omitempty"`
 	Name        string `json:"name,omitempty"`
@@ -197,4 +217,30 @@ type SetGroupQuotaRequest struct {
 
 type AutoShutdownRequest struct {
 	AutoShutdownTimeout string `json:"autoShutdownTimeout"`
+}
+type CreateSourceRequest struct {
+	ID          string `json:"id,omitempty" form:"id"`
+	Type        string `json:"type" form:"type"`
+	URL         string `json:"url,omitempty" form:"url"`
+	Ref         string `json:"ref,omitempty" form:"ref"`
+	GlobalRoles bool   `json:"globalRoles,omitempty" form:"globalRoles"`
+	Force       bool   `json:"force,omitempty" form:"force"`
+	DryRun      bool   `json:"dryRun,omitempty" form:"dryRun"`
+}
+type UpdateSourceRequest struct {
+	Ref         string `json:"ref"`
+	GlobalRoles bool   `json:"globalRoles,omitempty"`
+	Force       bool   `json:"force,omitempty"`
+}
+type SyncSourceRequest struct {
+	GlobalRoles bool `json:"globalRoles,omitempty" form:"globalRoles"`
+	Force       bool `json:"force,omitempty" form:"force"`
+	DryRun      bool `json:"dryRun,omitempty" form:"dryRun"`
+}
+type DeleteSourceRequest struct {
+	Purge bool `json:"purge,omitempty"`
+}
+type InstallBlueprintDepsRequest struct {
+	GlobalRoles bool `json:"globalRoles,omitempty"`
+	ForceRoles  bool `json:"forceRoles,omitempty"`
 }
