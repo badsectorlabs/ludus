@@ -1036,6 +1036,34 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"ListSourceTemplates",
+		http.MethodGet,
+		"/sources/{sourceID}/templates",
+		ListSourceTemplates,
+	},
+
+	{
+		"ListSourceRoles",
+		http.MethodGet,
+		"/sources/{sourceID}/roles",
+		ListSourceRoles,
+	},
+
+	{
+		"ListSourceAccessUsers",
+		http.MethodGet,
+		"/sources/{sourceID}/access/users",
+		ListSourceAccessUsers,
+	},
+
+	{
+		"ListSourceAccessGroups",
+		http.MethodGet,
+		"/sources/{sourceID}/access/groups",
+		ListSourceAccessGroups,
+	},
+
+	{
 		"ListAllSourceBlueprints",
 		http.MethodGet,
 		"/sources/blueprints",
