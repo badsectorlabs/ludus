@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -880,4 +881,175 @@ func sourceBlueprintToListItem(src, bp *core.Record) dto.SourceBlueprintListItem
 		Tags:              anySliceToStrings(bp.Get("tags")),
 		MinLudusVersion:   bp.GetString("min_ludus_version"),
 	}
+}
+
+// ListSourceTemplates handles GET /sources/{sourceID}/templates.
+// Returns templates this source registered, taken from source_artifacts.
+func ListSourceTemplates(e *core.RequestEvent) error {
+	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
+	if err != nil {
+		return err
+	}
+	records, ferr := e.App.FindRecordsByFilter("source_artifacts",
+		"source = {:s} && kind = 'template'", "+name", 0, 0,
+		map[string]any{"s": src.Id})
+	if ferr != nil {
+		return JSONError(e, http.StatusInternalServerError, ferr.Error())
+	}
+	out := make([]dto.ListSourceTemplatesResponseItem, 0, len(records))
+	for _, r := range records {
+		out = append(out, dto.ListSourceTemplatesResponseItem{
+			Name:    r.GetString("name"),
+			Version: r.GetString("version"),
+		})
+	}
+	return e.JSON(http.StatusOK, out)
+}
+
+// ListSourceRoles handles GET /sources/{sourceID}/roles.
+// Returns roles this source registered. Local vs galaxy is derived from kind.
+func ListSourceRoles(e *core.RequestEvent) error {
+	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
+	if err != nil {
+		return err
+	}
+	records, ferr := e.App.FindRecordsByFilter("source_artifacts",
+		"source = {:s} && (kind = 'local_role' || kind = 'galaxy_role')",
+		"+name", 0, 0,
+		map[string]any{"s": src.Id})
+	if ferr != nil {
+		return JSONError(e, http.StatusInternalServerError, ferr.Error())
+	}
+	out := make([]dto.ListSourceRolesResponseItem, 0, len(records))
+	for _, r := range records {
+		scope := "local"
+		if r.GetString("kind") == "galaxy_role" {
+			scope = "galaxy"
+		}
+		out = append(out, dto.ListSourceRolesResponseItem{
+			Name:    r.GetString("name"),
+			Version: r.GetString("version"),
+			Scope:   scope,
+		})
+	}
+	return e.JSON(http.StatusOK, out)
+}
+
+// ListSourceAccessUsers handles GET /sources/{sourceID}/access/users.
+// Returns one row per user with effective access. Mirrors ListBlueprintAccessUsers.
+func ListSourceAccessUsers(e *core.RequestEvent) error {
+	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
+	if err != nil {
+		return err
+	}
+
+	userIdentityCache := make(map[string]struct {
+		UserID string
+		Name   string
+	})
+	accessByUserRecordID := make(map[string]*blueprintAccessUserAccumulator)
+
+	addUserAccess := func(userRecordID string, accessType string, groupName string) {
+		recordID := strings.TrimSpace(userRecordID)
+		if recordID == "" {
+			return
+		}
+		identity, exists := userIdentityCache[recordID]
+		if !exists {
+			resolvedUserID, resolvedName := resolveUserIdentity(e, recordID)
+			identity = struct {
+				UserID string
+				Name   string
+			}{UserID: resolvedUserID, Name: resolvedName}
+			userIdentityCache[recordID] = identity
+		}
+		if strings.TrimSpace(identity.UserID) == "" {
+			return
+		}
+		entry, exists := accessByUserRecordID[recordID]
+		if !exists {
+			entry = &blueprintAccessUserAccumulator{
+				UserID:    identity.UserID,
+				Name:      identity.Name,
+				AccessSet: make(map[string]struct{}),
+				GroupSet:  make(map[string]struct{}),
+			}
+			accessByUserRecordID[recordID] = entry
+		}
+		if at := strings.TrimSpace(accessType); at != "" {
+			entry.AccessSet[at] = struct{}{}
+		}
+		if gn := strings.TrimSpace(groupName); gn != "" {
+			entry.GroupSet[gn] = struct{}{}
+		}
+	}
+
+	addUserAccess(src.GetString("owner"), "owner", "")
+	for _, sharedUserRecordID := range src.GetStringSlice("sharedUsers") {
+		addUserAccess(sharedUserRecordID, "direct", "")
+	}
+	for _, sharedGroupRecordID := range src.GetStringSlice("sharedGroups") {
+		groupRecord, err := e.App.FindRecordById("groups", sharedGroupRecordID)
+		if err != nil {
+			continue
+		}
+		groupName := strings.TrimSpace(groupRecord.GetString("name"))
+		if groupName == "" {
+			groupName = sharedGroupRecordID
+		}
+		for _, managerRecordID := range groupRecord.GetStringSlice("managers") {
+			addUserAccess(managerRecordID, "group-manager", groupName)
+		}
+		for _, memberRecordID := range groupRecord.GetStringSlice("members") {
+			addUserAccess(memberRecordID, "group-member", groupName)
+		}
+	}
+
+	response := make([]dto.ListSourceAccessUsersResponseItem, 0, len(accessByUserRecordID))
+	for _, entry := range accessByUserRecordID {
+		response = append(response, dto.ListSourceAccessUsersResponseItem{
+			UserID: entry.UserID,
+			Name:   entry.Name,
+			Access: sortedKeysFromSet(entry.AccessSet),
+			Groups: sortedKeysFromSet(entry.GroupSet),
+		})
+	}
+	sort.SliceStable(response, func(i, j int) bool {
+		return response[i].UserID < response[j].UserID
+	})
+	return e.JSON(http.StatusOK, response)
+}
+
+// ListSourceAccessGroups handles GET /sources/{sourceID}/access/groups.
+// Returns one row per shared group with managers and members. Mirrors
+// ListBlueprintAccessGroups.
+func ListSourceAccessGroups(e *core.RequestEvent) error {
+	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
+	if err != nil {
+		return err
+	}
+	response := make([]dto.ListSourceAccessGroupsResponseItem, 0, len(src.GetStringSlice("sharedGroups")))
+	for _, sharedGroupRecordID := range src.GetStringSlice("sharedGroups") {
+		groupRecord, err := e.App.FindRecordById("groups", sharedGroupRecordID)
+		if err != nil {
+			continue
+		}
+		groupName := strings.TrimSpace(groupRecord.GetString("name"))
+		if groupName == "" {
+			groupName = sharedGroupRecordID
+		}
+		managers := resolveUserIDs(e, groupRecord.GetStringSlice("managers"))
+		members := resolveUserIDs(e, groupRecord.GetStringSlice("members"))
+		sort.Strings(managers)
+		sort.Strings(members)
+		response = append(response, dto.ListSourceAccessGroupsResponseItem{
+			GroupName: groupName,
+			Managers:  managers,
+			Members:   members,
+		})
+	}
+	sort.SliceStable(response, func(i, j int) bool {
+		return response[i].GroupName < response[j].GroupName
+	})
+	return e.JSON(http.StatusOK, response)
 }

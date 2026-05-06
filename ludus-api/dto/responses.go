@@ -374,6 +374,31 @@ type ListBlueprintAccessGroupsResponseItem struct {
 	Managers  []string `json:"managers,omitempty"`
 	Members   []string `json:"members,omitempty"`
 }
+
+type ListSourceTemplatesResponseItem struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+}
+
+type ListSourceRolesResponseItem struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	Scope   string `json:"scope"`
+}
+
+type ListSourceAccessUsersResponseItem struct {
+	UserID string   `json:"userID"`
+	Name   string   `json:"name,omitempty"`
+	Access []string `json:"access,omitempty"`
+	Groups []string `json:"groups,omitempty"`
+}
+
+type ListSourceAccessGroupsResponseItem struct {
+	GroupName string   `json:"groupName"`
+	Managers  []string `json:"managers,omitempty"`
+	Members   []string `json:"members,omitempty"`
+}
+
 type ListUserResponse struct {
 	Value []ListUserResponseItem `json:"-"`
 }
