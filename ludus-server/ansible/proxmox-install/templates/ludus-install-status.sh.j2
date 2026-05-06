@@ -29,19 +29,33 @@ print_initial_admin_credentials() {
         return 0
     fi
 
-    if [[ ! -f "$initial_admin_userid_path" ]]; then
-        return 0
+    # Wait up to 30 seconds for root-api-key file to exist
+    if [[ ! -f "$root_api_key_path" ]]; then
+        echo -n "Root API key file ($root_api_key_path) not found, waiting for it to be created..."
     fi
-
-    # Wait up to 10 seconds for root-api-key file to exist
     count=0
-    while [ ! -f "$root_api_key_path" ] && [ $count -lt 10 ]; do
+    while [ ! -f "$root_api_key_path" ] && [ $count -lt 30 ]; do
         sleep 1
+        echo -n "."
         ((count++))
     done
+    echo
     if [ ! -f "$root_api_key_path" ]; then
         echo "Error: Root API key file ($root_api_key_path) not found"
         return 1
+    fi
+
+    if [[ ! -f "$initial_admin_userid_path" ]]; then
+        echo -n "Initial admin user not created yet, waiting for it to be created..."
+        sleep 1
+        ((count++))
+        while [ ! -f "$initial_admin_userid_path" ] && [ $count -lt 30 ]; do
+            sleep 1
+            echo -n "."
+            ((count++))
+        done
+        echo
+        echo
     fi
 
     root_api_key="$(tr -d '\n' < "$root_api_key_path")"
@@ -92,8 +106,9 @@ if [[ -f {{ ludus_install_path }}/install/.stage-3-complete ]]; then
 else 
     tail -f {{ ludus_install_path }}/install/install.log | while read line; do
         echo "$line"
-        if echo "$line" | grep -q "Ludus install complete"; then
+        if echo "$line" | grep -q "Ludus install complete" && [[ -f {{ ludus_install_path }}/install/.stage-3-complete ]]; then
             echo "Install complete!"
+            echo "Generating initial admin credentials. This may take a few seconds..."
             break
         fi
     done
