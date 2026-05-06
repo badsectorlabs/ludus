@@ -169,13 +169,6 @@
         group: root
         mode: '0644'
 
-    - name: Start the ludus admin service
-      ansible.builtin.service:
-        name: ludus-admin.service
-        state: started
-        enabled: true
-        daemon_reload: true
-
     - name: Create systemd service file for ludus
       ansible.builtin.template:
         src: ludus.service.j2
@@ -263,6 +256,13 @@
         path: "{{ ludus_install_path }}/install/.stage-3-complete"
         state: touch
         mode: '0644'
+
+    - name: Start the ludus admin service
+      ansible.builtin.service:
+        name: ludus-admin.service
+        state: started
+        enabled: true
+        daemon_reload: true
 
     - name: Ludus install complete
       ansible.builtin.pause:
