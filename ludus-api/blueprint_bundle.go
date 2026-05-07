@@ -22,7 +22,8 @@ type BundleInputs struct {
 	Tags            []string
 	MinLudusVersion string
 	ConfigBytes     []byte
-	RolesPath       string
+	RolesPath       string // caller's user roles dir, checked first
+	GlobalRolesPath string // global roles dir, checked when caller's dir misses (mirrors deploy precedence)
 	PackerDir       string
 	SubCatalog      []string
 }
@@ -114,9 +115,20 @@ func BuildBundle(in BundleInputs) (BundleResult, error) {
 		}
 		src := filepath.Join(in.RolesPath, r)
 		if _, statErr := os.Stat(src); statErr != nil {
-			res.SkippedRoles = append(res.SkippedRoles, r)
-			res.Complete = false
-			continue
+			// Fall back to the global roles dir (mirrors deploy precedence).
+			fellBack := false
+			if in.GlobalRolesPath != "" {
+				globalSrc := filepath.Join(in.GlobalRolesPath, r)
+				if _, gErr := os.Stat(globalSrc); gErr == nil {
+					src = globalSrc
+					fellBack = true
+				}
+			}
+			if !fellBack {
+				res.SkippedRoles = append(res.SkippedRoles, r)
+				res.Complete = false
+				continue
+			}
 		}
 		// Galaxy-installable role: pin in requirements.yml; do NOT copy contents.
 		if version, ok := readGalaxyInstallVersion(filepath.Join(src, "meta", ".galaxy_install_info")); ok {

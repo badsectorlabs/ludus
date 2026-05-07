@@ -48,14 +48,53 @@ type artifactResultPayload struct {
 	Message string `json:"message,omitempty"`
 }
 
+func updateSourceRequestToForm(req dto.UpdateSourceRequest) map[string]string {
+	form := map[string]string{}
+	if req.Ref != "" {
+		form["ref"] = req.Ref
+	}
+	if req.GlobalRoles {
+		form["globalRoles"] = "true"
+	}
+	if req.Force {
+		form["force"] = "true"
+	}
+	return form
+}
+
+// createSourceRequestToForm omits zero-valued fields so server defaults still apply.
+func createSourceRequestToForm(req dto.CreateSourceRequest) map[string]string {
+	form := map[string]string{}
+	if req.ID != "" {
+		form["id"] = req.ID
+	}
+	if req.Type != "" {
+		form["type"] = req.Type
+	}
+	if req.URL != "" {
+		form["url"] = req.URL
+	}
+	if req.Ref != "" {
+		form["ref"] = req.Ref
+	}
+	if req.GlobalRoles {
+		form["globalRoles"] = "true"
+	}
+	if req.Force {
+		form["force"] = "true"
+	}
+	if req.DryRun {
+		form["dryRun"] = "true"
+	}
+	return form
+}
+
 type roleResultPayload struct {
 	Name  string `json:"name"`
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 }
 
-// collectArtifactFailureLines returns one "<kind> <name>: <reason>" line per
-// failed artifact across the three result slices.
 func collectArtifactFailureLines(templates, localRoles []artifactResultPayload, roles []roleResultPayload) []string {
 	var failures []string
 	for _, r := range templates {
@@ -76,9 +115,6 @@ func collectArtifactFailureLines(templates, localRoles []artifactResultPayload, 
 	return failures
 }
 
-// printArtifactOutcome emits one INFO line on success or a WARN block listing
-// each failure. successPhrase and failurePhrase are appended to label, e.g.
-// `printArtifactOutcome("Source 'X'", "synced successfully", "synced with errors", failures)`.
 func printArtifactOutcome(label, successPhrase, failurePhrase string, failures []string) {
 	if len(failures) == 0 {
 		logger.Logger.Infof("%s %s.", label, successPhrase)
@@ -90,8 +126,6 @@ func printArtifactOutcome(label, successPhrase, failurePhrase string, failures [
 	}
 }
 
-// printSyncFailures emits one log line per failed artifact so callers see exactly
-// which template/role didn't register or download.
 func printSyncFailures(label string, p syncResultPayload) {
 	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, p.RoleResults)
 	printArtifactOutcome(label, "synced successfully", "synced with errors", failures)
@@ -130,18 +164,21 @@ The argument is auto-detected:
 func runSourceAdd(cmd *cobra.Command, args []string) {
 	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-	formData := map[string]string{}
+	req := dto.CreateSourceRequest{
+		ID:          sourceFlagID,
+		GlobalRoles: sourceFlagGlobalRoles,
+		Force:       sourceFlagForce,
+		DryRun:      sourceFlagDryRun,
+	}
 	var fileField, fileName string
 	var fileBytes []byte
 
 	arg := args[0]
 	switch detectSourceArg(arg) {
 	case sourceArgGit:
-		formData["type"] = "git"
-		formData["url"] = arg
-		if sourceFlagRef != "" {
-			formData["ref"] = sourceFlagRef
-		}
+		req.Type = "git"
+		req.URL = arg
+		req.Ref = sourceFlagRef
 	case sourceArgArchive:
 		data, err := os.ReadFile(arg)
 		if err != nil {
@@ -150,7 +187,7 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 		fileField = "archive"
 		fileBytes = data
 		fileName = filepath.Base(arg)
-		formData["type"] = "upload"
+		req.Type = "upload"
 	case sourceArgDirectory:
 		roleTar, err := tarDirectoryInMemory(arg)
 		if err != nil {
@@ -163,13 +200,9 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 		fileField = "archive"
 		fileBytes = gz
 		fileName = filepath.Base(strings.TrimSuffix(arg, string(os.PathSeparator))) + ".tar.gz"
-		formData["type"] = "upload"
+		req.Type = "upload"
 	default:
 		logger.Logger.Fatalf("could not interpret %q: expected a git URL, tarball/zip path, or local directory", arg)
-	}
-
-	if sourceFlagID != "" {
-		formData["id"] = sourceFlagID
 	}
 
 	endpoint := buildURLWithRangeAndUserID("/sources")
@@ -177,25 +210,9 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 	var success bool
 
 	if fileField != "" {
-		if sourceFlagGlobalRoles {
-			formData["globalRoles"] = "true"
-		}
-		if sourceFlagForce {
-			formData["force"] = "true"
-		}
-		if sourceFlagDryRun {
-			formData["dryRun"] = "true"
-		}
-		responseJSON, success = rest.FileUpload(client, "POST", endpoint, fileField, fileName, fileBytes, formData)
+		responseJSON, success = rest.FileUpload(client, "POST", endpoint, fileField, fileName, fileBytes, createSourceRequestToForm(req))
 	} else {
-		jsonBody := map[string]any{}
-		for k, v := range formData {
-			jsonBody[k] = v
-		}
-		jsonBody["globalRoles"] = sourceFlagGlobalRoles
-		jsonBody["force"] = sourceFlagForce
-		jsonBody["dryRun"] = sourceFlagDryRun
-		responseJSON, success = rest.GenericJSONPost(client, endpoint, jsonBody)
+		responseJSON, success = rest.GenericJSONPost(client, endpoint, req)
 	}
 
 	if didFailOrWantJSON(success, responseJSON) {
@@ -356,25 +373,16 @@ func runSourceSync(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	formData := map[string]any{}
-	if sourceFlagGlobalRoles {
-		formData["globalRoles"] = true
-	}
-	if sourceFlagForce {
-		formData["force"] = true
-	}
-	if sourceFlagDryRun {
-		formData["dryRun"] = true
-	}
-	body, _ := json.Marshal(formData)
+	body, _ := json.Marshal(dto.SyncSourceRequest{
+		GlobalRoles: sourceFlagGlobalRoles,
+		Force:       sourceFlagForce,
+		DryRun:      sourceFlagDryRun,
+	})
 
 	for _, sid := range targets {
 		path := fmt.Sprintf("/sources/%s/sync", sid)
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(path), string(body))
-		if !success {
-			if msg := strings.TrimSpace(string(responseJSON)); msg != "" {
-				logger.Logger.Errorf("sync %s: %s", sid, msg)
-			}
+		if didFailOrWantJSON(success, responseJSON) {
 			continue
 		}
 		var resp syncResultPayload
@@ -438,15 +446,12 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 	}
 
 	if fileField != "" {
-		formData := map[string]string{}
-		if sourceFlagGlobalRoles {
-			formData["globalRoles"] = "true"
-		}
-		if sourceFlagForce {
-			formData["force"] = "true"
+		updateReq := dto.UpdateSourceRequest{
+			GlobalRoles: sourceFlagGlobalRoles,
+			Force:       sourceFlagForce,
 		}
 		responseJSON, success := rest.FileUpload(client, "PATCH",
-			buildURLWithRangeAndUserID(path), fileField, fileName, fileBytes, formData)
+			buildURLWithRangeAndUserID(path), fileField, fileName, fileBytes, updateSourceRequestToForm(updateReq))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
@@ -459,7 +464,7 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	body, _ := json.Marshal(map[string]string{"ref": sourceFlagRef})
+	body, _ := json.Marshal(dto.UpdateSourceRequest{Ref: sourceFlagRef})
 	responseJSON, success := rest.GenericJSONPatch(client, buildURLWithRangeAndUserID(path), string(body))
 	if didFailOrWantJSON(success, responseJSON) {
 		return
@@ -491,98 +496,19 @@ var sourceRmCmd = &cobra.Command{
 		}
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 		path := fmt.Sprintf("/sources/%s", args[0])
-		body, _ := json.Marshal(map[string]bool{"purge": sourceFlagPurge})
+		body, _ := json.Marshal(dto.DeleteSourceRequest{Purge: sourceFlagPurge})
 		responseJSON, success := rest.GenericDeleteWithBody(client, buildURLWithRangeAndUserID(path), body)
-		didFailOrWantJSON(success, responseJSON)
-	},
-}
-
-
-var sourceShareCmd = &cobra.Command{
-	Use:   "share",
-	Short: "Share a source with users or groups",
-}
-
-var sourceShareUserCmd = &cobra.Command{
-	Use:   "user <sourceID> <userID...>",
-	Short: "Share a source with one or more users",
-	Args:  cobra.MinimumNArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
-		shareSource(args[0], "share/users", args[1:])
-	},
-}
-
-var sourceShareGroupCmd = &cobra.Command{
-	Use:   "group <sourceID> <groupName...>",
-	Short: "Share a source with one or more groups",
-	Args:  cobra.MinimumNArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
-		shareSource(args[0], "share/groups", args[1:])
-	},
-}
-
-var sourceUnshareCmd = &cobra.Command{
-	Use:   "unshare",
-	Short: "Unshare a source",
-}
-
-var sourceUnshareUserCmd = &cobra.Command{
-	Use:   "user <sourceID> <userID...>",
-	Short: "Remove user share grants",
-	Args:  cobra.MinimumNArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
-		shareSource(args[0], "unshare/users", args[1:])
-	},
-}
-
-var sourceUnshareGroupCmd = &cobra.Command{
-	Use:   "group <sourceID> <groupName...>",
-	Short: "Remove group share grants",
-	Args:  cobra.MinimumNArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
-		shareSource(args[0], "unshare/groups", args[1:])
-	},
-}
-
-func shareSource(sourceID, op string, ids []string) {
-	flat := []string{}
-	for _, s := range ids {
-		for _, p := range strings.Split(s, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				flat = append(flat, p)
-			}
+		if didFailOrWantJSON(success, responseJSON) {
+			return
 		}
-	}
-	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-	path := fmt.Sprintf("/sources/%s/%s", sourceID, op)
-
-	subjectKind := "user(s)"
-	bodyKey := "userIDs"
-	if strings.HasSuffix(op, "/groups") {
-		bodyKey = "groupNames"
-		subjectKind = "group(s)"
-	}
-	body, _ := json.Marshal(map[string][]string{bodyKey: flat})
-	responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(path), string(body))
-	if didFailOrWantJSON(success, responseJSON) {
-		return
-	}
-	verb := "shared with"
-	if strings.HasPrefix(op, "unshare/") {
-		verb = "unshared from"
-	}
-	var resp dto.BulkBlueprintOperationResponse
-	_ = json.Unmarshal(responseJSON, &resp)
-	if len(resp.Success) > 0 {
-		logger.Logger.Infof("Source '%s' %s %d %s: %v", sourceID, verb, len(resp.Success), subjectKind, resp.Success)
-	}
-	for _, e := range resp.Errors {
-		logger.Logger.Errorf("%s: %s", e.Item, e.Reason)
-	}
-	if len(resp.Success) == 0 && len(resp.Errors) == 0 {
-		logger.Logger.Infof("Source '%s' %s %d %s: %v", sourceID, verb, len(flat), subjectKind, flat)
-	}
+		if sourceFlagPurge {
+			logger.Logger.Infof("Source %q removed (templates and roles registered only by this source were also removed).", args[0])
+		} else {
+			logger.Logger.Infof("Source %q removed.", args[0])
+		}
+	},
 }
+
 
 func init() {
 	sourceAddCmd.Flags().StringVar(&sourceFlagID, "id", "", "explicit sourceID; overrides auto-derived slug")
@@ -605,18 +531,12 @@ func init() {
 	sourceRmCmd.Flags().BoolVar(&sourceFlagPurge, "purge", false, "remove templates/roles registered only by this source")
 	sourceRmCmd.Flags().BoolVar(&sourceFlagNoPrompt, "no-prompt", false, "skip confirmation prompt")
 
-	// Compose share subcommands.
-	sourceShareCmd.AddCommand(sourceShareUserCmd, sourceShareGroupCmd)
-	sourceUnshareCmd.AddCommand(sourceUnshareUserCmd, sourceUnshareGroupCmd)
-
 	sourceCmd.AddCommand(sourceAddCmd)
 	sourceCmd.AddCommand(
 		sourceListCmd,
 		sourceSyncCmd,
 		sourceUpdateCmd,
 		sourceRmCmd,
-		sourceShareCmd,
-		sourceUnshareCmd,
 	)
 	rootCmd.AddCommand(sourceCmd)
 }

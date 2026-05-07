@@ -10,14 +10,14 @@ keywords: [sources, sharing, blueprints, ansible, packer, git]
 A source is a versioned bundle of Packer templates, Ansible roles, and blueprints, served from a git repo, tarball, or local directory. `ludus source add` registers the contents in one step.
 
 ```bash
-# Adopt the Bad Sector Labs source
+# Register the Bad Sector Labs source
 ludus source add https://github.com/badsectorlabs/ludus-blueprints
 
 # Build any required templates that aren't built yet
 ludus templates build
 
 # Apply one of the source's blueprints to your range
-ludus blueprint apply ludus-blueprints/goad
+ludus blueprint apply badsectorlabs-ludus-blueprints/goad
 
 # Deploy
 ludus range deploy
@@ -25,13 +25,13 @@ ludus range deploy
 
 :::tip Publishing your own
 
-Fork the [Ludus Source Template](https://github.com/SuibhneOFoighil/ludus-source-template) to start your own.
+Fork the [Ludus Source Template](https://gitlab.com/badsectorlabs/ludus-source-template) to start your own.
 
 :::
 
 ## What's in a Source Repo
 
-A source can ship any combination of three artifact types: Packer templates, Ansible roles, and blueprints. All three are optional, but a source must ship at least one.
+A source can include Packer templates, Ansible roles, and blueprints — any combination, as long as it ships at least one.
 
 ```
 my-source-repo/
@@ -50,23 +50,23 @@ my-source-repo/
         └── README.md                # long description
 ```
 
-Templates and roles can also live inside an individual blueprint at `blueprints/<id>/templates/` and `blueprints/<id>/roles/` when they only apply to that one blueprint.
+If a template or role is only used by one blueprint, put it inside that blueprint's directory at `blueprints/<id>/templates/` or `blueprints/<id>/roles/` instead of the top-level `templates/` or `roles/`.
 
 ## Common Workflows
 
-### Adopt a Publisher's Library
+### Register Someone Else's Source
 
 ```bash
 # terminal-command-local
 ludus source add https://github.com/badsectorlabs/ludus-blueprints
 ludus templates build
-ludus blueprint apply ludus-blueprints/goad
+ludus blueprint apply badsectorlabs-ludus-blueprints/goad
 ludus range deploy
 ```
 
 `source add` registers the templates and roles, and installs declared galaxy/git role dependencies. Templates are registered but not built; run `ludus templates build` separately.
 
-Slug-prefixed IDs (`ludus-blueprints/goad`) disambiguate between sources. If two sources both ship `goad`, they appear as `ludus-blueprints/goad` and `workshop-labs/goad`. Apply by full prefix.
+Slug-prefixed IDs (`badsectorlabs-ludus-blueprints/goad`) keep blueprints from different sources separate. If two sources both ship `goad`, they appear as `badsectorlabs-ludus-blueprints/goad` and `secteam-workshop-labs/goad`. Apply by full prefix.
 
 ### Fork to Edit
 
@@ -74,16 +74,16 @@ Slug-prefixed IDs (`ludus-blueprints/goad`) disambiguate between sources. If two
 
 ```bash
 # terminal-command-local
-ludus blueprint apply ludus-blueprints/goad
+ludus blueprint apply badsectorlabs-ludus-blueprints/goad
 # ... edit via ludus range config get/set ...
 ludus blueprint create --id my-goad --from-range <rangeID>
 ludus blueprint apply my-goad
 ludus range deploy
 ```
 
-### Adopt a Role or Template Pack
+### Roles-Only or Templates-Only Sources
 
-A source doesn't need to ship blueprints. To register a roles-only or templates-only source:
+A source doesn't need to ship blueprints. Register a roles-only or templates-only source the same way:
 
 ```bash
 # terminal-command-local
@@ -93,22 +93,22 @@ ludus source add https://github.com/foo/ludus-role-pack
 
 Templates work the same way; run `ludus templates build` to produce VM images.
 
-### Retry a Partial Install
+### Retry a Partial Source Add
 
 If `source add` fails partway, retry just one blueprint's deps:
 
 ```bash
 # terminal-command-local
-ludus blueprint install ludus-blueprints/goad
+ludus blueprint install badsectorlabs-ludus-blueprints/goad
 ```
 
-Works on any blueprint visible to you, local or from a source.
+Works on any blueprint you can see, whether it's local or from a source.
 
 ## Authoring a Source
 
 ### Packer templates
 
-Each `templates/<n>/` directory is a standard Ludus Packer template, the same shape as the [Ludus template catalog](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates):
+Each `templates/<n>/` directory is a standard Ludus Packer template, the same shape as the [templates bundled with Ludus](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates):
 
 ```
 templates/my-debian-base/
@@ -212,13 +212,13 @@ ludus source add https://github.com/you/my-source-repo
 
 ## Source IDs
 
-Every source gets a short `sourceID` auto-derived from the URL or path when you run `source add`. For example:
+Every source gets a `sourceID` auto-derived from the URL or path when you run `source add`. Git URLs default to `<org>-<repo>` so two repos with the same name under different orgs don't collide. For example:
 
 | Input | Derived sourceID |
 |-------|-----------------|
-| `https://github.com/badsectorlabs/ludus-blueprints` | `ludus-blueprints` |
-| `https://github.com/badsectorlabs/ludus-blueprints.git` | `ludus-blueprints` |
-| `git@gitlab.com:secteam/workshop-labs.git` | `workshop-labs` |
+| `https://github.com/badsectorlabs/ludus-blueprints` | `badsectorlabs-ludus-blueprints` |
+| `https://github.com/badsectorlabs/ludus-blueprints.git` | `badsectorlabs-ludus-blueprints` |
+| `git@gitlab.com:secteam/workshop-labs.git` | `secteam-workshop-labs` |
 | `/tmp/my-source.tar.gz` | `my-source` |
 | `/home/user/my-workshop-lab` (directory) | `my-workshop-lab` |
 
@@ -230,36 +230,28 @@ ludus source add https://github.com/badsectorlabs/ludus-blueprints --id bsl
 ludus blueprint apply bsl/goad
 ```
 
-## Sharing Sources
+If you already have a source registered under the auto-derived ID, pass `--id` to give the new one a distinct alias. The same repo can be added twice to one account this way — useful for tracking different branches of the same upstream.
 
-Sharing a source makes its catalog visible to others. Templates registered by `source add` are global and visible to everyone regardless of sharing. Roles install per-user by default, so each shared user runs their own install:
+## Sharing what's in a source
 
-```bash
-# User A: adds the source and shares it
-# terminal-command-local
-ludus source add https://github.com/.../catalog
-ludus source share user <sourceID> userB
+Sources are personal — only the user who ran `source add` sees them in `source list`. To make a source's contents available to others, share each piece individually.
 
-# User B: now sees any blueprints the source ships in `ludus blueprint list`.
-# To install role dependencies for User B:
-# terminal-command-local
-ludus source sync <sourceID>
+Templates registered by a source are global. Every user sees them automatically; nothing to share.
 
-# Or install one blueprint's dependencies:
-# terminal-command-local
-ludus blueprint install <sourceID>/<bpID>
-```
+Roles install per-user. An admin can install them instance-wide by passing `--global-roles` to `source add`, which makes them available to every user on the instance.
 
-:::tip Admin: global role install
-
-Admins can install roles instance-wide with `--global-roles` so users don't need to run their own sync:
+Blueprints share per-blueprint with `ludus blueprint share user <sourceID>/<bpID> <userID>` (or `share group`).
 
 ```bash
-ludus source add https://github.com/.../catalog --global-roles
-ludus source share group <sourceID> all-users
-```
+# Admin: register a source with global roles for all users
+# terminal-command-local
+ludus source add https://github.com/.../my-class --global-roles
 
-:::
+# Share each blueprint with the class group
+# terminal-command-local
+ludus blueprint share group <sourceID>/lab-1 students
+ludus blueprint share group <sourceID>/lab-2 students
+```
 
 ## CLI Reference
 
@@ -272,11 +264,7 @@ ludus source share group <sourceID> all-users
 | `ludus source sync [<sourceID>]` | Re-pull a git source (no-op for upload sources) |
 | `ludus source update <sourceID> --ref <ref>` | Change a git source's tracked ref |
 | `ludus source update <sourceID> <tarball\|directory>` | Push new content to an upload source |
-| `ludus source rm <sourceID>` | Remove a source (`--purge` to also remove unique artifacts) |
-| `ludus source share user <sourceID> <userID...>` | Share with users |
-| `ludus source share group <sourceID> <groupName...>` | Share with groups |
-| `ludus source unshare user <sourceID> <userID...>` | Unshare from users |
-| `ludus source unshare group <sourceID> <groupName...>` | Unshare from groups |
+| `ludus source rm <sourceID>` | Remove a source (`--purge` also removes templates/roles registered only by this source) |
 
 ### Blueprint Commands (Extended for Sources)
 

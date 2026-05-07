@@ -183,6 +183,16 @@ type ApplyBlueprintRequest struct {
 	RangeID string `json:"rangeID,omitempty"`
 	Force   bool   `json:"force,omitempty"`
 }
+
+type UpdateBlueprintMetadataRequest struct {
+	Name            *string   `json:"name,omitempty"`
+	Description     *string   `json:"description,omitempty"`
+	Version         *string   `json:"version,omitempty"`
+	Tags            *[]string `json:"tags,omitempty"`
+	MinLudusVersion *string   `json:"min_ludus_version,omitempty"`
+	Config          *string   `json:"config,omitempty"`
+}
+
 type UpdateBlueprintConfigRequest struct {
 	Config string `json:"config"`
 }

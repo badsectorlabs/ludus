@@ -29,12 +29,9 @@ import (
 
 var blueprintIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*(\/[A-Za-z0-9_\-]+){0,2}$`)
 
-// blueprintRebuildLocks serialises bundle rebuilds per blueprint record. The
-// bundle dir is mutated directly on disk (not through a transactional store),
-// so two concurrent UpdateBlueprintConfig / UpdateBlueprintMetadata requests on
-// the same blueprint would race the rename-swap and silently lose one writer's
-// bytes. This sync.Map gives us a per-id mutex without bounded growth concerns
-// (entries are sticky but each is only a *sync.Mutex header).
+// blueprintRebuildLocks serializes per-blueprint bundle rebuilds; without
+// it, concurrent Update* requests would race the on-disk rename-swap and
+// silently lose one writer's bytes.
 var blueprintRebuildLocks sync.Map
 
 func lockBlueprintRebuild(blueprintRecordID string) func() {
@@ -303,12 +300,7 @@ func createBlueprintWithBundle(
 	}
 	rolesPath := userRolesPath(rolesProxmoxUsername)
 	packerDir := filepath.Join(ludusInstallPath, "packer")
-	subCatalog := getSubscriptionCatalogNames(app)
-
-	version := meta.Version
-	if version == "" {
-		version = "0.1.0"
-	}
+	subCatalog := getSubscriptionCatalogNames(e)
 
 	// Step 1: build bundle keyed by BlueprintID (temporary), so atomic rollback
 	// works if the DB save fails. Missing template HCL or roles are tolerated;
@@ -318,11 +310,12 @@ func createBlueprintWithBundle(
 		BlueprintID:     blueprintID,
 		Name:            name,
 		Description:     description,
-		Version:         version,
+		Version:         meta.Version,
 		Tags:            meta.Tags,
 		MinLudusVersion: meta.MinLudusVersion,
 		ConfigBytes:     configBytes,
 		RolesPath:       rolesPath,
+		GlobalRolesPath: globalRolesPath(),
 		PackerDir:       packerDir,
 		SubCatalog:      subCatalog,
 	})
@@ -341,7 +334,7 @@ func createBlueprintWithBundle(
 		_ = os.RemoveAll(tmpBundleDir)
 		return nil, "", err
 	}
-	bp.Set("version", version)
+	bp.Set("version", meta.Version)
 	if len(meta.Tags) > 0 {
 		bp.Set("tags", meta.Tags)
 	}
@@ -404,7 +397,7 @@ func rebuildBlueprintBundle(e *core.RequestEvent, bp *core.Record, configBytes [
 	rolesProxmoxUsername := owner.ProxmoxUsername()
 	rolesPath := userRolesPath(rolesProxmoxUsername)
 	packerDir := filepath.Join(ludusInstallPath, "packer")
-	subCatalog := getSubscriptionCatalogNames(app)
+	subCatalog := getSubscriptionCatalogNames(e)
 
 	suffix := make([]byte, 6)
 	if _, err := rand.Read(suffix); err != nil {
@@ -412,25 +405,18 @@ func rebuildBlueprintBundle(e *core.RequestEvent, bp *core.Record, configBytes [
 	}
 	stagingKey := bp.Id + ".rebuild-" + hex.EncodeToString(suffix)
 
-	// Legacy records (migrated from the FileField era) carry empty version.
-	// The bundle manifest requires semver, so default it the same way
-	// createBlueprintWithBundle does for fresh records.
-	version := bp.GetString("version")
-	if version == "" {
-		version = "0.1.0"
-	}
-
 	br, err := BuildBundle(BundleInputs{
 		BundleRoot:      bundleRoot,
 		BundleDirName:   stagingKey,
 		BlueprintID:     bp.GetString("blueprintID"),
 		Name:            bp.GetString("name"),
 		Description:     bp.GetString("description"),
-		Version:         version,
+		Version:         bp.GetString("version"),
 		Tags:            anySliceToStrings(bp.Get("tags")),
 		MinLudusVersion: bp.GetString("min_ludus_version"),
 		ConfigBytes:     configBytes,
 		RolesPath:       rolesPath,
+		GlobalRolesPath: globalRolesPath(),
 		PackerDir:       packerDir,
 		SubCatalog:      subCatalog,
 	})
@@ -494,45 +480,34 @@ func ListBlueprints(e *core.RequestEvent) error {
 		fromSourceRecID = src.Id
 	}
 
-	records, err := e.App.FindAllRecords("blueprints")
+	clauses := []string{}
+	params := map[string]any{}
+	if !user.IsAdmin() {
+		clauses = append(clauses,
+			"(owner = {:u} || sharedUsers.id ?= {:u} || sharedGroups.members.id ?= {:u} || sharedGroups.managers.id ?= {:u})",
+		)
+		params["u"] = user.Id
+	}
+	if fromSourceRecID != "" {
+		clauses = append(clauses, "source = {:s}")
+		params["s"] = fromSourceRecID
+	}
+	filter := strings.Join(clauses, " && ")
+
+	records, err := e.App.FindRecordsByFilter("blueprints", filter, "-updated", 0, 0, params)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error listing blueprints: %v", err))
 	}
+
+	// Tag filter runs in Go; PocketBase filter syntax can't match array elements in a JSON column.
 	for _, rec := range records {
-		if fromSourceRecID != "" && rec.GetString("source") != fromSourceRecID {
-			continue
-		}
-		canAccess, accessErr := userCanAccessBlueprint(e, user, rec)
-		if accessErr != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking blueprint access: %v", accessErr))
-		}
-		if !canAccess {
-			continue
-		}
-		if tagFilter != "" && !blueprintTagMatches(rec, tagFilter) {
+		if tagFilter != "" && !slices.Contains(rec.GetStringSlice("tags"), tagFilter) {
 			continue
 		}
 		blueprints = append(blueprints, buildBlueprintListItem(e, user, rec))
 	}
 
-	sort.SliceStable(blueprints, func(i, j int) bool {
-		return blueprints[i].Updated.After(blueprints[j].Updated)
-	})
-
 	return e.JSON(http.StatusOK, blueprints)
-}
-
-func blueprintTagMatches(rec *core.Record, tag string) bool {
-	return sliceContains(anySliceToStrings(rec.Get("tags")), tag)
-}
-
-func sliceContains(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
 }
 
 func DeleteBlueprint(e *core.RequestEvent) error {
@@ -582,17 +557,12 @@ func getRangeByID(e *core.RequestEvent, rangeID string) (*models.Range, error) {
 	return rangeObj, nil
 }
 
-// CreateBlueprint handles POST /blueprints — creates a new blueprint from
-// scratch. Optional `config` seeds range-config.yml; if omitted, the seed
-// mirrors `range create` (the example AD lab in user-files) so authors get a
-// working starting point instead of an empty file. The example is one
-// `ludus blueprint config edit` away from anything they want to build, and
-// `--config <file>` overrides it. If the example file is missing (e.g.
-// during install hiccups), we fall back to a valid empty `ludus: []`.
+// CreateBlueprint creates a blueprint from scratch. Optional `config`
+// seeds range-config.yml; otherwise the seed mirrors `range create` (the
+// example AD lab) so authors start from a working layout. Falls back to
+// `ludus: []` if the example file is missing.
 //
-// Use POST /blueprints/from-range to snapshot a range,
-// /blueprints/{id}/copy to fork another blueprint, or /blueprints/import for
-// an exported tarball.
+// Sibling endpoints: POST /blueprints/from-range, /blueprints/{id}/copy, /blueprints/import.
 func CreateBlueprint(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
 
@@ -631,12 +601,16 @@ func CreateBlueprint(e *core.RequestEvent) error {
 	if name == "" {
 		name = blueprintID
 	}
+	version := payload.Version
+	if version == "" {
+		version = "1.0.0"
+	}
 
 	bp, bundleDir, err := createBlueprintWithBundle(
 		e, user, user.ProxmoxUsername(),
 		blueprintID, name, payload.Description, configBytes,
 		BlueprintMeta{
-			Version:         payload.Version,
+			Version:         version,
 			Tags:            payload.Tags,
 			MinLudusVersion: payload.MinLudusVersion,
 		},
@@ -651,7 +625,7 @@ func CreateBlueprint(e *core.RequestEvent) error {
 	}
 	walked, werr := WalkBlueprintBundle(bundleDir)
 	if werr == nil && walked != nil {
-		res := ResolveAndInstall(e.App, *walked, ResolverOpts{
+		res := ResolveAndInstall(e, e.App, *walked, ResolverOpts{
 			OwnerProxmoxUser: user.ProxmoxUsername(),
 			AnsibleHome:      ansibleHomeForUser(user, false),
 		})
@@ -703,26 +677,10 @@ func CreateBlueprintFromRange(e *core.RequestEvent) error {
 		}
 	}
 
-	// Resolve the proxmox username whose roles dir should be snapshotted into the
-	// bundle. When an admin snapshots another user's range, the roles live under
-	// the range owner's home — not the admin's. Fall back to the caller's username
-	// if the lookup fails (better than crashing, and correct for the common case
-	// where caller == owner).
+	// Use only the caller's roles dir; reaching into another user's home for
+	// admin-creates-from-other-user's-range was rejected as a privilege smell.
+	// New blueprints ship roles inline, so this only affects legacy bundles.
 	rolesProxmoxUsername := user.ProxmoxUsername()
-	ownerRecords, ownerErr := e.App.FindRecordsByFilter(
-		"users",
-		"ranges.id ?= {:range_id}",
-		"-created",
-		1, 0,
-		map[string]any{"range_id": sourceRange.Id},
-	)
-	if ownerErr != nil {
-		logger.Error(fmt.Sprintf("CreateBlueprintFromRange: range owner lookup failed for range %s: %v (falling back to caller)", sourceRange.RangeId(), ownerErr))
-	} else if len(ownerRecords) > 0 {
-		if px := ownerRecords[0].GetString("proxmoxUsername"); px != "" {
-			rolesProxmoxUsername = px
-		}
-	}
 
 	rangeConfigBytes, err := os.ReadFile(fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, sourceRange.RangeId()))
 	if err != nil {
@@ -739,7 +697,7 @@ func CreateBlueprintFromRange(e *core.RequestEvent) error {
 		description = fmt.Sprintf("Blueprint created from range %s", sourceRange.RangeId())
 	}
 
-	blueprintRecord, bundleDir, err := createBlueprintWithBundle(e, user, rolesProxmoxUsername, blueprintID, name, description, rangeConfigBytes, BlueprintMeta{})
+	blueprintRecord, bundleDir, err := createBlueprintWithBundle(e, user, rolesProxmoxUsername, blueprintID, name, description, rangeConfigBytes, BlueprintMeta{Version: "1.0.0"})
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error creating blueprint: %v", err))
 	}
@@ -751,7 +709,7 @@ func CreateBlueprintFromRange(e *core.RequestEvent) error {
 	}
 	walked, werr := WalkBlueprintBundle(bundleDir)
 	if werr == nil && walked != nil {
-		res := ResolveAndInstall(e.App, *walked, ResolverOpts{
+		res := ResolveAndInstall(e, e.App, *walked, ResolverOpts{
 			OwnerProxmoxUser: user.ProxmoxUsername(),
 			AnsibleHome:      ansibleHomeForUser(user, false),
 		})
@@ -948,7 +906,7 @@ func writeRangeConfig(e *core.RequestEvent, targetRange *models.Range, configByt
 //	roles:
 //	  - ludus_ghosts_client                    # bare scalar
 //	  - name: ludus_ghosts_client              # structured
-func checkSubscriptionRefs(app core.App, bundleDir string) ([]string, error) {
+func checkSubscriptionRefs(e *core.RequestEvent, bundleDir string) ([]string, error) {
 	if bundleDir == "" {
 		return nil, nil
 	}
@@ -987,7 +945,7 @@ func checkSubscriptionRefs(app core.App, bundleDir string) ([]string, error) {
 		}
 	}
 
-	catalog := getSubscriptionCatalogNames(app)
+	catalog := getSubscriptionCatalogNames(e)
 	have := map[string]bool{}
 	for _, c := range catalog {
 		have[c] = true
@@ -1055,7 +1013,7 @@ func resolveBlueprintConfigForApply(e *core.RequestEvent, user *models.User, blu
 	if err != nil {
 		return nil, JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error reading blueprint config: %v", err))
 	}
-	if unmet, cErr := checkSubscriptionRefs(e.App, blueprintBundleDir(bp)); cErr != nil {
+	if unmet, cErr := checkSubscriptionRefs(e, blueprintBundleDir(bp)); cErr != nil {
 		return nil, JSONError(e, http.StatusInternalServerError, fmt.Sprintf("check subscription refs: %v", cErr))
 	} else if len(unmet) > 0 {
 		return nil, JSONError(e, http.StatusForbidden,
@@ -1154,8 +1112,12 @@ func ShareBlueprintWithGroups(e *core.RequestEvent) error {
 	}
 
 	actingUser := e.Get("user").(*models.User)
-	if !actingUser.IsAdmin() && blueprintRecord.GetString("owner") != actingUser.Id {
-		return JSONError(e, http.StatusForbidden, "only the blueprint owner or an admin can change sharing")
+	canAccess, err := userCanAccessBlueprint(e, actingUser, blueprintRecord)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking blueprint access: %v", err))
+	}
+	if !canAccess {
+		return JSONError(e, http.StatusForbidden, "You do not have access to this blueprint")
 	}
 
 	var bulkRequest dto.BulkShareBlueprintWithGroupsRequest
@@ -1229,8 +1191,12 @@ func UnshareBlueprintWithGroups(e *core.RequestEvent) error {
 	}
 
 	actingUser := e.Get("user").(*models.User)
-	if !actingUser.IsAdmin() && blueprintRecord.GetString("owner") != actingUser.Id {
-		return JSONError(e, http.StatusForbidden, "only the blueprint owner or an admin can change sharing")
+	canAccess, err := userCanAccessBlueprint(e, actingUser, blueprintRecord)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking blueprint access: %v", err))
+	}
+	if !canAccess {
+		return JSONError(e, http.StatusForbidden, "You do not have access to this blueprint")
 	}
 
 	var bulkRequest dto.BulkUnshareBlueprintWithGroupsRequest
@@ -1304,8 +1270,12 @@ func ShareBlueprintWithUsers(e *core.RequestEvent) error {
 	}
 
 	actingUser := e.Get("user").(*models.User)
-	if !actingUser.IsAdmin() && blueprintRecord.GetString("owner") != actingUser.Id {
-		return JSONError(e, http.StatusForbidden, "only the blueprint owner or an admin can change sharing")
+	canAccess, err := userCanAccessBlueprint(e, actingUser, blueprintRecord)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking blueprint access: %v", err))
+	}
+	if !canAccess {
+		return JSONError(e, http.StatusForbidden, "You do not have access to this blueprint")
 	}
 
 	var bulkRequest dto.BulkShareBlueprintWithUsersRequest
@@ -1387,8 +1357,12 @@ func UnshareBlueprintWithUsers(e *core.RequestEvent) error {
 	}
 
 	actingUser := e.Get("user").(*models.User)
-	if !actingUser.IsAdmin() && blueprintRecord.GetString("owner") != actingUser.Id {
-		return JSONError(e, http.StatusForbidden, "only the blueprint owner or an admin can change sharing")
+	canAccess, err := userCanAccessBlueprint(e, actingUser, blueprintRecord)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking blueprint access: %v", err))
+	}
+	if !canAccess {
+		return JSONError(e, http.StatusForbidden, "You do not have access to this blueprint")
 	}
 
 	var bulkRequest dto.BulkUnshareBlueprintWithUsersRequest
@@ -1676,16 +1650,12 @@ func rewriteBundleManifest(bp *core.Record) error {
 		return fmt.Errorf("bundle dir missing: %w", err)
 	}
 
-	version := bp.GetString("version")
-	if version == "" {
-		version = "0.1.0"
-	}
 	manifest := BlueprintManifest{
 		ManifestVersion: SupportedManifestVersion,
 		ID:              bp.GetString("blueprintID"),
 		Name:            bp.GetString("name"),
 		Description:     bp.GetString("description"),
-		Version:         version,
+		Version:         bp.GetString("version"),
 		Tags:            anySliceToStrings(bp.Get("tags")),
 		MinLudusVersion: bp.GetString("min_ludus_version"),
 		Config:          "range-config.yml",
@@ -1796,7 +1766,7 @@ func GetBlueprintDetail(e *core.RequestEvent) error {
 		"min_ludus_version": bp.GetString("min_ludus_version"),
 		"long_description":  bp.GetString("long_description"),
 		"templateStatus":    computeTemplateStatus(e, templates),
-		"roleStatus":        computeRoleStatus(e.App, user, roles),
+		"roleStatus":        computeRoleStatus(e, user, roles),
 		"lastInstallStatus": bp.GetString("lastInstallStatus"),
 		"lastInstallError":  bp.GetString("lastInstallError"),
 		"lastInstalledAt":   bp.GetString("lastInstalledAt"),
@@ -1896,14 +1866,15 @@ func InstallBlueprintDeps(e *core.RequestEvent) error {
 		roleSet = roles
 	}
 
-	// Synchronous: run install inline so the response carries the per-role
-	// outcome. Installs are bounded by ansible-galaxy fetch time; for slow
-	// networks the underlying HTTP timeout governs.
+	// Dir lets the resolver read subscription_refs.yml from the bundle so
+	// declared subscription roles route through the licensed pipeline
+	// instead of resolving to a same-named galaxy role.
 	walked := WalkedBlueprint{
 		Manifest:         &BlueprintManifest{ID: id, Config: "range-config.yml"},
 		RequirementsYAML: requirementsYAML,
+		Dir:              blueprintBundleDir(bpRec),
 	}
-	results := installRolesForBlueprint(e.App, walked, ResolverOpts{
+	results := installRolesForBlueprint(e, e.App, walked, ResolverOpts{
 		ForceRoles:       req.ForceRoles,
 		GlobalRoles:      req.GlobalRoles,
 		OwnerProxmoxUser: user.ProxmoxUsername(),
@@ -2123,7 +2094,7 @@ func ImportBlueprint(e *core.RequestEvent) error {
 	}
 	walked2, _ := WalkBlueprintBundle(finalDir)
 	if walked2 != nil {
-		res := ResolveAndInstall(e.App, *walked2, ResolverOpts{
+		res := ResolveAndInstall(e, e.App, *walked2, ResolverOpts{
 			OwnerProxmoxUser: user.ProxmoxUsername(),
 			AnsibleHome:      ansibleHomeForUser(user, false),
 		})
@@ -2133,72 +2104,8 @@ func ImportBlueprint(e *core.RequestEvent) error {
 	return e.JSON(http.StatusCreated, resp)
 }
 
-// extractTar unpacks tr into tmpDir with strict security controls:
-//   - only regular files and directories are accepted (symlinks and hard links
-//     are rejected to prevent escaping the bundle or affecting later phases);
-//   - path traversal is blocked via filepath.Clean + absolute-path + prefix checks;
-//   - setuid/setgid/sticky bits are stripped (files capped at 0644, dirs at 0755).
 func extractTar(tr *tar.Reader, tmpDir string) error {
-	for {
-		hdr, tErr := tr.Next()
-		if tErr == io.EOF {
-			return nil
-		}
-		if tErr != nil {
-			return fmt.Errorf("malformed tar: %v", tErr)
-		}
-
-		// Reject anything that isn't a regular file or directory entry. Symlinks
-		// and hard links could escape the bundle dir or affect later phases (the
-		// walker already rejects symlinks for source repos; mirror that here).
-		switch hdr.Typeflag {
-		case tar.TypeDir, tar.TypeReg:
-			// ok — extraction handled below
-		default:
-			return fmt.Errorf("archive contains unsupported entry type (%c) for %q", hdr.Typeflag, hdr.Name)
-		}
-
-		// Strict path-traversal guard: clean the name, reject absolute paths and
-		// names that escape tmpDir. Compare against tmpDir + separator so we don't
-		// false-match on a tmpDir prefix (e.g. /tmp/foo vs /tmp/foobar).
-		cleaned := filepath.Clean(hdr.Name)
-		if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "..") {
-			return fmt.Errorf("archive contains unsafe path %q", hdr.Name)
-		}
-		dst := filepath.Join(tmpDir, cleaned)
-		if !strings.HasPrefix(dst+string(filepath.Separator), tmpDir+string(filepath.Separator)) {
-			return fmt.Errorf("archive entry %q escapes destination", hdr.Name)
-		}
-
-		// Mask file mode bits — strip setuid/setgid/sticky and any non-permission bits.
-		// Files: cap at 0644; dirs: cap at 0755 — bundles never need executable bits.
-		mode := os.FileMode(hdr.Mode) & 0777
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if mode == 0 {
-				mode = 0755
-			}
-			if mkErr := os.MkdirAll(dst, mode); mkErr != nil {
-				return mkErr
-			}
-		case tar.TypeReg:
-			if mode == 0 {
-				mode = 0644
-			}
-			if mkErr := os.MkdirAll(filepath.Dir(dst), 0755); mkErr != nil {
-				return mkErr
-			}
-			out, oErr := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-			if oErr != nil {
-				return oErr
-			}
-			if _, cpErr := io.Copy(out, tr); cpErr != nil {
-				out.Close()
-				return cpErr
-			}
-			out.Close()
-		}
-	}
+	return extractTarReader(tr, tmpDir, ExtractOptions{RejectSymlinks: true})
 }
 // ───────────────────────────────────────────────────────────────
 // merged from api_blueprint_export.go

@@ -64,7 +64,7 @@ func lockSourceSync(sourceRecordID string) func() {
 // source-derived blueprints, registers shipped templates and local roles, and
 // runs the unioned role install. Used by both source-add (the heavy first run)
 // and source-sync (idempotent re-application). Synchronous.
-func SyncSource(ctx context.Context, app core.App, sourceRecord *core.Record, opts SyncOptions) (*SyncResult, error) {
+func SyncSource(ctx context.Context, e *core.RequestEvent, app core.App, sourceRecord *core.Record, opts SyncOptions) (*SyncResult, error) {
 	defer lockSourceSync(sourceRecord.Id)()
 	checkoutDir := SourceCheckoutDir(sourceRecord.Id)
 
@@ -139,7 +139,7 @@ func SyncSource(ctx context.Context, app core.App, sourceRecord *core.Record, op
 	}
 
 	if opts.DryRun {
-		return &SyncResult{DryRun: computeDryRunPlan(app, walked, sourceRecord)}, nil
+		return &SyncResult{DryRun: computeDryRunPlan(e, app, walked, sourceRecord)}, nil
 	}
 
 	applySourceManifestToRecord(sourceRecord, walked.Source)
@@ -155,7 +155,7 @@ func SyncSource(ctx context.Context, app core.App, sourceRecord *core.Record, op
 	res := &SyncResult{}
 	res.TemplateResults = registerTemplates(app, sourceRecord, walked, opts.Force)
 	res.LocalRoleResults = registerLocalRoles(app, sourceRecord, walked, opts)
-	res.RoleResults = installUnionedRoles(app, sourceRecord, walked, opts)
+	res.RoleResults = installUnionedRoles(e, app, sourceRecord, walked, opts)
 
 	sourceRecord.Set("lastSyncedAt", time.Now().UTC().Format(time.RFC3339))
 	failures := collectSyncFailures(res)
@@ -339,7 +339,7 @@ func SyncAllSourcesOnStartup(app core.App) {
 			sem <- struct{}{}
 			go func(s *core.Record) {
 				defer func() { <-sem }()
-				_, _ = SyncSource(context.Background(), app, s, SyncOptions{})
+				_, _ = SyncSource(context.Background(), nil, app, s, SyncOptions{})
 			}(src)
 		}
 		for i := 0; i < cap(sem); i++ {
@@ -348,7 +348,7 @@ func SyncAllSourcesOnStartup(app core.App) {
 	}()
 }
 
-func computeDryRunPlan(app core.App, walked *WalkedSource, src *core.Record) *DryRunPlan {
+func computeDryRunPlan(e *core.RequestEvent, app core.App, walked *WalkedSource, src *core.Record) *DryRunPlan {
 	plan := &DryRunPlan{}
 	if walked.Source != nil {
 		plan.SourceName = walked.Source.Name
@@ -399,7 +399,7 @@ func computeDryRunPlan(app core.App, walked *WalkedSource, src *core.Record) *Dr
 	roleSet, _, _ := UnionRoles(walked.Blueprints, inferred)
 	roleSet = subtractLocalRoleNames(roleSet, walked)
 
-	subRoles, pubRoles := SplitSubscriptionRoles(roleSet, getSubscriptionCatalogNames(app))
+	subRoles, pubRoles := SplitSubscriptionRoles(roleSet, getSubscriptionCatalogNames(e))
 	plan.GalaxyRoles = pubRoles
 	plan.SubscriptionRoles = subRoles
 	return plan

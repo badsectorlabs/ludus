@@ -9,8 +9,8 @@ import (
 )
 
 // userCanAccessBlueprint reports whether user has read access to
-// blueprintRecord. Admins always pass. Source-derived blueprints inherit
-// access from the parent source's sharedUsers / sharedGroups.
+// blueprintRecord. Admins always pass; otherwise access is granted via
+// owner, the blueprint's sharedUsers, or membership in any sharedGroups.
 func userCanAccessBlueprint(e *core.RequestEvent, user *models.User, blueprintRecord *core.Record) (bool, error) {
 	if user.IsAdmin() {
 		return true, nil
@@ -32,25 +32,6 @@ func userCanAccessBlueprint(e *core.RequestEvent, user *models.User, blueprintRe
 		if slices.Contains(groupRecord.GetStringSlice("members"), user.Id) ||
 			slices.Contains(groupRecord.GetStringSlice("managers"), user.Id) {
 			return true, nil
-		}
-	}
-
-	if srcID := blueprintRecord.GetString("source"); srcID != "" {
-		srcRecord, err := e.App.FindRecordById("sources", srcID)
-		if err == nil && srcRecord != nil {
-			if slices.Contains(srcRecord.GetStringSlice("sharedUsers"), user.Id) {
-				return true, nil
-			}
-			for _, groupID := range srcRecord.GetStringSlice("sharedGroups") {
-				groupRecord, gErr := e.App.FindRecordById("groups", groupID)
-				if gErr != nil {
-					continue
-				}
-				if slices.Contains(groupRecord.GetStringSlice("members"), user.Id) ||
-					slices.Contains(groupRecord.GetStringSlice("managers"), user.Id) {
-					return true, nil
-				}
-			}
 		}
 	}
 
@@ -87,9 +68,8 @@ func userCanShareBlueprintWithUser(e *core.RequestEvent, actingUser *models.User
 	return false, nil
 }
 
-// getBlueprintAccessType labels how user gets access: admin / owner / direct
-// (sharedUsers) / group (member of a sharedGroup) / source (inherited from
-// the parent source) / unknown.
+// getBlueprintAccessType labels how user gets access: admin / owner /
+// direct (sharedUsers) / group (member of a sharedGroup) / unknown.
 func getBlueprintAccessType(e *core.RequestEvent, user *models.User, blueprintRecord *core.Record) string {
 	if user.IsAdmin() {
 		return "admin"
@@ -111,25 +91,6 @@ func getBlueprintAccessType(e *core.RequestEvent, user *models.User, blueprintRe
 		if slices.Contains(groupRecord.GetStringSlice("members"), user.Id) ||
 			slices.Contains(groupRecord.GetStringSlice("managers"), user.Id) {
 			return "group"
-		}
-	}
-
-	if srcID := blueprintRecord.GetString("source"); srcID != "" {
-		srcRecord, err := e.App.FindRecordById("sources", srcID)
-		if err == nil && srcRecord != nil {
-			if slices.Contains(srcRecord.GetStringSlice("sharedUsers"), user.Id) {
-				return "source"
-			}
-			for _, groupID := range srcRecord.GetStringSlice("sharedGroups") {
-				groupRecord, gErr := e.App.FindRecordById("groups", groupID)
-				if gErr != nil {
-					continue
-				}
-				if slices.Contains(groupRecord.GetStringSlice("members"), user.Id) ||
-					slices.Contains(groupRecord.GetStringSlice("managers"), user.Id) {
-					return "source"
-				}
-			}
 		}
 	}
 

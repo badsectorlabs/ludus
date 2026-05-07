@@ -65,34 +65,17 @@ func createSourcesCollection(app core.App) error {
 	if err != nil {
 		return err
 	}
-	groupsCollection, err := app.FindCollectionByNameOrId("groups")
-	if err != nil {
-		return err
-	}
 
 	c := core.NewBaseCollection("sources")
 
-	hasAccessRule := types.Pointer(`
-	@request.auth.id != "" && (
-		@request.auth.isAdmin = true ||
-		owner.id = @request.auth.id ||
-		sharedUsers.id ?= @request.auth.id ||
-		(
-			@collection.groups.id ?= sharedGroups.id &&
-			(
-				@collection.groups.members.id ?= @request.auth.id ||
-				@collection.groups.managers.id ?= @request.auth.id
-			)
-		)
-	)`)
 	ownerOrAdminRule := types.Pointer(`
 	@request.auth.id != "" && (
 		@request.auth.isAdmin = true ||
 		owner.id = @request.auth.id
 	)`)
 
-	c.ListRule = hasAccessRule
-	c.ViewRule = hasAccessRule
+	c.ListRule = ownerOrAdminRule
+	c.ViewRule = ownerOrAdminRule
 	c.CreateRule = types.Pointer(`@request.auth.id != ""`)
 	c.UpdateRule = ownerOrAdminRule
 	c.DeleteRule = ownerOrAdminRule
@@ -121,16 +104,6 @@ func createSourcesCollection(app core.App) error {
 			CollectionId: usersCollection.Id,
 			Required:     true,
 			MaxSelect:    1,
-		},
-		&core.RelationField{
-			Name:         "sharedUsers",
-			CollectionId: usersCollection.Id,
-			MaxSelect:    9999,
-		},
-		&core.RelationField{
-			Name:         "sharedGroups",
-			CollectionId: groupsCollection.Id,
-			MaxSelect:    9999,
 		},
 		&core.DateField{Name: "lastSyncedAt"},
 		&core.TextField{Name: "lastSyncStatus"},
