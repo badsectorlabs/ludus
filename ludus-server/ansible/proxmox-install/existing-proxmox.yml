@@ -329,13 +329,6 @@
         group: root
         mode: '0644'
 
-    - name: Start the ludus service
-      ansible.builtin.service:
-        name: ludus
-        state: started
-        enabled: true
-        daemon_reload: true
-    
     - name: Restart dnsmasq
       ansible.builtin.service:
         name: dnsmasq
@@ -350,6 +343,17 @@
     - name: Start the ludus admin service
       ansible.builtin.service:
         name: ludus-admin.service
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    - name: Pause to allow the admin service to start
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: Start the ludus service
+      ansible.builtin.service:
+        name: ludus
         state: started
         enabled: true
         daemon_reload: true
