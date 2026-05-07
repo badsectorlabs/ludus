@@ -17,10 +17,8 @@ const SupportedManifestVersion = 1
 
 // blueprintManifestIDRegex permits up to two slashes so authors can scope IDs
 // into folders (e.g. "windows/dc"). The slug-prefixed display id stays
-// unambiguous because sourceIDRegex disallows slashes.
+// unambiguous because sourceSlugRegex (api_source_management.go) disallows slashes.
 var blueprintManifestIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*(\/[A-Za-z0-9_\-]+){0,2}$`)
-
-var sourceIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*$`)
 
 // BlueprintManifest is the parsed shape of a blueprint.yml. Authors, license,
 // and homepage live on the source manifest and are inherited at read time.

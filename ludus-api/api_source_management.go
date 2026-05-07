@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -164,7 +163,7 @@ func CreateBlueprintSource(e *core.RequestEvent) error {
 
 	// Dry-run: sync, return the plan, roll the row + on-disk checkout back.
 	if req.DryRun {
-		syncResult, syncErr := SyncSource(context.Background(), e.App, src, opts)
+		syncResult, syncErr := SyncSource(context.Background(), e, e.App, src, opts)
 		_ = os.RemoveAll(SourceCheckoutDir(src.Id))
 		_ = e.App.Delete(src)
 		if syncErr != nil {
@@ -177,7 +176,7 @@ func CreateBlueprintSource(e *core.RequestEvent) error {
 	}
 
 	// First-sync failure rolls the row back so the caller can retry without rm.
-	syncResult, syncErr := SyncSource(context.Background(), e.App, src, opts)
+	syncResult, syncErr := SyncSource(context.Background(), e, e.App, src, opts)
 	if syncErr != nil {
 		_ = os.RemoveAll(SourceCheckoutDir(src.Id))
 		_ = e.App.Delete(src)
@@ -202,7 +201,13 @@ func deriveSourceIDFromRequest(req *dto.CreateSourceRequest, e *core.RequestEven
 	var basename string
 	switch req.Type {
 	case "git":
-		basename = lastPathSegment(req.URL)
+		// `<org>-<repo>` so same-named repos under different orgs don't collide.
+		org, repo := gitURLOrgAndRepo(req.URL)
+		if org != "" {
+			basename = org + "-" + repo
+		} else {
+			basename = repo
+		}
 	case "upload":
 		basename = lastPathSegment(multipartArchiveFilename(e, "archive"))
 	}
@@ -221,6 +226,32 @@ func deriveSourceIDFromRequest(req *dto.CreateSourceRequest, e *core.RequestEven
 		return "", fmt.Errorf("could not auto-derive sourceID; pass --id explicitly")
 	}
 	return basename, nil
+}
+
+// gitURLOrgAndRepo handles https://, git+ssh://, and git@host:org/repo.git.
+// Returns ("", repo) when the URL has no org segment.
+func gitURLOrgAndRepo(rawURL string) (string, string) {
+	u := strings.TrimSpace(rawURL)
+	u = strings.TrimSuffix(u, "/")
+	if i := strings.Index(u, "://"); i >= 0 {
+		u = u[i+3:]
+		if j := strings.Index(u, "/"); j >= 0 {
+			u = u[j+1:]
+		} else {
+			u = ""
+		}
+	} else if i := strings.LastIndex(u, ":"); i >= 0 && !strings.HasPrefix(u, "/") {
+		u = u[i+1:]
+	}
+	parts := strings.Split(u, "/")
+	switch len(parts) {
+	case 0:
+		return "", ""
+	case 1:
+		return "", parts[0]
+	default:
+		return parts[len(parts)-2], parts[len(parts)-1]
+	}
 }
 
 func lastPathSegment(p string) string {
@@ -276,8 +307,7 @@ func ListBlueprintSources(e *core.RequestEvent) error {
 		records, err = e.App.FindRecordsByFilter("sources", "", "-created", 0, 0, nil)
 	} else {
 		records, err = e.App.FindRecordsByFilter("sources",
-			"owner = {:u} || sharedUsers.id ?= {:u} || sharedGroups.members.id ?= {:u} || sharedGroups.managers.id ?= {:u}",
-			"-created", 0, 0,
+			"owner = {:u}", "-created", 0, 0,
 			map[string]any{"u": user.Id})
 	}
 	if err != nil {
@@ -375,7 +405,7 @@ func UpdateBlueprintSource(e *core.RequestEvent) error {
 			Archive:         uploadBytes,
 			ArchiveFilename: uploadFilename,
 		}
-		syncResult, syncErr := SyncSource(context.Background(), e.App, src, opts)
+		syncResult, syncErr := SyncSource(context.Background(), e, e.App, src, opts)
 		if syncErr != nil {
 			return JSONError(e, http.StatusBadRequest, syncErr.Error())
 		}
@@ -593,8 +623,7 @@ func findSourceByVisibleID(e *core.RequestEvent, sourceID string) (*core.Record,
 			map[string]any{"s": sourceID})
 	} else {
 		records, err = e.App.FindRecordsByFilter("sources",
-			"sourceID = {:s} && (owner = {:u} || sharedUsers.id ?= {:u} || sharedGroups.members.id ?= {:u} || sharedGroups.managers.id ?= {:u})",
-			"+owner", 2, 0,
+			"sourceID = {:s} && owner = {:u}", "+owner", 2, 0,
 			map[string]any{"s": sourceID, "u": user.Id})
 	}
 	if err != nil || len(records) == 0 {
@@ -650,7 +679,7 @@ func SyncBlueprintSource(e *core.RequestEvent) error {
 
 	// Dry-run: run sync synchronously and return the plan; no persisted state changes.
 	if req.DryRun {
-		result, syncErr := SyncSource(context.Background(), e.App, src, opts)
+		result, syncErr := SyncSource(context.Background(), e, e.App, src, opts)
 		if syncErr != nil {
 			return JSONError(e, http.StatusInternalServerError, syncErr.Error())
 		}
@@ -660,127 +689,11 @@ func SyncBlueprintSource(e *core.RequestEvent) error {
 		return e.JSON(http.StatusOK, result.DryRun)
 	}
 
-	syncResult, syncErr := SyncSource(context.Background(), e.App, src, opts)
+	syncResult, syncErr := SyncSource(context.Background(), e, e.App, src, opts)
 	if syncErr != nil {
 		return JSONError(e, http.StatusInternalServerError, syncErr.Error())
 	}
 	return e.JSON(http.StatusOK, sourceSyncResponse(src.GetString("sourceID"), syncResult))
-}
-
-func ShareBlueprintSourceWithUsers(e *core.RequestEvent) error {
-	return mutateSourceShare(e, "sharedUsers", "users", "userID", true)
-}
-
-func ShareBlueprintSourceWithGroups(e *core.RequestEvent) error {
-	return mutateSourceShare(e, "sharedGroups", "groups", "name", true)
-}
-
-func UnshareBlueprintSourceFromUsers(e *core.RequestEvent) error {
-	return mutateSourceShare(e, "sharedUsers", "users", "userID", false)
-}
-
-func UnshareBlueprintSourceFromGroups(e *core.RequestEvent) error {
-	return mutateSourceShare(e, "sharedGroups", "groups", "name", false)
-}
-
-// mutateSourceShare adds or removes related records on a source's multi-relation field,
-// translating logical identifiers (userID / group name) to PocketBase record IDs.
-//
-// share=true appends; share=false removes.
-func mutateSourceShare(e *core.RequestEvent, field, collection, lookupKey string, share bool) error {
-	user, err := requireUser(e)
-	if err != nil {
-		return err
-	}
-	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
-	if err != nil {
-		return err
-	}
-	if !user.IsAdmin() && src.GetString("owner") != user.Id {
-		return JSONError(e, http.StatusForbidden, "only the owner or an admin can change source sharing")
-	}
-
-	var identifiers []string
-	if collection == "users" {
-		var body dto.BulkShareBlueprintWithUsersRequest
-		if err := e.BindBody(&body); err != nil {
-			return JSONError(e, http.StatusBadRequest, "Request body with userIDs is required")
-		}
-		identifiers = normalizeBulkIdentifiers(body.UserIDs)
-	} else {
-		var body dto.BulkShareBlueprintWithGroupsRequest
-		if err := e.BindBody(&body); err != nil {
-			return JSONError(e, http.StatusBadRequest, "Request body with groupNames is required")
-		}
-		identifiers = normalizeBulkIdentifiers(body.GroupNames)
-	}
-	if len(identifiers) == 0 {
-		hint := "userIDs"
-		if collection == "groups" {
-			hint = "groupNames"
-		}
-		return JSONError(e, http.StatusBadRequest, fmt.Sprintf("Request body with %s is required", hint))
-	}
-
-	var success []string
-	var errors []dto.BulkBlueprintOperationErrorItem
-	resolvedIDs := []string{}
-
-	for _, id := range identifiers {
-		rec, ferr := e.App.FindFirstRecordByData(collection, lookupKey, id)
-		if ferr != nil || rec == nil {
-			errors = append(errors, dto.BulkBlueprintOperationErrorItem{
-				Item:   id,
-				Reason: fmt.Sprintf("%s %q not found", collection[:len(collection)-1], id),
-			})
-			continue
-		}
-		resolvedIDs = append(resolvedIDs, rec.Id)
-		success = append(success, id)
-	}
-
-	existing := src.GetStringSlice(field)
-	if share {
-		src.Set(field, mergeUnique(existing, resolvedIDs))
-	} else {
-		src.Set(field, removeFromSlice(existing, resolvedIDs))
-	}
-	if err := e.App.Save(src); err != nil {
-		return JSONError(e, http.StatusInternalServerError, err.Error())
-	}
-	return e.JSON(http.StatusOK, dto.BulkBlueprintOperationResponse{Success: success, Errors: errors})
-}
-
-func mergeUnique(existing, additions []string) []string {
-	seen := map[string]struct{}{}
-	out := []string{}
-	for _, s := range existing {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
-			out = append(out, s)
-		}
-	}
-	for _, s := range additions {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func removeFromSlice(existing, removals []string) []string {
-	rm := map[string]struct{}{}
-	for _, s := range removals {
-		rm[s] = struct{}{}
-	}
-	out := []string{}
-	for _, s := range existing {
-		if _, drop := rm[s]; !drop {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 func ListSourceBlueprints(e *core.RequestEvent) error {
@@ -814,8 +727,7 @@ func ListAllSourceBlueprints(e *core.RequestEvent) error {
 		sources, srcErr = e.App.FindRecordsByFilter("sources", "", "+sourceID", 0, 0, nil)
 	} else {
 		sources, srcErr = e.App.FindRecordsByFilter("sources",
-			"owner = {:u} || sharedUsers.id ?= {:u} || sharedGroups.members.id ?= {:u} || sharedGroups.managers.id ?= {:u}",
-			"+sourceID", 0, 0,
+			"owner = {:u}", "+sourceID", 0, 0,
 			map[string]any{"u": user.Id})
 	}
 	if srcErr != nil {
@@ -935,121 +847,3 @@ func ListSourceRoles(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, out)
 }
 
-// ListSourceAccessUsers handles GET /sources/{sourceID}/access/users.
-// Returns one row per user with effective access. Mirrors ListBlueprintAccessUsers.
-func ListSourceAccessUsers(e *core.RequestEvent) error {
-	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
-	if err != nil {
-		return err
-	}
-
-	userIdentityCache := make(map[string]struct {
-		UserID string
-		Name   string
-	})
-	accessByUserRecordID := make(map[string]*blueprintAccessUserAccumulator)
-
-	addUserAccess := func(userRecordID string, accessType string, groupName string) {
-		recordID := strings.TrimSpace(userRecordID)
-		if recordID == "" {
-			return
-		}
-		identity, exists := userIdentityCache[recordID]
-		if !exists {
-			resolvedUserID, resolvedName := resolveUserIdentity(e, recordID)
-			identity = struct {
-				UserID string
-				Name   string
-			}{UserID: resolvedUserID, Name: resolvedName}
-			userIdentityCache[recordID] = identity
-		}
-		if strings.TrimSpace(identity.UserID) == "" {
-			return
-		}
-		entry, exists := accessByUserRecordID[recordID]
-		if !exists {
-			entry = &blueprintAccessUserAccumulator{
-				UserID:    identity.UserID,
-				Name:      identity.Name,
-				AccessSet: make(map[string]struct{}),
-				GroupSet:  make(map[string]struct{}),
-			}
-			accessByUserRecordID[recordID] = entry
-		}
-		if at := strings.TrimSpace(accessType); at != "" {
-			entry.AccessSet[at] = struct{}{}
-		}
-		if gn := strings.TrimSpace(groupName); gn != "" {
-			entry.GroupSet[gn] = struct{}{}
-		}
-	}
-
-	addUserAccess(src.GetString("owner"), "owner", "")
-	for _, sharedUserRecordID := range src.GetStringSlice("sharedUsers") {
-		addUserAccess(sharedUserRecordID, "direct", "")
-	}
-	for _, sharedGroupRecordID := range src.GetStringSlice("sharedGroups") {
-		groupRecord, err := e.App.FindRecordById("groups", sharedGroupRecordID)
-		if err != nil {
-			continue
-		}
-		groupName := strings.TrimSpace(groupRecord.GetString("name"))
-		if groupName == "" {
-			groupName = sharedGroupRecordID
-		}
-		for _, managerRecordID := range groupRecord.GetStringSlice("managers") {
-			addUserAccess(managerRecordID, "group-manager", groupName)
-		}
-		for _, memberRecordID := range groupRecord.GetStringSlice("members") {
-			addUserAccess(memberRecordID, "group-member", groupName)
-		}
-	}
-
-	response := make([]dto.ListSourceAccessUsersResponseItem, 0, len(accessByUserRecordID))
-	for _, entry := range accessByUserRecordID {
-		response = append(response, dto.ListSourceAccessUsersResponseItem{
-			UserID: entry.UserID,
-			Name:   entry.Name,
-			Access: sortedKeysFromSet(entry.AccessSet),
-			Groups: sortedKeysFromSet(entry.GroupSet),
-		})
-	}
-	sort.SliceStable(response, func(i, j int) bool {
-		return response[i].UserID < response[j].UserID
-	})
-	return e.JSON(http.StatusOK, response)
-}
-
-// ListSourceAccessGroups handles GET /sources/{sourceID}/access/groups.
-// Returns one row per shared group with managers and members. Mirrors
-// ListBlueprintAccessGroups.
-func ListSourceAccessGroups(e *core.RequestEvent) error {
-	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
-	if err != nil {
-		return err
-	}
-	response := make([]dto.ListSourceAccessGroupsResponseItem, 0, len(src.GetStringSlice("sharedGroups")))
-	for _, sharedGroupRecordID := range src.GetStringSlice("sharedGroups") {
-		groupRecord, err := e.App.FindRecordById("groups", sharedGroupRecordID)
-		if err != nil {
-			continue
-		}
-		groupName := strings.TrimSpace(groupRecord.GetString("name"))
-		if groupName == "" {
-			groupName = sharedGroupRecordID
-		}
-		managers := resolveUserIDs(e, groupRecord.GetStringSlice("managers"))
-		members := resolveUserIDs(e, groupRecord.GetStringSlice("members"))
-		sort.Strings(managers)
-		sort.Strings(members)
-		response = append(response, dto.ListSourceAccessGroupsResponseItem{
-			GroupName: groupName,
-			Managers:  managers,
-			Members:   members,
-		})
-	}
-	sort.SliceStable(response, func(i, j int) bool {
-		return response[i].GroupName < response[j].GroupName
-	})
-	return e.JSON(http.StatusOK, response)
-}

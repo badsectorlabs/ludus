@@ -774,9 +774,9 @@ Works on local blueprints (e.g. 'my-lab') OR slug-prefixed source-blueprints (e.
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-		body, _ := json.Marshal(map[string]bool{
-			"globalRoles": installFlagGlobalRoles,
-			"forceRoles":  installFlagForceRoles,
+		body, _ := json.Marshal(dto.InstallBlueprintDepsRequest{
+			GlobalRoles: installFlagGlobalRoles,
+			ForceRoles:  installFlagForceRoles,
 		})
 		path := fmt.Sprintf("/blueprints/%s/install", neturl.PathEscape(args[0]))
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(path), string(body))
@@ -808,26 +808,34 @@ field. For interactive editing of the YAML config, use 'ludus blueprint config e
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-		body := map[string]any{}
+		body := dto.UpdateBlueprintMetadataRequest{}
+		hasField := false
 		if cmd.Flags().Changed("name") {
-			body["name"] = blueprintName
+			body.Name = &blueprintName
+			hasField = true
 		}
 		if cmd.Flags().Changed("description") {
-			body["description"] = blueprintDescription
+			body.Description = &blueprintDescription
+			hasField = true
 		}
 		if cmd.Flags().Changed("version") {
-			body["version"] = updateFlagVersion
+			body.Version = &updateFlagVersion
+			hasField = true
 		}
 		if cmd.Flags().Changed("tag") {
-			body["tags"] = updateFlagTags
+			body.Tags = &updateFlagTags
+			hasField = true
 		}
 		if updateFlagClearTags {
-			body["tags"] = []string{}
+			empty := []string{}
+			body.Tags = &empty
+			hasField = true
 		}
 		if cmd.Flags().Changed("min-ludus-version") {
-			body["min_ludus_version"] = updateFlagMinLudusVer
+			body.MinLudusVersion = &updateFlagMinLudusVer
+			hasField = true
 		}
-		if len(body) == 0 {
+		if !hasField {
 			logger.Logger.Fatal("at least one field flag is required")
 		}
 		jsonBody, _ := json.Marshal(body)
@@ -864,6 +872,15 @@ The exported tarball can be imported on another Ludus instance via
 		path := fmt.Sprintf("/blueprints/%s/export", neturl.PathEscape(args[0]))
 		_, success := rest.FileGet(client, path, out)
 		if !success {
+			return
+		}
+		if jsonFormat {
+			payload, _ := json.Marshal(map[string]string{
+				"blueprintID": args[0],
+				"path":        out,
+				"result":      "exported",
+			})
+			fmt.Println(string(payload))
 			return
 		}
 		logger.Logger.Infof("wrote %s", out)

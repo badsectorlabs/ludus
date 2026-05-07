@@ -1,7 +1,6 @@
 package ludusapi
 
 import (
-	"archive/tar"
 	"bytes"
 	"fmt"
 	"io"
@@ -79,82 +78,10 @@ func findFiles(rootDir, pattern1, pattern2 string) ([]string, error) {
 	return files, err
 }
 
-// Untar takes a source tar file and untars it into the specified destination directory.
+// Untar uses the loose defaults (no bomb cap, symlinks tolerated). For
+// untrusted uploads, call ExtractTarFile with hardenedExtractOptions.
 func Untar(tarFile, destDir string) error {
-	// Open the tar file
-	file, err := os.Open(tarFile)
-	if err != nil {
-		return fmt.Errorf("failed to open tar file: %w", err)
-	}
-	defer file.Close()
-
-	// Create a new tar reader
-	tarReader := tar.NewReader(file)
-
-	// Resolve the absolute, cleaned destination directory for safety checks
-	absDestDir, err := filepath.Abs(destDir)
-	if err != nil {
-		return fmt.Errorf("failed to resolve destination directory: %w", err)
-	}
-	absDestDir = filepath.Clean(absDestDir)
-
-	// Iterate through the files in the tar archive
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break // End of tar file
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read tar file: %w", err)
-		}
-
-		// Construct the full path for the file/directory and prevent path traversal
-		joinedPath := filepath.Join(absDestDir, header.Name)
-		cleanPath := filepath.Clean(joinedPath)
-		absPath, err := filepath.Abs(cleanPath)
-		if err != nil {
-			return fmt.Errorf("failed to resolve path: %w", err)
-		}
-		// Ensure the final path is within the destination directory
-		if absPath != absDestDir && !strings.HasPrefix(absPath+string(os.PathSeparator), absDestDir+string(os.PathSeparator)) {
-			return fmt.Errorf("illegal file path in tar: %s", header.Name)
-		}
-
-		path := absPath
-
-		// Check the file type
-		switch header.Typeflag {
-		case tar.TypeDir: // Directory
-			// Create directory if it doesn't exist
-			if err := os.MkdirAll(path, 0755); err != nil {
-				return fmt.Errorf("failed to create directory: %w", err)
-			}
-		case tar.TypeReg: // Regular file
-			// Check if the file starts with '._' and if so, skip it (these are macOS hidden files)
-			if strings.HasPrefix(filepath.Base(header.Name), "._") {
-				continue
-			}
-			// Create the directory for the file (may be the first file deeply nested in a dir)
-			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-				return fmt.Errorf("failed to create directory: %w", err)
-			}
-			// Create the file and write its content
-			outFile, err := os.Create(path)
-			if err != nil {
-				return fmt.Errorf("failed to create file: %w", err)
-			}
-
-			if _, err := io.Copy(outFile, tarReader); err != nil {
-				outFile.Close()
-				return fmt.Errorf("failed to write file: %w", err)
-			}
-			outFile.Close()
-		default:
-			fmt.Printf("Unsupported type: %v in %s\n", header.Typeflag, header.Name)
-		}
-	}
-
-	return nil
+	return ExtractTarFile(tarFile, destDir, ExtractOptions{})
 }
 
 // Returns false if the filePath does not exist or was modified more than recent seconds ago

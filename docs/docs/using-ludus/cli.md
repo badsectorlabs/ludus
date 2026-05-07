@@ -1556,7 +1556,7 @@ Flags:
 
 ## Source
 
-Register and share sources of Packer templates, Ansible roles, and blueprints.
+Register sources of Packer templates, Ansible roles, and blueprints.
 
 ```
 Usage:
@@ -1568,8 +1568,6 @@ Available Commands:
   sync     Re-sync one or all sources
   update   Change a source's tracked ref (git) or replace its content (upload)
   rm       Remove a source
-  share    Share a source with users or groups
-  unshare  Unshare a source
 ```
 
 ### Source Add
@@ -1636,26 +1634,6 @@ Usage:
 Flags:
     --purge       delete templates/roles claimed only by this source (no cross-check against ranges or blueprints)
     --no-prompt   skip confirmation prompt
-```
-
-### Source Share
-
-Share a source with users or groups.
-
-```
-Usage:
-  ludus source share user <sourceID> <userID...>
-  ludus source share group <sourceID> <groupName...>
-```
-
-### Source Unshare
-
-Remove share grants from users or groups.
-
-```
-Usage:
-  ludus source unshare user <sourceID> <userID...>
-  ludus source unshare group <sourceID> <groupName...>
 ```
 
 ## Templates

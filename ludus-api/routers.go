@@ -995,34 +995,6 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
-		"ShareBlueprintSourceWithUsers",
-		http.MethodPost,
-		"/sources/{sourceID}/share/users",
-		ShareBlueprintSourceWithUsers,
-	},
-
-	{
-		"ShareBlueprintSourceWithGroups",
-		http.MethodPost,
-		"/sources/{sourceID}/share/groups",
-		ShareBlueprintSourceWithGroups,
-	},
-
-	{
-		"UnshareBlueprintSourceFromUsers",
-		http.MethodPost,
-		"/sources/{sourceID}/unshare/users",
-		UnshareBlueprintSourceFromUsers,
-	},
-
-	{
-		"UnshareBlueprintSourceFromGroups",
-		http.MethodPost,
-		"/sources/{sourceID}/unshare/groups",
-		UnshareBlueprintSourceFromGroups,
-	},
-
-	{
 		"ListSourceBlueprints",
 		http.MethodGet,
 		"/sources/{sourceID}/blueprints",
@@ -1041,20 +1013,6 @@ var routes = PocketBaseRoutes{
 		http.MethodGet,
 		"/sources/{sourceID}/roles",
 		ListSourceRoles,
-	},
-
-	{
-		"ListSourceAccessUsers",
-		http.MethodGet,
-		"/sources/{sourceID}/access/users",
-		ListSourceAccessUsers,
-	},
-
-	{
-		"ListSourceAccessGroups",
-		http.MethodGet,
-		"/sources/{sourceID}/access/groups",
-		ListSourceAccessGroups,
 	},
 
 	{

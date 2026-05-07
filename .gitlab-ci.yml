@@ -1279,7 +1279,6 @@ post-deploy blueprints-as-admin:
     max: 2
     when: script_failure
   script:
-    - *ci-setup-user # source share tests need CIU
     - *ci-setup-admin
     # Pre-clean everything this job creates so a stale snapshot doesn't trip
     # up the create/import calls below.
@@ -1337,15 +1336,12 @@ post-deploy blueprints-as-admin:
     - 'ludus blueprint list | grep -q "ci-src/example"'
     - ludus blueprint info ci-src/example | tee /tmp/ci-src-example.info
     - 'grep -q "Authors:" /tmp/ci-src-example.info'
-    - ludus source share user ci-src CIU
-    - 'LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user) ludus source list | grep -q "ci-src "'
-    - 'LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user) ludus blueprint list | grep "ci-src/example" | grep -q source'
+    # Negative-path: a non-owner can't delete an admin-created source. CIU is created on demand here since this job runs admin-only setup.
+    - ludus users list all | grep -q 'Continuous Integration User' || ludus users add -n "Continuous Integration User" -i CIU -e "ciu@ludus.internal" -p "cicdpassword"
     - set +o pipefail
-    - 'LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user) ludus source rm ci-src --no-prompt 2>&1 | grep -q "owner or an admin"'
-    - 'LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user) ludus source share user ci-src CIA 2>&1 | grep -q "owner or an admin"'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ci-src --no-prompt 2>&1 | grep -qiE "not found|owner or an admin"'
     - set -o pipefail
-    - ludus source unshare user ci-src CIU
-    # Cross-claim purge preserves shared artifacts; solo-claim purge removes them
+    # Purging one source preserves artifacts a second source still claims; purging the last claimant removes them
     - ludus source add /opt/ludus/ci/fixtures/source-template --id ci-src2 --force
     - ludus source rm ci-src --no-prompt --purge
     - ludus ansible role list | grep -q geerlingguy.docker

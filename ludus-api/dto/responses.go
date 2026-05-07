@@ -386,19 +386,6 @@ type ListSourceRolesResponseItem struct {
 	Scope   string `json:"scope"`
 }
 
-type ListSourceAccessUsersResponseItem struct {
-	UserID string   `json:"userID"`
-	Name   string   `json:"name,omitempty"`
-	Access []string `json:"access,omitempty"`
-	Groups []string `json:"groups,omitempty"`
-}
-
-type ListSourceAccessGroupsResponseItem struct {
-	GroupName string   `json:"groupName"`
-	Managers  []string `json:"managers,omitempty"`
-	Members   []string `json:"members,omitempty"`
-}
-
 type ListUserResponse struct {
 	Value []ListUserResponseItem `json:"-"`
 }

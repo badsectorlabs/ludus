@@ -8,8 +8,46 @@ import (
 	"time"
 
 	"github.com/pocketbase/pocketbase/core"
+	"gopkg.in/yaml.v3"
 	"ludusapi/models"
 )
+
+func mergeStringSlicesUnique(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, s := range b {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func readDeclaredSubscriptionRoles(bundleDir string) []string {
+	if bundleDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(bundleDir, "subscription_refs.yml"))
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		Roles []string `yaml:"roles"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil
+	}
+	return doc.Roles
+}
 
 type TemplateStatusEntry struct {
 	Name  string `json:"name"`
@@ -40,8 +78,8 @@ func computeTemplateStatus(e *core.RequestEvent, names []string) []TemplateStatu
 	return out
 }
 
-func computeRoleStatus(app core.App, user *models.User, names []string) []RoleStatusEntry {
-	catalog := getSubscriptionCatalogNames(app)
+func computeRoleStatus(e *core.RequestEvent, user *models.User, names []string) []RoleStatusEntry {
+	catalog := getSubscriptionCatalogNames(e)
 	subSet := make(map[string]struct{}, len(catalog))
 	for _, n := range catalog {
 		subSet[n] = struct{}{}
@@ -125,7 +163,7 @@ type ResolverResult struct {
 // source_install.go already handle both shared and scoped artifacts for the
 // full-source sync path. To avoid double-registration, installUnionedRoles
 // calls only installRolesForBlueprint rather than the full ResolveAndInstall.
-func ResolveAndInstall(app core.App, walked WalkedBlueprint, opts ResolverOpts) ResolverResult {
+func ResolveAndInstall(e *core.RequestEvent, app core.App, walked WalkedBlueprint, opts ResolverOpts) ResolverResult {
 	out := ResolverResult{}
 
 	for _, dir := range walked.ScopedTemplates {
@@ -152,14 +190,14 @@ func ResolveAndInstall(app core.App, walked WalkedBlueprint, opts ResolverOpts) 
 		out.LocalRoleResults = append(out.LocalRoleResults, ArtifactResult{Name: name, OK: true})
 	}
 
-	out.RoleResults = installRolesForBlueprint(app, walked, opts)
+	out.RoleResults = installRolesForBlueprint(e, app, walked, opts)
 	return out
 }
 
 // installRolesForBlueprint reads config.yml + requirements.yml from the
 // bundle, splits roles into public/subscription, installs each set, returns
 // per-role results. PreInferredRoles bypasses the disk read.
-func installRolesForBlueprint(app core.App, walked WalkedBlueprint, opts ResolverOpts) []RoleInstallResult {
+func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedBlueprint, opts ResolverOpts) []RoleInstallResult {
 	var inferredRoles []string
 
 	if opts.PreInferredRoles != nil {
@@ -188,10 +226,33 @@ func installRolesForBlueprint(app core.App, walked WalkedBlueprint, opts Resolve
 		inferredRoles = filtered
 	}
 
-	catalog := getSubscriptionCatalogNames(app)
-	subRoles, pubRoles := SplitSubscriptionRoles(inferredRoles, catalog)
+	// Union the bundle's declared subscription roles with the live catalog
+	// so an importing subscriber routes them correctly even before its own
+	// catalog has fetched, and an unlicensed instance can detect them
+	// instead of silently falling through to a same-named galaxy role.
+	declaredSub := readDeclaredSubscriptionRoles(walked.Dir)
+	catalog := getSubscriptionCatalogNames(e)
+	subSet := mergeStringSlicesUnique(declaredSub, catalog)
+	subRoles, pubRoles := SplitSubscriptionRoles(inferredRoles, subSet)
 
 	var out []RoleInstallResult
+
+	if len(subRoles) > 0 {
+		switch {
+		case server == nil || !server.LicenseValid || server.LicenseKey == "":
+			out = append(out, RoleInstallResult{
+				OK:    false,
+				Error: fmt.Sprintf("blueprint requires Ludus subscription roles, but this instance has no valid license: %v", subRoles),
+			})
+			return out
+		case len(catalog) == 0:
+			out = append(out, RoleInstallResult{
+				OK:    false,
+				Error: fmt.Sprintf("blueprint requires Ludus subscription roles, but the live subscription catalog is empty (license-server unreachable, missing entitlement, or community license): %v", subRoles),
+			})
+			return out
+		}
+	}
 
 	if hasRequirementsRoles(walked.RequirementsYAML) || len(pubRoles) > 0 {
 		augmented := augmentRequirementsWithBareNames(walked.RequirementsYAML, pubRoles)
@@ -222,7 +283,7 @@ func installRolesForBlueprint(app core.App, walked WalkedBlueprint, opts Resolve
 	// users and sources. Recording them would cause `source rm --purge` to
 	// try deleting the global install (incorrect, and would fail on perms).
 	for _, name := range subRoles {
-		if err := installSubscriptionRoleByName(app, name, opts.AnsibleHome); err != nil {
+		if err := installSubscriptionRoleByName(e, name, opts.AnsibleHome); err != nil {
 			out = append(out, RoleInstallResult{Name: name, OK: false, Error: err.Error()})
 		} else {
 			out = append(out, RoleInstallResult{Name: name, OK: true})

@@ -136,17 +136,21 @@ empty string to clear a field.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		body := map[string]any{}
+		body := dto.UpdateRangeRequest{}
+		hasField := false
 		if cmd.Flags().Changed("name") {
-			body["name"] = rangeUpdateName
+			body.Name = &rangeUpdateName
+			hasField = true
 		}
 		if cmd.Flags().Changed("description") {
-			body["description"] = rangeUpdateDescription
+			body.Description = &rangeUpdateDescription
+			hasField = true
 		}
 		if cmd.Flags().Changed("purpose") {
-			body["purpose"] = rangeUpdatePurpose
+			body.Purpose = &rangeUpdatePurpose
+			hasField = true
 		}
-		if len(body) == 0 {
+		if !hasField {
 			logger.Logger.Fatal("at least one of --name, --description, --purpose is required")
 		}
 
