@@ -4365,6 +4365,8 @@ paths:
                     enum:
                       - success
                       - failure
+                      - running
+                      - aborted
                     example: success
                   start:
                     type: string
@@ -7115,6 +7117,8 @@ components:
           enum:
             - success
             - failure
+            - running
+            - aborted
           example: success
         start:
           type: string
@@ -7148,6 +7152,8 @@ components:
           enum:
             - success
             - failure
+            - running
+            - aborted
           example: success
         start:
           type: string
