@@ -166,9 +166,12 @@
         label: "{{ item.vmid }} ({{ item.name }})"
 
     # --- Snapshot base VMs immediately (they just need the CI template state) ---
-    - name: Snapshot base VMs (1000, 1007) as 'clean'
-      ansible.builtin.command: >
-        qm snapshot {{ item.vmid }} clean --vmstate true
+    - name: Recreate 'clean' snapshot for base VMs (1000, 1007)
+      ansible.builtin.shell: |
+        if sudo qm listsnapshot {{ item.vmid }} | grep -q '\-> clean'; then
+          sudo qm delsnapshot {{ item.vmid }} clean
+        fi
+        sudo qm snapshot {{ item.vmid }} clean --vmstate true
       loop: "{{ ci_vms | selectattr('role', 'equalto', 'base') | list }}"
       loop_control:
         label: "{{ item.vmid }} ({{ item.name }})"
@@ -179,37 +182,68 @@
   gather_facts: false
   vars:
     ssh_config: /home/gitlab-runner/.ssh/config
-    # VMs that need Ludus installed (everything except base and cluster)
+    # VMs that need Ludus installed (all VMs except *-base)
     install_vms:
       - { vmid: 1001, role: installed }
       - { vmid: 1002, role: templates }
       - { vmid: 1003, role: range-admin }
       - { vmid: 1004, role: range-user }
+      - { vmid: 1005, role: cluster }
+      - { vmid: 1006, role: cluster }
       - { vmid: 1008, role: installed }
       - { vmid: 1009, role: templates }
       - { vmid: 1010, role: range-admin }
       - { vmid: 1011, role: range-user }
       - { vmid: 1012, role: build }
   tasks:
+    - name: Initialize install target list
+      ansible.builtin.set_fact:
+        install_vms_needing_install: []
+
+    - name: Check whether Ludus is already installed on each VM
+      ansible.builtin.shell: |
+        ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+          "sudo test -f /opt/ludus/install/install.log && sudo grep -q 'Ludus install complete' /opt/ludus/install/install.log"
+      loop: "{{ install_vms }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+      register: ludus_install_check_results
+      changed_when: false
+      failed_when: false
+      when: vm_ip_map is defined
+
+    - name: Build list of VMs that still need Ludus install
+      ansible.builtin.set_fact:
+        install_vms_needing_install: >-
+          {{
+            ludus_install_check_results.results
+            | rejectattr('rc', 'equalto', 0)
+            | map(attribute='item')
+            | list
+          }}
+      when: vm_ip_map is defined
+
     - name: Copy Ludus server binary to VMs
       ansible.builtin.shell: |
         scp -F {{ ssh_config }} {{ ludus_install_path }}/ci/binaries/ludus-server \
           gitlab-runner@{{ vm_ip_map[item.vmid | string] }}:/tmp/ludus-server
-        scp -F {{ ssh_config }} {{ ludus_install_path }}/ci/binaries/ludus-client_linux-amd64 \
-          gitlab-runner@{{ vm_ip_map[item.vmid | string] }}:/tmp/ludus-client
-      loop: "{{ install_vms }}"
+      loop: "{{ install_vms_needing_install }}"
       loop_control:
         label: "{{ item.vmid }}"
-      when: vm_ip_map is defined
+      when:
+        - vm_ip_map is defined
+        - install_vms_needing_install | length > 0
 
     - name: Run Ludus installer on each VM (kicks off install, causes reboot)
       ansible.builtin.shell: |
         ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
           "cd /tmp && sudo chmod +x ludus-server && sudo ./ludus-server --no-prompt $(hostname)"
-      loop: "{{ install_vms }}"
+      loop: "{{ install_vms_needing_install }}"
       loop_control:
         label: "{{ item.vmid }}"
-      ignore_errors: true  # SSH connection may drop during reboot
+      register: installer_kickoff_results
+      failed_when: false  # SSH connection may drop during reboot
+      when: install_vms_needing_install | length > 0
 
     - name: Wait for VMs to reboot and SSH to come back (up to 10 minutes)
       ansible.builtin.shell: |
@@ -218,16 +252,17 @@
           sleep 5
         done
         exit 1
-      loop: "{{ install_vms }}"
+      loop: "{{ install_vms_needing_install }}"
       loop_control:
         label: "{{ item.vmid }}"
+      when: install_vms_needing_install | length > 0
 
     - name: Wait for Ludus install to complete (check install status)
       ansible.builtin.shell: |
         for i in $(seq 1 180); do
           RESULT=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
             "sudo cat /opt/ludus/install/install.log 2>/dev/null | tail -5" 2>/dev/null || echo "")
-          if echo "$RESULT" | grep -q "Ludus install completed successfully"; then
+          if echo "$RESULT" | grep -q "Ludus install complete"; then
             echo "Install complete on {{ item.vmid }}"
             exit 0
           fi
@@ -235,22 +270,61 @@
         done
         echo "Install timed out on {{ item.vmid }}"
         exit 1
-      loop: "{{ install_vms }}"
+      loop: "{{ install_vms_needing_install }}"
       loop_control:
         label: "{{ item.vmid }}"
       register: install_results
+      when: install_vms_needing_install | length > 0
 
-    - name: Copy ludus client to /usr/local/bin on each VM
+    - name: Check if ludus client is already installed on each VM
       ansible.builtin.shell: |
         ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
-          "sudo cp /tmp/ludus-client /usr/local/bin/ludus && sudo chmod +x /usr/local/bin/ludus"
+          "sudo test -f /usr/local/bin/ludus"
       loop: "{{ install_vms }}"
       loop_control:
         label: "{{ item.vmid }}"
+      register: ludus_client_check_results
+      changed_when: false
+      failed_when: false
+      when:
+        - vm_ip_map is defined
+        - vm_ip_map[item.vmid | string] is defined
 
-    - name: Snapshot 'installed' VMs (1001, 1008, 1012) as 'clean'
-      ansible.builtin.command: >
-        qm snapshot {{ item.vmid }} clean --vmstate true
+    - name: Build list of VMs that still need Ludus client installed
+      ansible.builtin.set_fact:
+        install_vms_needing_install: >-
+          {{
+            ludus_client_check_results.results
+            | selectattr('skipped', 'undefined')
+            | selectattr('rc', 'defined')
+            | rejectattr('rc', 'equalto', 0)
+            | map(attribute='item')
+            | list
+          }}
+      when: vm_ip_map is defined
+
+    - name: SCP ludus client binary to each VM
+      ansible.builtin.shell: |
+        scp -F {{ ssh_config }} {{ ludus_install_path }}/ci/binaries/ludus-client_linux-amd64 \
+          gitlab-runner@{{ vm_ip_map[item.vmid | string] }}:/tmp/ludus-client
+      loop: "{{ install_vms_needing_install }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Copy ludus client to /usr/local/bin on each newly installed VM
+      ansible.builtin.shell: |
+        ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+          "sudo cp /tmp/ludus-client /usr/local/bin/ludus && sudo chmod 0755 /usr/local/bin/ludus && sudo /bin/bash -c '/usr/local/bin/ludus completion bash > /usr/share/bash-completion/completions/ludus'"
+      loop: "{{ install_vms_needing_install }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+
+    - name: Recreate 'clean' snapshot for 'installed' VMs (1001, 1008, 1012)
+      ansible.builtin.shell: |
+        if sudo qm listsnapshot {{ item.vmid }} | grep -q '\-> clean'; then
+          sudo qm delsnapshot {{ item.vmid }} clean
+        fi
+        sudo qm snapshot {{ item.vmid }} clean --vmstate true
       loop: "{{ install_vms | selectattr('role', 'in', ['installed', 'build']) | list }}"
       loop_control:
         label: "{{ item.vmid }}"
@@ -274,6 +348,7 @@
         ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} bash -l <<'REMOTE'
         export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
         # Create the CI admin user
+        sudo chown -R gitlab-runner:gitlab-runner /opt/ludus/ci
         ludus users add -a -n "Continuous Integration Admin" -i CIA -e "cia@ludus.internal" -p "cicdpassword" || true
         ludus --user CIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-admin
         export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
@@ -303,9 +378,12 @@
       loop_control:
         label: "{{ item.vmid }}"
 
-    - name: Snapshot 'templates' VMs (1002, 1009) as 'clean'
-      ansible.builtin.command: >
-        qm snapshot {{ item.vmid }} clean --vmstate true
+    - name: Recreate 'clean' snapshot for 'templates' VMs (1002, 1009)
+      ansible.builtin.shell: |
+        if sudo qm listsnapshot {{ item.vmid }} | grep -q '\-> clean'; then
+          sudo qm delsnapshot {{ item.vmid }} clean
+        fi
+        sudo qm snapshot {{ item.vmid }} clean --vmstate true
       loop: "{{ template_vms | selectattr('role', 'equalto', 'templates') | list }}"
       loop_control:
         label: "{{ item.vmid }}"
@@ -318,9 +396,7 @@
     ssh_config: /home/gitlab-runner/.ssh/config
     admin_range_vms:
       - { vmid: 1003, role: range-admin }
-      - { vmid: 1004, role: range-user }
       - { vmid: 1010, role: range-admin }
-      - { vmid: 1011, role: range-user }
   tasks:
     - name: Set range config and deploy admin range
       ansible.builtin.shell: |
@@ -358,9 +434,12 @@
       loop_control:
         label: "{{ item.vmid }}"
 
-    - name: Snapshot 'range-admin' VMs (1003, 1010) as 'clean'
-      ansible.builtin.command: >
-        qm snapshot {{ item.vmid }} clean --vmstate true
+    - name: Recreate 'clean' snapshot for 'range-admin' VMs (1003, 1010)
+      ansible.builtin.shell: |
+        if sudo qm listsnapshot {{ item.vmid }} | grep -q '\-> clean'; then
+          sudo qm delsnapshot {{ item.vmid }} clean
+        fi
+        sudo qm snapshot {{ item.vmid }} clean --vmstate true
       loop: "{{ admin_range_vms | selectattr('role', 'equalto', 'range-admin') | list }}"
       loop_control:
         label: "{{ item.vmid }}"
@@ -415,64 +494,13 @@
       loop_control:
         label: "{{ item.vmid }}"
 
-    - name: Snapshot 'range-user' VMs (1004, 1011) as 'clean'
-      ansible.builtin.command: >
-        qm snapshot {{ item.vmid }} clean --vmstate true
+    - name: Recreate 'clean' snapshot for 'range-user' VMs (1004, 1011)
+      ansible.builtin.shell: |
+        if sudo qm listsnapshot {{ item.vmid }} | grep -q '\-> clean'; then
+          sudo qm delsnapshot {{ item.vmid }} clean
+        fi
+        sudo qm snapshot {{ item.vmid }} clean --vmstate true
       loop: "{{ user_range_vms }}"
-      loop_control:
-        label: "{{ item.vmid }}"
-
-# --- Set up cluster nodes ---
-- name: Set up cluster nodes
-  hosts: localhost
-  gather_facts: false
-  vars:
-    ssh_config: /home/gitlab-runner/.ssh/config
-    cluster_vms:
-      - { vmid: 1005, name: "ci-cluster-node1" }
-      - { vmid: 1006, name: "ci-cluster-node2" }
-  tasks:
-    - name: Install Ludus on cluster nodes
-      ansible.builtin.shell: |
-        ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
-          "cd /tmp && sudo chmod +x ludus-server && sudo ./ludus-server --no-prompt $(hostname)"
-      loop: "{{ cluster_vms }}"
-      loop_control:
-        label: "{{ item.vmid }}"
-      ignore_errors: true
-
-    - name: Wait for cluster VMs to reboot and SSH to come back
-      ansible.builtin.shell: |
-        for i in $(seq 1 120); do
-          ssh -o ConnectTimeout=3 -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} "echo ready" 2>/dev/null && exit 0
-          sleep 5
-        done
-        exit 1
-      loop: "{{ cluster_vms }}"
-      loop_control:
-        label: "{{ item.vmid }}"
-
-    - name: Wait for Ludus install to complete on cluster nodes
-      ansible.builtin.shell: |
-        for i in $(seq 1 180); do
-          RESULT=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
-            "sudo cat /opt/ludus/install/install.log 2>/dev/null | tail -5" 2>/dev/null || echo "")
-          if echo "$RESULT" | grep -q "Ludus install completed successfully"; then
-            echo "Install complete on {{ item.vmid }}"
-            exit 0
-          fi
-          sleep 10
-        done
-        echo "Install timed out on {{ item.vmid }}"
-        exit 1
-      loop: "{{ cluster_vms }}"
-      loop_control:
-        label: "{{ item.vmid }}"
-
-    - name: Snapshot cluster VMs as 'clean'
-      ansible.builtin.command: >
-        qm snapshot {{ item.vmid }} clean --vmstate true
-      loop: "{{ cluster_vms }}"
       loop_control:
         label: "{{ item.vmid }}"
 

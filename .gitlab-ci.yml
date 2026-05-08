@@ -293,7 +293,7 @@ pages:
     LUDUS_BUILD_TYPE: any-built
     PAGES_PREFIX: "" # No prefix by default (main)
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_MESSAGE =~ /\[build pages\]/
@@ -324,7 +324,7 @@ documentation:
   variables:
     LUDUS_BUILD_TYPE: any-built
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_MESSAGE =~ /\[build docs\]/
@@ -359,7 +359,7 @@ documentation:
 build all:
   stage: build
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   dependencies:
     - documentation
   rules:
@@ -460,7 +460,7 @@ build all:
 install kickoff:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
   rules:
@@ -490,7 +490,7 @@ install kickoff:
 install check:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - install kickoff
   dependencies: [] # Prevent download of build artifacts, use local cache
@@ -519,7 +519,7 @@ install check:
 install snapshot:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - install check
   dependencies: [] # Prevent download of build artifacts, use local cache
@@ -551,7 +551,7 @@ install snapshot:
 templates build:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: install snapshot
@@ -600,7 +600,7 @@ templates build:
 templates check:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - templates build
   dependencies: [] # Prevent download of build artifacts, use local cache
@@ -650,7 +650,7 @@ templates check:
 templates snapshot:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - templates check
   dependencies: [] # Prevent download of build artifacts, use local cache
@@ -690,7 +690,7 @@ templates snapshot:
 client basic-commands:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
   dependencies:
@@ -744,7 +744,7 @@ client basic-commands:
 range deploy-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: templates snapshot
@@ -792,7 +792,7 @@ range deploy-admin:
 range check-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - range deploy-admin
   dependencies: [] # Prevent download of build artifacts, use local cache
@@ -855,7 +855,7 @@ range check-admin:
 range snapshot-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - range check-admin
   dependencies: [] # Prevent download of build artifacts, use local cache
@@ -897,7 +897,7 @@ range snapshot-admin:
 post-deploy testing-as-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: range snapshot-admin
@@ -941,7 +941,7 @@ post-deploy testing-as-admin:
 post-deploy power-as-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy testing-as-admin
@@ -986,7 +986,7 @@ post-deploy power-as-admin:
 post-deploy ansible-as-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy power-as-admin
@@ -1032,7 +1032,7 @@ post-deploy ansible-as-admin:
 post-deploy user-cmds-as-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy ansible-as-admin
@@ -1104,7 +1104,7 @@ post-deploy user-cmds-as-admin:
 post-deploy groups-as-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy user-cmds-as-admin
@@ -1240,7 +1240,7 @@ post-deploy groups-as-admin:
 post-deploy blueprints-as-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy groups-as-admin
@@ -1308,7 +1308,7 @@ post-deploy blueprints-as-admin:
 post-deploy ranges-as-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy blueprints-as-admin
@@ -1470,7 +1470,7 @@ post-deploy ranges-as-admin:
 post-deploy templates-as-admin:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy ranges-as-admin
@@ -1516,7 +1516,7 @@ post-deploy templates-as-admin:
 range deploy-user:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: range snapshot-admin
@@ -1562,7 +1562,7 @@ range deploy-user:
 range check-user:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - range deploy-user
   dependencies: [] # Prevent download of build artifacts, use local cache
@@ -1606,7 +1606,7 @@ range check-user:
 range snapshot-user:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - range check-user
   dependencies: [] # Prevent download of build artifacts, use local cache
@@ -1646,7 +1646,7 @@ range snapshot-user:
 post-deploy testing-as-user:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: range snapshot-user
@@ -1687,7 +1687,7 @@ post-deploy testing-as-user:
 post-deploy power-as-user:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy testing-as-user
@@ -1731,7 +1731,7 @@ post-deploy power-as-user:
 post-deploy ansible-as-user:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy power-as-user
@@ -1772,7 +1772,7 @@ post-deploy ansible-as-user:
 post-deploy user-cmds-as-user:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy ansible-as-user
@@ -1839,7 +1839,7 @@ post-deploy user-cmds-as-user:
 post-deploy blueprints-as-user:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy user-cmds-as-user
@@ -1966,7 +1966,7 @@ post-deploy blueprints-as-user:
 post-deploy templates-as-user:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy blueprints-as-user
@@ -2006,7 +2006,7 @@ post-deploy templates-as-user:
 post-deploy snapshots-as-user:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy templates-as-user
@@ -2049,7 +2049,7 @@ post-deploy snapshots-as-user:
 test-everything:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - job: post-deploy snapshots-as-user
@@ -2152,7 +2152,7 @@ test-everything:
 cluster install kickoff:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
   dependencies:
@@ -2167,16 +2167,16 @@ cluster install kickoff:
     - cd binaries
     - |
       cat > config.yml <<'EOF'
-      proxmox_node: EH-Ludus
+      proxmox_node: ludus
       proxmox_interface: ens18
       proxmox_invalid_cert: true
       proxmox_url: https://127.0.0.1:8006
-      proxmox_hostname: EH-Ludus
-      proxmox_local_ip: 203.0.113.1
-      proxmox_public_ip: 203.0.113.1
+      proxmox_hostname: ludus
+      proxmox_local_ip: 203.0.113.184
+      proxmox_public_ip: 203.0.113.184
       proxmox_gateway: 203.0.113.254
       proxmox_netmask: 255.255.255.0
-      proxmox_vm_storage_pool: ceph-pool
+      proxmox_vm_storage_pool: ceph
       proxmox_vm_storage_format: raw
       proxmox_iso_storage_pool: cephfs
       ludus_nat_interface: ludusnat
@@ -2195,7 +2195,7 @@ cluster install kickoff:
 cluster-install-check:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - cluster install kickoff
   dependencies: []
@@ -2212,7 +2212,7 @@ cluster-install-check:
 cluster-verify-sdn:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   dependencies: []
   <<: *cluster-rules
   needs:
@@ -2237,7 +2237,7 @@ cluster-verify-sdn:
 cluster-templates-build:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - cluster-verify-sdn
@@ -2257,7 +2257,7 @@ cluster-templates-build:
 cluster-templates-check:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - cluster-templates-build
   dependencies: []
@@ -2277,13 +2277,13 @@ cluster-templates-check:
     - ludus templates list
     - export DEB11_TEMPLATE_VMID=$(sudo qm list | grep debian-11-x64-server-template | head -1 | awk '{print $1}')
     # Verify templates are accessible from both nodes
-    - test $(sudo pvesh get /nodes/EH-Ludus/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
-    - test $(sudo pvesh get /nodes/EH-Ludus-2/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
+    - test $(sudo pvesh get /nodes/ludus/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
+    - test $(sudo pvesh get /nodes/ludus2/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
 
 cluster-range-deploy:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - cluster-templates-check
@@ -2312,7 +2312,7 @@ cluster-range-deploy:
 cluster-verify-placement:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - cluster-range-deploy
   dependencies: []
@@ -2325,8 +2325,8 @@ cluster-verify-placement:
     - *ci-setup-cluster-admin
     # Verify VMs are spread across both nodes
     - |
-      NODE1_VMS=$(sudo pvesh get /nodes/EH-Ludus/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
-      NODE2_VMS=$(sudo pvesh get /nodes/EH-Ludus-2/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
+      NODE1_VMS=$(sudo pvesh get /nodes/ludus/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
+      NODE2_VMS=$(sudo pvesh get /nodes/ludus2/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
       echo "Node1 VMs: $NODE1_VMS, Node2 VMs: $NODE2_VMS"
       TOTAL=$((NODE1_VMS + NODE2_VMS))
       if [[ $TOTAL -lt 3 ]]; then
@@ -2346,7 +2346,7 @@ cluster-verify-placement:
 cluster-verify-vxlan:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   dependencies: []
   <<: *cluster-rules
   needs:
@@ -2373,7 +2373,7 @@ cluster-verify-vxlan:
 cluster-test-range-default:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - cluster-verify-vxlan
@@ -2414,10 +2414,9 @@ cluster-test-range-default:
     - ludus range deploy
     - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
-    # Verify placement: DC and Kali on EH-Ludus (range default), Win11 on EH-Ludus-2 (override)
     - |
-      NODE1_VMS=$(sudo pvesh get /nodes/EH-Ludus/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
-      NODE2_VMS=$(sudo pvesh get /nodes/EH-Ludus-2/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
+      NODE1_VMS=$(sudo pvesh get /nodes/ludus/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
+      NODE2_VMS=$(sudo pvesh get /nodes/ludus2/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
       echo "Node1 VMs: $NODE1_VMS, Node2 VMs: $NODE2_VMS"
       TOTAL=$((NODE1_VMS + NODE2_VMS))
       if [[ $TOTAL -lt 3 ]]; then
@@ -2443,7 +2442,7 @@ cluster-test-range-default:
 pool-release:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - job: post-deploy templates-as-admin
       optional: true
@@ -2477,7 +2476,7 @@ pool-release:
 manual testing:
   stage: test
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
   dependencies: [] # Prevent download of build artifacts, use local cache
@@ -2496,7 +2495,7 @@ manual testing:
 beta-release:
   stage: release
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
   variables:
@@ -2533,7 +2532,7 @@ beta-release:
 gitlab-upload:
   stage: upload
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
   variables:
@@ -2569,7 +2568,7 @@ gitlab-upload:
 keygen-upload:
   stage: upload
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - gitlab-upload # Just so they don't try to run at the same time
@@ -2650,7 +2649,7 @@ keygen-upload:
 release:
   stage: release
   tags:
-    - ludus-proxmox-runner
+    - ludus-proxmox-runner-parallel
   needs:
     - build all
     - gitlab-upload
