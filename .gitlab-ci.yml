@@ -289,6 +289,7 @@ stages:
 #################
 pages:
   stage: pages
+  resource_group: ludus-build-vm
   variables:
     LUDUS_BUILD_TYPE: any-built
     PAGES_PREFIX: "" # No prefix by default (main)
@@ -321,6 +322,7 @@ pages:
 
 documentation:
   stage: documentation
+  resource_group: ludus-build-vm
   variables:
     LUDUS_BUILD_TYPE: any-built
   tags:
@@ -358,6 +360,7 @@ documentation:
 #########
 build all:
   stage: build
+  resource_group: ludus-build-vm
   tags:
     - ludus-proxmox-runner-parallel
   dependencies:
@@ -516,35 +519,6 @@ install check:
     - sudo cat /opt/ludus/install/install.log
     - echo "root:$CI_PIPELINE_ID" | sudo chpasswd # allow root login via the web interface for debugging
 
-install snapshot:
-  stage: test
-  tags:
-    - ludus-proxmox-runner-parallel
-  needs:
-    - install check
-  dependencies: [] # Prevent download of build artifacts, use local cache
-  rules:
-    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at / # Any "start-at" will skip the install
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
-      when: never
-    - changes: # Only run if we need to test installer related changes
-        - ludus-server/*.go
-        - ludus-server/ansible/proxmox-install/**/*
-  variables:
-    LUDUS_BUILD_TYPE: full
-    LUDUS_INSTALL_STEP: take-snapshot # The magic happens in prepare.sh
-    LUDUS_SNAPSHOT_NAME: clean_install
-    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 5m
-  script:
-    - echo "Snapshot complete"
-
 #############
 # TEMPLATES #
 #############
@@ -646,43 +620,6 @@ templates check:
     - test "$TEMPLATE_LOG_HISTORY_COUNT" -ge 2
     - export TEMPLATE_LOG_ID=$(ludus templates logs --history --json | jq -r '.[0].id')
     - ludus templates logs --history --id "$TEMPLATE_LOG_ID" | grep -Eq "=>|Build complete|==>"
-
-templates snapshot:
-  stage: test
-  tags:
-    - ludus-proxmox-runner-parallel
-  needs:
-    - templates check
-  dependencies: [] # Prevent download of build artifacts, use local cache
-  rules:
-    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
-      when: never
-    - changes:
-        - ludus-server/packer/**/*
-  variables:
-    LUDUS_INSTALL_STEP: take-snapshot
-    LUDUS_SNAPSHOT_NAME: templates_built
-    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 5m
-  script:
-    - echo "Snapshot complete"
 
 ##########
 # CLIENT #
@@ -851,45 +788,6 @@ range check-admin:
     - export valid_last_octets=(1 11 21 254)
     - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
-
-range snapshot-admin:
-  stage: test
-  tags:
-    - ludus-proxmox-runner-parallel
-  needs:
-    - range check-admin
-  dependencies: [] # Prevent download of build artifacts, use local cache
-  rules:
-    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
-      when: never
-    - changes:
-        - ludus-server/ansible/range-management/**/*
-  variables:
-    LUDUS_INSTALL_STEP: take-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_admin
-    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 5m
-  retry:
-    max: 2
-    when: script_failure
-  script:
-    - echo "Snapshot complete"
 
 #######################
 # POST-DEPLOY - ADMIN #
@@ -1602,43 +1500,6 @@ range check-user:
     - export valid_last_octets=(1 11 21 254)
     - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
-
-range snapshot-user:
-  stage: test
-  tags:
-    - ludus-proxmox-runner-parallel
-  needs:
-    - range check-user
-  dependencies: [] # Prevent download of build artifacts, use local cache
-  rules:
-    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
-      when: never
-    - changes:
-        - ludus-server/ansible/range-management/**/*
-  variables:
-    LUDUS_INSTALL_STEP: take-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_user
-    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 5m
-  retry:
-    max: 2
-    when: script_failure
-  script:
-    - echo "Snapshot complete"
 
 #######################
 # POST-DEPLOY - USER #
@@ -2441,6 +2302,7 @@ cluster-test-range-default:
 # Must wait for ALL chains to avoid releasing the pool while parallel chains are still running.
 pool-release:
   stage: test
+  resource_group: ludus-build-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2475,6 +2337,7 @@ pool-release:
 ##########
 manual testing:
   stage: test
+  resource_group: ludus-build-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2494,6 +2357,7 @@ manual testing:
 ###########
 beta-release:
   stage: release
+  resource_group: ludus-build-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2531,6 +2395,7 @@ beta-release:
 
 gitlab-upload:
   stage: upload
+  resource_group: ludus-build-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2567,6 +2432,7 @@ gitlab-upload:
 
 keygen-upload:
   stage: upload
+  resource_group: ludus-build-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2648,6 +2514,7 @@ keygen-upload:
 
 release:
   stage: release
+  resource_group: ludus-build-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
