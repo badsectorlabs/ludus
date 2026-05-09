@@ -40,10 +40,8 @@ if [[ "$CUSTOM_ENV_LUDUS_INSTALL_STEP" == "take-snapshot" && -n "$CUSTOM_ENV_LUD
     fi
 fi
 
-# --- Rollback logic for quick tests (from-snapshot, not part of a full build) ---
-FULL_BUILD_VMID_FILE="$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}-full-build-vmid"
-
-if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" && ! -f "$FULL_BUILD_VMID_FILE" ]]; then
+# --- Rollback logic for snapshot-based tests ---
+if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
     TRACKING_FILE="/tmp/.ludus-ci-${PIPELINE_ID}-${CUSTOM_ENV_LUDUS_SNAPSHOT_NAME}-rolled-back"
 
     if [[ ! -f "$TRACKING_FILE" ]]; then
@@ -128,5 +126,4 @@ fi
 # --- Clean up old tracking files (over 2 days old) ---
 find /tmp/ -name '.ludus-ci-*' -type f -mtime +2 -exec rm {} + 2>/dev/null || true
 find "$POOL_ASSIGNMENT_DIR" -name '*.pool' -type f -mtime +2 -exec rm {} + 2>/dev/null || true
-find "$POOL_ASSIGNMENT_DIR" -name '*-full-build-vmid' -type f -mtime +2 -exec rm {} + 2>/dev/null || true
 find "$POOL_ASSIGNMENT_DIR" -name '*.claiming' -type f -mtime +2 -exec rm {} + 2>/dev/null || true

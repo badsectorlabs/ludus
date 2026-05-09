@@ -2306,6 +2306,14 @@ pool-release:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - job: install check
+      optional: true
+    - job: templates check
+      optional: true
+    - job: range check-admin
+      optional: true
+    - job: range check-user
+      optional: true
     - job: post-deploy templates-as-admin
       optional: true
     - job: post-deploy snapshots-as-user

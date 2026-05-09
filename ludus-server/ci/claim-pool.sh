@@ -61,7 +61,6 @@ try_claim_pool() {
         STALE_PIPELINE=$(basename "$OWNER_FILE" .pool)
         echo "Reclaiming stale pool $POOL_NAME from pipeline $STALE_PIPELINE"
         rm -f "$OWNER_FILE"
-        rm -f "$POOL_ASSIGNMENT_DIR/${STALE_PIPELINE}-full-build-vmid"
         echo "$POOL_NAME" > "$ASSIGNMENT_FILE"
         export POOL="$POOL_NAME"
         return 0

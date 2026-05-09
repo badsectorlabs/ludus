@@ -103,7 +103,6 @@ get_vm_ip_by_vmid() {
 resolve_vm() {
     local BUILD_TYPE="$CUSTOM_ENV_LUDUS_BUILD_TYPE"
     local SNAPSHOT_NAME="$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME"
-    local FULL_BUILD_VMID_FILE="$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}-full-build-vmid"
 
     # Cluster builds use dedicated shared VMs
     if [[ -n "$BUILD_TYPE" && "$BUILD_TYPE" == *"cluster"* ]]; then
@@ -124,14 +123,9 @@ resolve_vm() {
         return 0
     fi
 
-    # Full build: always use offset 0 (base VM), track in per-pipeline file
+    # Full build: always use offset 0 (base VM)
     if [[ "$BUILD_TYPE" == "full" ]]; then
-        if [[ -f "$FULL_BUILD_VMID_FILE" ]]; then
-            VM_ID=$(cat "$FULL_BUILD_VMID_FILE")
-        else
-            VM_ID=$(get_vmid_for_pool "$POOL" 0)
-            echo "$VM_ID" > "$FULL_BUILD_VMID_FILE"
-        fi
+        VM_ID=$(get_vmid_for_pool "$POOL" 0)
         export VM_ID
         VM_IP=$(get_vm_ip_by_vmid "$VM_ID")
         export VM_IP
@@ -139,19 +133,8 @@ resolve_vm() {
         return 0
     fi
 
-    # from-snapshot: check if part of a full-build pipeline first
+    # from-snapshot: use the dedicated VM for this snapshot type
     if [[ "$BUILD_TYPE" == "from-snapshot" ]]; then
-        if [[ -f "$FULL_BUILD_VMID_FILE" ]]; then
-            # Full build in progress - continue on the same VM
-            VM_ID=$(cat "$FULL_BUILD_VMID_FILE")
-            export VM_ID
-            VM_IP=$(get_vm_ip_by_vmid "$VM_ID")
-            export VM_IP
-            echo "Full build pipeline, continuing on VM: $VM_ID ($VM_IP)"
-            return 0
-        fi
-
-        # Quick test: use the dedicated VM for this snapshot type
         local OFFSET
         OFFSET=$(get_vm_offset "$SNAPSHOT_NAME")
         VM_ID=$(get_vmid_for_pool "$POOL" "$OFFSET")
