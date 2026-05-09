@@ -5840,6 +5840,107 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /blueprints/{blueprintID}/export:
+    get:
+      summary: Export blueprint
+      deprecated: false
+      description: >-
+        Streams a .tar.gz archive of the blueprint bundle (range-config,
+        manifest, bundled roles/templates).
+      operationId: exportBlueprint
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bundle archive
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/import:
+    post:
+      summary: Import blueprint
+      deprecated: false
+      description: >-
+        Uploads a .tar.gz blueprint bundle (multipart form field 'archive') and
+        creates a new blueprint from it.
+      operationId: importBlueprint
+      tags:
+        - Blueprint Management
+      parameters: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                archive:
+                  type: string
+                  format: binary
+                  description: Bundle .tar.gz produced by /blueprints/{blueprintID}/export.
+                  example: ''
+              required:
+                - archive
+        required: true
+      responses:
+        '201':
+          description: Imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintMutationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/install:
+    post:
+      summary: Install blueprint dependencies
+      deprecated: false
+      description: >-
+        Installs the templates and roles referenced by a blueprint into the
+        calling user's range. Body is optional (zero-valued defaults).
+      operationId: installBlueprintDeps
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallBlueprintDepsRequest'
+      responses:
+        '200':
+          description: Install completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /user/quotas:
     get:
       summary: Get quota status for the current user
@@ -6487,142 +6588,6 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /sources/{sourceID}/share/users:
-    post:
-      summary: Share source with users
-      deprecated: false
-      description: Shares a source with one or more users.
-      operationId: shareSourceWithUsers
-      tags:
-        - Sources
-      parameters:
-        - name: sourceID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkShareBlueprintWithUsersRequest'
-            examples: {}
-        required: true
-      responses:
-        '200':
-          description: Bulk share result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /sources/{sourceID}/share/groups:
-    post:
-      summary: Share source with groups
-      deprecated: false
-      description: Shares a source with one or more groups.
-      operationId: shareSourceWithGroups
-      tags:
-        - Sources
-      parameters:
-        - name: sourceID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkShareBlueprintWithGroupsRequest'
-            examples: {}
-        required: true
-      responses:
-        '200':
-          description: Bulk share result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /sources/{sourceID}/unshare/users:
-    post:
-      summary: Unshare source from users
-      deprecated: false
-      description: Removes source sharing from one or more users.
-      operationId: unshareSourceFromUsers
-      tags:
-        - Sources
-      parameters:
-        - name: sourceID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkUnshareBlueprintWithUsersRequest'
-            examples: {}
-        required: true
-      responses:
-        '200':
-          description: Bulk unshare result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /sources/{sourceID}/unshare/groups:
-    post:
-      summary: Unshare source from groups
-      deprecated: false
-      description: Removes source sharing from one or more groups.
-      operationId: unshareSourceFromGroups
-      tags:
-        - Sources
-      parameters:
-        - name: sourceID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkUnshareBlueprintWithGroupsRequest'
-            examples: {}
-        required: true
-      responses:
-        '200':
-          description: Bulk unshare result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
   /sources/{sourceID}/blueprints:
     get:
       summary: List blueprints in a source
@@ -6702,6 +6667,67 @@ paths:
                 properties: {}
           headers: {}
       security: []
+  /sources/{sourceID}/templates:
+    get:
+      summary: List source templates
+      deprecated: false
+      description: Lists templates registered by this source.
+      operationId: listSourceTemplates
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ListSourceTemplatesResponseItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/roles:
+    get:
+      summary: List source roles
+      deprecated: false
+      description: >-
+        Lists Ansible roles registered by this source. Each item includes a
+        scope: "subscription" (entitled via Ludus Pro) or "local" (bundled in
+        source).
+      operationId: listSourceRoles
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source roles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ListSourceRolesResponseItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
 components:
   schemas:
     CreateBlueprintRequest:
@@ -6758,12 +6784,6 @@ components:
           type: string
         version:
           type: string
-        author:
-          type: string
-        homepage:
-          type: string
-        license:
-          type: string
         tags:
           type: array
           items:
@@ -6793,20 +6813,24 @@ components:
     BlueprintDetail:
       type: object
       required:
-        - id
+        - sourceBlueprintID
         - name
       properties:
-        id:
+        sourceBlueprintID:
           type: string
-          description: Either a local blueprintID or "<sourceID>/<sourceBlueprintID>".
+          description: >-
+            ID of the blueprint within its source (the part after
+            "<sourceID>/").
         name:
           type: string
         description:
           type: string
         version:
           type: string
-        author:
-          type: string
+        authors:
+          type: array
+          items:
+            type: string
         homepage:
           type: string
         license:
@@ -6819,14 +6843,21 @@ components:
           type: string
         long_description:
           type: string
-        templateStatus:
+        inferred_templates:
           type: array
           items:
-            $ref: '#/components/schemas/TemplateStatusEntry'
-        roleStatus:
+            type: string
+          description: Template names referenced by this blueprint's range-config.
+        inferred_roles:
           type: array
           items:
-            $ref: '#/components/schemas/RoleStatusEntry'
+            type: string
+          description: Ansible role names referenced by this blueprint's range-config.
+        requirements_yaml:
+          type: string
+          description: >-
+            Galaxy-style requirements.yml shipped with the source blueprint, if
+            any.
     TemplateStatusEntry:
       type: object
       required:
@@ -6855,8 +6886,9 @@ components:
         - id
         - sourceID
         - name
+        - kind
         - type
-        - owner
+        - ownerUserID
       properties:
         id:
           type: string
@@ -6874,6 +6906,15 @@ components:
           type: string
         license:
           type: string
+        kind:
+          type: string
+          description: >-
+            Source kind discriminator distinct from `type`. Values: "git",
+            "upload", "local".
+          enum:
+            - git
+            - upload
+            - local
         type:
           type: string
           enum:
@@ -6883,8 +6924,9 @@ components:
           type: string
         ref:
           type: string
-        owner:
+        ownerUserID:
           type: string
+          description: Human-readable userID of the owner (not the PocketBase record ID).
         lastSyncedAt:
           type: string
         lastSyncStatus:
@@ -7021,8 +7063,10 @@ components:
           type: string
         version:
           type: string
-        author:
-          type: string
+        authors:
+          type: array
+          items:
+            type: string
         homepage:
           type: string
         license:
@@ -7571,6 +7615,10 @@ components:
         sourceID:
           type: string
           description: Set when this blueprint was discovered via a registered source.
+        tags:
+          type: array
+          items:
+            type: string
         created:
           type: string
           format: date-time
@@ -7709,6 +7757,33 @@ components:
             sourceID:
               type: string
         - $ref: '#/components/schemas/SyncResult'
+    ListSourceTemplatesResponseItem:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+    ListSourceRolesResponseItem:
+      type: object
+      required:
+        - name
+        - scope
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        scope:
+          type: string
+          enum:
+            - subscription
+            - local
+          description: >-
+            Where the role is sourced from: "subscription" (entitled via Ludus
+            Pro) or "local" (bundled in source).
   responses: {}
   securitySchemes:
     ApiKeyAuth:
