@@ -16,11 +16,6 @@ type BundleInputs struct {
 	BundleRoot      string
 	BundleDirName   string // dir name under BundleRoot; falls back to BlueprintID. Set distinct when staging an atomic-swap rebuild.
 	BlueprintID     string
-	Name            string
-	Description     string
-	Version         string
-	Tags            []string
-	MinLudusVersion string
 	ConfigBytes     []byte
 	RolesPath       string // caller's user roles dir, checked first
 	GlobalRolesPath string // global roles dir, checked when caller's dir misses (mirrors deploy precedence)
@@ -38,10 +33,12 @@ type BundleResult struct {
 	SkippedRoles     []string
 }
 
-// BuildBundle materialises a self-contained blueprint bundle on disk. On any
-// hard failure during materialisation the partial bundle dir is removed so
-// the caller observes an atomic outcome. Missing template HCL dirs and
-// missing role dirs are NOT hard failures — many Ludus templates are
+// BuildBundle materialises a self-contained blueprint bundle on disk. The DB
+// record is canonical for blueprint metadata; no blueprint.yml is written here
+// — ExportBlueprint synthesizes the manifest from the live record at export
+// time. On any hard failure during materialisation the partial bundle dir is
+// removed so the caller observes an atomic outcome. Missing template HCL dirs
+// and missing role dirs are NOT hard failures — many Ludus templates are
 // user-uploaded VM images with no Packer build config on disk, and roles can
 // be referenced by name even when not yet installed.
 func BuildBundle(in BundleInputs) (BundleResult, error) {
@@ -63,24 +60,6 @@ func BuildBundle(in BundleInputs) (BundleResult, error) {
 
 	if writeErr := os.WriteFile(filepath.Join(bundleDir, "range-config.yml"), in.ConfigBytes, 0644); writeErr != nil {
 		return res, fmt.Errorf("write range-config.yml: %w", writeErr)
-	}
-
-	manifest := BlueprintManifest{
-		ManifestVersion: SupportedManifestVersion,
-		ID:              in.BlueprintID,
-		Name:            in.Name,
-		Description:     in.Description,
-		Version:         in.Version,
-		Tags:            in.Tags,
-		MinLudusVersion: in.MinLudusVersion,
-		Config:          "range-config.yml",
-	}
-	manifestBytes, marshalErr := yaml.Marshal(&manifest)
-	if marshalErr != nil {
-		return res, fmt.Errorf("marshal blueprint.yml: %w", marshalErr)
-	}
-	if writeErr := os.WriteFile(filepath.Join(bundleDir, "blueprint.yml"), manifestBytes, 0644); writeErr != nil {
-		return res, fmt.Errorf("write blueprint.yml: %w", writeErr)
 	}
 
 	templateNames, roleNames, parseErr := InferFromRangeConfig(in.ConfigBytes)

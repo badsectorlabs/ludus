@@ -808,39 +808,36 @@ field. For interactive editing of the YAML config, use 'ludus blueprint config e
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-		body := dto.UpdateBlueprintMetadataRequest{}
-		hasField := false
+		body := map[string]any{}
 		if cmd.Flags().Changed("name") {
-			body.Name = &blueprintName
-			hasField = true
+			body["name"] = blueprintName
 		}
 		if cmd.Flags().Changed("description") {
-			body.Description = &blueprintDescription
-			hasField = true
+			body["description"] = blueprintDescription
 		}
 		if cmd.Flags().Changed("version") {
-			body.Version = &updateFlagVersion
-			hasField = true
+			body["version"] = updateFlagVersion
 		}
 		if cmd.Flags().Changed("tag") {
-			body.Tags = &updateFlagTags
-			hasField = true
+			body["tags"] = updateFlagTags
 		}
 		if updateFlagClearTags {
-			empty := []string{}
-			body.Tags = &empty
-			hasField = true
+			body["tags"] = []string{}
 		}
 		if cmd.Flags().Changed("min-ludus-version") {
-			body.MinLudusVersion = &updateFlagMinLudusVer
-			hasField = true
+			body["min_ludus_version"] = updateFlagMinLudusVer
 		}
-		if !hasField {
+		if len(body) == 0 {
 			logger.Logger.Fatal("at least one field flag is required")
 		}
+
+		recordID, err := rest.PBLookupRecordID(client, "blueprints", "blueprintID", args[0])
+		if err != nil {
+			logger.Logger.Fatal(err.Error())
+		}
 		jsonBody, _ := json.Marshal(body)
-		path := fmt.Sprintf("/blueprints/%s", neturl.PathEscape(args[0]))
-		responseJSON, success := rest.GenericJSONPatch(client, buildURLWithRangeAndUserID(path), string(jsonBody))
+		path := fmt.Sprintf("/api/collections/blueprints/records/%s", neturl.PathEscape(recordID))
+		responseJSON, success := rest.GenericJSONPatch(client, path, string(jsonBody))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}

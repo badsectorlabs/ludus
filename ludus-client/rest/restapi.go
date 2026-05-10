@@ -22,6 +22,11 @@ type ErrorStruct struct {
 
 const APIBasePath = "/api/v2"
 
+// apiPrefix matches both APIBasePath and PocketBase's /api/collections/* —
+// helpers below treat any "/api/" path as already-rooted and only prepend
+// APIBasePath when callers pass a relative path.
+const apiPrefix = "/api/"
+
 var user string
 
 func InitClient(url string, apiKey string, proxy string, verify bool, debug bool, versionString string) *resty.Client {
@@ -121,6 +126,33 @@ func prettyPrintPocketBaseError(errorBytes []byte) error {
 	return nil
 }
 
+// PBLookupRecordID resolves a PocketBase record's internal ID by querying the
+// list endpoint with a filter on a unique user-facing field (e.g. blueprintID,
+// rangeID). Returns the first matching record's id. The collection's ListRule
+// must permit the caller for this to return a hit.
+func PBLookupRecordID(client *resty.Client, collection, field, value string) (string, error) {
+	filter := fmt.Sprintf(`%s = "%s"`, field, strings.ReplaceAll(value, `"`, `\"`))
+	path := fmt.Sprintf("/api/collections/%s/records?perPage=1&filter=%s",
+		collection,
+		strings.ReplaceAll(filter, " ", "%20"))
+	body, ok := GenericGet(client, path)
+	if !ok {
+		return "", fmt.Errorf("error looking up %s record by %s=%q", collection, field, value)
+	}
+	var listResp struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &listResp); err != nil {
+		return "", fmt.Errorf("decode %s lookup response: %w", collection, err)
+	}
+	if len(listResp.Items) == 0 {
+		return "", fmt.Errorf("%s %q not found", collection, value)
+	}
+	return listResp.Items[0].ID, nil
+}
+
 func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 
 	var result []byte
@@ -178,7 +210,7 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 }
 
 func GenericGet(client *resty.Client, apiPath string) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 
@@ -194,7 +226,7 @@ func GenericGet(client *resty.Client, apiPath string) ([]byte, bool) {
 }
 
 func GenericJSONPost(client *resty.Client, apiPath string, data any) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -213,7 +245,7 @@ func GenericJSONPost(client *resty.Client, apiPath string, data any) ([]byte, bo
 }
 
 func GenericDelete(client *resty.Client, apiPath string) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -229,7 +261,7 @@ func GenericDelete(client *resty.Client, apiPath string) ([]byte, bool) {
 }
 
 func GenericDeleteWithBody(client *resty.Client, apiPath string, data any) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -250,7 +282,7 @@ func GenericDeleteWithBody(client *resty.Client, apiPath string, data any) ([]by
 // `fileField`/`filename` and any additional string `fields` set as form data.
 // All file-uploading helpers in this package are thin wrappers around this one.
 func FileUpload(client *resty.Client, method, apiPath, fileField, filename string, data []byte, fields map[string]string) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -299,7 +331,7 @@ func PostFileAndForceAndGlobal(client *resty.Client, apiPath string, data []byte
 }
 
 func GenericJSONPut(client *resty.Client, apiPath string, data string) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -318,7 +350,7 @@ func GenericJSONPut(client *resty.Client, apiPath string, data string) ([]byte, 
 }
 
 func GenericJSONPatch(client *resty.Client, apiPath string, data string) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -341,7 +373,7 @@ func GenericJSONPatch(client *resty.Client, apiPath string, data string) ([]byte
 // user's chosen path is never overwritten with an error body. Returns
 // (errorBody, false) on failure, (nil, true) on success.
 func FileGet(client *resty.Client, apiPath, dst string) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)

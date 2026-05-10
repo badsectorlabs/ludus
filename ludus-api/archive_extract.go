@@ -21,8 +21,11 @@ type ExtractOptions struct {
 	// shares it (the shape `tar czf out.tgz ./dir` produces).
 	StripSingleRoot bool
 
-	// RejectSymlinks fails extraction on symlink/hardlink entries.
-	RejectSymlinks bool
+	// RejectDangerousEntries fails extraction on filesystem entries that don't
+	// belong in a source archive: symlinks, hardlinks, character/block devices,
+	// and FIFOs. Protocol-metadata typeflags (PAX, GNU long-name) are always
+	// skipped, never rejected.
+	RejectDangerousEntries bool
 }
 
 func ExtractTarFile(tarPath, destDir string, opts ExtractOptions) error {
@@ -81,7 +84,7 @@ func ExtractZipFile(archivePath, destDir string, opts ExtractOptions) error {
 
 	var written int64
 	for _, f := range r.File {
-		if opts.RejectSymlinks && f.FileInfo().Mode()&os.ModeSymlink != 0 {
+		if opts.RejectDangerousEntries && f.FileInfo().Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("archive contains symlink %q (unsupported)", f.Name)
 		}
 		stripped := stripPrefixSegment(f.Name, root)
@@ -160,18 +163,20 @@ func extractTarReaderWithRoot(tr *tar.Reader, destDir string, opts ExtractOption
 			return fmt.Errorf("malformed tar: %w", err)
 		}
 
+		// Deny-list policy: extract regular files and directories; reject
+		// filesystem-shaped entries that don't belong in a source archive
+		// when in strict mode; silently skip everything else (PAX/GNU
+		// metadata, reserved typeflags, anything novel).
 		switch hdr.Typeflag {
-		case tar.TypeDir, tar.TypeReg:
-			// supported
-		case tar.TypeSymlink, tar.TypeLink:
-			if opts.RejectSymlinks {
-				return fmt.Errorf("archive contains unsupported entry type (%c) for %q", hdr.Typeflag, hdr.Name)
+		case tar.TypeReg, tar.TypeRegA, tar.TypeDir:
+			// extract below
+		case tar.TypeSymlink, tar.TypeLink,
+			tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
+			if opts.RejectDangerousEntries {
+				return fmt.Errorf("archive contains dangerous entry type (%c) for %q", hdr.Typeflag, hdr.Name)
 			}
 			continue
 		default:
-			if opts.RejectSymlinks {
-				return fmt.Errorf("archive contains unsupported entry type (%c) for %q", hdr.Typeflag, hdr.Name)
-			}
 			continue
 		}
 
@@ -299,6 +304,13 @@ func tarGzSingleRoot(archivePath string, stripSingleRoot bool) (string, error) {
 		}
 		if err != nil {
 			return "", err
+		}
+		// Skip protocol-metadata typeflags so PAX/GNU long-name headers
+		// don't make a single-rooted archive look multi-rooted.
+		switch hdr.Typeflag {
+		case tar.TypeXGlobalHeader, tar.TypeXHeader,
+			tar.TypeGNULongName, tar.TypeGNULongLink:
+			continue
 		}
 		names = append(names, hdr.Name)
 	}

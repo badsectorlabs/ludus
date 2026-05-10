@@ -804,13 +804,6 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
-		"UpdateRange",
-		http.MethodPatch,
-		"/ranges/{rangeID}",
-		UpdateRange,
-	},
-
-	{
 		"ListUserAccessibleRanges",
 		http.MethodGet,
 		"/ranges/accessible",
@@ -879,13 +872,6 @@ var routes = PocketBaseRoutes{
 		http.MethodDelete,
 		"/blueprints/{blueprintID}",
 		DeleteBlueprint,
-	},
-
-	{
-		"UpdateBlueprintMetadata",
-		http.MethodPatch,
-		"/blueprints/{blueprintID}",
-		UpdateBlueprintMetadata,
 	},
 
 	{

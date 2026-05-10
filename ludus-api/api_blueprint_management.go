@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 	"gopkg.in/yaml.v3"
@@ -308,11 +309,6 @@ func createBlueprintWithBundle(
 	br, err := BuildBundle(BundleInputs{
 		BundleRoot:      bundleRoot,
 		BlueprintID:     blueprintID,
-		Name:            name,
-		Description:     description,
-		Version:         meta.Version,
-		Tags:            meta.Tags,
-		MinLudusVersion: meta.MinLudusVersion,
 		ConfigBytes:     configBytes,
 		RolesPath:       rolesPath,
 		GlobalRolesPath: globalRolesPath(),
@@ -409,11 +405,6 @@ func rebuildBlueprintBundle(e *core.RequestEvent, bp *core.Record, configBytes [
 		BundleRoot:      bundleRoot,
 		BundleDirName:   stagingKey,
 		BlueprintID:     bp.GetString("blueprintID"),
-		Name:            bp.GetString("name"),
-		Description:     bp.GetString("description"),
-		Version:         bp.GetString("version"),
-		Tags:            anySliceToStrings(bp.Get("tags")),
-		MinLudusVersion: bp.GetString("min_ludus_version"),
 		ConfigBytes:     configBytes,
 		RolesPath:       rolesPath,
 		GlobalRolesPath: globalRolesPath(),
@@ -807,9 +798,7 @@ func CopyBlueprint(e *core.RequestEvent) error {
 	copyBlueprintRecord.Set("bundlePath", dstBundle)
 	copyBlueprintRecord.Set("bundle_complete", bundleComplete)
 	// Carry the source's release metadata so the copy starts from the same
-	// baseline; the user can bump/clear afterwards. Without this, the DB record
-	// disagrees with the bundle's blueprint.yml (which still has the source's
-	// values) until the next metadata update rewrites the manifest.
+	// baseline; the user can bump/clear afterwards.
 	copyBlueprintRecord.Set("version", blueprintRecord.GetString("version"))
 	if tags := blueprintRecord.Get("tags"); tags != nil {
 		copyBlueprintRecord.Set("tags", tags)
@@ -819,13 +808,6 @@ func CopyBlueprint(e *core.RequestEvent) error {
 		_ = os.RemoveAll(dstBundle)
 		_ = e.App.Delete(copyBlueprintRecord)
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("save bundle path: %v", saveErr))
-	}
-	// Bundle was deep-copied verbatim, so its blueprint.yml still claims the
-	// source's id and name. Rewrite to match the new record so export round-trips.
-	if rwErr := rewriteBundleManifest(copyBlueprintRecord); rwErr != nil {
-		_ = os.RemoveAll(dstBundle)
-		_ = e.App.Delete(copyBlueprintRecord)
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("rewrite copy manifest: %v", rwErr))
 	}
 
 	return e.JSON(http.StatusCreated, map[string]any{
@@ -1545,138 +1527,6 @@ func ListBlueprintAccessUsers(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, response)
 }
 
-// UpdateBlueprintMetadata handles PATCH /blueprints/{blueprintID}.
-// Updates local blueprint fields (name, description, version, author, homepage,
-// license, tags, min_ludus_version) and optionally replaces the config file.
-//
-// IDs containing slashes are first checked against registered sources; if the first
-// segment matches a source the request is rejected as read-only (source-blueprints
-// can't be patched). Otherwise the id is treated as a local subpath (e.g. team/windows).
-func UpdateBlueprintMetadata(e *core.RequestEvent) error {
-	user, err := requireUser(e)
-	if err != nil {
-		return err
-	}
-
-	id := normalizeBlueprintID(e.Request.PathValue("blueprintID"))
-	if id == "" {
-		return JSONError(e, http.StatusBadRequest, "blueprintID is required")
-	}
-	if isSourcePrefixedID(id) {
-		parts := splitSourcePrefixedID(id)
-		if _, srcErr := findSourceByVisibleID(e, parts[0]); srcErr == nil {
-			return JSONError(e, http.StatusMethodNotAllowed,
-				"source-blueprints are read-only; fork via apply + create --from-range to edit")
-		}
-		// First segment isn't a known source → fall through to local lookup
-		// (subpath IDs like "team/windows" are valid blueprintID values).
-	}
-
-	bp, err := findLocalBlueprintByID(e, id, user)
-	if err != nil {
-		return err
-	}
-	if !user.IsAdmin() && bp.GetString("owner") != user.Id {
-		return JSONError(e, http.StatusForbidden, "only the owner or an admin can update a blueprint")
-	}
-
-	// Parse body as a generic map so any subset of editable fields is accepted.
-	var body map[string]any
-	if err := e.BindBody(&body); err != nil {
-		return JSONError(e, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
-	}
-
-	// Scalar editable fields. License, homepage, and authors are source-level
-	// concerns and live on the parent source manifest; they are not editable
-	// on the blueprint record.
-	editable := map[string]bool{
-		"name":              true,
-		"description":       true,
-		"version":           true,
-		"tags":              true,
-		"min_ludus_version": true,
-	}
-	// Validate config FIRST so a bad config string doesn't leave scalars
-	// half-applied. The bundle rebuild does its own Save (covering scalars +
-	// bundle metadata atomically); the scalar-only path falls back to a plain
-	// Save below.
-	cfgRaw, hasConfig := body["config"].(string)
-	hasConfig = hasConfig && strings.TrimSpace(cfgRaw) != ""
-	if hasConfig {
-		if err := validateBlueprintConfigBytes([]byte(cfgRaw)); err != nil {
-			return JSONError(e, http.StatusBadRequest, fmt.Sprintf("invalid blueprint config: %v", err))
-		}
-	}
-
-	metadataChanged := false
-	for k, v := range body {
-		if editable[k] {
-			bp.Set(k, v)
-			metadataChanged = true
-		}
-	}
-
-	if hasConfig {
-		if err := rebuildBlueprintBundle(e, bp, []byte(cfgRaw)); err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("rebuild bundle: %v", err))
-		}
-	} else {
-		if err := e.App.Save(bp); err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("save blueprint: %v", err))
-		}
-		// Sync the bundle's blueprint.yml so export/import roundtrips preserve
-		// the new metadata. Cheaper than a full rebuild; only the manifest is
-		// touched, not the role/template copies.
-		if metadataChanged {
-			if err := rewriteBundleManifest(bp); err != nil {
-				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("rewrite bundle manifest: %v", err))
-			}
-		}
-	}
-
-	return e.JSON(http.StatusOK, map[string]string{"status": "updated"})
-}
-
-// rewriteBundleManifest atomically rewrites <bundleDir>/blueprint.yml from the
-// current record state. Used for metadata-only updates so the bundle stays in
-// sync with the DB without re-copying roles/templates. Held under the same
-// per-blueprint lock as full rebuilds.
-func rewriteBundleManifest(bp *core.Record) error {
-	unlock := lockBlueprintRebuild(bp.Id)
-	defer unlock()
-
-	bundleDir := blueprintBundleDir(bp)
-	if _, err := os.Stat(bundleDir); err != nil {
-		return fmt.Errorf("bundle dir missing: %w", err)
-	}
-
-	manifest := BlueprintManifest{
-		ManifestVersion: SupportedManifestVersion,
-		ID:              bp.GetString("blueprintID"),
-		Name:            bp.GetString("name"),
-		Description:     bp.GetString("description"),
-		Version:         bp.GetString("version"),
-		Tags:            anySliceToStrings(bp.Get("tags")),
-		MinLudusVersion: bp.GetString("min_ludus_version"),
-		Config:          "range-config.yml",
-	}
-	data, err := yaml.Marshal(&manifest)
-	if err != nil {
-		return fmt.Errorf("marshal manifest: %w", err)
-	}
-
-	finalPath := filepath.Join(bundleDir, "blueprint.yml")
-	tmpPath := finalPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return fmt.Errorf("write manifest: %w", err)
-	}
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("install manifest: %w", err)
-	}
-	return nil
-}
-
 func ListBlueprintAccessGroups(e *core.RequestEvent) error {
 	blueprintRecord, err := getBlueprintRecordFromRequest(e)
 	if err != nil {
@@ -2105,7 +1955,7 @@ func ImportBlueprint(e *core.RequestEvent) error {
 }
 
 func extractTar(tr *tar.Reader, tmpDir string) error {
-	return extractTarReader(tr, tmpDir, ExtractOptions{RejectSymlinks: true})
+	return extractTarReader(tr, tmpDir, ExtractOptions{RejectDangerousEntries: true})
 }
 // ───────────────────────────────────────────────────────────────
 // merged from api_blueprint_export.go
@@ -2149,12 +1999,47 @@ func ExportBlueprint(e *core.RequestEvent) error {
 	// to keep the bundle a single directory entry.
 	prefix := sanitiseExportFilename(publicID)
 
+	// Synthesise blueprint.yml from the live DB record. Local bundles no
+	// longer carry a manifest on disk — the DB is canonical and the manifest
+	// is regenerated here so export tarballs remain self-describing.
+	manifest := BlueprintManifest{
+		ManifestVersion: SupportedManifestVersion,
+		ID:              publicID,
+		Name:            bp.GetString("name"),
+		Description:     bp.GetString("description"),
+		Version:         bp.GetString("version"),
+		Tags:            anySliceToStrings(bp.Get("tags")),
+		MinLudusVersion: bp.GetString("min_ludus_version"),
+		Config:          "range-config.yml",
+	}
+	manifestBytes, marshalErr := yaml.Marshal(&manifest)
+	if marshalErr != nil {
+		return fmt.Errorf("marshal blueprint.yml: %w", marshalErr)
+	}
+	if err := tw.WriteHeader(&tar.Header{
+		Name:    filepath.ToSlash(filepath.Join(prefix, "blueprint.yml")),
+		Mode:    0644,
+		Size:    int64(len(manifestBytes)),
+		ModTime: time.Now(),
+	}); err != nil {
+		return err
+	}
+	if _, err := tw.Write(manifestBytes); err != nil {
+		return err
+	}
+
 	return filepath.Walk(bundleDir, func(p string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		rel, _ := filepath.Rel(bundleDir, p)
 		if rel == "." {
+			return nil
+		}
+		// Skip any on-disk blueprint.yml. Imported tarballs leave one in the
+		// bundle dir; emitting it again would duplicate the entry we just
+		// synthesised and the disk copy (older metadata) would win on extract.
+		if rel == "blueprint.yml" {
 			return nil
 		}
 		hdr, err := tar.FileInfoHeader(info, "")
