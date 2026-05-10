@@ -2,24 +2,42 @@
 
 # /opt/ludus/ci/prepare.sh
 #
-# Custom executor prepare phase. Claims a pool, selects the target VM,
-# handles snapshot rollback and take-snapshot operations.
+# Custom executor prepare phase. Runs once per job before the script.
+#
+# - Claim/release jobs (build type contains "claim" or "release") do no VM
+#   work here.
+# - Cluster jobs delegate to prepare-cluster.sh.
+# - All other jobs read POOL from the environment (set by GitLab from the
+#   claim-pool job's dotenv artifact), then resolve the target VM and
+#   handle snapshot rollback.
 
 set -eo pipefail
 
 currentDir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+source "${currentDir}/base.sh"
 
 echo "CUSTOM_ENV_LUDUS_BUILD_TYPE: $CUSTOM_ENV_LUDUS_BUILD_TYPE"
 
-# --- Cluster handling (dedicated shared VMs with their own locking) ---
+# --- Claim/release jobs need no VM prep ---
+if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"claim"* || "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"release"* ]]; then
+    echo "Claim/release job ($CUSTOM_ENV_LUDUS_BUILD_TYPE) — no VM prep needed"
+    exit 0
+fi
+
+# --- Cluster handling (dedicated shared VMs) ---
 if [[ -n "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"cluster"* ]]; then
-    source "${currentDir}/base.sh"
     source "${currentDir}/prepare-cluster.sh"
     exit 0
 fi
 
-# --- Claim a pool (sets POOL, sources base.sh) ---
-source "${currentDir}/claim-pool.sh"
+# --- POOL is exported by GitLab from the claim-pool dotenv artifact ---
+# GitLab forwards artifact dotenv variables as CUSTOM_ENV_<NAME> in the
+# custom executor; fall back to a plain POOL env if set.
+export POOL="${CUSTOM_ENV_POOL:-${POOL:-}}"
+if [[ -z "$POOL" ]]; then
+    echo "ERROR: POOL is not set. The claim-pool job must run before this job and pass POOL via dotenv." >&2
+    exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+fi
 
 # --- Resolve the target VM (sets VM_ID, VM_IP) ---
 resolve_vm
@@ -40,12 +58,11 @@ if [[ "$CUSTOM_ENV_LUDUS_INSTALL_STEP" == "take-snapshot" && -n "$CUSTOM_ENV_LUD
     fi
 fi
 
-# --- Rollback logic for snapshot-based tests ---
+# --- Rollback for snapshot-based tests ---
 if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
     TRACKING_FILE="/tmp/.ludus-ci-${PIPELINE_ID}-${CUSTOM_ENV_LUDUS_SNAPSHOT_NAME}-rolled-back"
 
     if [[ ! -f "$TRACKING_FILE" ]]; then
-        # First job in this chain for this snapshot type - rollback to "clean"
         echo "Rolling back VM $VM_ID to 'clean' snapshot"
         qm rollback "$VM_ID" clean --start
         if [[ $? -ne 0 ]]; then
@@ -53,7 +70,6 @@ if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
             exit "${BUILD_FAILURE_EXIT_CODE:-1}"
         fi
 
-        # Wait for SSH to come up after rollback
         echo "Waiting for SSH on $VM_IP..."
         for i in {1..60}; do
             if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no -F /home/gitlab-runner/.ssh/config gitlab-runner@"$VM_IP" "echo ready" 2>/dev/null; then
@@ -67,7 +83,6 @@ if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
             sleep 5
         done
 
-        # Track that we've rolled back this VM for this pipeline/snapshot
         touch "$TRACKING_FILE"
     else
         echo "VM $VM_ID already rolled back for pipeline $PIPELINE_ID / snapshot $CUSTOM_ENV_LUDUS_SNAPSHOT_NAME. Skipping rollback."
@@ -77,7 +92,6 @@ fi
 # --- Rollback for build VM (any-built) ---
 if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "any-built" ]]; then
     # Build VM doesn't need rollback - it supports concurrent builds.
-    # Just ensure it's running and SSH is up.
     echo "Ensuring build VM $VM_ID is accessible..."
     for i in {1..10}; do
         if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no -F /home/gitlab-runner/.ssh/config gitlab-runner@"$VM_IP" "echo ready" 2>/dev/null; then
@@ -125,5 +139,4 @@ fi
 
 # --- Clean up old tracking files (over 2 days old) ---
 find /tmp/ -name '.ludus-ci-*' -type f -mtime +2 -exec rm {} + 2>/dev/null || true
-find "$POOL_ASSIGNMENT_DIR" -name '*.pool' -type f -mtime +2 -exec rm {} + 2>/dev/null || true
-find "$POOL_ASSIGNMENT_DIR" -name '*.claiming' -type f -mtime +2 -exec rm {} + 2>/dev/null || true
+find "$POOL_ASSIGNMENT_DIR" -mindepth 1 -maxdepth 1 -mtime +2 -exec rm -rf {} + 2>/dev/null || true

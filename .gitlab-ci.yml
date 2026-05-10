@@ -2,9 +2,11 @@ stages:
   - pages
   - documentation
   - build
-  - test      # All install/template/range/post-deploy/integration/cluster jobs (DAG via needs)
+  - claim         # claim a VM pool (A or B) or the cluster slot
+  - test          # all install/template/range/post-deploy/integration/cluster jobs (DAG via needs)
+  - release-claim       # release the claimed pool/cluster (when: always)
   - upload
-  - release
+  - release-binaries # tag/release publishing jobs
 
 ################
 # YAML ANCHORS #
@@ -260,6 +262,36 @@ stages:
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
 
+# Superset of every pool-using test job's rule set. claim-pool / release-pool
+# use this so the pool is claimed exactly when at least one pool test will
+# actually run.
+.pool-rules: &pool-rules
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE == "Automatic backup from Apidog"
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[client tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[testing-mode tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[power tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[integration test\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+    - changes:
+        - ludus-server/**/*
+        - ludus-client/**/*
+
 .ci-setup-cluster-admin: &ci-setup-cluster-admin
   # Sync time after snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
@@ -457,6 +489,47 @@ build all:
       fi
     - echo "Compile complete."
 
+#########
+# CLAIM #
+#########
+# Atomically claim one of the two VM pools (A or B). Writes POOL=<A|B> to
+# pool.env so downstream jobs (via dotenv artifact) inherit it. Hard fails
+# after 1 hour if both pools remain busy.
+claim-pool:
+  stage: claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - build all
+  dependencies: [] # don't pull build artifacts; this script needs nothing from binaries/
+  <<: *pool-rules
+  variables:
+    LUDUS_BUILD_TYPE: pool-claim
+    GIT_STRATEGY: none
+  timeout: 1h
+  script:
+    - /opt/ludus/ci/claim-pool.sh
+  artifacts:
+    reports:
+      dotenv: pool.env
+
+# Atomically claim the single cluster slot (VMIDs 1005/1006). Hard fails
+# after 1 hour if the cluster is still busy.
+claim-cluster:
+  stage: claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - build all
+  dependencies: []
+  <<: *cluster-rules
+  variables:
+    LUDUS_BUILD_TYPE: cluster-claim
+    GIT_STRATEGY: none
+  timeout: 1h
+  script:
+    - /opt/ludus/ci/claim-cluster.sh
+
 ###########
 # INSTALL #
 ###########
@@ -465,6 +538,7 @@ install kickoff:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -495,6 +569,7 @@ install check:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - install kickoff
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -527,6 +602,7 @@ templates build:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: install snapshot
       optional: true
@@ -576,6 +652,7 @@ templates check:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - templates build
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -629,6 +706,7 @@ client basic-commands:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
   dependencies:
     - build all
@@ -683,6 +761,7 @@ range deploy-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: templates snapshot
       optional: true
@@ -731,6 +810,7 @@ range check-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - range deploy-admin
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -797,6 +877,7 @@ post-deploy testing-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: range snapshot-admin
       optional: true
@@ -841,6 +922,7 @@ post-deploy power-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy testing-as-admin
       optional: true
@@ -886,6 +968,7 @@ post-deploy ansible-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy power-as-admin
       optional: true
@@ -932,6 +1015,7 @@ post-deploy user-cmds-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy ansible-as-admin
       optional: true
@@ -1004,6 +1088,7 @@ post-deploy groups-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy user-cmds-as-admin
       optional: true
@@ -1140,6 +1225,7 @@ post-deploy blueprints-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy groups-as-admin
       optional: true
@@ -1208,6 +1294,7 @@ post-deploy ranges-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy blueprints-as-admin
       optional: true
@@ -1370,6 +1457,7 @@ post-deploy templates-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy ranges-as-admin
       optional: true
@@ -1416,6 +1504,7 @@ range deploy-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: range snapshot-admin
       optional: true
@@ -1462,6 +1551,7 @@ range check-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - range deploy-user
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -1509,6 +1599,7 @@ post-deploy testing-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: range snapshot-user
       optional: true
@@ -1550,6 +1641,7 @@ post-deploy power-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy testing-as-user
       optional: true
@@ -1594,6 +1686,7 @@ post-deploy ansible-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy power-as-user
       optional: true
@@ -1635,6 +1728,7 @@ post-deploy user-cmds-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy ansible-as-user
       optional: true
@@ -1702,6 +1796,7 @@ post-deploy blueprints-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy user-cmds-as-user
       optional: true
@@ -1829,6 +1924,7 @@ post-deploy templates-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy blueprints-as-user
       optional: true
@@ -1869,6 +1965,7 @@ post-deploy snapshots-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy templates-as-user
       optional: true
@@ -1912,6 +2009,7 @@ test-everything:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-pool
     - build all
     - job: post-deploy snapshots-as-user
       optional: true
@@ -2015,6 +2113,7 @@ cluster install kickoff:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-cluster
     - build all
   dependencies:
     - build all
@@ -2058,6 +2157,7 @@ cluster-install-check:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-cluster
     - cluster install kickoff
   dependencies: []
   <<: *cluster-rules
@@ -2077,6 +2177,7 @@ cluster-verify-sdn:
   dependencies: []
   <<: *cluster-rules
   needs:
+    - claim-cluster
     - cluster-install-check
   variables:
     LUDUS_BUILD_TYPE: cluster
@@ -2100,6 +2201,7 @@ cluster-templates-build:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-cluster
     - build all
     - cluster-verify-sdn
   dependencies:
@@ -2120,6 +2222,7 @@ cluster-templates-check:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-cluster
     - cluster-templates-build
   dependencies: []
   <<: *cluster-rules
@@ -2146,6 +2249,7 @@ cluster-range-deploy:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-cluster
     - build all
     - cluster-templates-check
   dependencies:
@@ -2175,6 +2279,7 @@ cluster-verify-placement:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-cluster
     - cluster-range-deploy
   dependencies: []
   <<: *cluster-rules
@@ -2211,6 +2316,7 @@ cluster-verify-vxlan:
   dependencies: []
   <<: *cluster-rules
   needs:
+    - claim-cluster
     - cluster-verify-placement
   variables:
     LUDUS_BUILD_TYPE: cluster
@@ -2236,6 +2342,7 @@ cluster-test-range-default:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - claim-cluster
     - build all
     - cluster-verify-vxlan
   dependencies:
@@ -2294,18 +2401,19 @@ cluster-test-range-default:
       fi
       echo "Cluster placement verified: $TOTAL VMs across both nodes, 1 on Node1, 2 on Node2"
 
-################
-# POOL RELEASE #
-################
-# Dedicated job to release the VM pool after all test chains complete.
-# Uses optional needs so it runs once all triggered chains finish (or are skipped).
-# Must wait for ALL chains to avoid releasing the pool while parallel chains are still running.
-pool-release:
-  stage: test
-  resource_group: ludus-build-vm
+###########
+# RELEASE #
+###########
+# Release the claimed pool after all pool-using test chains complete.
+# Optional needs cover every terminal pool job; `when: always` ensures the
+# pool is freed even if upstream jobs failed.
+release-pool:
+  stage: release-claim
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - job: claim-pool
+      optional: true
     - job: install check
       optional: true
     - job: templates check
@@ -2322,13 +2430,10 @@ pool-release:
       optional: true
     - job: client basic-commands
       optional: true
-    - job: cluster-test-range-default
-      optional: true
-    - job: manual testing
-      optional: true
+  dependencies:
+    - claim-pool
   variables:
-    LUDUS_RELEASE_POOL: "true"
-    LUDUS_BUILD_TYPE: any-built
+    LUDUS_BUILD_TYPE: pool-release
     GIT_STRATEGY: none
   rules:
     - if: $CI_COMMIT_TAG
@@ -2338,7 +2443,30 @@ pool-release:
     - when: always
   timeout: 5m
   script:
-    - echo "Pool released"
+    - /opt/ludus/ci/release-pool.sh
+
+# Release the cluster slot after the cluster chain completes.
+release-cluster:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: claim-cluster
+      optional: true
+    - job: cluster-test-range-default
+      optional: true
+  variables:
+    LUDUS_BUILD_TYPE: cluster-release
+    GIT_STRATEGY: none
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - when: always
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-cluster.sh
 
 ##########
 # MANUAL #
@@ -2364,7 +2492,7 @@ manual testing:
 # RELEASE #
 ###########
 beta-release:
-  stage: release
+  stage: release-binaries
   resource_group: ludus-build-vm
   tags:
     - ludus-proxmox-runner-parallel
@@ -2521,7 +2649,7 @@ keygen-upload:
     - keygen publish --release ${CI_COMMIT_TAG} --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
 
 release:
-  stage: release
+  stage: release-binaries
   resource_group: ludus-build-vm
   tags:
     - ludus-proxmox-runner-parallel

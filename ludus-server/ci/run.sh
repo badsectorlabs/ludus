@@ -2,16 +2,23 @@
 
 # /opt/ludus/ci/run.sh
 #
-# Custom executor run phase. Resolves the target VM (same logic as prepare.sh)
-# and executes the job script on it via SSH.
+# Custom executor run phase. Executes the job script:
+# - Claim/release jobs run on the runner host directly (no VM).
+# - All other jobs are SSH'd into the resolved VM.
 
 currentDir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+source "${currentDir}/base.sh"
 
-# Source base.sh and claim-pool.sh to get POOL and helper functions.
-# claim-pool.sh will read the existing pool assignment (created by prepare.sh).
-source "${currentDir}/claim-pool.sh"
+# POOL is forwarded by GitLab from the claim-pool dotenv artifact.
+export POOL="${CUSTOM_ENV_POOL:-${POOL:-}}"
 
-# Resolve the target VM (sets VM_ID, VM_IP)
+# --- Claim/release jobs run on the runner host (gitlab-runner shell) ---
+if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"claim"* || "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"release"* ]]; then
+    /bin/bash --login < "${1}"
+    exit $?
+fi
+
+# --- Resolve target VM (sets VM_ID, VM_IP) ---
 resolve_vm
 
 # If we are in the install-check step, run a custom check loop.
@@ -27,8 +34,6 @@ if [[ -n "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP" = 
 fi
 
 # Transfer build artifacts (binaries/) from the HOST build directory to the target VM.
-# In the custom executor, GitLab downloads artifacts to the HOST. Test jobs need the
-# freshly-built binaries on the VM so *ci-setup-admin/*ci-setup-user can install them.
 BUILD_DIR=$(dirname "${1}")
 if [[ -d "$BUILD_DIR/binaries" ]]; then
     echo "Transferring build artifacts to $VM_IP..."
@@ -40,7 +45,6 @@ ssh -F /home/gitlab-runner/.ssh/config gitlab-runner@"$VM_IP" /bin/bash --login 
 SSH_EXIT=$?
 
 if [[ $SSH_EXIT -ne 0 && (-z "$CUSTOM_ENV_LUDUS_INSTALL_STEP" || "$CUSTOM_ENV_LUDUS_INSTALL_STEP" != "kickoff") ]]; then
-    # Exit using the variable, to make the build as failure in GitLab CI.
     exit "${BUILD_FAILURE_EXIT_CODE:-1}"
 elif [[ -n "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP" = "kickoff" && $SSH_EXIT -ne 0 ]]; then
     echo "SSH connection lost, assuming reboot during install."

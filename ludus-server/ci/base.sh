@@ -85,7 +85,7 @@ get_vm_ip_by_vmid() {
     for i in {1..30}; do
         IP=$(curl -s -k -b "PVEAuthCookie=$COOKIE" \
             "https://127.0.0.1:8006/api2/json/nodes/$PROXMOX_NODE/qemu/$VMID/agent/network-get-interfaces" \
-            | jq -r '.data.result[] | ."ip-addresses" | .[]? | ."ip-address"' \
+            | jq -r '.data.result[]? | ."ip-addresses"[]? | ."ip-address"? // empty' \
             | grep 203.0.113)
         if [[ -n "$IP" ]]; then
             echo "$IP"
@@ -103,6 +103,12 @@ get_vm_ip_by_vmid() {
 resolve_vm() {
     local BUILD_TYPE="$CUSTOM_ENV_LUDUS_BUILD_TYPE"
     local SNAPSHOT_NAME="$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME"
+
+    # Claim/release jobs run on the runner host directly; no target VM.
+    if [[ "$BUILD_TYPE" == *"claim"* || "$BUILD_TYPE" == *"release"* ]]; then
+        echo "Claim/release job ($BUILD_TYPE) — no VM resolution needed"
+        return 0
+    fi
 
     # Cluster builds use dedicated shared VMs
     if [[ -n "$BUILD_TYPE" && "$BUILD_TYPE" == *"cluster"* ]]; then
