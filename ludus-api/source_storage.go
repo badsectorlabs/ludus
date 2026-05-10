@@ -91,7 +91,7 @@ const maxExtractedArchiveBytes = 500 * 1024 * 1024
 var hardenedExtractOptions = ExtractOptions{
 	MaxBytes:        maxExtractedArchiveBytes,
 	StripSingleRoot: true,
-	RejectSymlinks:  true,
+	RejectDangerousEntries: true,
 }
 
 func extractTarGz(dest, archive string) error {

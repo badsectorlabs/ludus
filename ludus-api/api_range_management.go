@@ -1061,66 +1061,6 @@ func ListRangeUsers(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, result)
 }
 
-// UpdateRange mutates label fields (name, description, purpose) on an existing
-// range. Any user with access to the range (direct assignment, group
-// membership, or admin) may patch. Lifecycle-related fields (allowedDomains,
-// testing flags, autoshutdown, etc.) have their own dedicated endpoints and
-// are NOT accepted here.
-func UpdateRange(e *core.RequestEvent) error {
-	user := e.Get("user").(*models.User)
-	if user == nil {
-		return JSONError(e, http.StatusUnauthorized, "User not found")
-	}
-
-	rangeID := e.Request.PathValue("rangeID")
-	if rangeID == "" {
-		return JSONError(e, http.StatusBadRequest, "Range ID is required")
-	}
-
-	rangeNumber, err := GetRangeNumberFromRangeID(rangeID)
-	if err != nil {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found: %v", rangeID, err))
-	}
-
-	if !user.IsAdmin() && !HasRangeAccess(e, user.UserId(), rangeNumber) {
-		return JSONError(e, http.StatusForbidden, fmt.Sprintf("You (%s) do not have access to range %s", user.UserId(), rangeID))
-	}
-
-	rangeRecordRaw, err := e.App.FindFirstRecordByData("ranges", "rangeID", rangeID)
-	if err != nil {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("Range %s not found", rangeID))
-	}
-	rangeRecord := &models.Ranges{}
-	rangeRecord.SetProxyRecord(rangeRecordRaw)
-
-	var payload dto.UpdateRangeRequest
-	if err := e.BindBody(&payload); err != nil {
-		return JSONError(e, http.StatusBadRequest, "Invalid request body: "+err.Error())
-	}
-
-	changed := false
-	if payload.Name != nil {
-		rangeRecord.SetName(*payload.Name)
-		changed = true
-	}
-	if payload.Description != nil {
-		rangeRecord.SetDescription(*payload.Description)
-		changed = true
-	}
-	if payload.Purpose != nil {
-		rangeRecord.SetPurpose(*payload.Purpose)
-		changed = true
-	}
-	if !changed {
-		return JSONError(e, http.StatusBadRequest, "At least one of name, description, purpose must be provided")
-	}
-
-	if err := e.App.Save(rangeRecord); err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving range: %v", err))
-	}
-	return e.JSON(http.StatusOK, map[string]string{"result": "Range updated successfully"})
-}
-
 // ListUserAccessibleRanges lists all ranges the current user can access
 func ListUserAccessibleRanges(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)

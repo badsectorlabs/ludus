@@ -136,31 +136,31 @@ empty string to clear a field.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		body := dto.UpdateRangeRequest{}
-		hasField := false
+		body := map[string]string{}
 		if cmd.Flags().Changed("name") {
-			body.Name = &rangeUpdateName
-			hasField = true
+			body["name"] = rangeUpdateName
 		}
 		if cmd.Flags().Changed("description") {
-			body.Description = &rangeUpdateDescription
-			hasField = true
+			body["description"] = rangeUpdateDescription
 		}
 		if cmd.Flags().Changed("purpose") {
-			body.Purpose = &rangeUpdatePurpose
-			hasField = true
+			body["purpose"] = rangeUpdatePurpose
 		}
-		if !hasField {
+		if len(body) == 0 {
 			logger.Logger.Fatal("at least one of --name, --description, --purpose is required")
 		}
 
+		recordID, err := rest.PBLookupRecordID(client, "ranges", "rangeID", args[0])
+		if err != nil {
+			logger.Logger.Fatal(err.Error())
+		}
 		jsonBody, _ := json.Marshal(body)
-		path := fmt.Sprintf("/ranges/%s", neturl.PathEscape(args[0]))
-		responseJSON, success := rest.GenericJSONPatch(client, buildURLWithRangeAndUserID(path), string(jsonBody))
+		path := fmt.Sprintf("/api/collections/ranges/records/%s", neturl.PathEscape(recordID))
+		responseJSON, success := rest.GenericJSONPatch(client, path, string(jsonBody))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		handleGenericResult(responseJSON)
+		logger.Logger.Infof("Range '%s' updated", args[0])
 	},
 }
 

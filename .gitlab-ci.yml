@@ -1416,6 +1416,8 @@ post-deploy blueprints-as-admin:
     - 'grep -q "Version:.*1.2.3" /tmp/ci-bp-scratch.info'
     - 'grep -q "Min Ludus:.*2.1.0" /tmp/ci-bp-scratch.info'
     - 'grep -q alpha /tmp/ci-bp-scratch.info && grep -q beta /tmp/ci-bp-scratch.info'
+    # Local bundle dirs must never carry an on-disk blueprint.yml (DB is canonical; manifest is synthesized at export)
+    - '! sudo find /opt/ludus/blueprints -maxdepth 2 -name "blueprint.yml" | grep .'
     - ludus blueprint export ci-bp-scratch -o /tmp/ci-bp-scratch.tar.gz
     - tar tzf /tmp/ci-bp-scratch.tar.gz | grep -q "^ci-bp-scratch/blueprint.yml$"
     - ludus blueprint rm ci-bp-scratch --no-prompt
@@ -1423,6 +1425,13 @@ post-deploy blueprints-as-admin:
     - ludus blueprint info ci-bp-scratch | tee /tmp/ci-bp-scratch.imported.info
     - 'grep -q "Version:.*1.2.3" /tmp/ci-bp-scratch.imported.info'
     - 'grep -q "Min Ludus:.*2.1.0" /tmp/ci-bp-scratch.imported.info'
+    # `ludus blueprint update` hits PB direct PATCH /api/collections/blueprints/records/{id}.
+    # Run AFTER the import roundtrip so it doesn't mutate the version/tags before that assertion.
+    - ludus blueprint update ci-bp-scratch --version 9.9.9 --tag updated --min-ludus-version 3.3.3
+    - ludus blueprint info ci-bp-scratch | tee /tmp/ci-bp-scratch.updated.info
+    - 'grep -q "Version:.*9.9.9" /tmp/ci-bp-scratch.updated.info'
+    - 'grep -q "Min Ludus:.*3.3.3" /tmp/ci-bp-scratch.updated.info'
+    - 'grep -q updated /tmp/ci-bp-scratch.updated.info'
     # Copy must rewrite the bundle manifest id
     - ludus blueprint create --from-blueprint ci-bp-scratch --id ci-bp-roundtrip
     - ludus blueprint export ci-bp-roundtrip -o /tmp/ci-bp-roundtrip.tar.gz
@@ -1500,6 +1509,10 @@ post-deploy ranges-as-admin:
   script:
     - *ci-setup-user # Ensure CIU user is created
     - *ci-setup-admin
+    # `ludus range update` hits PB direct PATCH /api/collections/ranges/records/{id}
+    - ludus range update CIA --description "patched in CI" --purpose "ci-update"
+    - ludus range list all --json | jq -e '.[] | select(.rangeID=="CIA") | .description == "patched in CI"'
+    - ludus range list all --json | jq -e '.[] | select(.rangeID=="CIA") | .purpose == "ci-update"'
     # Log history: verify a success entry was saved from the earlier deploy
     - ludus range logs --history --json | jq -e 'length > 0'
     - ludus range logs --history --json | jq -e '.[0].status == "success"'
@@ -2033,6 +2046,8 @@ post-deploy blueprints-as-user:
     - ludus blueprint config get ci-acl-main 2>&1 | grep "do not have access"
     - ludus blueprint create --from-blueprint ci-acl-main --id ci-acl-copy-ciu --name "CI ACL Copy CIU" 2>&1 | grep "do not have access"
     - ludus blueprint apply ci-acl-main --target-range CIU --force 2>&1 | grep "do not have access"
+    # PB-direct PATCH for non-owner: list filter excludes them, so blueprint-update lookup returns "not found"
+    - ludus blueprint update ci-acl-main --name "hijacked" 2>&1 | grep -qi "not found"
     - set -o pipefail
     # Share coverage (user + group) as admin
     - export LUDUS_API_KEY=$CIA_API_KEY

@@ -45,11 +45,6 @@ type CreateRangeRequest struct {
 	Name        string   `json:"name"`
 	BlueprintID string   `json:"blueprintID,omitempty"`
 }
-type UpdateRangeRequest struct {
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Purpose     *string `json:"purpose,omitempty"`
-}
 type DenyRequest struct {
 	Domains []string `json:"domains,omitempty"`
 	Ips     []string `json:"ips,omitempty"`
@@ -182,15 +177,6 @@ type CopyBlueprintRequest struct {
 type ApplyBlueprintRequest struct {
 	RangeID string `json:"rangeID,omitempty"`
 	Force   bool   `json:"force,omitempty"`
-}
-
-type UpdateBlueprintMetadataRequest struct {
-	Name            *string   `json:"name,omitempty"`
-	Description     *string   `json:"description,omitempty"`
-	Version         *string   `json:"version,omitempty"`
-	Tags            *[]string `json:"tags,omitempty"`
-	MinLudusVersion *string   `json:"min_ludus_version,omitempty"`
-	Config          *string   `json:"config,omitempty"`
 }
 
 type UpdateBlueprintConfigRequest struct {
