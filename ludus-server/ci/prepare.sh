@@ -30,13 +30,24 @@ if [[ -n "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"c
     exit 0
 fi
 
-# --- POOL is exported by GitLab from the claim-pool dotenv artifact ---
-# GitLab forwards artifact dotenv variables as CUSTOM_ENV_<NAME> in the
-# custom executor; fall back to a plain POOL env if set.
+# --- POOL discovery ---
+# Preferred: GitLab forwards claim-pool's dotenv as CUSTOM_ENV_POOL.
+# Fallback: read $POOL_ASSIGNMENT_DIR/<pipeline-id>.pool that claim-pool.sh
+# writes on the runner host. The fallback is necessary because many test
+# jobs declare `dependencies: [build all]` (or `dependencies: []`), which
+# overrides `needs:` for artifact download and strips the dotenv.
+# Only pool-using build types (full, from-snapshot) require POOL — any-built
+# jobs run on the dedicated build VM (1012) and don't need a pool.
 export POOL="${CUSTOM_ENV_POOL:-${POOL:-}}"
-if [[ -z "$POOL" ]]; then
-    echo "ERROR: POOL is not set. The claim-pool job must run before this job and pass POOL via dotenv." >&2
-    exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+if [[ -z "$POOL" && -f "$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool" ]]; then
+    POOL=$(cat "$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool")
+    export POOL
+fi
+if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "full" || "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
+    if [[ -z "$POOL" ]]; then
+        echo "ERROR: POOL is not set. The claim-pool job must run before this job (via dotenv or $POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool)." >&2
+        exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+    fi
 fi
 
 # --- Resolve the target VM (sets VM_ID, VM_IP) ---

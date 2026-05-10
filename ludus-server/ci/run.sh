@@ -9,8 +9,13 @@
 currentDir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 source "${currentDir}/base.sh"
 
-# POOL is forwarded by GitLab from the claim-pool dotenv artifact.
+# POOL discovery: prefer the dotenv-forwarded variable, fall back to the
+# per-pipeline file written by claim-pool.sh on the runner host.
 export POOL="${CUSTOM_ENV_POOL:-${POOL:-}}"
+if [[ -z "$POOL" && -f "$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool" ]]; then
+    POOL=$(cat "$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool")
+    export POOL
+fi
 
 # --- Claim/release jobs run on the runner host (gitlab-runner shell) ---
 if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"claim"* || "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"release"* ]]; then

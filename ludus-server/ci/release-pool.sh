@@ -10,6 +10,12 @@
 currentDir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 source "${currentDir}/base.sh"
 
+# Prefer dotenv POOL; fall back to per-pipeline file written by claim-pool.sh
+export POOL="${CUSTOM_ENV_POOL:-${POOL:-}}"
+if [[ -z "$POOL" && -f "$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool" ]]; then
+    POOL=$(cat "$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool")
+fi
+
 if [[ -z "$POOL" ]]; then
     echo "POOL not set; nothing to release."
     exit 0
@@ -29,7 +35,8 @@ else
     echo "Pool ${POOL} owned by '${OWNER}', not pipeline ${PIPELINE_ID}; not releasing."
 fi
 
-# Tidy this pipeline's rollback tracking files
+# Tidy this pipeline's per-pipeline assignment file and rollback markers
+rm -f "$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool" 2>/dev/null || true
 rm -f /tmp/.ludus-ci-"${PIPELINE_ID}"-* 2>/dev/null || true
 
 exit 0

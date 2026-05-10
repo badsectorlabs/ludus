@@ -45,6 +45,10 @@ START=$(date +%s)
 while true; do
     for P in A B; do
         if CLAIMED=$(try_claim "$P"); then
+            # Persist the assignment to the runner host so prepare.sh can read
+            # it even when downstream jobs strip claim-pool from their
+            # dependencies and the dotenv variable is not propagated.
+            echo "${CLAIMED}" > "$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool"
             echo "POOL=${CLAIMED}" | tee pool.env
             echo "Claimed pool ${CLAIMED} for pipeline ${PIPELINE_ID}"
             exit 0

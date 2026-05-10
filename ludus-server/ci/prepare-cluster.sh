@@ -13,6 +13,9 @@ source "${currentDir}/base.sh"
 
 echo "CUSTOM_ENV_LUDUS_BUILD_TYPE: $CUSTOM_ENV_LUDUS_BUILD_TYPE"
 
+# Populate CLUSTER_NODE{1,2}_IP / CLUSTER_NODES via Proxmox API
+discover_cluster_ips
+
 NODE1=$CLUSTER_NODE1_VMID
 NODE2=$CLUSTER_NODE2_VMID
 
