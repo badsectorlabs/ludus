@@ -3174,58 +3174,6 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /ranges/{rangeID}:
-    patch:
-      summary: 'Update range label fields '
-      deprecated: false
-      description: Update label fields on a range (name, description, purpose).
-      operationId: updateRange
-      tags:
-        - Range Management
-      parameters:
-        - name: rangeID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                name:
-                  type: string
-                description:
-                  type: string
-                purpose:
-                  type: string
-            examples: {}
-      responses:
-        '200':
-          description: Range updated
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: string
-          headers: {}
-        '400':
-          description: At least one field must be provided
-          headers: {}
-        '403':
-          description: Only the owner or an admin can update range metadata
-          headers: {}
-        '404':
-          description: Range not found
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
   /range/poweron:
     put:
       summary: Power on range VMs
@@ -5479,42 +5427,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BlueprintDetail'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    patch:
-      summary: Update blueprint metadata
-      deprecated: false
-      description: >-
-        Update mutable metadata on a local blueprint (name, description,
-        version, etc.).
-      operationId: updateBlueprintMetadata
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateBlueprintMetadataRequest'
-            examples: {}
-        required: true
-      responses:
-        '200':
-          description: Metadata updated
-          content:
-            application/json:
-              schema:
-                type: object
-                properties: {}
           headers: {}
       security:
         - JWT: []
