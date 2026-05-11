@@ -93,6 +93,28 @@ get_vm_ip_by_vmid() {
     return 1
 }
 
+# Returns 0 if the given GitLab pipeline ID is in a terminal state
+# (success/failed/canceled/skipped); 1 if active, unknown, or the API
+# call fails. Used by claim-pool/claim-cluster to recover locks held by
+# pipelines a user canceled (canceled pipelines do not run when:always
+# release jobs, so without this we'd wait until STALE_THRESHOLD).
+is_pipeline_terminal() {
+    local PIPELINE="$1"
+    [[ -z "$PIPELINE" ]] && return 1
+    command -v glab >/dev/null 2>&1 || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+
+    local PROJECT="${CUSTOM_ENV_CI_PROJECT_ID:-badsectorlabs%2Fludus}"
+    local RESPONSE STATUS
+    RESPONSE=$(timeout 10 glab api "projects/${PROJECT}/pipelines/${PIPELINE}" 2>/dev/null) || return 1
+    STATUS=$(printf '%s' "$RESPONSE" | jq -r '.status // empty' 2>/dev/null)
+
+    case "$STATUS" in
+        success|failed|canceled|skipped) return 0 ;;
+        *)                                return 1 ;;
+    esac
+}
+
 # Populate CLUSTER_NODE{1,2}_IP, CLUSTER_NODES, and CLUSTER_PRIMARY by
 # querying the Proxmox API. Caches values; safe to call multiple times.
 discover_cluster_ips() {

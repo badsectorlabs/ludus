@@ -30,7 +30,20 @@ try_claim() {
         return 0
     fi
 
-    # Lock exists - break if stale
+    # Lock exists. First, check whether the owning pipeline is in a
+    # terminal state via the GitLab API — covers the common case where a
+    # user canceled the pipeline (when:always release jobs do NOT run on
+    # cancellation, so the lock would otherwise sit until STALE_THRESHOLD).
+    local OWNER
+    OWNER=$(cat "$LOCK/owner" 2>/dev/null)
+    if [[ -n "$OWNER" ]] && is_pipeline_terminal "$OWNER"; then
+        echo "Breaking pool ${POOL} lock — owner pipeline ${OWNER} is in a terminal state" >&2
+        rm -rf "$LOCK"
+        return 1
+    fi
+
+    # Time-based fallback for the case where the API is unreachable or
+    # the pipeline ID isn't queryable.
     local LOCK_MTIME
     LOCK_MTIME=$(stat -c %Y "$LOCK" 2>/dev/null || stat -f %m "$LOCK" 2>/dev/null || echo 0)
     local AGE=$(( $(date +%s) - LOCK_MTIME ))

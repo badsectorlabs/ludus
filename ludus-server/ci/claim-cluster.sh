@@ -26,6 +26,17 @@ while true; do
         exit 0
     fi
 
+    # Active recovery: if the owning pipeline is in a terminal state
+    # (canceled / failed / done), break the lock immediately so we don't
+    # have to wait for STALE_THRESHOLD.
+    OWNER=$(cat "$LOCK/owner" 2>/dev/null)
+    if [[ -n "$OWNER" ]] && is_pipeline_terminal "$OWNER"; then
+        echo "Breaking cluster lock — owner pipeline ${OWNER} is in a terminal state" >&2
+        rm -rf "$LOCK"
+        continue
+    fi
+
+    # Time-based fallback for unreachable API / unknown pipeline.
     LOCK_MTIME=$(stat -c %Y "$LOCK" 2>/dev/null || stat -f %m "$LOCK" 2>/dev/null || echo 0)
     AGE=$(( $(date +%s) - LOCK_MTIME ))
     if [[ "$AGE" -gt "$STALE_THRESHOLD" ]]; then

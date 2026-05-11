@@ -581,6 +581,8 @@ install kickoff:
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 10m
   script:
+    - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
+    - date
     - sudo hostname ludus-$CI_PIPELINE_ID
     - sudo hostnamectl set-hostname ludus-$CI_PIPELINE_ID
     - cd binaries
@@ -2146,6 +2148,8 @@ cluster install kickoff:
     GIT_STRATEGY: none
   timeout: 20m
   script:
+    - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
+    - date
     - cd binaries
     - |
       cat > config.yml <<'EOF'
@@ -2423,37 +2427,24 @@ cluster-test-range-default:
       fi
       echo "Cluster placement verified: $TOTAL VMs across both nodes, 1 on Node1, 2 on Node2"
 
-###########
-# RELEASE #
-###########
-# Release the claimed pool after all pool-using test chains complete.
-# Optional needs cover every terminal pool job; `when: always` ensures the
-# pool is freed even if upstream jobs failed.
+#################
+# RELEASE CLAIM #
+#################
+# Release the claimed pool after all test-stage jobs complete.
+#
+# These jobs intentionally do NOT declare `needs:` — we rely on stage
+# ordering so they wait for the entire `test` stage to finish.
+#
+# `when: always` covers test failures; cancellation is handled by the
+# active-recovery API check in claim-pool.sh.
+#
+# Note: there are no needs:, so the dotenv from claim-pool is NOT
+# inherited. release-pool.sh reads POOL from the per-pipeline file on
+# the runner host, falling back to a no-op if neither is set.
 release-pool:
   stage: release-claim
   tags:
     - ludus-proxmox-runner-parallel
-  needs:
-    - job: claim-pool
-      optional: true
-    - job: install check
-      optional: true
-    - job: templates check
-      optional: true
-    - job: range check-admin
-      optional: true
-    - job: range check-user
-      optional: true
-    - job: post-deploy templates-as-admin
-      optional: true
-    - job: post-deploy snapshots-as-user
-      optional: true
-    - job: test-everything
-      optional: true
-    - job: client basic-commands
-      optional: true
-  dependencies:
-    - claim-pool
   variables:
     LUDUS_BUILD_TYPE: pool-release
     GIT_STRATEGY: none
@@ -2467,16 +2458,10 @@ release-pool:
   script:
     - /opt/ludus/ci/release-pool.sh
 
-# Release the cluster slot after the cluster chain completes.
 release-cluster:
   stage: release-claim
   tags:
     - ludus-proxmox-runner-parallel
-  needs:
-    - job: claim-cluster
-      optional: true
-    - job: cluster-test-range-default
-      optional: true
   variables:
     LUDUS_BUILD_TYPE: cluster-release
     GIT_STRATEGY: none

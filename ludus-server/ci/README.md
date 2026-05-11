@@ -13,14 +13,6 @@ runner host at `/opt/ludus/ci/`. The runner uses the deployed copies in
 
 ## Runner host
 
-| | |
-|---|---|
-| Host | `ci-proxmox` (`192.168.1.219`) |
-| Runner | name=`r720-1-dtw`, executor=`custom`, `concurrent=12` |
-| Config | `/etc/gitlab-runner/config.toml` |
-| Tag | `ludus-proxmox-runner-parallel` |
-| User | `gitlab-runner` |
-| SSH | `ssh ci-proxmox` (uses `~/projects/ludus/ludus-dev-key`) |
 
 The custom executor is wired up to:
 
@@ -108,8 +100,21 @@ are idempotent and only release if they own the lock.
 
 ### Stale lock recovery
 
-Any lock older than 6 hours is treated as orphaned and cleared on the next
-claim attempt. To recover manually from a wedged pipeline:
+When a user **cancels** a pipeline mid-flight, GitLab does not run the
+`when: always` release jobs. Without recovery the lock would sit until the
+stale threshold expires.
+
+`claim-pool.sh` and `claim-cluster.sh` therefore call
+`is_pipeline_terminal` (in `base.sh`) before falling back to the time
+check. That helper queries the GitLab API
+(`projects/<id>/pipelines/<owner-pipeline-id>` via `glab`) and returns
+true if the owning pipeline is `success`, `failed`, `canceled`, or
+`skipped`. The lock is broken immediately on the next claim attempt.
+
+If `glab` or `jq` is unavailable, or the API call fails, the time-based
+fallback (locks > 6 hours old) takes over.
+
+To recover manually from a wedged pipeline:
 
 ```sh
 ssh ci-proxmox
@@ -182,7 +187,7 @@ Set by `claim-pool` (passed via dotenv to every job that `needs:` it):
 After editing scripts in this directory, push them to the runner host:
 
 ```sh
-cd /Users/erik/projects/ludus
+cd ludus
 scp ludus-server/ci/{base,claim-pool,claim-cluster,release-pool,release-cluster,prepare,prepare-cluster,run,cleanup,check-install-status}.sh \
     ci-proxmox:/opt/ludus/ci/
 ssh ci-proxmox 'chmod +x /opt/ludus/ci/*.sh'
