@@ -72,9 +72,15 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 	for _, bp := range walked.Blueprints {
 		dirs = append(dirs, bp.ScopedLocalRoles...)
 	}
+	ownerProxmoxUsername := ""
+	if !opts.GlobalRoles {
+		if owner, err := app.FindRecordById("users", src.GetString("owner")); err == nil {
+			ownerProxmoxUsername = owner.GetString("proxmoxUsername")
+		}
+	}
 	for _, dir := range dirs {
 		name := filepath.Base(dir)
-		err := addLocalRoleFromDirectory(app, dir, opts.GlobalRoles, opts.Force)
+		err := addLocalRoleFromDirectory(app, dir, ownerProxmoxUsername, opts.GlobalRoles, opts.Force)
 		if err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
@@ -159,15 +165,19 @@ func addTemplateFromDirectory(_ core.App, dir string, force bool) error {
 }
 
 // addLocalRoleFromDirectory copies a role dir into either the global-roles
-// path (when global=true) or the shared roles path. force=true overwrites.
-func addLocalRoleFromDirectory(_ core.App, dir string, global, force bool) error {
+// path (when global=true) or the owner's per-user roles dir. force=true
+// overwrites. ownerProxmoxUsername is required for non-global installs.
+func addLocalRoleFromDirectory(_ core.App, dir, ownerProxmoxUsername string, global, force bool) error {
 	name := filepath.Base(dir)
 
 	var destDir string
 	if global {
 		destDir = filepath.Join(ludusInstallPath, "resources", "global-roles", name)
 	} else {
-		destDir = filepath.Join(ludusInstallPath, "resources", "roles", name)
+		if ownerProxmoxUsername == "" {
+			return fmt.Errorf("ownerProxmoxUsername is required for non-global role install of %q", name)
+		}
+		destDir = filepath.Join(userRolesPath(ownerProxmoxUsername), name)
 	}
 
 	hasRoleStructure := false

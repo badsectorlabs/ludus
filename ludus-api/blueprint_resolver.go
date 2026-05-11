@@ -180,7 +180,7 @@ func ResolveAndInstall(e *core.RequestEvent, app core.App, walked WalkedBlueprin
 
 	for _, dir := range walked.ScopedLocalRoles {
 		name := filepath.Base(dir)
-		if err := addLocalRoleFromDirectory(app, dir, opts.GlobalRoles, opts.ForceRoles); err != nil {
+		if err := addLocalRoleFromDirectory(app, dir, opts.OwnerProxmoxUser, opts.GlobalRoles, opts.ForceRoles); err != nil {
 			out.LocalRoleResults = append(out.LocalRoleResults, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
 		}
