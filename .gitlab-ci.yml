@@ -40,6 +40,17 @@ stages:
       echo "Not all VMs are powered on, powering on now"
       ludus power on -n all
       timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true" ]]; do sleep 5; done'
+      # poweredOn=true only means Proxmox has issued the power-on; the
+      # guest OS still needs to finish booting before the QEMU guest agent
+      # responds. Downstream tests use `qm guest exec` against the Win11
+      # VM, which fails with "QEMU guest agent is not running" if we race
+      # ahead. Wait up to 5 min for the agent to come up.
+      WIN11VMID=$(sudo qm list | grep running | grep -i win11 | head -1 | awk '{print $1}' || true)
+      if [[ -n "$WIN11VMID" ]]; then
+        echo "Waiting for QEMU guest agent on Win11 VM $WIN11VMID..."
+        timeout 300 bash -c "until sudo qm guest ping $WIN11VMID >/dev/null 2>&1; do sleep 5; done" \
+          || echo "WARNING: Win11 guest agent did not respond within 300s — downstream qm guest exec may fail"
+      fi
     fi
   # Exit testing mode if we failed mid-testing mode and this is a retry
   - if [[ "$(ludus testing status --json | jq '.testingEnabled')" == "true" ]]; then echo "Testing mode was on, stopping it now"; ludus testing stop; fi
@@ -581,7 +592,7 @@ install kickoff:
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 10m
   script:
-    - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
+    - sudo timedatectl set-ntp off && sudo timedatectl set-ntp on
     - date
     - sudo hostname ludus-$CI_PIPELINE_ID
     - sudo hostnamectl set-hostname ludus-$CI_PIPELINE_ID
@@ -763,6 +774,10 @@ client basic-commands:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
+  retry:
+    max: 2
+    when:
+      - script_failure
   timeout: 5m
   script:
     - *ci-setup-admin
@@ -1557,7 +1572,7 @@ range deploy-user:
         - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_admin
+    LUDUS_SNAPSHOT_NAME: range_built_user # offset 4 -> VMID 1004/1011 (dedicated user-range VM)
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 5m
   retry:
@@ -1599,7 +1614,7 @@ range check-user:
         - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_admin
+    LUDUS_SNAPSHOT_NAME: range_built_user # offset 4 -> VMID 1004/1011 (dedicated user-range VM)
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 3h
   retry:
@@ -2148,7 +2163,7 @@ cluster install kickoff:
     GIT_STRATEGY: none
   timeout: 20m
   script:
-    - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
+    - sudo timedatectl set-ntp off && sudo timedatectl set-ntp on
     - date
     - cd binaries
     - |
