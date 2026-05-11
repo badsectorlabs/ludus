@@ -225,7 +225,7 @@ func detectGalaxyVersionMismatches(results []RoleInstallResult, requirementsYAML
 			continue
 		}
 		results[i].OK = false
-		results[i].Error = fmt.Sprintf("version mismatch: requested %s, installed %s; use --force to overwrite", wantVer, haveVer)
+		results[i].Error = fmt.Sprintf("version mismatch: requested %s, installed %s; set force=true to overwrite", wantVer, haveVer)
 	}
 	return results
 }

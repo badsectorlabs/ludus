@@ -110,7 +110,7 @@ func CreateBlueprintSource(e *core.RequestEvent) error {
 		map[string]any{"o": user.Id, "s": sourceID})
 	if len(existing) > 0 {
 		return JSONError(e, http.StatusConflict,
-			fmt.Sprintf("source %q already exists; use --id to choose another", sourceID))
+			fmt.Sprintf("source %q already exists; pick a different source ID", sourceID))
 	}
 
 	collection, err := e.App.FindCollectionByNameOrId("sources")
