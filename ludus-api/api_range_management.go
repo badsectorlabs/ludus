@@ -1055,3 +1055,54 @@ func ListUserAccessibleRanges(e *core.RequestEvent) error {
 
 	return e.JSON(http.StatusOK, result)
 }
+
+// startupReconcileRangeStates clears stuck transitional range states left
+// behind by a process death mid-deploy or mid-destroy. The deploy/destroy
+// goroutines flip the state back to a terminal value when they finish, so any
+// range still in DEPLOYING or DESTROYING after startup is an orphan whose
+// goroutine died with the previous process.
+//
+// DEPLOYING → ABORTED is safe and matches the existing AbortAnsible semantics.
+// DESTROYING → ERROR rather than DESTROYED because mid-destroy means some VMs
+// may still exist on Proxmox; ERROR surfaces the inconsistency so the user
+// re-triggers destroy (which is idempotent).
+func startupReconcileRangeStates(app core.App) error {
+	records, err := app.FindRecordsByFilter(
+		"ranges",
+		"rangeState = {:deploying} || rangeState = {:destroying}",
+		"-updated",
+		0, 0,
+		dbx.Params{
+			"deploying":  LudusRangeStateDeploying,
+			"destroying": LudusRangeStateDestroying,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("query in-flight ranges: %w", err)
+	}
+	if len(records) == 0 {
+		return nil
+	}
+
+	for _, record := range records {
+		previousState := record.GetString("rangeState")
+		var newState string
+		switch previousState {
+		case LudusRangeStateDeploying:
+			newState = LudusRangeStateAborted
+		case LudusRangeStateDestroying:
+			newState = LudusRangeStateError
+		default:
+			continue
+		}
+
+		record.Set("rangeState", newState)
+		if err := app.Save(record); err != nil {
+			logger.Error(fmt.Sprintf("Failed to reconcile orphaned range %s state: %v", record.GetString("rangeID"), err))
+			continue
+		}
+		logger.Warn(fmt.Sprintf("Reconciled orphaned range %s: %s -> %s",
+			record.GetString("rangeID"), previousState, newState))
+	}
+	return nil
+}
