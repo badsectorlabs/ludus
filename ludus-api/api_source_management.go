@@ -487,7 +487,7 @@ func purgeSourceArtifacts(app core.App, src *core.Record) ([]string, error) {
 				}
 			}
 		case "local_role":
-			rmErr = removeLocalRoleByName(app, name)
+			rmErr = removeLocalRoleByName(app, name, src)
 		case "galaxy_role":
 			rmErr = removeGalaxyRoleByName(app, name, src)
 		}
@@ -503,13 +503,18 @@ func removeTemplateByName(_ core.App, name string) error {
 	return os.RemoveAll(dir)
 }
 
-// removeLocalRoleByName removes a role from the global-roles or per-user roles dir.
-// For purge from sources, we conservatively remove from BOTH (idempotent: ignore not-found).
-func removeLocalRoleByName(_ core.App, name string) error {
-	for _, base := range []string{
+// removeLocalRoleByName removes a role from the global-roles dir or the
+// source owner's per-user roles dir. Idempotent: missing dirs are ignored.
+func removeLocalRoleByName(app core.App, name string, src *core.Record) error {
+	candidates := []string{
 		filepath.Join(ludusInstallPath, "resources", "global-roles", name),
-		filepath.Join(ludusInstallPath, "resources", "roles", name),
-	} {
+	}
+	if owner, err := app.FindRecordById("users", src.GetString("owner")); err == nil {
+		if home := userRolesPath(owner.GetString("proxmoxUsername")); home != "" {
+			candidates = append(candidates, filepath.Join(home, name))
+		}
+	}
+	for _, base := range candidates {
 		_ = os.RemoveAll(base)
 	}
 	return nil

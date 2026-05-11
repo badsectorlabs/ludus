@@ -1443,10 +1443,13 @@ post-deploy blueprints-as-admin:
     - '! ludus blueprint list | grep ci-bp-copy'
     - ludus blueprint rm ci-bp-main --no-prompt || true
     - '! ludus blueprint list | grep ci-bp-main'
-    # Sources — registered from a bundled fixture so CI never depends on a remote repo
+    # Sources — registered from a bundled fixture so CI never depends on a remote repo.
+    # The fixture ships a blueprint, a shared packer template, and a shared local ansible role.
     - ludus source add /opt/ludus/ci/fixtures/source-template --id ci-src --force
     - 'ludus source list | grep -q "ci-src "'
     - 'ludus blueprint list | grep -q "ci-src/example"'
+    - 'ludus templates list | grep -q "example-debian-12"'
+    - 'ludus ansible role list | grep -q "say_hello"'
     - ludus blueprint info ci-src/example | tee /tmp/ci-src-example.info
     - 'grep -q "Authors:" /tmp/ci-src-example.info'
     # Negative-path: a non-owner can't delete an admin-created source. CIU is created on demand here since this job runs admin-only setup.
@@ -1460,6 +1463,8 @@ post-deploy blueprints-as-admin:
     - ludus ansible role list | grep -q geerlingguy.docker
     - ludus source rm ci-src2 --no-prompt --purge
     - '! ludus ansible role list | grep -q geerlingguy.docker'
+    - '! ludus ansible role list | grep -q "say_hello"'
+    - '! ludus templates list | grep -q "example-debian-12"'
 
 post-deploy ranges-as-admin:
   stage: test
