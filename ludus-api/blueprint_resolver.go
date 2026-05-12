@@ -173,7 +173,7 @@ func ResolveAndInstall(e *core.RequestEvent, app core.App, walked WalkedBlueprin
 			continue
 		}
 		if opts.SourceRecordID != "" {
-			reconcileArtifactProvenance(app, opts.SourceRecordID, "template", name, "")
+			insertSourceArtifact(app, opts.SourceRecordID, "template", name, "")
 		}
 		out.TemplateResults = append(out.TemplateResults, ArtifactResult{Name: name, OK: true})
 	}
@@ -185,7 +185,7 @@ func ResolveAndInstall(e *core.RequestEvent, app core.App, walked WalkedBlueprin
 			continue
 		}
 		if opts.SourceRecordID != "" {
-			reconcileArtifactProvenance(app, opts.SourceRecordID, "local_role", name, "")
+			insertSourceArtifact(app, opts.SourceRecordID, "local_role", name, "")
 		}
 		out.LocalRoleResults = append(out.LocalRoleResults, ArtifactResult{Name: name, OK: true})
 	}

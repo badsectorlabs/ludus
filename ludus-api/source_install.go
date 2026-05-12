@@ -80,20 +80,21 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 	}
 	for _, dir := range dirs {
 		name := filepath.Base(dir)
-		err := addLocalRoleFromDirectory(app, dir, ownerProxmoxUsername, opts.GlobalRoles, opts.Force)
-		if err != nil {
+		if err := addLocalRoleFromDirectory(app, dir, ownerProxmoxUsername, opts.GlobalRoles, opts.Force); err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
 		}
-		reconcileArtifactProvenance(app, src.Id, "local_role", name, "")
+		insertSourceArtifact(app, src.Id, "local_role", name, "")
 		results = append(results, ArtifactResult{Name: name, OK: true})
 	}
 	return results
 }
 
 // insertSourceArtifact idempotently records (source, kind, name, version).
-// Galaxy roles use this directly — two sources sharing a role at the same
-// version is normal. Local roles go through reconcileArtifactProvenance.
+// Multiple sources sharing the same role/template name is allowed —
+// collisions are rare in practice, and the on-disk content reflects the most
+// recent force-sync. The frontend can join across source_artifacts to surface
+// co-claims when relevant.
 func insertSourceArtifact(app core.App, sourceID, kind, name, version string) {
 	collection, err := app.FindCollectionByNameOrId("source_artifacts")
 	if err != nil {
@@ -113,22 +114,11 @@ func insertSourceArtifact(app core.App, sourceID, kind, name, version string) {
 	_ = app.Save(r)
 }
 
-// reconcileArtifactProvenance upserts the local-role row, deleting any
-// other-source rows for the same (kind, name) first — local roles install to
-// a single on-disk location, so two sources claiming the same name would
-// silently overwrite each other; we make ownership explicit.
-func reconcileArtifactProvenance(app core.App, sourceID, kind, name, version string) {
-	others, _ := app.FindRecordsByFilter("source_artifacts",
-		"kind = {:k} && name = {:n} && source != {:s}", "", 0, 0,
-		map[string]any{"k": kind, "n": name, "s": sourceID})
-	for _, row := range others {
-		_ = app.Delete(row)
-	}
-	insertSourceArtifact(app, sourceID, kind, name, version)
-}
-
 // addTemplateFromDirectory copies a packer template into the global packer
 // dir. Requires exactly one *.pkr.hcl or *.pkr.json. force=true overwrites.
+// When the destination already exists and force=false, the existing on-disk
+// template is preserved and we return nil so the caller can still record
+// the source's claim — multiple sources owning the same name is allowed.
 func addTemplateFromDirectory(_ core.App, dir string, force bool) error {
 	name := filepath.Base(dir)
 	destDir := filepath.Join(ludusInstallPath, "packer", name)
@@ -148,7 +138,7 @@ func addTemplateFromDirectory(_ core.App, dir string, force bool) error {
 
 	if _, err := os.Stat(destDir); err == nil {
 		if !force {
-			return fmt.Errorf("template %q already exists; use force to overwrite", name)
+			return nil
 		}
 		if err := os.RemoveAll(destDir); err != nil {
 			return fmt.Errorf("removing existing template directory %s: %w", destDir, err)
@@ -167,6 +157,9 @@ func addTemplateFromDirectory(_ core.App, dir string, force bool) error {
 // addLocalRoleFromDirectory copies a role dir into either the global-roles
 // path (when global=true) or the owner's per-user roles dir. force=true
 // overwrites. ownerProxmoxUsername is required for non-global installs.
+// When the destination already exists and force=false, the existing files
+// are preserved and we return nil so the caller can still record the
+// source's claim — multiple sources owning the same name is allowed.
 func addLocalRoleFromDirectory(_ core.App, dir, ownerProxmoxUsername string, global, force bool) error {
 	name := filepath.Base(dir)
 
@@ -191,24 +184,57 @@ func addLocalRoleFromDirectory(_ core.App, dir, ownerProxmoxUsername string, glo
 		return fmt.Errorf("directory %s does not appear to contain an ansible role (no tasks/, meta/, defaults/, etc.)", dir)
 	}
 
+	existedAlready := false
 	if _, err := os.Stat(destDir); err == nil {
 		if !force {
-			return fmt.Errorf("role %q already exists at %s; use force to overwrite", name, destDir)
-		}
-		if err := os.RemoveAll(destDir); err != nil {
+			existedAlready = true
+		} else if err := os.RemoveAll(destDir); err != nil {
 			return fmt.Errorf("removing existing role directory %s: %w", destDir, err)
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
-		return fmt.Errorf("creating roles directory: %w", err)
+	if !existedAlready {
+		if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
+			return fmt.Errorf("creating roles directory: %w", err)
+		}
+		if err := copyDir(dir, destDir); err != nil {
+			return fmt.Errorf("copying role %s to %s: %w", dir, destDir, err)
+		}
 	}
-	if err := copyDir(dir, destDir); err != nil {
-		return fmt.Errorf("copying role %s to %s: %w", dir, destDir, err)
+
+	// `ansible-galaxy role list` only enumerates directories that contain a
+	// meta/main.yml (or .yaml). Some real-world community sources ship roles
+	// with only tasks/ + README, which leaves them invisible after install.
+	// Synthesize a minimal stub so the role enumerates correctly. This is a
+	// Ludus implementation detail — log it for operator visibility but don't
+	// bubble it into the user-facing artifact result.
+	if synthesized, err := synthesizeRoleMetaIfMissing(destDir, name); err != nil {
+		return fmt.Errorf("writing meta stub for %s: %w", name, err)
+	} else if synthesized {
+		log.Printf("source role %q ships without meta/main.yml — synthesized a minimal stub at %s", name, destDir)
 	}
 
 	_, _ = reflectRoleVersionToGalaxyInfo(destDir)
 	return nil
+}
+
+// synthesizeRoleMetaIfMissing writes a minimal meta/main.yml stub when the
+// role has no meta/main.{yml,yaml}. Returns true if a stub was written.
+func synthesizeRoleMetaIfMissing(roleDir, name string) (bool, error) {
+	metaDir := filepath.Join(roleDir, "meta")
+	for _, candidate := range []string{"main.yml", "main.yaml"} {
+		if _, err := os.Stat(filepath.Join(metaDir, candidate)); err == nil {
+			return false, nil
+		}
+	}
+	if err := os.MkdirAll(metaDir, 0755); err != nil {
+		return false, err
+	}
+	stub := fmt.Sprintf("galaxy_info:\n  role_name: %s\n  author: ludus-source\n  description: \"Auto-generated by Ludus source install; replace with real metadata.\"\n", name)
+	if err := os.WriteFile(filepath.Join(metaDir, "main.yml"), []byte(stub), 0644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // installUnionedRoles installs galaxy and subscription roles for every
