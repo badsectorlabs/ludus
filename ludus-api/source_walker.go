@@ -27,7 +27,6 @@ type WalkedBlueprint struct {
 	ConfigPath       string
 	RequirementsYAML []byte // nil if no requirements.yml
 	ThumbnailPath    string
-	ReadmePath       string
 	ScopedTemplates  []string
 	ScopedLocalRoles []string
 }
@@ -148,9 +147,6 @@ func walkBlueprint(bpDir string) (*WalkedBlueprint, error) {
 		if _, err := os.Stat(thumbPath); err == nil {
 			bp.ThumbnailPath = thumbPath
 		}
-	}
-	if _, err := os.Stat(filepath.Join(bpDir, "README.md")); err == nil {
-		bp.ReadmePath = filepath.Join(bpDir, "README.md")
 	}
 	bp.ScopedTemplates = walkSubdirs(filepath.Join(bpDir, "templates"))
 	bp.ScopedLocalRoles = walkSubdirs(filepath.Join(bpDir, "roles"))

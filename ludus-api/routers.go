@@ -937,47 +937,47 @@ var routes = PocketBaseRoutes{
 		InstallBlueprintDeps,
 	},
 
-	// Blueprint source routes
+	// Source routes
 	{
-		"CreateBlueprintSource",
+		"CreateSource",
 		http.MethodPost,
 		"/sources",
-		CreateBlueprintSource,
+		CreateSource,
 	},
 
 	{
-		"ListBlueprintSources",
+		"ListSources",
 		http.MethodGet,
 		"/sources",
-		ListBlueprintSources,
+		ListSources,
 	},
 
 	{
-		"GetBlueprintSource",
+		"GetSource",
 		http.MethodGet,
 		"/sources/{sourceID}",
-		GetBlueprintSource,
+		GetSource,
 	},
 
 	{
-		"UpdateBlueprintSource",
+		"UpdateSource",
 		http.MethodPatch,
 		"/sources/{sourceID}",
-		UpdateBlueprintSource,
+		UpdateSource,
 	},
 
 	{
-		"DeleteBlueprintSource",
+		"DeleteSource",
 		http.MethodDelete,
 		"/sources/{sourceID}",
-		DeleteBlueprintSource,
+		DeleteSource,
 	},
 
 	{
-		"SyncBlueprintSource",
+		"SyncSource",
 		http.MethodPost,
 		"/sources/{sourceID}/sync",
-		SyncBlueprintSource,
+		SyncSource,
 	},
 
 	{
@@ -1093,5 +1093,4 @@ var routes = PocketBaseRoutes{
 		"/ansible/role/scope",
 		MoveRoleScope,
 	},
-
 }

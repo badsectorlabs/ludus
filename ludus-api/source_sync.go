@@ -48,7 +48,7 @@ type DryRunPlan struct {
 	SubscriptionRoles []string `json:"subscriptionRoles"`
 }
 
-// sourceSyncLocks serialises SyncSource per source record. Concurrent syncs on
+// sourceSyncLocks serialises runSourceSync per source record. Concurrent syncs on
 // the same source would race the git checkout, the disk artifact copies, and
 // the blueprint upserts.
 var sourceSyncLocks sync.Map
@@ -60,11 +60,11 @@ func lockSourceSync(sourceRecordID string) func() {
 	return mu.Unlock
 }
 
-// SyncSource fetches/extracts the source on disk, walks it, upserts
+// runSourceSync fetches/extracts the source on disk, walks it, upserts
 // source-derived blueprints, registers shipped templates and local roles, and
 // runs the unioned role install. Used by both source-add (the heavy first run)
 // and source-sync (idempotent re-application). Synchronous.
-func SyncSource(ctx context.Context, e *core.RequestEvent, app core.App, sourceRecord *core.Record, opts SyncOptions) (*SyncResult, error) {
+func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sourceRecord *core.Record, opts SyncOptions) (*SyncResult, error) {
 	defer lockSourceSync(sourceRecord.Id)()
 	checkoutDir := SourceCheckoutDir(sourceRecord.Id)
 
@@ -286,12 +286,6 @@ func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource
 				rec.Set("thumbnail", file)
 			}
 		}
-		if bp.ReadmePath != "" {
-			if data, rerr := os.ReadFile(bp.ReadmePath); rerr == nil {
-				rec.Set("long_description", string(data))
-			}
-		}
-
 		if err := app.Save(rec); err != nil {
 			return fmt.Errorf("save blueprint %s/%s: %w", sourceID, bp.Manifest.ID, err)
 		}
@@ -339,7 +333,7 @@ func SyncAllSourcesOnStartup(app core.App) {
 			sem <- struct{}{}
 			go func(s *core.Record) {
 				defer func() { <-sem }()
-				_, _ = SyncSource(context.Background(), nil, app, s, SyncOptions{})
+				_, _ = runSourceSync(context.Background(), nil, app, s, SyncOptions{})
 			}(src)
 		}
 		for i := 0; i < cap(sem); i++ {
