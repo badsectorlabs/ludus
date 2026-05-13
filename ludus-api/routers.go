@@ -107,6 +107,12 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		if err := startupSyncTemplatesCollection(app); err != nil {
 			logger.Error(fmt.Sprintf("Error syncing templates collection on startup: %v", err))
 		}
+		if err := startupReconcileRunningLogHistory(app); err != nil {
+			logger.Error(fmt.Sprintf("Error reconciling orphaned running log history on startup: %v", err))
+		}
+		if err := startupReconcileRangeStates(app); err != nil {
+			logger.Error(fmt.Sprintf("Error reconciling orphaned range states on startup: %v", err))
+		}
 	}
 
 	// Setup NAT VNet for cluster mode, this function checks if we are in cluster mode first
