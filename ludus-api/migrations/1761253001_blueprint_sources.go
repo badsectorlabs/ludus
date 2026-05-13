@@ -194,7 +194,6 @@ func extendBlueprintsCollection(app core.App) error {
 	add(&core.JSONField{Name: "inferred_templates"})
 	add(&core.JSONField{Name: "inferred_roles"})
 	add(&core.TextField{Name: "requirements_yaml"})
-	add(&core.TextField{Name: "long_description"})
 
 	// blueprintID must be globally unique: a local blueprint id "goad/foo"
 	// otherwise collides with source "goad" sub "foo".
@@ -388,7 +387,7 @@ func stripBlueprintsCollectionExtensions(app core.App) error {
 		"lastInstallStatus", "lastInstallError", "lastInstalledAt",
 		"bundlePath", "bundle_complete",
 		"source", "sourceBlueprintID", "blueprint_path", "config_path",
-		"inferred_templates", "inferred_roles", "requirements_yaml", "long_description",
+		"inferred_templates", "inferred_roles", "requirements_yaml",
 	} {
 		if f := c.Fields.GetByName(name); f != nil {
 			_ = f

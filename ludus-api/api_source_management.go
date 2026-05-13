@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -44,10 +45,10 @@ func archiveOverLimit(e *core.RequestEvent) bool {
 	return false
 }
 
-// CreateBlueprintSource handles POST /sources. Body is JSON or multipart;
+// CreateSource handles POST /sources. Body is JSON or multipart;
 // upload-type sources require an `archive` file field. Runs sync inline and
 // rolls the source row back if the first sync fails.
-func CreateBlueprintSource(e *core.RequestEvent) error {
+func CreateSource(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
 	if user == nil {
 		return JSONError(e, http.StatusUnauthorized, "unauthenticated")
@@ -163,7 +164,7 @@ func CreateBlueprintSource(e *core.RequestEvent) error {
 
 	// Dry-run: sync, return the plan, roll the row + on-disk checkout back.
 	if req.DryRun {
-		syncResult, syncErr := SyncSource(context.Background(), e, e.App, src, opts)
+		syncResult, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
 		_ = os.RemoveAll(SourceCheckoutDir(src.Id))
 		_ = e.App.Delete(src)
 		if syncErr != nil {
@@ -176,7 +177,7 @@ func CreateBlueprintSource(e *core.RequestEvent) error {
 	}
 
 	// First-sync failure rolls the row back so the caller can retry without rm.
-	syncResult, syncErr := SyncSource(context.Background(), e, e.App, src, opts)
+	syncResult, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
 	if syncErr != nil {
 		_ = os.RemoveAll(SourceCheckoutDir(src.Id))
 		_ = e.App.Delete(src)
@@ -186,7 +187,7 @@ func CreateBlueprintSource(e *core.RequestEvent) error {
 }
 
 // sourceSyncResponse wraps a SyncResult for the wire and tags the source
-// the result belongs to. Used by both CreateBlueprintSource and SyncBlueprintSource.
+// the result belongs to. Used by both CreateSource and SyncSource.
 func sourceSyncResponse(sourceID string, res *SyncResult) map[string]any {
 	out := map[string]any{
 		"sourceID": sourceID,
@@ -296,7 +297,7 @@ func multipartArchiveFilename(e *core.RequestEvent, fieldName string) string {
 	return header.Filename
 }
 
-func ListBlueprintSources(e *core.RequestEvent) error {
+func ListSources(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
 		return err
@@ -321,7 +322,7 @@ func ListBlueprintSources(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, out)
 }
 
-func GetBlueprintSource(e *core.RequestEvent) error {
+func GetSource(e *core.RequestEvent) error {
 	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
 	if err != nil {
 		return err // already a JSONError
@@ -329,11 +330,11 @@ func GetBlueprintSource(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, sourceRecordToResponseWithKind(e.App, src))
 }
 
-// UpdateBlueprintSource handles PATCH /sources/{sourceID}. Body is multipart
+// UpdateSource handles PATCH /sources/{sourceID}. Body is multipart
 // (carries an optional `archive` file plus text fields) or JSON. For
 // upload-type sources, an `archive` triggers an inline sync — the response is
 // the sync result, not a SourceResponse.
-func UpdateBlueprintSource(e *core.RequestEvent) error {
+func UpdateSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
 		return err
@@ -405,7 +406,7 @@ func UpdateBlueprintSource(e *core.RequestEvent) error {
 			Archive:         uploadBytes,
 			ArchiveFilename: uploadFilename,
 		}
-		syncResult, syncErr := SyncSource(context.Background(), e, e.App, src, opts)
+		syncResult, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
 		if syncErr != nil {
 			return JSONError(e, http.StatusBadRequest, syncErr.Error())
 		}
@@ -415,9 +416,13 @@ func UpdateBlueprintSource(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, sourceRecordToResponseWithKind(e.App, src))
 }
 
-// DeleteBlueprintSource handles DELETE /sources/{sourceID}.
-// With purge=true: cascade-removes templates/local-roles/galaxy-roles registered ONLY by this source.
-func DeleteBlueprintSource(e *core.RequestEvent) error {
+// DeleteSource handles DELETE /sources/{sourceID}.
+// With purge=true: cascade-removes every template/local-role/galaxy-role
+// this source's source_artifacts rows claim, regardless of co-claims from
+// other sources. The response carries the sourceIDs of any other sources
+// that also claimed those names — those sources are now missing files and
+// can re-sync to restore them.
+func DeleteSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
 		return err
@@ -434,10 +439,10 @@ func DeleteBlueprintSource(e *core.RequestEvent) error {
 	var req dto.DeleteSourceRequest
 	_ = e.BindBody(&req) // body is optional
 
-	purgeErrors := []string{}
+	var purge PurgeResult
 	if req.Purge {
 		var pErr error
-		purgeErrors, pErr = purgeSourceArtifacts(e.App, src)
+		purge, pErr = purgeSourceArtifacts(e.App, src)
 		if pErr != nil {
 			return JSONError(e, http.StatusInternalServerError, pErr.Error())
 		}
@@ -448,35 +453,57 @@ func DeleteBlueprintSource(e *core.RequestEvent) error {
 	if err := e.App.Delete(src); err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-	resp := map[string]any{"status": "deleted"}
-	if len(purgeErrors) > 0 {
-		resp["status"] = "deleted_with_errors"
-		resp["purgeErrors"] = purgeErrors
+	resp := dto.DeleteSourceResponse{Status: "deleted"}
+	if len(purge.Failures) > 0 {
+		resp.Status = "deleted_with_errors"
+		resp.PurgeErrors = purge.Failures
 	}
+	resp.AffectedSources = purge.AffectedSources
 	return e.JSON(http.StatusOK, resp)
 }
 
-// purgeSourceArtifacts cascades to the actual templates/roles registered by this
-// source, but only deletes artifacts that no other source claims. Per-artifact
-// failures are collected and returned so the caller can include them in the response;
-// the function only returns a hard error when the artifact lookup itself fails.
-func purgeSourceArtifacts(app core.App, src *core.Record) ([]string, error) {
-	var failures []string
+// PurgeResult is what purgeSourceArtifacts hands back to the delete handler.
+// Failures are per-artifact errors during removal. AffectedSources are the
+// visible sourceIDs of OTHER sources that also claim any of the artifacts we
+// just removed — those sources are now missing on-disk files and will need
+// to re-sync. We deliberately do NOT skip purging on their behalf: the user
+// asked to purge, and we honor that.
+type PurgeResult struct {
+	Failures        []string
+	AffectedSources []string
+}
+
+// purgeSourceArtifacts removes every template/role this source's
+// source_artifacts rows claim — regardless of whether other sources also
+// claim the same name. Per-artifact failures are collected and returned so
+// the caller can include them in the response. The function only returns a
+// hard error when the artifact lookup itself fails.
+func purgeSourceArtifacts(app core.App, src *core.Record) (PurgeResult, error) {
+	var res PurgeResult
+	affected := map[string]bool{}
 
 	artifacts, err := app.FindRecordsByFilter("source_artifacts",
 		"source = {:s}", "", 0, 0, map[string]any{"s": src.Id})
 	if err != nil {
-		return failures, err
+		return res, err
 	}
 	for _, art := range artifacts {
 		kind := art.GetString("kind")
 		name := art.GetString("name")
+
+		// Collect co-claimants for reporting — they keep their source_artifacts
+		// rows, but their on-disk files are about to go away.
 		others, _ := app.FindRecordsByFilter("source_artifacts",
-			"source != {:s} && kind = {:k} && name = {:n}", "", 1, 0,
+			"source != {:s} && kind = {:k} && name = {:n}", "", 0, 0,
 			map[string]any{"s": src.Id, "k": kind, "n": name})
-		if len(others) > 0 {
-			continue
+		for _, row := range others {
+			otherRecID := row.GetString("source")
+			if otherRecID == "" || affected[otherRecID] {
+				continue
+			}
+			affected[otherRecID] = true
 		}
+
 		var rmErr error
 		switch kind {
 		case "template":
@@ -492,10 +519,24 @@ func purgeSourceArtifacts(app core.App, src *core.Record) ([]string, error) {
 			rmErr = removeGalaxyRoleByName(app, name, src)
 		}
 		if rmErr != nil {
-			failures = append(failures, fmt.Sprintf("%s %q: %v", kind, name, rmErr))
+			res.Failures = append(res.Failures, fmt.Sprintf("%s %q: %v", kind, name, rmErr))
 		}
 	}
-	return failures, nil
+
+	// Resolve affected source record ids to visible sourceIDs for the response.
+	for recID := range affected {
+		other, lookupErr := app.FindRecordById("sources", recID)
+		if lookupErr != nil {
+			continue
+		}
+		visible := other.GetString("sourceID")
+		if visible == "" {
+			visible = recID
+		}
+		res.AffectedSources = append(res.AffectedSources, visible)
+	}
+	sort.Strings(res.AffectedSources)
+	return res, nil
 }
 
 func removeTemplateByName(_ core.App, name string) error {
@@ -648,11 +689,13 @@ func findSourceByVisibleID(e *core.RequestEvent, sourceID string) (*core.Record,
 	return records[0], nil
 }
 
-// SyncBlueprintSource handles POST /sources/{sourceID}/sync. Owner-or-admin
-// only. A multipart `archive` field replaces the stored archive on
-// upload-type sources; rejected on git-type. dryRun returns the plan without
-// touching state.
-func SyncBlueprintSource(e *core.RequestEvent) error {
+// SyncSource handles POST /sources/{sourceID}/sync. Owner-or-admin
+// only. For git sources, re-clones at the source's ref and reinstalls. For
+// upload sources, reinstalls from the existing on-disk checkout — the same
+// archive bytes that were stored when the source was created. To push a new
+// archive version for an upload source, PATCH the source with the archive
+// instead. dryRun returns the plan without touching state.
+func SyncSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
 		return err
@@ -664,10 +707,6 @@ func SyncBlueprintSource(e *core.RequestEvent) error {
 	}
 	if !user.IsAdmin() && src.GetString("owner") != user.Id {
 		return JSONError(e, http.StatusForbidden, "only the owner or an admin can sync a source")
-	}
-	if src.GetString("type") != "git" {
-		return JSONError(e, http.StatusBadRequest,
-			"sync only applies to git sources; for upload sources, PATCH the source with a new archive to push a new version")
 	}
 
 	var req dto.SyncSourceRequest
@@ -684,7 +723,7 @@ func SyncBlueprintSource(e *core.RequestEvent) error {
 
 	// Dry-run: run sync synchronously and return the plan; no persisted state changes.
 	if req.DryRun {
-		result, syncErr := SyncSource(context.Background(), e, e.App, src, opts)
+		result, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
 		if syncErr != nil {
 			return JSONError(e, http.StatusInternalServerError, syncErr.Error())
 		}
@@ -694,7 +733,7 @@ func SyncBlueprintSource(e *core.RequestEvent) error {
 		return e.JSON(http.StatusOK, result.DryRun)
 	}
 
-	syncResult, syncErr := SyncSource(context.Background(), e, e.App, src, opts)
+	syncResult, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
 	if syncErr != nil {
 		return JSONError(e, http.StatusInternalServerError, syncErr.Error())
 	}
@@ -780,7 +819,6 @@ func GetSourceBlueprintManifest(e *core.RequestEvent) error {
 		"inferred_templates": anySliceToStrings(bp.Get("inferred_templates")),
 		"inferred_roles":     anySliceToStrings(bp.Get("inferred_roles")),
 		"requirements_yaml":  bp.GetString("requirements_yaml"),
-		"long_description":   bp.GetString("long_description"),
 	})
 }
 

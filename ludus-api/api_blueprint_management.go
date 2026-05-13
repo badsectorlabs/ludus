@@ -1614,7 +1614,6 @@ func GetBlueprintDetail(e *core.RequestEvent) error {
 		"version":           bp.GetString("version"),
 		"tags":              anySliceToStrings(bp.Get("tags")),
 		"min_ludus_version": bp.GetString("min_ludus_version"),
-		"long_description":  bp.GetString("long_description"),
 		"templateStatus":    computeTemplateStatus(e, templates),
 		"roleStatus":        computeRoleStatus(e, user, roles),
 		"lastInstallStatus": bp.GetString("lastInstallStatus"),

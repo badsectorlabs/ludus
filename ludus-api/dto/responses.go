@@ -623,6 +623,12 @@ type AutoShutdownResponse struct {
 	AutoShutdownTimeout AutoShutdownDetail `json:"autoShutdownTimeout"`
 }
 
+type DeleteSourceResponse struct {
+	Status          string   `json:"status"`
+	PurgeErrors     []string `json:"purgeErrors,omitempty"`
+	AffectedSources []string `json:"affectedSources,omitempty"`
+}
+
 type SourceResponse struct {
 	ID             string   `json:"id"`
 	SourceID       string   `json:"sourceID"`
