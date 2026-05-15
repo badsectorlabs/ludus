@@ -3,51 +3,14 @@ package ludusapi
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/pocketbase/pocketbase/core"
-	"gopkg.in/yaml.v3"
+	"ludusapi/dto"
 	"ludusapi/models"
+
+	"github.com/pocketbase/pocketbase/core"
 )
-
-func mergeStringSlicesUnique(a, b []string) []string {
-	seen := make(map[string]struct{}, len(a)+len(b))
-	out := make([]string, 0, len(a)+len(b))
-	for _, s := range a {
-		if _, ok := seen[s]; ok {
-			continue
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
-	}
-	for _, s := range b {
-		if _, ok := seen[s]; ok {
-			continue
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
-	}
-	return out
-}
-
-func readDeclaredSubscriptionRoles(bundleDir string) []string {
-	if bundleDir == "" {
-		return nil
-	}
-	data, err := os.ReadFile(filepath.Join(bundleDir, "subscription_refs.yml"))
-	if err != nil {
-		return nil
-	}
-	var doc struct {
-		Roles []string `yaml:"roles"`
-	}
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil
-	}
-	return doc.Roles
-}
 
 type TemplateStatusEntry struct {
 	Name  string `json:"name"`
@@ -142,127 +105,43 @@ type ResolverOpts struct {
 	// SourceRecordID: when set, registered artifacts are tracked in
 	// source_artifacts; empty for local blueprints.
 	SourceRecordID string
-	// PreInferredRoles, when non-nil, bypasses reading and parsing
-	// ConfigPath. Useful when the role set is already resolved (e.g. from DB
-	// columns) and no on-disk config is available.
-	PreInferredRoles []string
 }
 
-type ResolverResult struct {
-	TemplateResults  []ArtifactResult
-	LocalRoleResults []ArtifactResult
-	RoleResults      []RoleInstallResult
-}
-
-// ResolveAndInstall is the single entry point for "install this blueprint's
-// dependencies." Registers bundled templates and local roles, then installs
-// galaxy and subscription roles declared in config.yml + requirements.yml.
-// Idempotent.
-//
-// NOTE for sync callers: registerTemplates and registerLocalRoles in
-// source_install.go already handle both shared and scoped artifacts for the
-// full-source sync path. To avoid double-registration, installUnionedRoles
-// calls only installRolesForBlueprint rather than the full ResolveAndInstall.
-func ResolveAndInstall(e *core.RequestEvent, app core.App, walked WalkedBlueprint, opts ResolverOpts) ResolverResult {
-	out := ResolverResult{}
-
-	for _, dir := range walked.ScopedTemplates {
-		name := filepath.Base(dir)
-		if err := addTemplateFromDirectory(app, dir, opts.ForceRoles); err != nil {
-			out.TemplateResults = append(out.TemplateResults, ArtifactResult{Name: name, OK: false, Message: err.Error()})
-			continue
-		}
-		if opts.SourceRecordID != "" {
-			insertSourceArtifact(app, opts.SourceRecordID, "template", name, "")
-		}
-		out.TemplateResults = append(out.TemplateResults, ArtifactResult{Name: name, OK: true})
-	}
-
-	for _, dir := range walked.ScopedLocalRoles {
-		name := filepath.Base(dir)
-		if err := addLocalRoleFromDirectory(app, dir, opts.OwnerProxmoxUser, opts.GlobalRoles, opts.ForceRoles); err != nil {
-			out.LocalRoleResults = append(out.LocalRoleResults, ArtifactResult{Name: name, OK: false, Message: err.Error()})
-			continue
-		}
-		if opts.SourceRecordID != "" {
-			insertSourceArtifact(app, opts.SourceRecordID, "local_role", name, "")
-		}
-		out.LocalRoleResults = append(out.LocalRoleResults, ArtifactResult{Name: name, OK: true})
-	}
-
-	out.RoleResults = installRolesForBlueprint(e, app, walked, opts)
-	return out
-}
-
-// installRolesForBlueprint reads config.yml + requirements.yml from the
-// bundle, splits roles into public/subscription, installs each set, returns
-// per-role results. PreInferredRoles bypasses the disk read.
+// installRolesForBlueprint installs every dependency declared in the
+// blueprint's requirements.yml: galaxy roles (`roles:`), collections
+// (`collections:`), and subscription roles (`subscription_roles:`).
+// Returns per-role results.
 func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedBlueprint, opts ResolverOpts) []RoleInstallResult {
-	var inferredRoles []string
-
-	if opts.PreInferredRoles != nil {
-		inferredRoles = opts.PreInferredRoles
-	} else {
-		var configBytes []byte
-		if walked.ConfigPath != "" {
-			if data, err := os.ReadFile(walked.ConfigPath); err == nil {
-				configBytes = data
-			}
-		}
-		_, inferredRoles, _ = InferFromRangeConfig(configBytes)
-
-		// Strip locally-bundled role names; those are registered via
-		// addLocalRoleFromDirectory and must not be requested from galaxy.
-		bundledNames := map[string]bool{}
-		for _, dir := range walked.ScopedLocalRoles {
-			bundledNames[filepath.Base(dir)] = true
-		}
-		filtered := inferredRoles[:0:0]
-		for _, r := range inferredRoles {
-			if !bundledNames[r] {
-				filtered = append(filtered, r)
-			}
-		}
-		inferredRoles = filtered
-	}
-
-	// Union the bundle's declared subscription roles with the live catalog
-	// so an importing subscriber routes them correctly even before its own
-	// catalog has fetched, and an unlicensed instance can detect them
-	// instead of silently falling through to a same-named galaxy role.
-	declaredSub := readDeclaredSubscriptionRoles(walked.Dir)
+	declaredSub := subscriptionRolesFromRequirements(walked.RequirementsYAML)
 	catalog := getSubscriptionCatalogNames(e)
-	subSet := mergeStringSlicesUnique(declaredSub, catalog)
-	subRoles, pubRoles := SplitSubscriptionRoles(inferredRoles, subSet)
 
 	var out []RoleInstallResult
 
-	if len(subRoles) > 0 {
+	if len(declaredSub) > 0 {
 		switch {
 		case server == nil || !server.LicenseValid || server.LicenseKey == "":
 			out = append(out, RoleInstallResult{
 				OK:    false,
-				Error: fmt.Sprintf("blueprint requires Ludus subscription roles, but this instance has no valid license: %v", subRoles),
+				Error: fmt.Sprintf("blueprint declares Ludus subscription roles, but this instance has no valid license: %v", declaredSub),
 			})
 			return out
 		case len(catalog) == 0:
 			out = append(out, RoleInstallResult{
 				OK:    false,
-				Error: fmt.Sprintf("blueprint requires Ludus subscription roles, but the live subscription catalog is empty (license-server unreachable, missing entitlement, or community license): %v", subRoles),
+				Error: fmt.Sprintf("blueprint declares Ludus subscription roles, but the live subscription catalog is empty (license-server unreachable, missing entitlement, or community license): %v", declaredSub),
 			})
 			return out
 		}
 	}
 
-	if hasRequirementsRoles(walked.RequirementsYAML) || len(pubRoles) > 0 {
-		augmented := augmentRequirementsWithBareNames(walked.RequirementsYAML, pubRoles)
+	if hasRequirementsRoles(walked.RequirementsYAML) {
 		rolesPath := ""
 		if opts.GlobalRoles {
 			rolesPath = globalRolesPath()
 		} else if opts.OwnerProxmoxUser != "" {
 			rolesPath = userRolesPath(opts.OwnerProxmoxUser)
 		}
-		results, err := InstallRolesFromRequirementsWithHome(augmented, rolesPath, opts.AnsibleHome, opts.ForceRoles)
+		results, err := InstallRolesFromRequirementsWithHome(walked.RequirementsYAML, rolesPath, opts.AnsibleHome, opts.ForceRoles)
 		if err != nil && len(results) == 0 {
 			out = append(out, RoleInstallResult{OK: false, Error: err.Error()})
 		}
@@ -278,11 +157,37 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 		out = append(out, results...)
 	}
 
+	// Collections install via `ansible-galaxy collection install -r`. The same
+	// requirements YAML is reused; the role and collection subcommands ignore
+	// each other's sections.
+	//
+	// Collection rows are recorded in source_artifacts for display, but source
+	// purge only deletes the rows — ansible-galaxy has no `collection remove`
+	// subcommand, so the on-disk install is left in place. The row is a claim
+	// ("this source declared this collection"), not a lifecycle anchor.
+	if hasRequirementsCollections(walked.RequirementsYAML) {
+		colResults, err := InstallCollectionsFromRequirementsWithHome(walked.RequirementsYAML, opts.AnsibleHome, opts.ForceRoles)
+		if err != nil && len(colResults) == 0 {
+			out = append(out, RoleInstallResult{OK: false, Error: err.Error()})
+		}
+		for _, r := range colResults {
+			if r.OK && opts.SourceRecordID != "" && r.Name != "" {
+				insertSourceArtifact(app, opts.SourceRecordID, "collection", r.Name, r.Version)
+			}
+		}
+		out = append(out, colResults...)
+	}
+
 	// Subscription roles via the licensed-pipeline helper. NOT tracked in
 	// source_artifacts — they're licensed-pipeline globals shared across all
 	// users and sources. Recording them would cause `source rm --purge` to
 	// try deleting the global install (incorrect, and would fail on perms).
-	for _, name := range subRoles {
+	//
+	// We install every declared name. A declared name absent from the live
+	// catalog will fail at download time and surface as a per-role error;
+	// we don't pre-filter here because the catalog can lag (e.g. fetch in
+	// progress) and we'd rather attempt and fail loudly than silently skip.
+	for _, name := range declaredSub {
 		if err := installSubscriptionRoleByName(e, name, opts.AnsibleHome); err != nil {
 			out = append(out, RoleInstallResult{Name: name, OK: false, Error: err.Error()})
 		} else {
@@ -293,15 +198,29 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 	return out
 }
 
-func applyResolverResultToStatus(app core.App, rec *core.Record, res ResolverResult) {
-	failures := collectArtifactFailures(res.TemplateResults, res.LocalRoleResults, res.RoleResults)
+func applyRoleResultsToStatus(app core.App, rec *core.Record, roles []RoleInstallResult) {
+	failures := collectArtifactFailures(nil, nil, roles)
 	markInstallStatusFromFailures(app, rec, failures)
 }
 
+func roleResultsToDTO(in []RoleInstallResult) []dto.BlueprintCreatedResponseRoleResult {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]dto.BlueprintCreatedResponseRoleResult, len(in))
+	for i, r := range in {
+		out[i] = dto.BlueprintCreatedResponseRoleResult{
+			Name:    r.Name,
+			Version: r.Version,
+			OK:      r.OK,
+			Error:   r.Error,
+		}
+	}
+	return out
+}
+
 // collectArtifactFailures walks per-artifact results and returns one
-// "<kind> <name>: <reason>" string per failed entry. Shared between source
-// sync (SyncResult) and blueprint install (ResolverResult) since the result
-// shapes match.
+// "<kind> <name>: <reason>" string per failed entry.
 func collectArtifactFailures(templates, localRoles []ArtifactResult, roles []RoleInstallResult) []string {
 	var failures []string
 	for _, r := range templates {

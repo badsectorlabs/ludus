@@ -45,12 +45,9 @@ my-source-repo/
     └── goad/
         ├── blueprint.yml            # display metadata
         ├── range-config.yml         # the range config
-        ├── requirements.yml         # galaxy/git role deps for this blueprint
-        ├── thumbnail.png
-        └── README.md                # long description
+        ├── requirements.yml         # galaxy roles, collections, subscription_roles
+        └── thumbnail.png
 ```
-
-If a template or role is only used by one blueprint, put it inside that blueprint's directory at `blueprints/<id>/templates/` or `blueprints/<id>/roles/` instead of the top-level `templates/` or `roles/`.
 
 ## Common Workflows
 
@@ -121,8 +118,6 @@ Templates register to a global, single-namespace pool. If two sources both regis
 
 After `ludus source add`, run `ludus templates build` to produce the VM image. Build is a separate step.
 
-Per-blueprint templates live at `blueprints/<id>/templates/<n>/` and follow the same shape.
-
 ### Ansible roles
 
 Each `roles/<n>/` directory is a standard [Ansible role](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html):
@@ -139,13 +134,11 @@ Reference roles by directory name (`my_helper`) under `roles:` in any blueprint'
 
 Roles install per-user by default; admins can use `--global-roles` on `source add` to install instance-wide.
 
-Per-blueprint roles live at `blueprints/<id>/roles/<n>/` and follow the same shape.
-
 ### Blueprints
 
 Each `blueprints/<id>/` directory holds one blueprint. Two files are required when the directory exists:
 
-`blueprint.yml` holds display metadata. Ludus infers which templates and roles a blueprint needs by reading its `range-config.yml`.
+`blueprint.yml` holds display metadata. Ludus reads `range-config.yml` to surface which templates and roles a blueprint references on the blueprint detail page.
 
 ```yaml
 manifest_version: 1
@@ -160,16 +153,30 @@ config: range-config.yml
 
 `range-config.yml` is a standard Ludus range config, the same format `ludus range config get` returns. See [Range Config](configuration.mdx).
 
-`requirements.yml` (optional) uses [ansible-galaxy syntax](https://docs.ansible.com/ansible/latest/galaxy/user_guide.html#installing-roles-and-collections-from-the-same-requirements-yml-file). Only needed when a role isn't on galaxy.ansible.com by bare name, or when you need a pinned version:
+`requirements.yml` is the manifest for the ansible roles and collections a blueprint depends on. Every role referenced under `roles:` in `range-config.yml` must appear here (or as a directory under the source's top-level `roles/`).
 
 ```yaml
 roles:
-  - name: badsectorlabs.ludus_adcs
+  - name: geerlingguy.docker
+    version: 7.4.4                                  # pin a galaxy role
+  - name: badsectorlabs.ludus_adcs                  # off-galaxy: name + src
     src: https://github.com/badsectorlabs/ludus_adcs
     version: v1.2.0
+
+collections:                                        # required for any 3-part
+  - name: community.crypto                          # FQCN role like
+    version: 2.16.0                                 # community.crypto.openssl_certificate
+  - name: my.collection                             # off-galaxy collection
+    source: https://github.com/foo/my-collection.git # NOTE: collections use
+    type: git                                       # `source:` not `src:`
+    version: main
+
+subscription_roles:                                 # license-gated roles served
+  - ludus_ghosts_client                             # from the Ludus catalog
+  - name: ludus_adcs                                
 ```
 
-Blueprints that use only plain galaxy roles (e.g. `geerlingguy.docker`) need no `requirements.yml`.
+Subscription role bytes never travel with a source; only the names. The importing instance's license must cover them. See the [Private Role Catalog](../enterprise/subscription-roles/roles-overview.md).
 
 ### `source.yml` at repo root
 

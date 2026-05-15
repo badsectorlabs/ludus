@@ -386,6 +386,11 @@ type ListSourceRolesResponseItem struct {
 	Scope   string `json:"scope"`
 }
 
+type ListSourceCollectionsResponseItem struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+}
+
 type ListUserResponse struct {
 	Value []ListUserResponseItem `json:"-"`
 }
@@ -627,6 +632,22 @@ type DeleteSourceResponse struct {
 	Status          string   `json:"status"`
 	PurgeErrors     []string `json:"purgeErrors,omitempty"`
 	AffectedSources []string `json:"affectedSources,omitempty"`
+}
+
+// BlueprintCreatedResponse is the shape returned by CreateBlueprint,
+// CreateBlueprintFromRange, CopyBlueprint, and ImportBlueprint.
+type BlueprintCreatedResponse struct {
+	Result      string                              `json:"result,omitempty"`
+	BlueprintID string                              `json:"blueprintID"`
+	ID          string                              `json:"id,omitempty"` // record ID; emitted by ImportBlueprint
+	RoleResults []BlueprintCreatedResponseRoleResult `json:"roleResults,omitempty"`
+}
+
+type BlueprintCreatedResponseRoleResult struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
 }
 
 type SourceResponse struct {

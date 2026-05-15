@@ -16,11 +16,7 @@ import (
 
 func registerTemplates(app core.App, src *core.Record, walked *WalkedSource, force bool) []ArtifactResult {
 	var results []ArtifactResult
-	dirs := append([]string{}, walked.SharedTemplates...)
-	for _, bp := range walked.Blueprints {
-		dirs = append(dirs, bp.ScopedTemplates...)
-	}
-	for _, dir := range dirs {
+	for _, dir := range walked.Templates {
 		name := filepath.Base(dir)
 		if err := addTemplateFromDirectory(app, dir, force); err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
@@ -68,17 +64,13 @@ func ensureTemplateRow(app core.App, name, srcDir string) error {
 
 func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, opts SyncOptions) []ArtifactResult {
 	var results []ArtifactResult
-	dirs := append([]string{}, walked.SharedLocalRoles...)
-	for _, bp := range walked.Blueprints {
-		dirs = append(dirs, bp.ScopedLocalRoles...)
-	}
 	ownerProxmoxUsername := ""
 	if !opts.GlobalRoles {
 		if owner, err := app.FindRecordById("users", src.GetString("owner")); err == nil {
 			ownerProxmoxUsername = owner.GetString("proxmoxUsername")
 		}
 	}
-	for _, dir := range dirs {
+	for _, dir := range walked.LocalRoles {
 		name := filepath.Base(dir)
 		if err := addLocalRoleFromDirectory(app, dir, ownerProxmoxUsername, opts.GlobalRoles, opts.Force); err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
@@ -90,10 +82,14 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 	return results
 }
 
-// insertSourceArtifact idempotently records (source, kind, name, version).
-// Multiple sources sharing the same role/template name is allowed —
-// collisions are rare in practice, and the on-disk content reflects the most
-// recent force-sync. The frontend can join across source_artifacts to surface
+// insertSourceArtifact upserts the (source, kind, name) claim. If a row
+// already exists for the same source claiming the same name, its version is
+// updated in place — re-syncing a source with a bumped role version must
+// not produce duplicate rows.
+//
+// Multiple sources sharing the same role/template name is allowed; the
+// (source, kind, name) tuple is per-source so cross-source claims live as
+// distinct rows. The frontend can join across source_artifacts to surface
 // co-claims when relevant.
 func insertSourceArtifact(app core.App, sourceID, kind, name, version string) {
 	collection, err := app.FindCollectionByNameOrId("source_artifacts")
@@ -101,9 +97,14 @@ func insertSourceArtifact(app core.App, sourceID, kind, name, version string) {
 		return
 	}
 	existing, _ := app.FindRecordsByFilter("source_artifacts",
-		"source = {:s} && kind = {:k} && name = {:n} && version = {:v}", "", 1, 0,
-		map[string]any{"s": sourceID, "k": kind, "n": name, "v": version})
+		"source = {:s} && kind = {:k} && name = {:n}", "", 1, 0,
+		map[string]any{"s": sourceID, "k": kind, "n": name})
 	if len(existing) > 0 {
+		rec := existing[0]
+		if rec.GetString("version") != version {
+			rec.Set("version", version)
+			_ = app.Save(rec)
+		}
 		return
 	}
 	r := core.NewRecord(collection)
@@ -238,9 +239,9 @@ func synthesizeRoleMetaIfMissing(roleDir, name string) (bool, error) {
 }
 
 // installUnionedRoles installs galaxy and subscription roles for every
-// blueprint in a source. registerTemplates and registerLocalRoles already
-// handle the shared/per-blueprint local artifacts, so this only deals with
-// galaxy + subscription roles.
+// blueprint in a source. registerTemplates and registerLocalRoles handle
+// the source-root local artifacts; this only deals with galaxy + subscription
+// roles declared in each blueprint's requirements.yml.
 func installUnionedRoles(e *core.RequestEvent, app core.App, src *core.Record, walked *WalkedSource, opts SyncOptions) []RoleInstallResult {
 	ownerProxmoxUser := ""
 	ownerID := src.GetString("owner")
@@ -252,10 +253,7 @@ func installUnionedRoles(e *core.RequestEvent, app core.App, src *core.Record, w
 
 	var out []RoleInstallResult
 	for _, bp := range walked.Blueprints {
-		augmentedBP := bp
-		augmentedBP.ScopedLocalRoles = appendUnique(bp.ScopedLocalRoles, walked.SharedLocalRoles...)
-
-		results := installRolesForBlueprint(e, app, augmentedBP, ResolverOpts{
+		results := installRolesForBlueprint(e, app, bp, ResolverOpts{
 			ForceRoles:       opts.Force,
 			GlobalRoles:      opts.GlobalRoles,
 			OwnerProxmoxUser: ownerProxmoxUser,
@@ -267,21 +265,6 @@ func installUnionedRoles(e *core.RequestEvent, app core.App, src *core.Record, w
 	return out
 }
 
-func appendUnique(dst []string, extras ...string) []string {
-	have := map[string]struct{}{}
-	for _, s := range dst {
-		have[s] = struct{}{}
-	}
-	result := append([]string{}, dst...)
-	for _, s := range extras {
-		if _, ok := have[s]; !ok {
-			result = append(result, s)
-			have[s] = struct{}{}
-		}
-	}
-	return result
-}
-
 func hasRequirementsRoles(reqYAML []byte) bool {
 	if len(reqYAML) == 0 {
 		return false
@@ -291,24 +274,6 @@ func hasRequirementsRoles(reqYAML []byte) bool {
 	return len(doc.Roles) > 0
 }
 
-// augmentRequirementsWithBareNames adds entries to the merged requirements.yml
-// for any public role name that doesn't already have an explicit entry. Bare
-// names resolve to galaxy.ansible.com lookups.
-func augmentRequirementsWithBareNames(reqYAML []byte, names []string) []byte {
-	var doc RequirementsDoc
-	_ = yaml.Unmarshal(reqYAML, &doc)
-	have := map[string]bool{}
-	for _, r := range doc.Roles {
-		have[r.Name] = true
-	}
-	for _, n := range names {
-		if !have[n] {
-			doc.Roles = append(doc.Roles, RequirementsRole{Name: n})
-		}
-	}
-	out, _ := yaml.Marshal(doc)
-	return out
-}
 
 func pickRolesPathForSourceOwner(app core.App, src *core.Record, global bool) string {
 	if global {
@@ -334,29 +299,6 @@ func userRolesPath(proxmoxUsername string) string {
 		return ""
 	}
 	return filepath.Join(ludusInstallPath, "users", proxmoxUsername, ".ansible", "roles")
-}
-
-// subtractLocalRoleNames returns roleSet minus role names that match a
-// directory shipped by the source as a local role. Those are installed by
-// registerLocalRoles and must not be sent to ansible-galaxy.
-func subtractLocalRoleNames(roleSet []string, walked *WalkedSource) []string {
-	local := map[string]struct{}{}
-	for _, dir := range walked.SharedLocalRoles {
-		local[filepath.Base(dir)] = struct{}{}
-	}
-	for _, bp := range walked.Blueprints {
-		for _, dir := range bp.ScopedLocalRoles {
-			local[filepath.Base(dir)] = struct{}{}
-		}
-	}
-	out := roleSet[:0:0]
-	for _, n := range roleSet {
-		if _, hit := local[n]; hit {
-			continue
-		}
-		out = append(out, n)
-	}
-	return out
 }
 
 func userAnsibleHome(proxmoxUsername string) string {

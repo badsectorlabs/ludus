@@ -194,6 +194,9 @@ func sourceSyncResponse(sourceID string, res *SyncResult) map[string]any {
 	}
 	if res != nil {
 		embedArtifactResults(out, res.TemplateResults, res.LocalRoleResults, res.RoleResults)
+		if len(res.UndeclaredDependencies) > 0 {
+			out["undeclaredDependencies"] = res.UndeclaredDependencies
+		}
 	}
 	return out
 }
@@ -478,6 +481,10 @@ type PurgeResult struct {
 // claim the same name. Per-artifact failures are collected and returned so
 // the caller can include them in the response. The function only returns a
 // hard error when the artifact lookup itself fails.
+//
+// Collections are an exception: ansible-galaxy has no `collection remove`,
+// so the on-disk install is left in place. The row itself is dropped via
+// the cascade when the source record is deleted.
 func purgeSourceArtifacts(app core.App, src *core.Record) (PurgeResult, error) {
 	var res PurgeResult
 	affected := map[string]bool{}
@@ -517,6 +524,8 @@ func purgeSourceArtifacts(app core.App, src *core.Record) (PurgeResult, error) {
 			rmErr = removeLocalRoleByName(app, name, src)
 		case "galaxy_role":
 			rmErr = removeGalaxyRoleByName(app, name, src)
+		case "collection":
+			// ansible-galaxy has no remove subcommand; the row drops via cascade.
 		}
 		if rmErr != nil {
 			res.Failures = append(res.Failures, fmt.Sprintf("%s %q: %v", kind, name, rmErr))
@@ -609,8 +618,8 @@ func sourceRecordToResponse(r *core.Record) dto.SourceResponse {
 }
 
 // computeSourceKind returns a "+" joined string of artifact kinds shipped by a
-// source: any nonempty subset of {"templates", "roles", "blueprints"}.
-// Returns "(empty)" when the source has none.
+// source: any nonempty subset of {"templates", "roles", "collections",
+// "blueprints"}. Returns "(empty)" when the source has none.
 func computeSourceKind(app core.App, srcID string) string {
 	hasBP, _ := app.FindRecordsByFilter("blueprints", "source = {:s}", "", 1, 0,
 		map[string]any{"s": srcID})
@@ -620,6 +629,9 @@ func computeSourceKind(app core.App, srcID string) string {
 	hasRole, _ := app.FindRecordsByFilter("source_artifacts",
 		"source = {:s} && (kind = 'local_role' || kind = 'galaxy_role')", "", 1, 0,
 		map[string]any{"s": srcID})
+	hasCol, _ := app.FindRecordsByFilter("source_artifacts",
+		"source = {:s} && kind = 'collection'", "", 1, 0,
+		map[string]any{"s": srcID})
 
 	parts := []string{}
 	if len(hasTpl) > 0 {
@@ -627,6 +639,9 @@ func computeSourceKind(app core.App, srcID string) string {
 	}
 	if len(hasRole) > 0 {
 		parts = append(parts, "roles")
+	}
+	if len(hasCol) > 0 {
+		parts = append(parts, "collections")
 	}
 	if len(hasBP) > 0 {
 		parts = append(parts, "blueprints")
@@ -806,6 +821,8 @@ func GetSourceBlueprintManifest(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusNotFound, fmt.Sprintf("source-blueprint %q not found", id))
 	}
 	bp := bps[0]
+	configBytes, _ := readBlueprintConfigBytes(bp)
+	templates, roles, _ := InferFromRangeConfig(configBytes)
 	return e.JSON(http.StatusOK, map[string]any{
 		"sourceBlueprintID":  bp.GetString("sourceBlueprintID"),
 		"name":               bp.GetString("name"),
@@ -816,8 +833,8 @@ func GetSourceBlueprintManifest(e *core.RequestEvent) error {
 		"license":            src.GetString("license"),
 		"tags":               anySliceToStrings(bp.Get("tags")),
 		"min_ludus_version":  bp.GetString("min_ludus_version"),
-		"inferred_templates": anySliceToStrings(bp.Get("inferred_templates")),
-		"inferred_roles":     anySliceToStrings(bp.Get("inferred_roles")),
+		"inferred_templates": templates,
+		"inferred_roles":     roles,
 		"requirements_yaml":  bp.GetString("requirements_yaml"),
 	})
 }
@@ -854,6 +871,32 @@ func ListSourceTemplates(e *core.RequestEvent) error {
 	out := make([]dto.ListSourceTemplatesResponseItem, 0, len(records))
 	for _, r := range records {
 		out = append(out, dto.ListSourceTemplatesResponseItem{
+			Name:    r.GetString("name"),
+			Version: r.GetString("version"),
+		})
+	}
+	return e.JSON(http.StatusOK, out)
+}
+
+// ListSourceCollections handles GET /sources/{sourceID}/collections.
+// Returns Ansible collections this source's blueprints declared in their
+// requirements.yml. ansible-galaxy has no remove subcommand, so a source
+// purge leaves the on-disk install in place — the row here is a claim,
+// not a lifecycle anchor.
+func ListSourceCollections(e *core.RequestEvent) error {
+	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
+	if err != nil {
+		return err
+	}
+	records, ferr := e.App.FindRecordsByFilter("source_artifacts",
+		"source = {:s} && kind = 'collection'", "+name", 0, 0,
+		map[string]any{"s": src.Id})
+	if ferr != nil {
+		return JSONError(e, http.StatusInternalServerError, ferr.Error())
+	}
+	out := make([]dto.ListSourceCollectionsResponseItem, 0, len(records))
+	for _, r := range records {
+		out = append(out, dto.ListSourceCollectionsResponseItem{
 			Name:    r.GetString("name"),
 			Version: r.GetString("version"),
 		})

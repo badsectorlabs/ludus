@@ -7,9 +7,9 @@ import (
 )
 
 // Backfill blueprint.version for legacy records that pre-date the
-// version field. The bundle manifest requires semver, and the create
-// handler now refuses to write empty version, so any "" surviving here
-// must be a pre-source-management record.
+// version field. The manifest requires semver, and the create handler
+// now refuses to write empty version, so any "" surviving here must
+// be a pre-source-management record.
 func init() {
 	m.Register(func(app core.App) error {
 		records, err := app.FindAllRecords("blueprints")

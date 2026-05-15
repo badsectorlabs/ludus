@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
@@ -36,10 +37,17 @@ func gzipBytes(in []byte) ([]byte, error) {
 // syncResultPayload mirrors the synchronous response shape from
 // POST /sources and POST /sources/{id}/sync.
 type syncResultPayload struct {
-	SourceID         string                  `json:"sourceID"`
-	TemplateResults  []artifactResultPayload `json:"templateResults"`
-	LocalRoleResults []artifactResultPayload `json:"localRoleResults"`
-	RoleResults      []roleResultPayload     `json:"roleResults"`
+	SourceID               string                        `json:"sourceID"`
+	TemplateResults        []artifactResultPayload       `json:"templateResults"`
+	LocalRoleResults       []artifactResultPayload       `json:"localRoleResults"`
+	RoleResults            []roleResultPayload           `json:"roleResults"`
+	UndeclaredDependencies []undeclaredDependencyPayload `json:"undeclaredDependencies,omitempty"`
+}
+
+type undeclaredDependencyPayload struct {
+	BlueprintID string `json:"blueprintID"`
+	Role        string `json:"role"`
+	Hint        string `json:"hint,omitempty"`
 }
 
 type artifactResultPayload struct {
@@ -129,6 +137,24 @@ func printArtifactOutcome(label, successPhrase, failurePhrase string, failures [
 func printSyncFailures(label string, p syncResultPayload) {
 	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, p.RoleResults)
 	printArtifactOutcome(label, "synced successfully", "synced with errors", failures)
+	printUndeclaredDependencies(p.UndeclaredDependencies)
+}
+
+// printUndeclaredDependencies surfaces range-config role references that
+// aren't covered by requirements.yml. Non-fatal — the source still synced —
+// but the user needs to fix these before deploy or the role install will be
+// silently skipped.
+func printUndeclaredDependencies(deps []undeclaredDependencyPayload) {
+	if len(deps) == 0 {
+		return
+	}
+	logger.Logger.Warnf("%d undeclared dependency reference(s) — install will be skipped at deploy:", len(deps))
+	for _, d := range deps {
+		logger.Logger.Warnf("  - blueprint %q role %q", d.BlueprintID, d.Role)
+		if d.Hint != "" {
+			logger.Logger.Warnf("      %s", d.Hint)
+		}
+	}
 }
 
 // Source-related flag vars; reused across subcommands.
@@ -235,12 +261,13 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 // human-readable summary. The shape mirrors ludus-api's DryRunPlan.
 func printDryRunPlan(body []byte) {
 	var plan struct {
-		SourceName        string   `json:"sourceName"`
-		BlueprintIDs      []string `json:"blueprintIDs"`
-		Templates         []string `json:"templates"`
-		LocalRoles        []string `json:"localRoles"`
-		GalaxyRoles       []string `json:"galaxyRoles"`
-		SubscriptionRoles []string `json:"subscriptionRoles"`
+		SourceName             string                        `json:"sourceName"`
+		BlueprintIDs           []string                      `json:"blueprintIDs"`
+		Templates              []string                      `json:"templates"`
+		LocalRoles             []string                      `json:"localRoles"`
+		GalaxyRoles            []string                      `json:"galaxyRoles"`
+		SubscriptionRoles      []string                      `json:"subscriptionRoles"`
+		UndeclaredDependencies []undeclaredDependencyPayload `json:"undeclaredDependencies"`
 	}
 	if err := json.Unmarshal(body, &plan); err != nil {
 		logger.Logger.Info(string(body))
@@ -265,6 +292,7 @@ func printDryRunPlan(body []byte) {
 		}
 		fmt.Printf("  %-19s %s\n", row[0], strings.Join(items, ", "))
 	}
+	printUndeclaredDependencies(plan.UndeclaredDependencies)
 }
 
 func isSourceURL(s string) bool {
@@ -308,14 +336,17 @@ func detectSourceArg(arg string) sourceArgKind {
 	return sourceArgUnknown
 }
 
-
 var sourceListCmd = &cobra.Command{
-	Use:     "list",
-	Short:   "List registered sources",
+	Use:     "list [<sourceID>]",
+	Short:   "List registered sources, or show details for one",
 	Aliases: []string{"ls", "status"},
-	Args:    cobra.NoArgs,
+	Args:    cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+		if len(args) == 1 {
+			runSourceDetail(client, args[0])
+			return
+		}
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources"))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
@@ -344,6 +375,149 @@ var sourceListCmd = &cobra.Command{
 	},
 }
 
+// runSourceDetail prints metadata + per-artifact tables for one source.
+// Each sub-resource fetch is independent: a failure on one (e.g. perms) does
+// not suppress the rest. Empty sections render as "(none)".
+func runSourceDetail(client *resty.Client, sourceID string) {
+	srcJSON, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID))
+	if didFailOrWantJSON(ok, srcJSON) {
+		return
+	}
+	var src dto.SourceResponse
+	if err := json.Unmarshal(srcJSON, &src); err != nil {
+		logger.Logger.Fatal(err)
+	}
+
+	fmt.Printf("Source: %s\n", src.SourceID)
+	printField("Name", src.Name)
+	printField("Description", src.Description)
+	printField("Type", src.Type)
+	if src.Type == "git" {
+		printField("URL", src.URL)
+		printField("Ref", src.Ref)
+	}
+	if len(src.Authors) > 0 {
+		printField("Authors", strings.Join(src.Authors, ", "))
+	}
+	printField("License", src.License)
+	printField("Homepage", src.Homepage)
+	printField("Owner", src.OwnerUserID)
+	printField("Kind", src.Kind)
+	printField("Last synced", src.LastSyncedAt)
+	printField("Status", src.LastSyncStatus)
+	if src.LastSyncError != "" {
+		printField("Error", src.LastSyncError)
+	}
+	fmt.Println()
+
+	printSourceBlueprints(client, sourceID)
+	printSourceTemplates(client, sourceID)
+	printSourceRoles(client, sourceID)
+	printSourceCollections(client, sourceID)
+}
+
+func printField(label, value string) {
+	if value == "" {
+		return
+	}
+	fmt.Printf("  %-13s %s\n", label+":", value)
+}
+
+func printSourceBlueprints(client *resty.Client, sourceID string) {
+	body, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/blueprints"))
+	if !ok {
+		return
+	}
+	var items []dto.SourceBlueprintListItem
+	if err := json.Unmarshal(body, &items); err != nil {
+		return
+	}
+	fmt.Printf("Blueprints (%d)\n", len(items))
+	if len(items) == 0 {
+		fmt.Println("  (none)")
+		fmt.Println()
+		return
+	}
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Blueprint ID", "Name", "Version", "Tags"})
+	for _, b := range items {
+		table.Append([]string{b.SourceBlueprintID, b.Name, b.Version, strings.Join(b.Tags, ", ")})
+	}
+	table.Render()
+	fmt.Println()
+}
+
+func printSourceTemplates(client *resty.Client, sourceID string) {
+	body, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/templates"))
+	if !ok {
+		return
+	}
+	var items []dto.ListSourceTemplatesResponseItem
+	if err := json.Unmarshal(body, &items); err != nil {
+		return
+	}
+	fmt.Printf("Templates (%d)\n", len(items))
+	if len(items) == 0 {
+		fmt.Println("  (none)")
+		fmt.Println()
+		return
+	}
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Name", "Version"})
+	for _, t := range items {
+		table.Append([]string{t.Name, t.Version})
+	}
+	table.Render()
+	fmt.Println()
+}
+
+func printSourceRoles(client *resty.Client, sourceID string) {
+	body, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/roles"))
+	if !ok {
+		return
+	}
+	var items []dto.ListSourceRolesResponseItem
+	if err := json.Unmarshal(body, &items); err != nil {
+		return
+	}
+	fmt.Printf("Roles (%d)\n", len(items))
+	if len(items) == 0 {
+		fmt.Println("  (none)")
+		fmt.Println()
+		return
+	}
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Name", "Scope", "Version"})
+	for _, r := range items {
+		table.Append([]string{r.Name, r.Scope, r.Version})
+	}
+	table.Render()
+	fmt.Println()
+}
+
+func printSourceCollections(client *resty.Client, sourceID string) {
+	body, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/collections"))
+	if !ok {
+		return
+	}
+	var items []dto.ListSourceCollectionsResponseItem
+	if err := json.Unmarshal(body, &items); err != nil {
+		return
+	}
+	fmt.Printf("Collections (%d)\n", len(items))
+	if len(items) == 0 {
+		fmt.Println("  (none)")
+		fmt.Println()
+		return
+	}
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Name", "Version"})
+	for _, c := range items {
+		table.Append([]string{c.Name, c.Version})
+	}
+	table.Render()
+	fmt.Println()
+}
 
 var sourceSyncCmd = &cobra.Command{
 	Use:   "sync [<sourceID>]",
@@ -385,6 +559,10 @@ func runSourceSync(cmd *cobra.Command, args []string) {
 		if didFailOrWantJSON(success, responseJSON) {
 			continue
 		}
+		if sourceFlagDryRun {
+			printDryRunPlan(responseJSON)
+			continue
+		}
 		var resp syncResultPayload
 		if err := json.Unmarshal(responseJSON, &resp); err != nil || resp.SourceID == "" {
 			logger.Logger.Info(string(responseJSON))
@@ -393,7 +571,6 @@ func runSourceSync(cmd *cobra.Command, args []string) {
 		printSyncFailures(fmt.Sprintf("Source '%s'", resp.SourceID), resp)
 	}
 }
-
 
 var sourceUpdateCmd = &cobra.Command{
 	Use:   "update <sourceID> [<tarball-or-directory>]",
@@ -472,7 +649,6 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 	logger.Logger.Infof("Source '%s' ref updated. Run `ludus source sync %s` to apply.", sid, sid)
 }
 
-
 var sourceRmCmd = &cobra.Command{
 	Use:     "rm <sourceID>",
 	Short:   "Remove a source",
@@ -484,7 +660,7 @@ var sourceRmCmd = &cobra.Command{
 		if !sourceFlagNoPrompt && stdinIsTerminal() {
 			extra := ""
 			if sourceFlagPurge {
-				extra = " and purge its templates/roles"
+				extra = " and uninstall its templates and roles"
 			}
 			fmt.Printf("Remove source '%s'%s? [y/N]: ", args[0], extra)
 			var resp string
@@ -501,14 +677,27 @@ var sourceRmCmd = &cobra.Command{
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		if sourceFlagPurge {
-			logger.Logger.Infof("Source %q removed (templates and roles registered only by this source were also removed).", args[0])
-		} else {
+		if !sourceFlagPurge {
 			logger.Logger.Infof("Source %q removed.", args[0])
+			return
+		}
+		var resp dto.DeleteSourceResponse
+		_ = json.Unmarshal(responseJSON, &resp)
+		logger.Logger.Infof("Source %q removed. Templates and roles registered only by this source were uninstalled. Collections remain installed.", args[0])
+		if len(resp.AffectedSources) > 0 {
+			logger.Logger.Warnf("Other sources also claimed some of these artifacts and will be missing files until re-synced:")
+			for _, s := range resp.AffectedSources {
+				logger.Logger.Warnf("  - %s", s)
+			}
+		}
+		if len(resp.PurgeErrors) > 0 {
+			logger.Logger.Warnf("%d artifact(s) could not be cleaned up:", len(resp.PurgeErrors))
+			for _, e := range resp.PurgeErrors {
+				logger.Logger.Warnf("  - %s", e)
+			}
 		}
 	},
 }
-
 
 func init() {
 	sourceAddCmd.Flags().StringVar(&sourceFlagID, "id", "", "explicit sourceID; overrides auto-derived slug")
@@ -528,7 +717,7 @@ func init() {
 	sourceUpdateCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "overwrite already-installed templates and galaxy/local roles (upload only)")
 
 	// Rm flags.
-	sourceRmCmd.Flags().BoolVar(&sourceFlagPurge, "purge", false, "remove templates/roles registered only by this source")
+	sourceRmCmd.Flags().BoolVar(&sourceFlagPurge, "purge", false, "uninstall templates and roles registered only by this source (collections persist on disk)")
 	sourceRmCmd.Flags().BoolVar(&sourceFlagNoPrompt, "no-prompt", false, "skip confirmation prompt")
 
 	sourceCmd.AddCommand(sourceAddCmd)

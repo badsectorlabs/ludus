@@ -251,18 +251,16 @@ You may only see blueprints you have access to. Admins have access to all bluepr
 | `ludus blueprint unshare group <id> <groupName...>` | Unshare from groups |
 | `ludus blueprint rm <id>` | Delete a blueprint |
 
-## Self-contained bundles
+## Directory Structure
 
-Each blueprint is stored as a self-contained bundle: pinned galaxy role versions plus copies of any local roles and template build configs. Applying it always produces the same range.
+Each blueprint is stored on disk as a small directory holding its range config and dependency manifest. Applying it always produces the same range.
 
 ```
 <ludus_install_path>/blueprints/<record-id>/
-├── blueprint.yml         # display metadata
-├── range-config.yml      # the range config
-├── requirements.yml      # auto-generated; pins galaxy role versions
-├── roles/                # copies of any local Ansible roles
-├── templates/            # copies of any custom Packer template build dirs
-└── subscription_refs.yml # subscription role names (when applicable)
+├── blueprint.yml      # display metadata (imported blueprints only)
+├── range-config.yml   # the range config
+├── requirements.yml   # galaxy roles and collections, and license-gated roles
+└── thumbnail.png      # optional display thumbnail
 ```
 
 ### Export and import
@@ -283,9 +281,11 @@ ludus blueprint apply my-lab
 ludus range deploy
 ```
 
+Blueprint export is a **config snapshot**, not a full installable artifact. The tarball carries `blueprint.yml` (display metadata), `range-config.yml`, `requirements.yml`, and the blueprint's thumbnail if one is set. Galaxy role and collection pins in `requirements.yml` are re-resolved on the importer's instance via ansible-galaxy. Custom local roles and Packer templates do not travel with a single-blueprint export — if you need to distribute those alongside a blueprint, package them as a [source](./sources.md) instead.
+
 ### Subscription roles
 
-Subscription role bytes aren't included; `subscription_refs.yml` lists names only. Applying on an instance without a valid license returns `403` listing the unmet roles. See the [Private Role Catalog](../enterprise/subscription-roles/roles-overview.md) for the list of subscription roles.
+Subscription role bytes are never carried; only the names declared under `subscription_roles:` in `requirements.yml`. At deploy time, an instance without a valid license (or whose catalog doesn't cover one of the names) will fail when ansible-galaxy tries to install the role. See the [Private Role Catalog](../enterprise/subscription-roles/roles-overview.md) for the list of subscription roles.
 
 ### Recovering from a failed install
 

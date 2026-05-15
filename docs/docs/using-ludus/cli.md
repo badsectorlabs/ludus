@@ -507,13 +507,11 @@ Export a blueprint as a `.tar.gz`. The archive contains:
 <blueprint-id>/
 ├── blueprint.yml         # display metadata
 ├── range-config.yml      # the range config
-├── requirements.yml      # auto-generated; pins galaxy role versions
-├── roles/                # copies of any local Ansible roles
-├── templates/            # copies of any custom Packer template build dirs
-└── subscription_refs.yml # subscription role names (when applicable)
+└── requirements.yml      # roles, collections, subscription_roles
+└── thumbnail.png      # optional display thumbnail
 ```
 
-Subscription role bytes are not included — the importing instance must hold a license that grants those roles. See the [Private Role Catalog](../enterprise/subscription-roles/roles-overview.md).
+Blueprint export is a range config snapshot — refs to ansible roles and collections travel via `requirements.yml` and are re-resolved on the importer's instance. Custom local roles and Packer templates do not travel with a blueprint; distribute those via a [source](./sources.md) instead.
 
 ```
 Usage:
