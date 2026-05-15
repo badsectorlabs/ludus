@@ -30,7 +30,7 @@ func init() {
 		if err := extendBlueprintsCollection(app); err != nil {
 			return err
 		}
-		if err := migrateBlueprintConfigsToBundles(app); err != nil {
+		if err := migrateBlueprintConfigsToDirs(app); err != nil {
 			return err
 		}
 		return dropBlueprintConfigFileField(app)
@@ -144,21 +144,21 @@ func createSourceArtifactsCollection(app core.App) error {
 			Name:      "kind",
 			Required:  true,
 			MaxSelect: 1,
-			Values:    []string{"template", "local_role", "galaxy_role"},
+			Values:    []string{"template", "local_role", "galaxy_role", "collection"},
 		},
 		&core.TextField{Name: "name", Required: true},
 		&core.TextField{Name: "version"},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 
-	c.AddIndex("idx_source_artifacts_unique", true, "source, kind, name, version", "")
+	c.AddIndex("idx_source_artifacts_unique", true, "source, kind, name", "")
 
 	return app.Save(c)
 }
 
 // extendBlueprintsCollection adds the source relation + metadata fields. A
 // populated source means source-derived; empty means user-created with
-// bundlePath as on-disk home.
+// blueprintDirPath as on-disk home.
 func extendBlueprintsCollection(app core.App) error {
 	c, err := app.FindCollectionByNameOrId("blueprints")
 	if err != nil {
@@ -179,8 +179,7 @@ func extendBlueprintsCollection(app core.App) error {
 	add(&core.TextField{Name: "lastInstallStatus"})
 	add(&core.TextField{Name: "lastInstallError"})
 	add(&core.TextField{Name: "lastInstalledAt"})
-	add(&core.TextField{Name: "bundlePath"})
-	add(&core.BoolField{Name: "bundle_complete"})
+	add(&core.TextField{Name: "blueprintDirPath"})
 	add(&core.RelationField{
 		Name:          "source",
 		CollectionId:  sourcesCollection.Id,
@@ -191,8 +190,6 @@ func extendBlueprintsCollection(app core.App) error {
 	add(&core.TextField{Name: "sourceBlueprintID"})
 	add(&core.TextField{Name: "blueprint_path"})
 	add(&core.TextField{Name: "config_path"})
-	add(&core.JSONField{Name: "inferred_templates"})
-	add(&core.JSONField{Name: "inferred_roles"})
 	add(&core.TextField{Name: "requirements_yaml"})
 
 	// blueprintID must be globally unique: a local blueprint id "goad/foo"
@@ -224,11 +221,11 @@ func extendBlueprintsCollection(app core.App) error {
 	return app.Save(c)
 }
 
-// migrateBlueprintConfigsToBundles moves any existing FileField config bytes
-// to disk-backed bundles. No-op on fresh installs.
-func migrateBlueprintConfigsToBundles(app core.App) error {
-	bundleRoot := filepath.Join(ludusInstallPathFromEnv(), "blueprints")
-	if err := os.MkdirAll(bundleRoot, 0755); err != nil {
+// migrateBlueprintConfigsToDirs moves any existing FileField config bytes
+// to disk-backed dirs. No-op on fresh installs.
+func migrateBlueprintConfigsToDirs(app core.App) error {
+	blueprintDirRoot := filepath.Join(ludusInstallPathFromEnv(), "blueprints")
+	if err := os.MkdirAll(blueprintDirRoot, 0755); err != nil {
 		return err
 	}
 
@@ -244,7 +241,7 @@ func migrateBlueprintConfigsToBundles(app core.App) error {
 	defer fsysClient.Close()
 
 	for _, rec := range records {
-		if rec.GetString("bundlePath") != "" {
+		if rec.GetString("blueprintDirPath") != "" {
 			continue
 		}
 		configFileName := rec.GetString("config")
@@ -263,16 +260,15 @@ func migrateBlueprintConfigsToBundles(app core.App) error {
 			return readErr
 		}
 
-		bundleDir := filepath.Join(bundleRoot, rec.Id)
-		if mkErr := os.MkdirAll(bundleDir, 0755); mkErr != nil {
+		blueprintDir := filepath.Join(blueprintDirRoot, rec.Id)
+		if mkErr := os.MkdirAll(blueprintDir, 0755); mkErr != nil {
 			return mkErr
 		}
-		if writeErr := os.WriteFile(filepath.Join(bundleDir, "range-config.yml"), data, 0644); writeErr != nil {
+		if writeErr := os.WriteFile(filepath.Join(blueprintDir, "range-config.yml"), data, 0644); writeErr != nil {
 			return writeErr
 		}
 
-		rec.Set("bundlePath", bundleDir)
-		rec.Set("bundle_complete", false)
+		rec.Set("blueprintDirPath", blueprintDir)
 		if saveErr := app.Save(rec); saveErr != nil {
 			return saveErr
 		}
@@ -300,7 +296,7 @@ func dropBlueprintConfigFileField(app core.App) error {
 		}
 	}
 
-	bundleRoot := filepath.Join(ludusInstallPathFromEnv(), "blueprints")
+	blueprintDirRoot := filepath.Join(ludusInstallPathFromEnv(), "blueprints")
 	records, err := app.FindAllRecords("blueprints")
 	if err != nil {
 		return err
@@ -323,15 +319,15 @@ func dropBlueprintConfigFileField(app core.App) error {
 			if readErr != nil {
 				return readErr
 			}
-			bundleDir := rec.GetString("bundlePath")
-			if bundleDir == "" {
-				bundleDir = filepath.Join(bundleRoot, rec.Id)
-				if mkErr := os.MkdirAll(bundleDir, 0755); mkErr != nil {
+			blueprintDir := rec.GetString("blueprintDirPath")
+			if blueprintDir == "" {
+				blueprintDir = filepath.Join(blueprintDirRoot, rec.Id)
+				if mkErr := os.MkdirAll(blueprintDir, 0755); mkErr != nil {
 					return mkErr
 				}
-				rec.Set("bundlePath", bundleDir)
+				rec.Set("blueprintDirPath", blueprintDir)
 			}
-			if writeErr := os.WriteFile(filepath.Join(bundleDir, "range-config.yml"), data, 0644); writeErr != nil {
+			if writeErr := os.WriteFile(filepath.Join(blueprintDir, "range-config.yml"), data, 0644); writeErr != nil {
 				return writeErr
 			}
 		}
@@ -352,7 +348,7 @@ func dropBlueprintConfigFileField(app core.App) error {
 }
 
 // restoreBlueprintConfigFileField re-adds the FileField on Down. Bytes are
-// not repopulated; the disk bundle is authoritative.
+// not repopulated; the disk blueprint dir is authoritative.
 func restoreBlueprintConfigFileField(app core.App) error {
 	c, err := app.FindCollectionByNameOrId("blueprints")
 	if err != nil {
@@ -385,9 +381,9 @@ func stripBlueprintsCollectionExtensions(app core.App) error {
 	for _, name := range []string{
 		"version", "tags", "min_ludus_version",
 		"lastInstallStatus", "lastInstallError", "lastInstalledAt",
-		"bundlePath", "bundle_complete",
+		"blueprintDirPath",
 		"source", "sourceBlueprintID", "blueprint_path", "config_path",
-		"inferred_templates", "inferred_roles", "requirements_yaml",
+		"requirements_yaml",
 	} {
 		if f := c.Fields.GetByName(name); f != nil {
 			_ = f

@@ -601,11 +601,7 @@ func GetRoleVars(e *core.RequestEvent) error {
 }
 
 // copyDir recursively copies a directory from src to dst. Symlinks are
-// rejected: a malicious source repo or role/template dir could include a
-// symlink pointing at /etc/shadow or any path the Ludus process can read,
-// and copyDir is invoked when materialising bundles and registering source
-// artifacts — so following links would let the symlink target leak into
-// the destination tree and onward via export/share.
+// rejected outright as a defense-in-depth measure.
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -613,7 +609,7 @@ func copyDir(src, dst string) error {
 		}
 
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refusing to copy symlink %q: bundles and role/template dirs must contain only regular files and directories", path)
+			return fmt.Errorf("refusing to copy symlink %q: blueprint dirs and role/template dirs must contain only regular files and directories", path)
 		}
 
 		relPath, err := filepath.Rel(src, path)

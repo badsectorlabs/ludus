@@ -15,10 +15,17 @@ import (
 )
 
 type SyncResult struct {
-	TemplateResults  []ArtifactResult    `json:"templateResults"`
-	LocalRoleResults []ArtifactResult    `json:"localRoleResults"`
-	RoleResults      []RoleInstallResult `json:"roleResults"`
-	DryRun           *DryRunPlan         `json:"dryRun,omitempty"`
+	TemplateResults        []ArtifactResult       `json:"templateResults"`
+	LocalRoleResults       []ArtifactResult       `json:"localRoleResults"`
+	RoleResults            []RoleInstallResult    `json:"roleResults"`
+	UndeclaredDependencies []UndeclaredDependency `json:"undeclaredDependencies,omitempty"`
+	DryRun                 *DryRunPlan            `json:"dryRun,omitempty"`
+}
+
+type UndeclaredDependency struct {
+	BlueprintID string `json:"blueprintID"`
+	Role        string `json:"role"`
+	Hint        string `json:"hint,omitempty"`
 }
 
 type ArtifactResult struct {
@@ -40,12 +47,14 @@ type SyncOptions struct {
 // DryRunPlan is what `source add --dry-run` returns: what would happen if the
 // sync ran, without persisting anything.
 type DryRunPlan struct {
-	SourceName        string   `json:"sourceName"`
-	BlueprintIDs      []string `json:"blueprintIDs"`
-	Templates         []string `json:"templates"`
-	LocalRoles        []string `json:"localRoles"`
-	GalaxyRoles       []string `json:"galaxyRoles"`
-	SubscriptionRoles []string `json:"subscriptionRoles"`
+	SourceName             string                 `json:"sourceName"`
+	BlueprintIDs           []string               `json:"blueprintIDs"`
+	Templates              []string               `json:"templates"`
+	LocalRoles             []string               `json:"localRoles"`
+	GalaxyRoles            []string               `json:"galaxyRoles"`
+	GalaxyCollections      []string               `json:"galaxyCollections,omitempty"`
+	SubscriptionRoles      []string               `json:"subscriptionRoles"`
+	UndeclaredDependencies []UndeclaredDependency `json:"undeclaredDependencies,omitempty"`
 }
 
 // sourceSyncLocks serialises runSourceSync per source record. Concurrent syncs on
@@ -132,7 +141,7 @@ func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sour
 		return nil, err
 	}
 
-	if len(walked.Blueprints) == 0 && len(walked.SharedTemplates) == 0 && len(walked.SharedLocalRoles) == 0 {
+	if len(walked.Blueprints) == 0 && len(walked.Templates) == 0 && len(walked.LocalRoles) == 0 {
 		err := fmt.Errorf("source has no blueprints, templates, or roles to register")
 		markSyncFailed(app, sourceRecord, err)
 		return nil, err
@@ -156,6 +165,7 @@ func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sour
 	res.TemplateResults = registerTemplates(app, sourceRecord, walked, opts.Force)
 	res.LocalRoleResults = registerLocalRoles(app, sourceRecord, walked, opts)
 	res.RoleResults = installUnionedRoles(e, app, sourceRecord, walked, opts)
+	res.UndeclaredDependencies = findUndeclaredDependencies(walked)
 
 	sourceRecord.Set("lastSyncedAt", time.Now().UTC().Format(time.RFC3339))
 	failures := collectSyncFailures(res)
@@ -251,15 +261,6 @@ func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource
 			}
 		}
 
-		configBytes, err := os.ReadFile(bp.ConfigPath)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", bp.ConfigPath, err)
-		}
-		templates, roles, err := InferFromRangeConfig(configBytes)
-		if err != nil {
-			return fmt.Errorf("parse %s: %w", bp.ConfigPath, err)
-		}
-
 		if isNew {
 			rec.Set("source", src.Id)
 			rec.Set("sourceBlueprintID", bp.Manifest.ID)
@@ -276,8 +277,6 @@ func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource
 		rec.Set("min_ludus_version", bp.Manifest.MinLudusVersion)
 		rec.Set("blueprint_path", relativeToCheckout(checkoutDir, filepath.Join(bp.Dir, "blueprint.yml")))
 		rec.Set("config_path", relativeToCheckout(checkoutDir, bp.ConfigPath))
-		rec.Set("inferred_templates", templates)
-		rec.Set("inferred_roles", roles)
 		rec.Set("requirements_yaml", string(bp.RequirementsYAML))
 
 		if bp.ThumbnailPath != "" {
@@ -355,46 +354,47 @@ func computeDryRunPlan(e *core.RequestEvent, app core.App, walked *WalkedSource,
 		plan.BlueprintIDs = append(plan.BlueprintIDs, bp.Manifest.ID)
 	}
 
-	tSet := map[string]struct{}{}
-	for _, d := range walked.SharedTemplates {
-		tSet[filepath.Base(d)] = struct{}{}
-	}
-	for _, bp := range walked.Blueprints {
-		for _, d := range bp.ScopedTemplates {
-			tSet[filepath.Base(d)] = struct{}{}
-		}
-	}
-	for n := range tSet {
-		plan.Templates = append(plan.Templates, n)
+	for _, d := range walked.Templates {
+		plan.Templates = append(plan.Templates, filepath.Base(d))
 	}
 	sort.Strings(plan.Templates)
 
-	rSet := map[string]struct{}{}
-	for _, d := range walked.SharedLocalRoles {
-		rSet[filepath.Base(d)] = struct{}{}
-	}
-	for _, bp := range walked.Blueprints {
-		for _, d := range bp.ScopedLocalRoles {
-			rSet[filepath.Base(d)] = struct{}{}
-		}
-	}
-	for n := range rSet {
-		plan.LocalRoles = append(plan.LocalRoles, n)
+	for _, d := range walked.LocalRoles {
+		plan.LocalRoles = append(plan.LocalRoles, filepath.Base(d))
 	}
 	sort.Strings(plan.LocalRoles)
 
-	inferred := make([][]string, len(walked.Blueprints))
-	for i, bp := range walked.Blueprints {
-		if data, err := os.ReadFile(bp.ConfigPath); err == nil {
-			_, roles, _ := InferFromRangeConfig(data)
-			inferred[i] = roles
+	// Plan reports exactly what the sync will install, matching the
+	// declared-only install policy: each section of each blueprint's
+	// requirements.yml.
+	galaxySet := map[string]struct{}{}
+	collectionSet := map[string]struct{}{}
+	subSet := map[string]struct{}{}
+	for _, bp := range walked.Blueprints {
+		gr, col, sub := declaredFromRequirements(bp.RequirementsYAML)
+		for _, n := range gr {
+			galaxySet[n] = struct{}{}
+		}
+		for _, n := range col {
+			collectionSet[n] = struct{}{}
+		}
+		for _, n := range sub {
+			subSet[n] = struct{}{}
 		}
 	}
-	roleSet, _, _ := UnionRoles(walked.Blueprints, inferred)
-	roleSet = subtractLocalRoleNames(roleSet, walked)
+	for n := range galaxySet {
+		plan.GalaxyRoles = append(plan.GalaxyRoles, n)
+	}
+	sort.Strings(plan.GalaxyRoles)
+	for n := range collectionSet {
+		plan.GalaxyCollections = append(plan.GalaxyCollections, n)
+	}
+	sort.Strings(plan.GalaxyCollections)
+	for n := range subSet {
+		plan.SubscriptionRoles = append(plan.SubscriptionRoles, n)
+	}
+	sort.Strings(plan.SubscriptionRoles)
 
-	subRoles, pubRoles := SplitSubscriptionRoles(roleSet, getSubscriptionCatalogNames(e))
-	plan.GalaxyRoles = pubRoles
-	plan.SubscriptionRoles = subRoles
+	plan.UndeclaredDependencies = findUndeclaredDependencies(walked)
 	return plan
 }

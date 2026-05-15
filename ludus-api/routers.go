@@ -1002,6 +1002,13 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"ListSourceCollections",
+		http.MethodGet,
+		"/sources/{sourceID}/collections",
+		ListSourceCollections,
+	},
+
+	{
 		"ListAllSourceBlueprints",
 		http.MethodGet,
 		"/sources/blueprints",

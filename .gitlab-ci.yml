@@ -1264,10 +1264,12 @@ post-deploy blueprints-as-admin:
       - ludus-client/cmd/source.go
       - ludus-api/api_blueprint_management.go
       - ludus-api/api_source_management.go
-      - ludus-api/blueprint_bundle.go
+      - ludus-api/blueprint_dir.go
       - ludus-api/blueprint_resolver.go
       - ludus-api/blueprint_access.go
+      - ludus-api/range_config_write.go
       - ludus-api/source_install.go
+      - ludus-api/source_roles.go
       - ludus-api/source_sync.go
       - ludus-api/source_walker.go
   variables:
@@ -1312,7 +1314,7 @@ post-deploy blueprints-as-admin:
     - 'grep -q "Version:.*1.2.3" /tmp/ci-bp-scratch.info'
     - 'grep -q "Min Ludus:.*2.1.0" /tmp/ci-bp-scratch.info'
     - 'grep -q alpha /tmp/ci-bp-scratch.info && grep -q beta /tmp/ci-bp-scratch.info'
-    # Local bundle dirs must never carry an on-disk blueprint.yml (DB is canonical; manifest is synthesized at export)
+    # Local blueprint dirs must never carry an on-disk blueprint.yml (DB is canonical; manifest is synthesized at export)
     - '! sudo find /opt/ludus/blueprints -maxdepth 2 -name "blueprint.yml" | grep .'
     - ludus blueprint export ci-bp-scratch -o /tmp/ci-bp-scratch.tar.gz
     - tar tzf /tmp/ci-bp-scratch.tar.gz | grep -q "^ci-bp-scratch/blueprint.yml$"
@@ -1328,7 +1330,7 @@ post-deploy blueprints-as-admin:
     - 'grep -q "Version:.*9.9.9" /tmp/ci-bp-scratch.updated.info'
     - 'grep -q "Min Ludus:.*3.3.3" /tmp/ci-bp-scratch.updated.info'
     - 'grep -q updated /tmp/ci-bp-scratch.updated.info'
-    # Copy must rewrite the bundle manifest id
+    # Copy must rewrite the synthesized manifest id
     - ludus blueprint create --from-blueprint ci-bp-scratch --id ci-bp-roundtrip
     - ludus blueprint export ci-bp-roundtrip -o /tmp/ci-bp-roundtrip.tar.gz
     - tar xzf /tmp/ci-bp-roundtrip.tar.gz -C /tmp
@@ -1353,9 +1355,15 @@ post-deploy blueprints-as-admin:
     - set +o pipefail
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ci-src --no-prompt 2>&1 | grep -qiE "not found|owner or an admin"'
     - set -o pipefail
-    # Purging one source preserves artifacts a second source still claims; purging the last claimant removes them
+    # Honest purge: --purge uninstalls the source's artifacts from disk
+    # regardless of co-claims from other sources, and reports affected
+    # sources so the operator can re-sync them. Co-claimed roles come back
+    # after a sync; only when no live source still claims the role does
+    # it stay gone.
     - ludus source add /opt/ludus/ci/fixtures/source-template --id ci-src2 --force
-    - ludus source rm ci-src --no-prompt --purge
+    - ludus source rm ci-src --no-prompt --purge 2>&1 | grep -q "ci-src2"  # affectedSources surfaced
+    - '! ludus ansible role list | grep -q geerlingguy.docker'              # purge removed the on-disk role
+    - ludus source sync ci-src2                                              # re-sync restores it
     - ludus ansible role list | grep -q geerlingguy.docker
     - ludus source rm ci-src2 --no-prompt --purge
     - '! ludus ansible role list | grep -q geerlingguy.docker'

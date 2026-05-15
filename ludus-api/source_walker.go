@@ -17,8 +17,8 @@ const maxBlueprintDepth = 2
 type WalkedSource struct {
 	Source           *SourceManifest   // nil if source.yml absent
 	Blueprints       []WalkedBlueprint // sorted by Manifest.ID
-	SharedTemplates  []string          // <repo>/templates/<name>/ absolute paths
-	SharedLocalRoles []string          // <repo>/roles/<name>/ absolute paths
+	Templates  []string          // <repo>/templates/<name>/ absolute paths
+	LocalRoles []string          // <repo>/roles/<name>/ absolute paths
 }
 
 type WalkedBlueprint struct {
@@ -27,8 +27,6 @@ type WalkedBlueprint struct {
 	ConfigPath       string
 	RequirementsYAML []byte // nil if no requirements.yml
 	ThumbnailPath    string
-	ScopedTemplates  []string
-	ScopedLocalRoles []string
 }
 
 // WalkSourceRepo scans a source repo's on-disk checkout. Tolerates missing
@@ -53,8 +51,8 @@ func WalkSourceRepo(rootDir string) (*WalkedSource, error) {
 	}
 	w.Blueprints = bps
 
-	w.SharedTemplates = walkSubdirs(filepath.Join(rootDir, "templates"))
-	w.SharedLocalRoles = walkSubdirs(filepath.Join(rootDir, "roles"))
+	w.Templates = walkSubdirs(filepath.Join(rootDir, "templates"))
+	w.LocalRoles = walkSubdirs(filepath.Join(rootDir, "roles"))
 
 	sort.Slice(w.Blueprints, func(i, j int) bool {
 		return w.Blueprints[i].Manifest.ID < w.Blueprints[j].Manifest.ID
@@ -148,18 +146,16 @@ func walkBlueprint(bpDir string) (*WalkedBlueprint, error) {
 			bp.ThumbnailPath = thumbPath
 		}
 	}
-	bp.ScopedTemplates = walkSubdirs(filepath.Join(bpDir, "templates"))
-	bp.ScopedLocalRoles = walkSubdirs(filepath.Join(bpDir, "roles"))
 	return bp, nil
 }
 
-func WalkBlueprintBundle(bundleDir string) (*WalkedBlueprint, error) {
-	bp, err := walkBlueprint(bundleDir)
+func WalkBlueprintDir(blueprintDir string) (*WalkedBlueprint, error) {
+	bp, err := walkBlueprint(blueprintDir)
 	if err != nil {
 		return nil, err
 	}
 	if bp == nil {
-		return nil, fmt.Errorf("no blueprint.yml found in %s", bundleDir)
+		return nil, fmt.Errorf("no blueprint.yml found in %s", blueprintDir)
 	}
 	return bp, nil
 }

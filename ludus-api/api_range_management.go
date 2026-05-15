@@ -591,29 +591,14 @@ func PutConfig(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, "Configuration error: "+err.Error())
 	}
 
-	// Check the roles and dependencies
-	rangeHasRoles := e.Get("rangeHasRoles")
-	logger.Debug(fmt.Sprintf("Range has roles: %v", rangeHasRoles))
-	if rangeHasRoles != nil && rangeHasRoles.(bool) {
-		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), "Resolving dependencies for user-defined roles..\n", false)
-		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(e, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
-		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), rolesOutput, true)
-		if err != nil {
-			targetRange.SetRangeState(LudusRangeStateError)
-			err = e.App.Save(targetRange)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
-			}
-			// Find the 'ERROR' line in the output and return it to the user
-			errorLine := regexp.MustCompile(`ERROR[^"]*`)
-			errorMatch := errorLine.FindString(rolesOutput)
-			if errorMatch != "" {
-				return JSONError(e, http.StatusBadRequest, "Configuration error: "+errorMatch)
-			} else {
-				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("Error generating ordered roles: %s %s", rolesOutput, err))
-
-			}
-		}
+	// Resolve user-defined role dependencies (or drop a stale playbook if
+	// the new config has no roles). Same helper drives blueprint apply.
+	configBytes, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to re-read validated config: "+readErr.Error())
+	}
+	if status, prepErr := prepareUserDefinedRolesPlaybook(e, targetRange, configBytes); prepErr != nil {
+		return JSONError(e, status, prepErr.Error())
 	}
 
 	// The file is valid, so let's move it to the range-config
