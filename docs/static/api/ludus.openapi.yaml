@@ -5337,14 +5337,13 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateBlueprintRequest'
-            examples: {}
       responses:
         '201':
           description: Blueprint created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BlueprintMutationResponse'
+                $ref: '#/components/schemas/BlueprintCreatedResponse'
           headers: {}
       security:
         - JWT: []
@@ -5369,12 +5368,41 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BlueprintMutationResponse'
+                $ref: '#/components/schemas/BlueprintCreatedResponse'
           headers: {}
       security:
         - JWT: []
         - ApiKeyAuth: []
   /blueprints/{blueprintID}:
+    get:
+      summary: Get blueprint detail
+      deprecated: false
+      description: >
+        Returns the full blueprint record plus computed dependency status. Works
+        for both local blueprints (id = blueprintID) and source-blueprints (id =
+        "sourceID/sourceBlueprintID").
+      operationId: getBlueprintDetail
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintDetail'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
     delete:
       summary: Delete blueprint
       deprecated: false
@@ -5398,35 +5426,6 @@ paths:
               schema:
                 type: object
                 properties: {}
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    get:
-      summary: Get blueprint detail
-      deprecated: false
-      description: >
-        Returns the full blueprint record plus computed dependency status. Works
-        for both local blueprints (id = blueprintID) and source-blueprints (id =
-        "<sourceID>/<sourceBlueprintID>").
-      operationId: getBlueprintDetail
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Blueprint detail
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BlueprintDetail'
           headers: {}
       security:
         - JWT: []
@@ -5458,7 +5457,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BlueprintMutationResponse'
+                $ref: '#/components/schemas/BlueprintCreatedResponse'
           headers: {}
       security:
         - JWT: []
@@ -5806,6 +5805,7 @@ paths:
                   example: ''
               required:
                 - archive
+            examples: {}
         required: true
       responses:
         '201':
@@ -5813,7 +5813,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BlueprintMutationResponse'
+                $ref: '#/components/schemas/BlueprintCreatedResponse'
           headers: {}
       security:
         - JWT: []
@@ -5822,9 +5822,7 @@ paths:
     post:
       summary: Install blueprint dependencies
       deprecated: false
-      description: >-
-        Installs the templates and roles referenced by a blueprint into the
-        calling user's range. Body is optional (zero-valued defaults).
+      description: Installs the roles and collections referenced by a blueprint
       operationId: installBlueprintDeps
       tags:
         - Blueprint Management
@@ -5841,14 +5839,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/InstallBlueprintDepsRequest'
+            examples: {}
       responses:
         '200':
           description: Install completed
           content:
             application/json:
               schema:
-                type: object
-                properties: {}
+                $ref: '#/components/schemas/BlueprintCreatedResponse'
           headers: {}
       security:
         - JWT: []
@@ -6500,6 +6498,39 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /sources/{sourceID}/collections:
+    get:
+      summary: List source collections
+      deprecated: false
+      description: >-
+        Lists Ansible collections declared by this source's blueprints.
+        ansible-galaxy has no `collection remove` subcommand, so source purge
+        leaves the on-disk install in place — the row is a claim, not a
+        lifecycle anchor.
+      operationId: listSourceCollections
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source collections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ListSourceCollectionsResponseItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /sources/{sourceID}/blueprints:
     get:
       summary: List blueprints in a source
@@ -6753,18 +6784,6 @@ components:
             type: string
         min_ludus_version:
           type: string
-        long_description:
-          type: string
-        inferred_templates:
-          type: array
-          items:
-            type: string
-          description: Template names referenced by this blueprint's range-config.
-        inferred_roles:
-          type: array
-          items:
-            type: string
-          description: Ansible role names referenced by this blueprint's range-config.
         requirements_yaml:
           type: string
           description: >-
@@ -7669,7 +7688,7 @@ components:
             sourceID:
               type: string
         - $ref: '#/components/schemas/SyncResult'
-    ListSourceTemplatesResponseItem:
+    ListSourceTemplatesResponseItem: &ref_2
       type: object
       required:
         - name
@@ -7696,6 +7715,68 @@ components:
           description: >-
             Where the role is sourced from: "subscription" (entitled via Ludus
             Pro) or "local" (bundled in source).
+    ListSourceCollectionsResponseItem: *ref_2
+    BlueprintCreatedResponse:
+      description: >-
+        Shape returned by every blueprint-create path (from scratch, from-range,
+        copy, import). `result` is the message ("Blueprint
+        created/copied/imported successfully"); `blueprintID` is the
+        slug-prefixed public ID; `id` is the PocketBase record ID (emitted by
+        importBlueprint); `roleResults` reports the outcome of each role install
+        kicked off as part of the create.
+      type: object
+      required:
+        - blueprintID
+      properties:
+        result:
+          type: string
+        blueprintID:
+          type: string
+        id:
+          type: string
+          description: PocketBase record ID; emitted by importBlueprint.
+        roleResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlueprintCreatedResponseRoleResult'
+    BlueprintCreatedResponseRoleResult:
+      type: object
+      required:
+        - name
+        - ok
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        ok:
+          type: boolean
+        error:
+          type: string
+    DeleteSourceResponse:
+      description: >-
+        Returned by `deleteSource`. `status` is "deleted" on a clean rm or
+        "deleted_with_errors" when --purge was set and one or more artifact
+        removals failed. `affectedSources` lists co-claimants whose on-disk
+        files were also removed; they need to re-sync to restore. `purgeErrors`
+        carries per-artifact failure messages.
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - deleted
+            - deleted_with_errors
+        purgeErrors:
+          type: array
+          items:
+            type: string
+        affectedSources:
+          type: array
+          items:
+            type: string
   responses: {}
   securitySchemes:
     ApiKeyAuth:
