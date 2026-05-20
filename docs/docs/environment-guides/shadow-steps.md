@@ -36,7 +36,7 @@ Have fun !
 
 ### Access the workbook here:
 
-- https://logout.gitbook.io/lateral-movement-in-ad-with-empire 
+- https://sec565.gitbook.io/ad-privesc-with-empire 
 
 
 ## Deployment
