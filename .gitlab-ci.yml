@@ -2,9 +2,9 @@ stages:
   - pages
   - documentation
   - build
-  - claim         # claim a VM pool (A or B) or the cluster slot
+  - claim         # claim the cluster slot
   - test          # all install/template/range/post-deploy/integration/cluster jobs (DAG via needs)
-  - release-claim       # release the claimed pool/cluster (when: always)
+  - release-claim # destroy successful dynamic CI clones and release cluster claim
   - upload
   - release-binaries # tag/release publishing jobs
 
@@ -273,9 +273,8 @@ stages:
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
 
-# Superset of every pool-using test job's rule set. claim-pool / release-pool
-# use this so the pool is claimed exactly when at least one pool test will
-# actually run.
+# Superset of every non-cluster test job's rule set. Kept as a reference for
+# dynamic clone cleanup and future all-series maintenance jobs.
 .pool-rules: &pool-rules
   rules:
     - if: $CI_COMMIT_TAG
@@ -299,6 +298,32 @@ stages:
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+    - changes:
+        - ludus-server/**/*
+        - ludus-client/**/*
+
+.cleanup-rules: &cleanup-rules
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[client tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[testing-mode tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[power tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[integration test\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
     - changes:
         - ludus-server/**/*
         - ludus-client/**/*
@@ -525,27 +550,6 @@ build all:
 #########
 # CLAIM #
 #########
-# Atomically claim one of the two VM pools (A or B). Writes POOL=<A|B> to
-# pool.env so downstream jobs (via dotenv artifact) inherit it. Hard fails
-# after 1 hour if both pools remain busy.
-claim-pool:
-  stage: claim
-  tags:
-    - ludus-proxmox-runner-parallel
-  needs:
-    - build all
-  dependencies: [] # don't pull build artifacts; this script needs nothing from binaries/
-  <<: *pool-rules
-  variables:
-    LUDUS_BUILD_TYPE: pool-claim
-    GIT_STRATEGY: none
-  timeout: 1h
-  script:
-    - /opt/ludus/ci/claim-pool.sh
-  artifacts:
-    reports:
-      dotenv: pool.env
-
 # Atomically claim the single cluster slot (VMIDs 1005/1006). Hard fails
 # after 1 hour if the cluster is still busy.
 claim-cluster:
@@ -571,7 +575,6 @@ install kickoff:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -604,7 +607,6 @@ install check:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - install kickoff
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -627,7 +629,6 @@ install check:
   timeout: 1h
   script:
     - sudo cat /opt/ludus/install/install.log
-    - echo "root:$CI_PIPELINE_ID" | sudo chpasswd # allow root login via the web interface for debugging
 
 #############
 # TEMPLATES #
@@ -637,7 +638,6 @@ templates build:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: install snapshot
       optional: true
@@ -687,7 +687,6 @@ templates check:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - templates build
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -741,7 +740,6 @@ client basic-commands:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
   dependencies:
     - build all
@@ -800,7 +798,6 @@ range deploy-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: templates snapshot
       optional: true
@@ -849,7 +846,6 @@ range check-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - range deploy-admin
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -916,7 +912,6 @@ post-deploy testing-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: range snapshot-admin
       optional: true
@@ -961,7 +956,6 @@ post-deploy power-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy testing-as-admin
       optional: true
@@ -1007,7 +1001,6 @@ post-deploy ansible-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy power-as-admin
       optional: true
@@ -1054,7 +1047,6 @@ post-deploy user-cmds-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy ansible-as-admin
       optional: true
@@ -1127,7 +1119,6 @@ post-deploy groups-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy user-cmds-as-admin
       optional: true
@@ -1264,7 +1255,6 @@ post-deploy blueprints-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy groups-as-admin
       optional: true
@@ -1333,7 +1323,6 @@ post-deploy ranges-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy blueprints-as-admin
       optional: true
@@ -1496,7 +1485,6 @@ post-deploy templates-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy ranges-as-admin
       optional: true
@@ -1543,7 +1531,6 @@ range deploy-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: range snapshot-admin
       optional: true
@@ -1572,7 +1559,7 @@ range deploy-user:
         - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_user # offset 4 -> VMID 1004/1011 (dedicated user-range VM)
+    LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 5m
   retry:
@@ -1590,7 +1577,6 @@ range check-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - range deploy-user
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -1614,7 +1600,7 @@ range check-user:
         - ludus-server/ansible/range-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_user # offset 4 -> VMID 1004/1011 (dedicated user-range VM)
+    LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 3h
   retry:
@@ -1638,7 +1624,6 @@ post-deploy testing-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: range snapshot-user
       optional: true
@@ -1680,7 +1665,6 @@ post-deploy power-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy testing-as-user
       optional: true
@@ -1725,7 +1709,6 @@ post-deploy ansible-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy power-as-user
       optional: true
@@ -1767,7 +1750,6 @@ post-deploy user-cmds-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy ansible-as-user
       optional: true
@@ -1835,7 +1817,6 @@ post-deploy blueprints-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy user-cmds-as-user
       optional: true
@@ -1963,7 +1944,6 @@ post-deploy templates-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy blueprints-as-user
       optional: true
@@ -2004,7 +1984,6 @@ post-deploy snapshots-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy templates-as-user
       optional: true
@@ -2048,10 +2027,7 @@ test-everything:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
-    - job: post-deploy snapshots-as-user
-      optional: true
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
@@ -2071,7 +2047,7 @@ test-everything:
       when: never
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_user
+    LUDUS_SNAPSHOT_NAME: integration_ready
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 3h
   retry:
@@ -2191,7 +2167,7 @@ cluster install kickoff:
       sdn_zone: ludus
       vxlan_tag_base: 0
       EOF
-    - sudo ./ludus-server --no-prompt $(hostname)
+    - sudo ./ludus-server --no-prompt
 
 cluster-install-check:
   stage: test
@@ -2282,8 +2258,8 @@ cluster-templates-check:
     - ludus templates list
     - export DEB11_TEMPLATE_VMID=$(sudo qm list | grep debian-11-x64-server-template | head -1 | awk '{print $1}')
     # Verify templates are accessible from both nodes
-    - test $(sudo pvesh get /nodes/ludus/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
-    - test $(sudo pvesh get /nodes/ludus2/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
+    - test $(sudo pvesh get /nodes/ludus/storage/ceph/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
+    - test $(sudo pvesh get /nodes/ludus2/storage/ceph/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
 
 cluster-range-deploy:
   stage: test
@@ -2445,33 +2421,177 @@ cluster-test-range-default:
 #################
 # RELEASE CLAIM #
 #################
-# Release the claimed pool after all test-stage jobs complete.
-#
-# These jobs intentionally do NOT declare `needs:` — we rely on stage
-# ordering so they wait for the entire `test` stage to finish.
-#
-# `when: always` covers test failures; cancellation is handled by the
-# active-recovery API check in claim-pool.sh.
-#
-# Note: there are no needs:, so the dotenv from claim-pool is NOT
-# inherited. release-pool.sh reads POOL from the per-pipeline file on
-# the runner host, falling back to a no-op if neither is set.
-release-pool:
+# These dynamic VM release jobs run only when their upstream series succeeds.
+# Failed series intentionally keep their clone running for troubleshooting.
+release install-vm:
   stage: release-claim
   tags:
     - ludus-proxmox-runner-parallel
+  needs:
+    - job: install kickoff
+      optional: true
+    - job: install check
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
   variables:
-    LUDUS_BUILD_TYPE: pool-release
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: install
     GIT_STRATEGY: none
-  rules:
-    - if: $CI_COMMIT_TAG
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - when: always
   timeout: 5m
   script:
-    - /opt/ludus/ci/release-pool.sh
+    - /opt/ludus/ci/release-vm.sh
+
+release templates-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: templates build
+      optional: true
+    - job: templates check
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: templates
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release client-basic-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: client basic-commands
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: client-basic
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release range-admin-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: range deploy-admin
+      optional: true
+    - job: range check-admin
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: range-admin
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release post-deploy-admin-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: post-deploy testing-as-admin
+      optional: true
+    - job: post-deploy power-as-admin
+      optional: true
+    - job: post-deploy ansible-as-admin
+      optional: true
+    - job: post-deploy user-cmds-as-admin
+      optional: true
+    - job: post-deploy groups-as-admin
+      optional: true
+    - job: post-deploy blueprints-as-admin
+      optional: true
+    - job: post-deploy ranges-as-admin
+      optional: true
+    - job: post-deploy templates-as-admin
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: post-deploy-admin
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release range-user-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: range deploy-user
+      optional: true
+    - job: range check-user
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: range-user
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release post-deploy-user-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: post-deploy testing-as-user
+      optional: true
+    - job: post-deploy power-as-user
+      optional: true
+    - job: post-deploy ansible-as-user
+      optional: true
+    - job: post-deploy user-cmds-as-user
+      optional: true
+    - job: post-deploy blueprints-as-user
+      optional: true
+    - job: post-deploy templates-as-user
+      optional: true
+    - job: post-deploy snapshots-as-user
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: post-deploy-user
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release integration-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: test-everything
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: integration
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
 
 release-cluster:
   stage: release-claim

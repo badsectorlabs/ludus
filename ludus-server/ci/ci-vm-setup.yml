@@ -1,13 +1,20 @@
 ---
 # /opt/ludus/ci/ci-vm-setup.yml
 #
-# Creates 12 CI VMs from the debian-13-x64-server-ludus-ci-template,
-# brings each to its target state, and takes a "clean" snapshot.
+# Creates protected CI seed templates for dynamic per-pipeline clones.
 #
-# Prerequisites:
-#   - debian-13-x64-server-ludus-ci-template exists (run ci-setup.yml first)
-#   - gitlab-runner user/ssh keys are configured
-#   - Proxmox API credentials available
+# Seed layout:
+#   1000 ci-seed-base             base OS / CI tooling
+#   1001 ci-seed-clean-install    Ludus installed
+#   1002 ci-seed-templates-built  Ludus installed + templates built
+#   1003 ci-seed-range-admin      Ludus installed + templates + admin range
+#   1004 ci-seed-range-user       Ludus installed + templates + user range
+#   1007 ci-seed-integration      Ludus installed + templates + user range
+#
+# Shared runtime VMs:
+#   1005 ci-cluster-node1
+#   1006 ci-cluster-node2
+#   1012 ci-build-machine
 #
 # Usage:
 #   ansible-playbook ci-vm-setup.yml \
@@ -16,47 +23,56 @@
 #     -e api_host=127.0.0.1 \
 #     -e node_name=ludus \
 #     -e ludus_install_path=/opt/ludus \
-#     -e proxmox_vm_storage_pool=local-zfs \
+#     -e proxmox_vm_storage_pool=zfs \
 #     -e proxmox_vm_storage_format=raw
-#
-# VM Layout:
-#   Pool A: 1000 (base), 1001 (installed), 1002 (templates), 1003 (range-admin), 1004 (range-user)
-#   Cluster: 1005 (node1), 1006 (node2)
-#   Pool B: 1007 (base), 1008 (installed), 1009 (templates), 1010 (range-admin), 1011 (range-user)
-#   Build:  1012 (dedicated build machine)
 
-- name: Clone all CI VMs from template
+- name: Clone CI seed and runtime VMs from template
   hosts: localhost
   gather_facts: false
   vars:
     ci_template_name: debian-13-x64-server-ludus-ci-template
     ci_bridge: ludusci
-    # VM definitions: vmid, name, role, memory (MB), cores
-    ci_vms:
-      - { vmid: 1000, name: "ci-pool-a-base",          role: base,         memory: 32768, cores: 8 }
-      - { vmid: 1001, name: "ci-pool-a-installed",      role: installed,    memory: 32768, cores: 8 }
-      - { vmid: 1002, name: "ci-pool-a-templates",      role: templates,    memory: 32768, cores: 8 }
-      - { vmid: 1003, name: "ci-pool-a-range-admin",    role: range-admin,  memory: 32768, cores: 8 }
-      - { vmid: 1004, name: "ci-pool-a-range-user",     role: range-user,   memory: 32768, cores: 8 }
-      - { vmid: 1005, name: "ci-cluster-node1",         role: cluster,      memory: 32768, cores: 8 }
-      - { vmid: 1006, name: "ci-cluster-node2",         role: cluster,      memory: 32768, cores: 8 }
-      - { vmid: 1007, name: "ci-pool-b-base",           role: base,         memory: 32768, cores: 8 }
-      - { vmid: 1008, name: "ci-pool-b-installed",      role: installed,    memory: 32768, cores: 8 }
-      - { vmid: 1009, name: "ci-pool-b-templates",      role: templates,    memory: 32768, cores: 8 }
-      - { vmid: 1010, name: "ci-pool-b-range-admin",    role: range-admin,  memory: 32768, cores: 8 }
-      - { vmid: 1011, name: "ci-pool-b-range-user",     role: range-user,   memory: 32768, cores: 8 }
-      - { vmid: 1012, name: "ci-build-machine",         role: build,        memory: 32768, cores: 8 }
+    ci_vm_disk_size: "250G"
+    ci_cluster_ceph_osd_disk_size: "100G"
+    ci_cluster_ceph_pg_num: 32
+    ci_seed_vms:
+      - { vmid: 1000, name: "ci-seed-base",            role: base,        memory: 32768, cores: 8 }
+      - { vmid: 1001, name: "ci-seed-clean-install",   role: installed,   memory: 32768, cores: 8 }
+      - { vmid: 1002, name: "ci-seed-templates-built", role: templates,   memory: 32768, cores: 8 }
+      - { vmid: 1003, name: "ci-seed-range-admin",     role: range-admin, memory: 32768, cores: 8 }
+      - { vmid: 1004, name: "ci-seed-range-user",      role: range-user,  memory: 32768, cores: 8 }
+      - { vmid: 1007, name: "ci-seed-integration",     role: integration, memory: 32768, cores: 8 }
+    ci_cluster_vms:
+      - { vmid: 1005, name: "ci-cluster-node1",         role: cluster,     memory: 32768, cores: 8, hostname: "ludus",  ip: "{{ ci_cluster_node1_ip | default('203.0.113.184') }}" }
+      - { vmid: 1006, name: "ci-cluster-node2",         role: cluster,     memory: 32768, cores: 8, hostname: "ludus2", ip: "{{ ci_cluster_node2_ip | default('203.0.113.185') }}" }
+    ci_build_vms:
+      - { vmid: 1012, name: "ci-build-machine",         role: build,       memory: 32768, cores: 8 }
+    ci_runtime_vms: "{{ ci_cluster_vms + ci_build_vms }}"
+    ci_vms: "{{ ci_seed_vms + ci_runtime_vms }}"
 
   tasks:
-    - name: Create pool-assignments directory
+    - name: Create CI state directories
       ansible.builtin.file:
-        path: "{{ ludus_install_path }}/ci/pool-assignments"
+        path: "{{ item }}"
         state: directory
         owner: gitlab-runner
         group: gitlab-runner
         mode: "0755"
+      loop:
+        - "{{ ludus_install_path }}/ci/pool-assignments"
+        - "{{ ludus_install_path }}/ci/vm-assignments"
+        - "{{ ludus_install_path }}/ci/ip-assignments"
 
-    - name: Clone VMs from CI template
+    - name: Check existing CI VMs
+      ansible.builtin.command: "qm status {{ item.vmid }}"
+      loop: "{{ ci_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+      register: existing_ci_vms
+      changed_when: false
+      failed_when: false
+
+    - name: Clone missing VMs from CI template
       community.general.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
@@ -71,9 +87,11 @@
         format: "{{ proxmox_vm_storage_format }}"
         timeout: 600
       loop: "{{ ci_vms }}"
-      loop_control:
-        label: "{{ item.vmid }} ({{ item.name }})"
       register: cloned_vms
+      when: existing_ci_vms.results[ansible_loop.index0].rc != 0
+      loop_control:
+        extended: true
+        label: "{{ item.vmid }} ({{ item.name }})"
 
     - name: Configure VM resources
       community.general.proxmox_kvm:
@@ -92,6 +110,27 @@
       loop_control:
         label: "{{ item.vmid }} ({{ item.name }})"
 
+    - name: Expand CI VM root disks
+      ansible.builtin.shell: |
+        set -euo pipefail
+        desired="{{ ci_vm_disk_size }}"
+        current=$(qm config {{ item.vmid }} | awk -F'size=' '/^virtio0:/ { split($2, fields, ","); print fields[1] }')
+        current_gib=${current%G}
+        desired_gib=${desired%G}
+        if [ "$current_gib" -lt "$desired_gib" ]; then
+          qm resize {{ item.vmid }} virtio0 "$desired"
+          echo resized
+        else
+          echo unchanged
+        fi
+      args:
+        executable: /bin/bash
+      register: ci_vm_disk_resize
+      changed_when: "'resized' in ci_vm_disk_resize.stdout"
+      loop: "{{ ci_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
     - name: Set VM network to CI bridge
       community.general.proxmox_nic:
         api_user: "{{ api_user }}"
@@ -103,6 +142,52 @@
       loop: "{{ ci_vms }}"
       loop_control:
         label: "{{ item.vmid }} ({{ item.name }})"
+
+    - name: Stop cluster VMs before Ceph OSD disk attachment
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if qm status {{ item.vmid }} | awk '{print $2}' | grep -qx running; then
+          qm shutdown {{ item.vmid }} --timeout 60 || qm stop {{ item.vmid }} --skiplock 1
+        fi
+      args:
+        executable: /bin/bash
+      loop: "{{ ci_cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+      tags: ci-cluster
+
+    - name: Ensure cluster VM Ceph OSD disks exist
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if qm config {{ item.vmid }} | grep -q '^virtio1:'; then
+          echo unchanged
+          exit 0
+        fi
+        osd_disk_gib="{{ ci_cluster_ceph_osd_disk_size }}"
+        osd_disk_gib="${osd_disk_gib%G}"
+        qm set {{ item.vmid }} --virtio1 "{{ proxmox_vm_storage_pool | default('zfs') }}:${osd_disk_gib},format={{ proxmox_vm_storage_format | default('raw') }}"
+        echo created
+      args:
+        executable: /bin/bash
+      register: ci_cluster_osd_disk
+      changed_when: "'created' in ci_cluster_osd_disk.stdout"
+      loop: "{{ ci_cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+      tags: ci-cluster
+
+    - name: Start cluster VMs after Ceph OSD disk attachment
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if ! qm status {{ item.vmid }} | awk '{print $2}' | grep -qx running; then
+          qm start {{ item.vmid }}
+        fi
+      args:
+        executable: /bin/bash
+      loop: "{{ ci_cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+      tags: ci-cluster
 
     - name: Start all VMs
       community.general.proxmox_kvm:
@@ -125,7 +210,7 @@
         for i in $(seq 1 60); do
           IP=$(curl -s -k -b "PVEAuthCookie=$COOKIE" \
             "https://127.0.0.1:8006/api2/json/nodes/{{ node_name }}/qemu/{{ item.vmid }}/agent/network-get-interfaces" \
-            | jq -r '.data.result[] | ."ip-addresses" | .[]? | ."ip-address"' \
+            | jq -r '.data.result[]? | ."ip-addresses"[]? | ."ip-address"? // empty' \
             | grep 203.0.113)
           if [ -n "$IP" ]; then
             echo "$IP"
@@ -165,41 +250,274 @@
       loop_control:
         label: "{{ item.vmid }} ({{ item.name }})"
 
-    # --- Snapshot base VMs immediately (they just need the CI template state) ---
-    - name: Recreate 'clean' snapshot for base VMs (1000, 1007)
+    - name: Grow root partitions to fill resized disks
       ansible.builtin.shell: |
-        if sudo qm listsnapshot {{ item.vmid }} | grep -q '\-> clean'; then
-          sudo qm delsnapshot {{ item.vmid }} clean
+        ssh -F /home/gitlab-runner/.ssh/config gitlab-runner@{{ vm_ip_map[item.vmid | string] }} sudo bash -s <<'REMOTE'
+        set -euo pipefail
+        root_dev=$(findmnt -n -o SOURCE /)
+        if [ "$root_dev" != "/dev/vda1" ]; then
+          echo "root device is $root_dev; expected /dev/vda1"
+          exit 0
         fi
-        sudo qm snapshot {{ item.vmid }} clean --vmstate true
-      loop: "{{ ci_vms | selectattr('role', 'equalto', 'base') | list }}"
+        disk_size=$(blockdev --getsize64 /dev/vda)
+        part_size=$(blockdev --getsize64 /dev/vda1)
+        if [ $((disk_size - part_size)) -lt 1048576 ]; then
+          echo "root partition already fills disk"
+          exit 0
+        fi
+        printf ', +\n' | sfdisk --force -N 1 /dev/vda >/tmp/ludus-ci-growroot.log 2>&1 || {
+          cat /tmp/ludus-ci-growroot.log
+          exit 1
+        }
+        partx -u /dev/vda || true
+        resize2fs /dev/vda1
+        REMOTE
+      loop: "{{ ci_vms }}"
       loop_control:
         label: "{{ item.vmid }} ({{ item.name }})"
 
-# --- Install Ludus on VMs that need it (all except base VMs) ---
-- name: Install Ludus on non-base VMs
+    - name: Configure cluster VM hostnames and static CI IPs
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for i in $(seq 1 90); do
+          qm guest cmd {{ item.vmid }} ping >/dev/null 2>&1 && break
+          if [ "$i" -eq 90 ]; then
+            echo "Timed out waiting for QEMU guest agent on {{ item.vmid }}"
+            exit 1
+          fi
+          sleep 2
+        done
+        read -r -d '' SCRIPT <<'REMOTE' || true
+        set -euo pipefail
+        hostnamectl set-hostname "{{ item.hostname }}"
+        awk -v ip="{{ item.ip }}/24" -v gw="203.0.113.254" '
+          /^iface ens18 inet / {
+            in_ens18=1
+            saw_address=0
+            saw_gateway=0
+            print "iface ens18 inet static"
+            next
+          }
+          /^(auto|allow-|iface) / && in_ens18 {
+            if (!saw_address) {
+              print "\taddress " ip
+            }
+            if (!saw_gateway) {
+              print "\tgateway " gw
+            }
+            in_ens18=0
+          }
+          in_ens18 && /^[[:space:]]*address[[:space:]]+/ {
+            print "\taddress " ip
+            saw_address=1
+            next
+          }
+          in_ens18 && /^[[:space:]]*gateway[[:space:]]+/ {
+            print "\tgateway " gw
+            saw_gateway=1
+            next
+          }
+          in_ens18 && /^[[:space:]]*(dhcp-|dns-|pre-up|post-up|post-down|metric)/ {
+            next
+          }
+          { print }
+          END {
+            if (in_ens18) {
+              if (!saw_address) {
+                print "\taddress " ip
+              }
+              if (!saw_gateway) {
+                print "\tgateway " gw
+              }
+            }
+          }
+        ' /etc/network/interfaces > /tmp/interfaces.ludus-ci
+        mv /tmp/interfaces.ludus-ci /etc/network/interfaces
+        if grep -qE '^127\.0\.1\.1[[:space:]]+' /etc/hosts; then
+          sed -i -E 's/^127\.0\.1\.1[[:space:]].*/127.0.1.1 {{ item.hostname }}/' /etc/hosts
+        else
+          printf '127.0.1.1 {{ item.hostname }}\n' >> /etc/hosts
+        fi
+        ip addr flush dev ens18
+        ip link set ens18 up
+        ip addr add "{{ item.ip }}/24" dev ens18
+        ip route replace default via 203.0.113.254 dev ens18
+        REMOTE
+        qm guest exec {{ item.vmid }} -- /bin/bash -lc "$SCRIPT" | jq -e '.exitcode == 0'
+      args:
+        executable: /bin/bash
+      loop: "{{ ci_cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.hostname }} / {{ item.ip }})"
+      tags: ci-cluster
+
+    - name: Wait for SSH on cluster static IPs
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: 22
+        delay: 3
+        timeout: 300
+      loop: "{{ ci_cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.hostname }} / {{ item.ip }})"
+      tags: ci-cluster
+
+    - name: Update cluster VM IP lookup entries
+      ansible.builtin.set_fact:
+        vm_ip_map: "{{ vm_ip_map | default({}) | combine({ item.vmid | string: item.ip }) }}"
+      loop: "{{ ci_cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.hostname }} / {{ item.ip }})"
+      tags: ci-cluster
+
+    - name: Add cluster VMs to in-memory inventory
+      ansible.builtin.add_host:
+        name: "{{ item.hostname }}"
+        groups: ci_pve_cluster
+        ansible_host: "{{ item.ip }}"
+        ansible_user: gitlab-runner
+        ansible_ssh_common_args: "-F /home/gitlab-runner/.ssh/config"
+        ansible_become: true
+        ansible_become_method: sudo
+        ansible_python_interpreter: /usr/bin/python3
+        pve_cluster_addr0: "{{ item.ip }}"
+        ci_vmid: "{{ item.vmid }}"
+      loop: "{{ ci_cluster_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.hostname }} / {{ item.ip }})"
+      tags: ci-cluster
+
+- name: Configure nested Proxmox cluster runtime VMs
+  hosts: ci_pve_cluster
+  gather_facts: true
+  become: true
+  tags: ci-cluster
+  vars:
+    pve_group: ci_pve_cluster
+    pve_cluster_enabled: true
+    pve_cluster_clustername: ludus-ci
+    pve_cluster_addr0: "{{ ansible_host }}"
+    pve_ceph_enabled: true
+    pve_ceph_network: "203.0.113.0/24"
+    pve_ceph_nodes: ci_pve_cluster
+    pve_ceph_mon_group: ci_pve_cluster
+    pve_ceph_mgr_group: ci_pve_cluster
+    pve_ceph_mds_group: ci_pve_cluster
+    pve_ceph_osds:
+      - device: /dev/vdb
+    pve_ceph_pools:
+      - name: ceph
+        storage: true
+        application: rbd
+        size: 2
+        min_size: 1
+        pgs: "{{ ci_cluster_ceph_pg_num | default(32) }}"
+    pve_ceph_fs:
+      - name: cephfs
+        storage: true
+        pgs: "{{ ci_cluster_ceph_pg_num | default(32) }}"
+        rule: replicated_rule
+    pve_storages:
+      - name: ceph
+        type: rbd
+        content:
+          - images
+          - rootdir
+        pool: ceph
+        username: admin
+      - name: cephfs
+        type: cephfs
+        content:
+          - iso
+          - vztmpl
+          - backup
+    pve_run_system_upgrades: false
+    pve_run_proxmox_upgrades: false
+    pve_reboot_on_kernel_update: true
+    pve_reboot_on_kernel_update_delay: 15
+  roles:
+    - role: lae.proxmox
+  post_tasks:
+    - name: Verify nested Proxmox cluster has two nodes
+      ansible.builtin.shell: |
+        pvesh get /cluster/status --output-format=json | jq -e '[.[] | select(.type == "node")] | length == 2'
+      changed_when: false
+      run_once: true
+
+    - name: Verify required Ceph-backed Proxmox storages exist
+      ansible.builtin.command: "pvesh get /storage/{{ item }} --output-format=json"
+      changed_when: false
+      loop:
+        - ceph
+        - cephfs
+      run_once: true
+
+    - name: Configure Ceph for two-node CI replication
+      ansible.builtin.shell: |
+        set -euo pipefail
+        sed -i -E 's/^\s*osd_pool_default_size\s*=.*/\tosd_pool_default_size = 2/' /etc/pve/ceph.conf
+        sed -i -E 's/^\s*osd_pool_default_min_size\s*=.*/\tosd_pool_default_min_size = 1/' /etc/pve/ceph.conf
+        ceph config set global osd_pool_default_size 2
+        ceph config set global osd_pool_default_min_size 1
+        ceph config set mon osd_pool_default_size 2
+        ceph config set mon osd_pool_default_min_size 1
+        ceph config set mgr osd_pool_default_size 2
+        ceph config set mgr osd_pool_default_min_size 1
+        ceph config set mon mon_clock_drift_allowed 1
+        for pool in ceph cephfs_data cephfs_metadata; do
+          ceph osd pool set "$pool" size 2
+          ceph osd pool set "$pool" min_size 1
+        done
+      args:
+        executable: /bin/bash
+      run_once: true
+
+    - name: Restart Ceph daemons after two-node default changes
+      ansible.builtin.shell: |
+        set -euo pipefail
+        systemctl restart "ceph-mon@$(hostname).service"
+        systemctl restart "ceph-mgr@$(hostname).service"
+      args:
+        executable: /bin/bash
+      throttle: 1
+
+    - name: Wait for Ceph health to settle
+      ansible.builtin.command: ceph health
+      register: ci_ceph_health
+      changed_when: false
+      until: ci_ceph_health.stdout.startswith('HEALTH_OK')
+      retries: 30
+      delay: 10
+      run_once: true
+
+- name: Snapshot clean nested Proxmox cluster runtime VMs
+  hosts: localhost
+  gather_facts: false
+  tags: ci-cluster
+  tasks:
+    - name: Recreate 'clean' snapshot for cluster VMs
+      ansible.builtin.shell: |
+        if sudo qm listsnapshot {{ hostvars[item].ci_vmid }} | grep -q '\-> clean'; then
+          sudo qm delsnapshot {{ hostvars[item].ci_vmid }} clean
+        fi
+        sudo qm snapshot {{ hostvars[item].ci_vmid }} clean --vmstate true
+      loop: "{{ groups['ci_pve_cluster'] }}"
+      loop_control:
+        label: "{{ hostvars[item].ci_vmid }} ({{ item }})"
+
+- name: Install Ludus on non-base CI VMs
   hosts: localhost
   gather_facts: false
   vars:
     ssh_config: /home/gitlab-runner/.ssh/config
-    # VMs that need Ludus installed (all VMs except *-base)
     install_vms:
       - { vmid: 1001, role: installed }
       - { vmid: 1002, role: templates }
       - { vmid: 1003, role: range-admin }
       - { vmid: 1004, role: range-user }
-      - { vmid: 1005, role: cluster }
-      - { vmid: 1006, role: cluster }
-      - { vmid: 1008, role: installed }
-      - { vmid: 1009, role: templates }
-      - { vmid: 1010, role: range-admin }
-      - { vmid: 1011, role: range-user }
+      - { vmid: 1007, role: integration }
       - { vmid: 1012, role: build }
   tasks:
-    - name: Initialize install target list
-      ansible.builtin.set_fact:
-        install_vms_needing_install: []
-
     - name: Check whether Ludus is already installed on each VM
       ansible.builtin.shell: |
         ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
@@ -210,7 +528,6 @@
       register: ludus_install_check_results
       changed_when: false
       failed_when: false
-      when: vm_ip_map is defined
 
     - name: Build list of VMs that still need Ludus install
       ansible.builtin.set_fact:
@@ -221,7 +538,6 @@
             | map(attribute='item')
             | list
           }}
-      when: vm_ip_map is defined
 
     - name: Copy Ludus server binary to VMs
       ansible.builtin.shell: |
@@ -230,22 +546,20 @@
       loop: "{{ install_vms_needing_install }}"
       loop_control:
         label: "{{ item.vmid }}"
-      when:
-        - vm_ip_map is defined
-        - install_vms_needing_install | length > 0
+      when: install_vms_needing_install | length > 0
 
-    - name: Run Ludus installer on each VM (kicks off install, causes reboot)
+    - name: Run Ludus installer on each VM
       ansible.builtin.shell: |
         ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
-          "cd /tmp && sudo chmod +x ludus-server && sudo ./ludus-server --no-prompt $(hostname)"
+          "cd /tmp && sudo chmod +x ludus-server && sudo ./ludus-server --no-prompt ci-{{ item.vmid }}"
       loop: "{{ install_vms_needing_install }}"
       loop_control:
         label: "{{ item.vmid }}"
       register: installer_kickoff_results
-      failed_when: false  # SSH connection may drop during reboot
+      failed_when: false
       when: install_vms_needing_install | length > 0
 
-    - name: Wait for VMs to reboot and SSH to come back (up to 10 minutes)
+    - name: Wait for VMs to reboot and SSH to come back
       ansible.builtin.shell: |
         for i in $(seq 1 120); do
           ssh -o ConnectTimeout=3 -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} "echo ready" 2>/dev/null && exit 0
@@ -257,12 +571,11 @@
         label: "{{ item.vmid }}"
       when: install_vms_needing_install | length > 0
 
-    - name: Wait for Ludus install to complete (check install status)
+    - name: Wait for Ludus install to complete
       ansible.builtin.shell: |
         for i in $(seq 1 180); do
-          RESULT=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
-            "sudo cat /opt/ludus/install/install.log 2>/dev/null | tail -5" 2>/dev/null || echo "")
-          if echo "$RESULT" | grep -q "Ludus install complete"; then
+          if ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+            "sudo grep -q 'Ludus install complete' /opt/ludus/install/install.log" 2>/dev/null; then
             echo "Install complete on {{ item.vmid }}"
             exit 0
           fi
@@ -273,7 +586,6 @@
       loop: "{{ install_vms_needing_install }}"
       loop_control:
         label: "{{ item.vmid }}"
-      register: install_results
       when: install_vms_needing_install | length > 0
 
     - name: Check if ludus client is already installed on each VM
@@ -286,51 +598,47 @@
       register: ludus_client_check_results
       changed_when: false
       failed_when: false
-      when:
-        - vm_ip_map is defined
-        - vm_ip_map[item.vmid | string] is defined
 
     - name: Build list of VMs that still need Ludus client installed
       ansible.builtin.set_fact:
-        install_vms_needing_install: >-
+        client_vms_needing_install: >-
           {{
             ludus_client_check_results.results
-            | selectattr('skipped', 'undefined')
-            | selectattr('rc', 'defined')
             | rejectattr('rc', 'equalto', 0)
             | map(attribute='item')
             | list
           }}
-      when: vm_ip_map is defined
 
     - name: SCP ludus client binary to each VM
       ansible.builtin.shell: |
         scp -F {{ ssh_config }} {{ ludus_install_path }}/ci/binaries/ludus-client_linux-amd64 \
           gitlab-runner@{{ vm_ip_map[item.vmid | string] }}:/tmp/ludus-client
-      loop: "{{ install_vms_needing_install }}"
+      loop: "{{ client_vms_needing_install }}"
       loop_control:
         label: "{{ item.vmid }}"
+      when: client_vms_needing_install | length > 0
 
-    - name: Copy ludus client to /usr/local/bin on each newly installed VM
+    - name: Copy ludus client to /usr/local/bin
       ansible.builtin.shell: |
         ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
           "sudo cp /tmp/ludus-client /usr/local/bin/ludus && sudo chmod 0755 /usr/local/bin/ludus && sudo /bin/bash -c '/usr/local/bin/ludus completion bash > /usr/share/bash-completion/completions/ludus'"
-      loop: "{{ install_vms_needing_install }}"
+      loop: "{{ client_vms_needing_install }}"
       loop_control:
         label: "{{ item.vmid }}"
+      when: client_vms_needing_install | length > 0
 
-    - name: Recreate 'clean' snapshot for 'installed' VMs (1001, 1008, 1012)
+    - name: Recreate 'clean' snapshot for runtime VMs
       ansible.builtin.shell: |
         if sudo qm listsnapshot {{ item.vmid }} | grep -q '\-> clean'; then
           sudo qm delsnapshot {{ item.vmid }} clean
         fi
         sudo qm snapshot {{ item.vmid }} clean --vmstate true
-      loop: "{{ install_vms | selectattr('role', 'in', ['installed', 'build']) | list }}"
+      loop:
+        - { vmid: 1012, role: build }
       loop_control:
         label: "{{ item.vmid }}"
 
-# --- Build templates on VMs that need them ---
-- name: Build templates on template/range VMs
+- name: Build templates on template/range seed VMs
   hosts: localhost
   gather_facts: false
   vars:
@@ -339,35 +647,38 @@
       - { vmid: 1002, role: templates }
       - { vmid: 1003, role: range-admin }
       - { vmid: 1004, role: range-user }
-      - { vmid: 1009, role: templates }
-      - { vmid: 1010, role: range-admin }
-      - { vmid: 1011, role: range-user }
+      - { vmid: 1007, role: integration }
   tasks:
     - name: Create admin user and start template builds
       ansible.builtin.shell: |
         ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} bash -l <<'REMOTE'
         export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
-        # Create the CI admin user
         sudo chown -R gitlab-runner:gitlab-runner /opt/ludus/ci
         ludus users add -a -n "Continuous Integration Admin" -i CIA -e "cia@ludus.internal" -p "cicdpassword" || true
         ludus --user CIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-admin
         export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
-        # Build all templates in parallel
-        ludus templates build --parallel 6
+        ludus templates build --parallel {{ ci_template_parallel | default(2) }}
         REMOTE
       loop: "{{ template_vms }}"
       loop_control:
         label: "{{ item.vmid }}"
 
-    - name: Wait for template builds to complete (up to 3 hours)
+    - name: Wait for template builds to complete
       ansible.builtin.shell: |
         for i in $(seq 1 360); do
+          STATUS=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
+            "export LUDUS_API_KEY=\$(cat /opt/ludus/ci/.apikey-admin) && \
+             ludus templates status --json | jq 'length'" 2>/dev/null || echo "0")
           REMAINING=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
             "export LUDUS_API_KEY=\$(cat /opt/ludus/ci/.apikey-admin) && \
              ludus templates list --json | jq '[.[] | select(.built == false)] | length'" 2>/dev/null || echo "99")
           if [ "$REMAINING" = "0" ]; then
             echo "Templates built on {{ item.vmid }}"
             exit 0
+          fi
+          if [ "$STATUS" = "0" ]; then
+            echo "{{ item.vmid }}: $REMAINING templates remain but no builds are active"
+            exit 1
           fi
           echo "{{ item.vmid }}: $REMAINING templates remaining..."
           sleep 30
@@ -378,25 +689,13 @@
       loop_control:
         label: "{{ item.vmid }}"
 
-    - name: Recreate 'clean' snapshot for 'templates' VMs (1002, 1009)
-      ansible.builtin.shell: |
-        if sudo qm listsnapshot {{ item.vmid }} | grep -q '\-> clean'; then
-          sudo qm delsnapshot {{ item.vmid }} clean
-        fi
-        sudo qm snapshot {{ item.vmid }} clean --vmstate true
-      loop: "{{ template_vms | selectattr('role', 'equalto', 'templates') | list }}"
-      loop_control:
-        label: "{{ item.vmid }}"
-
-# --- Deploy admin range on VMs that need it ---
-- name: Deploy admin range
+- name: Deploy admin range seed
   hosts: localhost
   gather_facts: false
   vars:
     ssh_config: /home/gitlab-runner/.ssh/config
     admin_range_vms:
       - { vmid: 1003, role: range-admin }
-      - { vmid: 1010, role: range-admin }
   tasks:
     - name: Set range config and deploy admin range
       ansible.builtin.shell: |
@@ -409,7 +708,7 @@
       loop_control:
         label: "{{ item.vmid }}"
 
-    - name: Wait for admin range deployment (up to 3 hours)
+    - name: Wait for admin range deployment
       ansible.builtin.shell: |
         for i in $(seq 1 360); do
           STATE=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
@@ -420,7 +719,7 @@
             exit 0
           fi
           if [ "$STATE" = "ERROR" ]; then
-            echo "Range deployment FAILED on {{ item.vmid }}"
+            echo "Range deployment failed on {{ item.vmid }}"
             ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
               "export LUDUS_API_KEY=\$(cat /opt/ludus/ci/.apikey-admin) && ludus range errors" 2>/dev/null || true
             exit 1
@@ -434,33 +733,20 @@
       loop_control:
         label: "{{ item.vmid }}"
 
-    - name: Recreate 'clean' snapshot for 'range-admin' VMs (1003, 1010)
-      ansible.builtin.shell: |
-        if sudo qm listsnapshot {{ item.vmid }} | grep -q '\-> clean'; then
-          sudo qm delsnapshot {{ item.vmid }} clean
-        fi
-        sudo qm snapshot {{ item.vmid }} clean --vmstate true
-      loop: "{{ admin_range_vms | selectattr('role', 'equalto', 'range-admin') | list }}"
-      loop_control:
-        label: "{{ item.vmid }}"
-
-# --- Deploy user range on VMs that need it ---
-- name: Deploy user range
+- name: Deploy user range seed
   hosts: localhost
   gather_facts: false
   vars:
     ssh_config: /home/gitlab-runner/.ssh/config
     user_range_vms:
       - { vmid: 1004, role: range-user }
-      - { vmid: 1011, role: range-user }
+      - { vmid: 1007, role: integration }
   tasks:
     - name: Create CIU user and deploy user range
       ansible.builtin.shell: |
         ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} bash -l <<'REMOTE'
         export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
-        # Power off admin range to save resources
-        ludus power off -n all
-        # Create the CI user
+        ludus power off -n all || true
         ludus users add -n "Continuous Integration User" -i CIU -e "ciu@ludus.internal" -p "cicdpassword" || true
         ludus --user CIU users apikey --no-prompt --value > /opt/ludus/ci/.apikey-user
         export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
@@ -471,7 +757,7 @@
       loop_control:
         label: "{{ item.vmid }}"
 
-    - name: Wait for user range deployment (up to 3 hours)
+    - name: Wait for user range deployment
       ansible.builtin.shell: |
         for i in $(seq 1 360); do
           STATE=$(ssh -F {{ ssh_config }} gitlab-runner@{{ vm_ip_map[item.vmid | string] }} \
@@ -482,7 +768,7 @@
             exit 0
           fi
           if [ "$STATE" = "ERROR" ]; then
-            echo "Range deployment FAILED on {{ item.vmid }}"
+            echo "Range deployment failed on {{ item.vmid }}"
             exit 1
           fi
           echo "{{ item.vmid }}: range state = $STATE"
@@ -494,22 +780,46 @@
       loop_control:
         label: "{{ item.vmid }}"
 
-    - name: Recreate 'clean' snapshot for 'range-user' VMs (1004, 1011)
-      ansible.builtin.shell: |
-        if sudo qm listsnapshot {{ item.vmid }} | grep -q '\-> clean'; then
-          sudo qm delsnapshot {{ item.vmid }} clean
-        fi
-        sudo qm snapshot {{ item.vmid }} clean --vmstate true
-      loop: "{{ user_range_vms }}"
-      loop_control:
-        label: "{{ item.vmid }}"
-
-# --- Update runner concurrency ---
-- name: Update runner concurrency for parallel CI
+- name: Convert CI seed VMs to protected templates
   hosts: localhost
   gather_facts: false
+  vars:
+    ci_seed_vms:
+      - { vmid: 1000, name: "ci-seed-base" }
+      - { vmid: 1001, name: "ci-seed-clean-install" }
+      - { vmid: 1002, name: "ci-seed-templates-built" }
+      - { vmid: 1003, name: "ci-seed-range-admin" }
+      - { vmid: 1004, name: "ci-seed-range-user" }
+      - { vmid: 1007, name: "ci-seed-integration" }
   tasks:
-    - name: Update GitLab runner config concurrency to 12
+    - name: Stop seed VMs before template conversion
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ item.vmid }}"
+        state: stopped
+        update: true
+      loop: "{{ ci_seed_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
+    - name: Convert seed VMs to templates
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_password: "{{ api_password }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        vmid: "{{ item.vmid }}"
+        state: present
+        template: true
+        update: true
+      loop: "{{ ci_seed_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
+    - name: Update GitLab runner config concurrency
       ansible.builtin.replace:
         path: /etc/gitlab-runner/config.toml
         regexp: "concurrent *= *\\d+"
@@ -521,12 +831,20 @@
     - name: Summary
       ansible.builtin.debug:
         msg: |
-          CI VM setup complete!
+          CI seed setup complete.
 
-          Pool A: VMIDs 1000-1004 (base → range-user)
-          Pool B: VMIDs 1007-1011 (base → range-user)
-          Cluster: VMIDs 1005-1006
-          Build:   VMID 1012
+          Dynamic clone seeds:
+            1000 ci-seed-base
+            1001 ci-seed-clean-install
+            1002 ci-seed-templates-built
+            1003 ci-seed-range-admin
+            1004 ci-seed-range-user
+            1007 ci-seed-integration
 
-          All VMs have been snapshotted as 'clean'.
-          Runner concurrency set to 12.
+          Runtime VMs:
+            1005 ci-cluster-node1
+            1006 ci-cluster-node2
+            1012 ci-build-machine
+
+          Successful CI series will destroy their dynamic clones.
+          Failed CI series leave their clone running for troubleshooting.

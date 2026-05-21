@@ -25,7 +25,7 @@ if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "clean-cluster" ]]; then
     qm rollback "$NODE2" clean --start 1
     for IP in $CLUSTER_NODES; do
         for i in {1..90}; do
-            ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config root@"$IP" "echo ready" && break || sleep 5
+            ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" "echo ready" && break || sleep 5
         done
     done
 elif [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "cluster-from-snapshot" ]]; then
@@ -43,7 +43,7 @@ elif [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "cluster-from-snapshot" ]]; then
             qm rollback "$NODE2" "$SNAP" --start
             for IP in $CLUSTER_NODES; do
                 for i in {1..30}; do
-                    ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config root@"$IP" "echo ready" && break || sleep 5
+                    ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" "echo ready" && break || sleep 5
                 done
             done
         else
@@ -54,7 +54,7 @@ elif [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "cluster-from-snapshot" ]]; then
         qm reboot "$NODE2"
         for IP in $CLUSTER_NODES; do
             for i in {1..90}; do
-                ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config root@"$IP" "echo ready" && break || sleep 5
+                ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" "echo ready" && break || sleep 5
             done
         done
         sleep 60

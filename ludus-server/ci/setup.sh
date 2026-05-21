@@ -23,10 +23,10 @@ ansible-galaxy role install gantsign.golang
 
 # Export variables needed for dynamic inventory
 export PROXMOX_URL=https://127.0.0.1:8006/
-export PROXMOX_NODE=ludus
+export PROXMOX_NODE=$(hostname -s 2>/dev/null || hostname)
 export PROXMOX_INVALID_CERT=true
 export PROXMOX_HOSTNAME=127.0.0.1
-export PROXMOX_VM_STORAGE_POOL=local
+export PROXMOX_VM_STORAGE_POOL=zfs
 export LUDUS_DIR=/opt/ludus
 
 # Do it

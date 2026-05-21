@@ -163,7 +163,7 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
   winrm_password       = "${var.winrm_password}"
   winrm_use_ssl        = true
   winrm_username       = "${var.winrm_username}"
-  winrm_timeout        = "60m"
+  winrm_timeout        = "6h" // Nested CI builds can take longer than 60m to reach WinRM
   task_timeout         = "20m" // On slow disks the imgcopy operation takes > 1m
 }
 
