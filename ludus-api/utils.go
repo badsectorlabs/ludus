@@ -227,10 +227,16 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 		}
 	}
 
-	targetRange.SetNumberOfVms(rangeVMCount)
-	err = app.Save(targetRange)
+	// Only update the VM count here. Polling endpoints call this while deploys
+	// are running; saving the whole range record can overwrite a concurrent
+	// state transition such as DEPLOYING -> SUCCESS with a stale value.
+	_, err = e.App.DB().NewQuery("UPDATE ranges SET numberOfVMs = {:number_of_vms} WHERE id = {:range_id}").
+		Bind(dbx.Params{
+			"number_of_vms": rangeVMCount,
+			"range_id":      targetRange.Id,
+		}).Execute()
 	if err != nil {
-		return errors.New("unable to update range: " + err.Error())
+		return errors.New("unable to update range VM count: " + err.Error())
 	}
 
 	logger.Debug(fmt.Sprintf("Updated range %s with %d VMs", targetRange.RangeId(), rangeVMCount))
