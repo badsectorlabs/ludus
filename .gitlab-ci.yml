@@ -400,7 +400,7 @@ documentation:
     # Preserve docs/node_modules and Docusaurus' webpack cache across runs.
     # The build VM is not rolled back, so the cache persists; default
     # `git clean -ffdx` would otherwise wipe it every job.
-    GIT_CLEAN_FLAGS: "-ffdx --exclude=docs/node_modules --exclude=docs/.docusaurus"
+    GIT_CLEAN_FLAGS: "-ffdx --exclude=docs/node_modules --exclude=docs/.docusaurus --exclude=ludus-gui --exclude=ludus-client/spinner"
   tags:
     - ludus-proxmox-runner-parallel
   rules:
@@ -460,7 +460,7 @@ build all:
     # ludus-client/spinner clone across runs. The build VM is not rolled
     # back, so default `git clean -ffdx` would otherwise wipe these and
     # force a cold Next.js build every job.
-    GIT_CLEAN_FLAGS: "-ffdx --exclude=ludus-gui --exclude=ludus-client/spinner"
+    GIT_CLEAN_FLAGS: "-ffdx --exclude=docs/node_modules --exclude=docs/.docusaurus --exclude=ludus-gui --exclude=ludus-client/spinner"
   timeout: 10m
   script:
     - echo "Compiling the server code..."
