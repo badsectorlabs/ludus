@@ -323,6 +323,41 @@ awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" '
     }
 ' /etc/network/interfaces > /tmp/interfaces.ludus-ci
 mv /tmp/interfaces.ludus-ci /etc/network/interfaces
+
+PROXMOX_NODE_NAME=\$(awk -F': *' '\$1 == "proxmox_node" { print \$2; exit }' /opt/ludus/config.yml 2>/dev/null || true)
+if [ -z "\$PROXMOX_NODE_NAME" ]; then
+    PROXMOX_NODE_NAME=\$(hostname -s)
+fi
+HOSTNAME_SHORT=\$(hostname -s)
+HOST_NAMES="\$PROXMOX_NODE_NAME"
+if [ "\$HOSTNAME_SHORT" != "\$PROXMOX_NODE_NAME" ]; then
+    HOST_NAMES="\$HOST_NAMES \$HOSTNAME_SHORT"
+fi
+awk -v n1="\$PROXMOX_NODE_NAME" -v n2="\$HOSTNAME_SHORT" '
+    \$1 !~ /^127\./ {
+        for (i = 2; i <= NF; i++) {
+            if (\$i == n1 || \$i == n2) {
+                next
+            }
+        }
+    }
+    { print }
+' /etc/hosts > /tmp/hosts.ludus-ci
+printf '%s\t%s\n' "${IP}" "\$HOST_NAMES" >> /tmp/hosts.ludus-ci
+mv /tmp/hosts.ludus-ci /etc/hosts
+
+if [ -f /opt/ludus/config.yml ]; then
+    for entry in "proxmox_local_ip ${IP}" "proxmox_public_ip ${IP}" "proxmox_hostname 127.0.0.1" "proxmox_url https://127.0.0.1:8006"; do
+        key="\${entry%% *}"
+        value="\${entry#* }"
+        if grep -qE "^\${key}:" /opt/ludus/config.yml; then
+            sed -i -E "s#^\${key}:.*#\${key}: \${value}#" /opt/ludus/config.yml
+        else
+            printf '%s: %s\n' "\$key" "\$value" >> /opt/ludus/config.yml
+        fi
+    done
+fi
+
 ip addr flush dev ens18
 ip link set ens18 up
 ip addr add "${IP}/24" dev ens18
