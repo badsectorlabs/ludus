@@ -2203,13 +2203,13 @@ cluster-verify-sdn:
   script:
     - *ci-setup-cluster-admin
     # Verify Ludus is in cluster mode
-    - ludus migrate sdn status --json | jq '.cluster_mode == true'
+    - ludus migrate sdn status --json | jq -e '.cluster_mode == true'
     # Verify the SDN zone exists
     - sudo pvesh get /cluster/sdn/zones --output-format=json | jq -e '.[] | select(.zone == "ludus")'
-    - ludus migrate sdn status --json | jq '.sdn_zone_exists == true'
+    - ludus migrate sdn status --json | jq -e '.sdn_zone_exists == true'
     # Verify the ludusnat VNet exists
     - sudo pvesh get /cluster/sdn/vnets --output-format=json | jq -e '.[] | select(.vnet == "ludusnat")'
-    - ludus migrate sdn status --json | jq '.nat_vnet_exists == true'
+    - ludus migrate sdn status --json | jq -e '.nat_vnet_exists == true'
     # Verify cluster has 2 nodes
     - sudo pvesh get /cluster/status --output-format=json | jq -e '[.[] | select(.type == "node")] | length == 2'
 
@@ -2246,7 +2246,7 @@ cluster-templates-check:
   variables:
     LUDUS_BUILD_TYPE: cluster
     GIT_STRATEGY: none
-  timeout: 15m
+  timeout: 2h
   retry:
     max: 2
   script:

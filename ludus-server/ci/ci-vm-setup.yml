@@ -438,6 +438,27 @@
   roles:
     - role: lae.proxmox
   post_tasks:
+    - name: Ensure chrony is installed for cluster CI time-sync setup
+      ansible.builtin.apt:
+        name: chrony
+        state: present
+        update_cache: true
+
+    - name: Ensure CephFS storage is active on cluster CI nodes
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if timeout 15 pvesm status --storage cephfs 2>/dev/null | awk '$1 == "cephfs" && $3 == "active" { found=1 } END { exit(found ? 0 : 1) }'; then
+          exit 0
+        fi
+
+        timeout 10 umount -f -l /mnt/pve/cephfs 2>/dev/null || true
+        mkdir -p /mnt/pve/cephfs
+        systemctl restart pvestatd || true
+
+        timeout 30 pvesm status --storage cephfs 2>/dev/null | awk '$1 == "cephfs" && $3 == "active" { found=1 } END { exit(found ? 0 : 1) }'
+      args:
+        executable: /bin/bash
+
     - name: Verify nested Proxmox cluster has two nodes
       ansible.builtin.shell: |
         pvesh get /cluster/status --output-format=json | jq -e '[.[] | select(.type == "node")] | length == 2'
@@ -488,6 +509,24 @@
       until: ci_ceph_health.stdout.startswith('HEALTH_OK')
       retries: 30
       delay: 10
+      run_once: true
+
+    - name: Ensure Ludus VXLAN SDN zone exists for cluster CI
+      ansible.builtin.shell: |
+        set -euo pipefail
+        zone="{{ ci_cluster_sdn_zone | default('ludus') }}"
+        peers="{{ groups['ci_pve_cluster'] | map('extract', hostvars, 'ansible_host') | join(',') }}"
+        nodes="{{ groups['ci_pve_cluster'] | sort | join(',') }}"
+
+        if pvesh get /cluster/sdn/zones --output-format=json | jq -e --arg zone "$zone" 'any(.[]; .type == "vxlan" and .zone == $zone)' >/dev/null; then
+          pvesh set "/cluster/sdn/zones/$zone" --peers "$peers" --nodes "$nodes"
+        else
+          pvesh create /cluster/sdn/zones --zone "$zone" --type vxlan --peers "$peers" --nodes "$nodes"
+        fi
+
+        pvesh set /cluster/sdn
+      args:
+        executable: /bin/bash
       run_once: true
 
 - name: Snapshot clean nested Proxmox cluster runtime VMs

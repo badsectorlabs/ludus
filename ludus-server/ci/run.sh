@@ -41,8 +41,8 @@ fi
 ssh -F /home/gitlab-runner/.ssh/config gitlab-runner@"$VM_IP" /bin/bash --login < "${1}"
 SSH_EXIT=$?
 
-if [[ $SSH_EXIT -ne 0 && (-z "$CUSTOM_ENV_LUDUS_INSTALL_STEP" || "$CUSTOM_ENV_LUDUS_INSTALL_STEP" != "kickoff") ]]; then
-    exit "${BUILD_FAILURE_EXIT_CODE:-1}"
-elif [[ -n "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP" = "kickoff" && $SSH_EXIT -ne 0 ]]; then
+if [[ $SSH_EXIT -ne 0 && -n "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP" = "kickoff" && $SSH_EXIT -eq 255 ]]; then
     echo "SSH connection lost, assuming reboot during install."
+elif [[ $SSH_EXIT -ne 0 ]]; then
+    exit "${BUILD_FAILURE_EXIT_CODE:-1}"
 fi

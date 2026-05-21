@@ -26,6 +26,7 @@ export CI_CLONE_IP_PREFIX=${CI_CLONE_IP_PREFIX:-203.0.113}
 export CI_CLONE_IP_START=${CI_CLONE_IP_START:-10}
 export CI_CLONE_IP_END=${CI_CLONE_IP_END:-99}
 export CI_CLONE_GATEWAY=${CI_CLONE_GATEWAY:-203.0.113.254}
+export CI_CLONE_DNS_SERVERS=${CI_CLONE_DNS_SERVERS:-"1.1.1.1 8.8.8.8"}
 
 # Backward-compatible name for cluster lock scripts. Pool locks are no
 # longer used for non-cluster CI.
@@ -283,11 +284,12 @@ configure_ci_control_ip() {
     SCRIPT=$(cat <<EOF
 set -e
 cp /etc/network/interfaces /etc/network/interfaces.ludus-ci.bak 2>/dev/null || true
-awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" '
+awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" -v dns="${CI_CLONE_DNS_SERVERS}" '
     /^iface ens18 inet static$/ {
         in_ens18=1
         saw_address=0
         saw_gateway=0
+        saw_dns=0
         print
         next
     }
@@ -297,6 +299,9 @@ awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" '
         }
         if (!saw_gateway) {
             print "\tgateway " gw
+        }
+        if (!saw_dns) {
+            print "\tdns-nameservers " dns
         }
         in_ens18=0
     }
@@ -310,6 +315,11 @@ awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" '
         saw_gateway=1
         next
     }
+    in_ens18 && /^[[:space:]]*dns-nameservers[[:space:]]+/ {
+        print "\tdns-nameservers " dns
+        saw_dns=1
+        next
+    }
     { print }
     END {
         if (in_ens18) {
@@ -319,10 +329,25 @@ awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" '
             if (!saw_gateway) {
                 print "\tgateway " gw
             }
+            if (!saw_dns) {
+                print "\tdns-nameservers " dns
+            }
         }
     }
 ' /etc/network/interfaces > /tmp/interfaces.ludus-ci
 mv /tmp/interfaces.ludus-ci /etc/network/interfaces
+
+for dns_server in ${CI_CLONE_DNS_SERVERS}; do
+    printf 'nameserver %s\n' "\$dns_server"
+done > /tmp/resolv.conf.ludus-ci
+if [ -d /etc/resolvconf/resolv.conf.d ]; then
+    cp /tmp/resolv.conf.ludus-ci /etc/resolvconf/resolv.conf.d/head
+    resolvconf -u || true
+fi
+if ! grep -qE '^nameserver[[:space:]]+' /etc/resolv.conf 2>/dev/null; then
+    cp /tmp/resolv.conf.ludus-ci /etc/resolv.conf
+fi
+rm -f /tmp/resolv.conf.ludus-ci
 
 PROXMOX_NODE_NAME=\$(awk -F': *' '\$1 == "proxmox_node" { print \$2; exit }' /opt/ludus/config.yml 2>/dev/null || true)
 if [ -z "\$PROXMOX_NODE_NAME" ]; then
