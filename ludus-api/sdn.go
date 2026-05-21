@@ -272,15 +272,18 @@ func ZoneExists(client *goproxmox.Client, zoneName string) (bool, error) {
 		return false, fmt.Errorf("failed to get cluster client: %w", err)
 	}
 
-	// Use library's SDNZone function - returns error if not found
-	_, err = cluster.SDNZone(ctx, zoneName)
+	zones, err := cluster.SDNZones(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no such") {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to check SDN zone existence: %w", err)
+		return false, fmt.Errorf("failed to list SDN zones: %w", err)
 	}
-	return true, nil
+
+	for _, zone := range zones {
+		if zone.Name == zoneName {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // GetVNetSubnets returns all subnets for a VNet using go-proxmox library

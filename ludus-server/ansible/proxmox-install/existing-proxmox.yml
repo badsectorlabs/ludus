@@ -114,7 +114,7 @@
 
     - name: Check for existing VXLAN Zone
       ansible.builtin.shell: |
-        pvesh get /cluster/sdn/zones --output-format=json | jq -e '.[] | select(.type == "vxlan" and .zone == "{{ sdn_zone | default("ludus") }}") | length > 0'
+        pvesh get /cluster/sdn/zones --output-format=json | jq -e 'any(.[]; .type == "vxlan" and .zone == "{{ sdn_zone | default("ludus") }}")'
       register: vxlan_zone_status
       ignore_errors: true
       when: cluster_status.stdout | trim == "true"
@@ -128,7 +128,7 @@
 
     - name: Create ludusnat VNet (cluster mode only)
       ansible.builtin.shell: |
-        pvesh create /cluster/sdn/vnets --zone ludus --vnet {{ ludus_nat_interface | default("ludusnat") }} --tag 16777215 --vlanaware 1 && pvesh set /cluster/sdn
+        pvesh create /cluster/sdn/vnets --zone {{ sdn_zone | default("ludus") }} --vnet {{ ludus_nat_interface | default("ludusnat") }} --tag 16777215 --vlanaware 1 && pvesh set /cluster/sdn
       when: cluster_status.stdout | trim == "true"
 
     - name: Add the ludusnat interface
