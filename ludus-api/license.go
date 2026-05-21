@@ -65,77 +65,129 @@ func (s *Server) checkLicense() {
 	}
 	enterpriseLoaded := false
 
-	// Validate the license for the current fingerprint
-	license, err := keygen.Validate(ctx, fingerprint)
-	switch {
-	case err == keygen.ErrLicenseNotActivated:
-		// Activate the current fingerprint
-		_, err := license.Activate(ctx, fingerprint)
+	var license *keygen.License
+	var entitlements keygen.Entitlements
+	// If a license file exists, use it instead of the network license
+	if FileExists(ludusInstallPath + "/license.lic") {
+		log.Println("LICENSE: using license file instead of network license")
+		keygen.PublicKey = LicensePublicKey
+		licenseFile, err := os.ReadFile(ludusInstallPath + "/license.lic")
+		if err != nil {
+			log.Println("LICENSE: unable to read license file:", err)
+			return
+		}
+		// Verify the license file's signature
+		lic := &keygen.LicenseFile{Certificate: string(licenseFile)}
+		err = lic.Verify()
 		switch {
-		case err == keygen.ErrMachineLimitExceeded:
-			log.Println("LICENSE: machine limit has been exceeded!")
+		case err == keygen.ErrLicenseFileNotGenuine:
+			log.Println("LICENSE: license file is not genuine!")
 			s.LicenseValid = false
-			s.LicenseMessage = "Machine limit has been exceeded"
+			s.LicenseMessage = "license file is not genuine!"
+		case err != nil:
+			log.Println("LICENSE: unable to verify license file:", err)
+			s.LicenseValid = false
+			s.LicenseMessage = err.Error()
+		}
+		// Use the license key to decrypt the license file
+		dataset, err := lic.Decrypt(s.LicenseKey)
+		switch {
+		case err == keygen.ErrSystemClockUnsynced:
+			log.Println("LICENSE: system clock tampering detected!")
+			s.LicenseValid = false
+			s.LicenseMessage = "System clock tampering detected"
+			return
+		case err == keygen.ErrLicenseFileExpired:
+			log.Println("LICENSE: license file is expired!")
+			s.LicenseValid = false
+			s.LicenseMessage = "License file is expired"
 			return
 		case err != nil:
-			log.Printf("LICENSE: machine activation failed: %v\n", err)
+			log.Println("LICENSE: unable to decrypt license file:", err)
 			s.LicenseValid = false
-			s.LicenseMessage = "Machine activation failed"
+			s.LicenseMessage = err.Error()
 			return
 		}
-	case err == keygen.ErrLicenseExpired:
-		log.Println("LICENSE: license is expired!")
-		s.LicenseValid = false
-		s.LicenseMessage = "License is expired"
-		return
-	case err != nil:
-		var urlErr *url.Error
-		if errors.As(err, &urlErr) || strings.Contains(err.Error(), "an error occurred") {
-			log.Println("LICENSE: unable to connect to license server:", err)
-			// If the enterprise plugin is not installed mark the license is not valid
-			// The enterprise plugin can use a fallback on disk license if the network license fails
-			if !FileExists(ludusInstallPath + "/plugins/enterprise/ludus-enterprise.so") {
+
+		log.Println("LICENSE: license file is genuine!")
+		license = &dataset.License
+		entitlements = dataset.Entitlements
+		if len(entitlements) == 0 {
+			log.Println("LICENSE: no entitlements found in license file")
+			s.Entitlements = []string{}
+		}
+	} else {
+		// Validate the license for the current fingerprint
+		license, err = keygen.Validate(ctx, fingerprint)
+		switch {
+		case err == keygen.ErrLicenseNotActivated:
+			// Activate the current fingerprint
+			_, err := license.Activate(ctx, fingerprint)
+			switch {
+			case err == keygen.ErrMachineLimitExceeded:
+				log.Println("LICENSE: machine limit has been exceeded!")
 				s.LicenseValid = false
-				s.LicenseMessage = "Unable to connect to license server"
+				s.LicenseMessage = "Machine limit has been exceeded"
 				return
-			} else {
-				log.Println("LICENSE: enterprise plugin is present, attempting to load it")
-				err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
-				if err != nil {
-					log.Printf("LICENSE: error loading enterprise plugin as part of network fallback: %v", err)
+			case err != nil:
+				log.Printf("LICENSE: machine activation failed: %v\n", err)
+				s.LicenseValid = false
+				s.LicenseMessage = "Machine activation failed"
+				return
+			}
+		case err == keygen.ErrLicenseExpired:
+			log.Println("LICENSE: license is expired!")
+			s.LicenseValid = false
+			s.LicenseMessage = "License is expired"
+			return
+		case err != nil:
+			var urlErr *url.Error
+			if errors.As(err, &urlErr) || strings.Contains(err.Error(), "an error occurred") {
+				log.Println("LICENSE: unable to connect to license server:", err)
+				// If the enterprise plugin is not installed mark the license is not valid
+				// The enterprise plugin can use a fallback on disk license if the network license fails
+				if !FileExists(ludusInstallPath + "/plugins/enterprise/ludus-enterprise.so") {
+					s.LicenseValid = false
+					s.LicenseMessage = "Unable to connect to license server"
+					return
 				} else {
-					enterpriseLoaded = true
+					log.Println("LICENSE: enterprise plugin is present, attempting to load it")
+					err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
+					if err != nil {
+						log.Printf("LICENSE: error loading enterprise plugin as part of network fallback: %v", err)
+					} else {
+						enterpriseLoaded = true
+					}
 				}
 			}
+			log.Printf("LICENSE: %v\n", err)
+			return
 		}
-		log.Printf("LICENSE: %v\n", err)
-		return
+		if license.Expiry != nil {
+			log.Printf("LICENSE: active, expires: %s, licensed to %s\n", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
+			s.LicenseMessage = fmt.Sprintf("License active, expires: %s, licensed to %s", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
+			s.LicenseName = license.Name
+			s.LicenseExpiry = license.Expiry
+		} else {
+			log.Println("LICENSE: active, does not expire, licensed to", license.Name)
+			s.LicenseMessage = fmt.Sprintf("License active, does not expire, licensed to %s", license.Name)
+			s.LicenseName = license.Name
+			s.LicenseExpiry = nil
+		}
+		s.LicenseValid = true
+		// Extract entitlements from license
+		entitlements, err = license.Entitlements(ctx)
+		if err != nil {
+			log.Printf("LICENSE: unable to get entitlements: %v", err)
+			s.Entitlements = []string{}
+		}
 	}
-	if license.Expiry != nil {
-		log.Printf("LICENSE: active, expires: %s, licensed to %s\n", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
-		s.LicenseMessage = fmt.Sprintf("License active, expires: %s, licensed to %s", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
-		s.LicenseName = license.Name
-		s.LicenseExpiry = license.Expiry
-	} else {
-		log.Println("LICENSE: active, does not expire, licensed to", license.Name)
-		s.LicenseMessage = fmt.Sprintf("License active, does not expire, licensed to %s", license.Name)
-		s.LicenseName = license.Name
-		s.LicenseExpiry = nil
-	}
-	s.LicenseValid = true
 
-	// Extract entitlements from license
-	entitlements, err := license.Entitlements(ctx)
-	if err != nil {
-		log.Printf("LICENSE: unable to get entitlements: %v", err)
-		s.Entitlements = []string{}
-	} else {
-		s.Entitlements = make([]string, len(entitlements))
-		for i, entitlement := range entitlements {
-			s.Entitlements[i] = string(entitlement.Code)
-		}
-		log.Printf("LICENSE: found entitlements: %s", strings.Join(s.Entitlements, ", "))
+	s.Entitlements = make([]string, len(entitlements))
+	for i, entitlement := range entitlements {
+		s.Entitlements[i] = string(entitlement.Code)
 	}
+	log.Printf("LICENSE: found entitlements: %s", strings.Join(s.Entitlements, ", "))
 
 	// Always load the enterprise plugin if it exists first
 	if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") && FileExists(pluginsDir+"/ludus-enterprise.so") {
