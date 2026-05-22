@@ -368,8 +368,30 @@ stages:
   - 'echo "url: https://127.0.0.1:9090" > ~/.config/ludus/config.yml'
   - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
   # Create cluster CI admin user
-  - for i in {1..5}; do (ludus users list all | grep -q 'Cluster CI Admin' || ludus users add -a -n "Cluster CI Admin" -i CCIA -e "ccia@ludus.internal" -p "cicdpassword") && break || sleep 5; done
-  - if [ ! -f /opt/ludus/ci/.apikey-cluster-admin ]; then ludus --user CCIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-cluster-admin; fi
+  - |
+    for i in {1..5}; do
+      if ludus users list all | grep -q 'Cluster CI Admin'; then
+        break
+      fi
+
+      if sudo pvesh get /pools --output-format=json | jq -e 'any(.[]; .poolid == "CCIA")' >/dev/null; then
+        if ! sudo pvesh get /pools/CCIA --output-format=json | jq -e '(.members // []) | length == 0' >/dev/null; then
+          echo "CCIA Proxmox pool exists but is not empty; refusing to remove it."
+          sudo pvesh get /pools/CCIA --output-format=json | jq .
+          exit 1
+        fi
+
+        sudo pvesh delete /pools/CCIA
+      fi
+
+      sudo pveum user delete cluster-ci-admin@pam 2>/dev/null || true
+      sudo userdel -r cluster-ci-admin 2>/dev/null || true
+      ludus users add -a -n "Cluster CI Admin" -i CCIA -e "ccia@ludus.internal" -p "cicdpassword" && break
+      sleep 5
+    done
+    ludus users list all | grep -q 'Cluster CI Admin'
+  - if [ ! -s /opt/ludus/ci/.apikey-cluster-admin ]; then rm -f /opt/ludus/ci/.apikey-cluster-admin; ludus --user CCIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-cluster-admin; fi
+  - test -s /opt/ludus/ci/.apikey-cluster-admin
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-cluster-admin)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
 
