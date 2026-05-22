@@ -31,6 +31,27 @@ stages:
   # Start as the ROOT user
   - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
 
+.wait-for-range-success: &wait-for-range-success
+  - |
+    while true; do
+      range_state="$(ludus range list --json | jq -r '.rangeState')"
+      echo "Current range state: ${range_state}"
+
+      case "${range_state}" in
+        SUCCESS)
+          break
+          ;;
+        ERROR|ABORTED)
+          echo "Range deployment ended in ${range_state}. Exiting."
+          ludus range errors || true
+          exit 1
+          ;;
+      esac
+
+      ludus range logs --tail 20 || true
+      sleep 60
+    done
+
 .powered-on-and-not-in-testing: &powered-on-and-not-in-testing
   # Start from a known state (in the event this is a retry)
   # Power on all VMs if we are not in a "user" test as admin (admin VMs are powered off for user tests to save resources)
@@ -112,7 +133,7 @@ stages:
   - ludus ansible role add -d /opt/ludus/ci/roles/third --force
   - ludus range config set -f /opt/ludus/ci/configs/depends-on.yml
   - ludus range deploy -t user-defined-roles
-  - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+  - *wait-for-range-success
   # Depends on - dependency that doesn't exist test
   - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
   - 'ludus range config set -f /opt/ludus/ci/configs/depends-on-not-found.yml 2>&1 | egrep "ERROR: Dependency not found \w+-ad-dc-win2022-server-x64-1:geerlingguy.docker"'
@@ -121,7 +142,7 @@ stages:
   - set -o pipefail
   - ludus range config set -f /opt/ludus/ci/configs/depends-on-complex.yml
   - ludus range deploy -t user-defined-roles
-  - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+  - *wait-for-range-success
 
 .testing-mode-tests: &testing-mode-tests
   - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
@@ -1451,7 +1472,25 @@ post-deploy ranges-as-admin:
     - ludus range create -n "CIA Test Range" -r CIA-test
     - ludus range config set -f /opt/ludus/ci/configs/small-range.yml -r CIA-test
     - ludus range deploy -r CIA-test
-    - while [ "$(ludus range list --json -r CIA-test | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range -r CIA-test logs --tail 20; sleep 60; done
+    - |
+      while true; do
+        range_state="$(ludus range list --json -r CIA-test | jq -r '.rangeState')"
+        echo "Current CIA-test range state: ${range_state}"
+
+        case "${range_state}" in
+          SUCCESS)
+            break
+            ;;
+          ERROR|ABORTED)
+            echo "CIA-test range deployment ended in ${range_state}. Exiting."
+            ludus range -r CIA-test errors || true
+            exit 1
+            ;;
+        esac
+
+        ludus range -r CIA-test logs --tail 20 || true
+        sleep 60
+      done
     - ludus range rm-range -r CIA-test --no-prompt --force
     # --- Default range delete test ---
     # Deleting the default range throws an error for range function but allows non-range functions to work
@@ -1608,7 +1647,7 @@ range check-user:
     when: script_failure
   script:
     - *ci-setup-user
-    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - *wait-for-range-success
     - ludus range logs
     - ludus range list
     # Check to make sure the IPs were set correctly
@@ -2286,7 +2325,7 @@ cluster-range-deploy:
     - ludus range config set -f /opt/ludus/ci/configs/cluster-explicit.yml
     - ludus range config get
     - ludus range deploy
-    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - *wait-for-range-success
     - ludus range logs
     - ludus range list
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
@@ -2397,7 +2436,7 @@ cluster-test-range-default:
     # Deploy with range-level default and per-VM override
     - ludus range config set -f /opt/ludus/ci/configs/cluster-range-default.yml
     - ludus range deploy
-    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - *wait-for-range-success
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
     - |
       NODE1_VMS=$(sudo pvesh get /nodes/ludus/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
