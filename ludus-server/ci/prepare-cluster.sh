@@ -20,6 +20,7 @@ NODE1=$CLUSTER_NODE1_VMID
 NODE2=$CLUSTER_NODE2_VMID
 CI_CLUSTER_DNS_SERVERS="${CI_CLUSTER_DNS_SERVERS:-$CI_CLONE_DNS_SERVERS}"
 CI_CLUSTER_SDN_ZONE="${CI_CLUSTER_SDN_ZONE:-ludus}"
+CLUSTER_ROLLED_BACK=0
 
 configure_cluster_dns() {
     local IP="$1"
@@ -58,6 +59,9 @@ if ! command -v chronyd >/dev/null 2>&1 || ! command -v chronyc >/dev/null 2>&1;
     apt-get install -y chrony
 fi
 
+systemctl enable --now chrony >/dev/null 2>&1 || systemctl enable --now chronyd >/dev/null 2>&1 || true
+chronyc -m 'burst 3/3' 'makestep 0.5 -1' >/dev/null 2>&1 || true
+
 if grep -qE '^iface ens18 inet static$' /etc/network/interfaces; then
     if grep -qE '^[[:space:]]*dns-nameservers[[:space:]]+' /etc/network/interfaces; then
         sed -i -E "s/^[[:space:]]*dns-nameservers[[:space:]]+.*/\tdns-nameservers ${DNS_SERVERS}/" /etc/network/interfaces
@@ -81,7 +85,7 @@ REMOTE
 repair_cluster_cephfs() {
     local IP="$1"
 
-    for i in {1..6}; do
+    for i in {1..12}; do
         if ssh -o ConnectTimeout=10 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" \
             "sudo bash -s" <<'REMOTE'
 set -euo pipefail
@@ -94,11 +98,26 @@ if timeout 15 pvesm status --storage cephfs 2>/dev/null | awk '$1 == "cephfs" &&
     exit 0
 fi
 
+if ! pvecm status 2>/dev/null | grep -qE '^Quorate:[[:space:]]+Yes$'; then
+    echo "Proxmox cluster is not quorate yet"
+    exit 1
+fi
+
+chronyc -m 'burst 3/3' 'makestep 0.5 -1' >/dev/null 2>&1 || true
+systemctl restart pvestatd || true
 timeout 10 umount -f -l /mnt/pve/cephfs 2>/dev/null || true
 mkdir -p /mnt/pve/cephfs
-systemctl restart pvestatd || true
 
-timeout 30 pvesm status --storage cephfs 2>/dev/null | awk '$1 == "cephfs" && $3 == "active" { found=1 } END { exit(found ? 0 : 1) }'
+for j in $(seq 1 12); do
+    if timeout 15 pvesm status --storage cephfs 2>/dev/null | awk '$1 == "cephfs" && $3 == "active" { found=1 } END { exit(found ? 0 : 1) }'; then
+        exit 0
+    fi
+    sleep 5
+done
+
+ceph -s 2>/dev/null || true
+pvesm status 2>/dev/null || true
+exit 1
 REMOTE
         then
             return 0
@@ -108,6 +127,50 @@ REMOTE
 
     echo "ERROR: Failed to activate cephfs storage on cluster node $IP" >&2
     return 1
+}
+
+restart_cluster_ceph_services() {
+    local IP
+
+    for IP in $CLUSTER_NODES; do
+        if ! ssh -o ConnectTimeout=10 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" \
+            "sudo bash -s" <<'REMOTE'
+set -euo pipefail
+
+if ! command -v ceph >/dev/null 2>&1; then
+    exit 0
+fi
+
+NODE_HOSTNAME="$(hostname)"
+systemctl reset-failed \
+    "ceph-mon@${NODE_HOSTNAME}.service" \
+    "ceph-mgr@${NODE_HOSTNAME}.service" \
+    "ceph-mds@${NODE_HOSTNAME}.service" \
+    pvestatd.service 2>/dev/null || true
+
+for service in \
+    "ceph-mon@${NODE_HOSTNAME}.service" \
+    "ceph-mgr@${NODE_HOSTNAME}.service" \
+    "ceph-mds@${NODE_HOSTNAME}.service" \
+    pvestatd.service; do
+    systemctl restart "$service" 2>/dev/null || true
+done
+
+for i in $(seq 1 30); do
+    if pvecm status 2>/dev/null | grep -qE '^Quorate:[[:space:]]+Yes$' && ceph health >/dev/null 2>&1; then
+        exit 0
+    fi
+    sleep 2
+done
+
+ceph -s 2>/dev/null || true
+exit 1
+REMOTE
+        then
+            echo "ERROR: Failed to restart Ceph services on cluster node $IP" >&2
+            return 1
+        fi
+    done
 }
 
 ensure_cluster_sdn_zone() {
@@ -151,6 +214,7 @@ if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "clean-cluster" ]]; then
     echo "Reverting cluster nodes to 'clean' snapshot"
     qm rollback "$NODE1" clean --start 1
     qm rollback "$NODE2" clean --start 1
+    CLUSTER_ROLLED_BACK=1
     for IP in $CLUSTER_NODES; do
         for i in {1..90}; do
             ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" "echo ready" && break || sleep 5
@@ -169,6 +233,7 @@ elif [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "cluster-from-snapshot" ]]; then
             echo "Rolling back cluster to $SNAP"
             qm rollback "$NODE1" "$SNAP" --start
             qm rollback "$NODE2" "$SNAP" --start
+            CLUSTER_ROLLED_BACK=1
             for IP in $CLUSTER_NODES; do
                 for i in {1..30}; do
                     ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" "echo ready" && break || sleep 5
@@ -198,6 +263,13 @@ fi
 
 for IP in $CLUSTER_NODES; do
     configure_cluster_dns "$IP"
+done
+
+if [[ "$CLUSTER_ROLLED_BACK" == "1" ]]; then
+    restart_cluster_ceph_services
+fi
+
+for IP in $CLUSTER_NODES; do
     repair_cluster_cephfs "$IP"
 done
 ensure_cluster_sdn_zone
