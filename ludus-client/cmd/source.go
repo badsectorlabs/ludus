@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"ludus/internal/sourcepicker"
 	"ludus/logger"
 	"ludus/rest"
 	"ludusapi/dto"
@@ -45,9 +46,10 @@ type syncResultPayload struct {
 }
 
 type undeclaredDependencyPayload struct {
-	BlueprintID string `json:"blueprintID"`
-	Role        string `json:"role"`
-	Hint        string `json:"hint,omitempty"`
+	BlueprintID      string `json:"blueprintID"`
+	Role             string `json:"role"`
+	Kind             string `json:"kind,omitempty"`
+	ParentCollection string `json:"parentCollection,omitempty"`
 }
 
 type artifactResultPayload struct {
@@ -91,9 +93,6 @@ func createSourceRequestToForm(req dto.CreateSourceRequest) map[string]string {
 	if req.Force {
 		form["force"] = "true"
 	}
-	if req.DryRun {
-		form["dryRun"] = "true"
-	}
 	return form
 }
 
@@ -134,27 +133,93 @@ func printArtifactOutcome(label, successPhrase, failurePhrase string, failures [
 	}
 }
 
-func printSyncFailures(label string, p syncResultPayload) {
+// printSyncFailures renders the per-artifact result list returned by the
+// server. verbPast is the action verb (past tense) shown in the summary —
+// "installed" from source add / install, "synced" from source sync,
+// "updated" from source update — so the output matches what the user
+// actually invoked.
+func printSyncFailures(label, verbPast string, p syncResultPayload) {
 	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, p.RoleResults)
-	printArtifactOutcome(label, "synced successfully", "synced with errors", failures)
+	printArtifactOutcome(label, verbPast+" successfully", verbPast+" with errors", failures)
 	printUndeclaredDependencies(p.UndeclaredDependencies)
 }
 
 // printUndeclaredDependencies surfaces range-config role references that
 // aren't covered by requirements.yml. Non-fatal — the source still synced —
 // but the user needs to fix these before deploy or the role install will be
-// silently skipped.
+// silently skipped. Items are grouped by kind (missing role vs missing
+// collection) and deduped across blueprints so the user sees a compact list
+// + one guidance line per kind.
 func printUndeclaredDependencies(deps []undeclaredDependencyPayload) {
 	if len(deps) == 0 {
 		return
 	}
 	logger.Logger.Warnf("%d undeclared dependency reference(s) — install will be skipped at deploy:", len(deps))
+	roles, collections := groupUndeclaredPayloads(deps)
+	if len(roles) > 0 {
+		logger.Logger.Warnf("  Missing roles:")
+		for _, e := range roles {
+			logger.Logger.Warnf("    %s  in: %s", e.label, strings.Join(e.blueprints, ", "))
+		}
+		logger.Logger.Warnf("    → declare in requirements.yml or ship as a local role under roles/")
+	}
+	if len(collections) > 0 {
+		logger.Logger.Warnf("  Missing collections:")
+		for _, e := range collections {
+			logger.Logger.Warnf("    %s  in: %s", e.label, strings.Join(e.blueprints, ", "))
+		}
+		logger.Logger.Warnf("    → declare the parent collection in requirements.yml")
+	}
+}
+
+// undeclaredGroup represents one deduped row in the rendered output: a
+// missing role/collection plus the blueprints that reference it.
+type undeclaredGroup struct {
+	label      string
+	blueprints []string
+}
+
+func groupUndeclaredPayloads(deps []undeclaredDependencyPayload) (roles, collections []undeclaredGroup) {
+	rolesByKey := map[string]*undeclaredGroup{}
+	colsByKey := map[string]*undeclaredGroup{}
+	var rolesOrder, colsOrder []string
 	for _, d := range deps {
-		logger.Logger.Warnf("  - blueprint %q role %q", d.BlueprintID, d.Role)
-		if d.Hint != "" {
-			logger.Logger.Warnf("      %s", d.Hint)
+		switch d.Kind {
+		case "missing_collection":
+			key := d.ParentCollection
+			label := d.ParentCollection + "  (refs " + d.Role + ")"
+			if g, ok := colsByKey[key]; ok {
+				g.blueprints = appendUniqueStr(g.blueprints, d.BlueprintID)
+			} else {
+				colsByKey[key] = &undeclaredGroup{label: label, blueprints: []string{d.BlueprintID}}
+				colsOrder = append(colsOrder, key)
+			}
+		default: // missing_role or pre-Kind payloads
+			key := d.Role
+			if g, ok := rolesByKey[key]; ok {
+				g.blueprints = appendUniqueStr(g.blueprints, d.BlueprintID)
+			} else {
+				rolesByKey[key] = &undeclaredGroup{label: d.Role, blueprints: []string{d.BlueprintID}}
+				rolesOrder = append(rolesOrder, key)
+			}
 		}
 	}
+	for _, k := range rolesOrder {
+		roles = append(roles, *rolesByKey[k])
+	}
+	for _, k := range colsOrder {
+		collections = append(collections, *colsByKey[k])
+	}
+	return roles, collections
+}
+
+func appendUniqueStr(s []string, v string) []string {
+	for _, e := range s {
+		if e == v {
+			return s
+		}
+	}
+	return append(s, v)
 }
 
 // Source-related flag vars; reused across subcommands.
@@ -163,9 +228,17 @@ var (
 	sourceFlagRef         string
 	sourceFlagGlobalRoles bool
 	sourceFlagForce       bool
-	sourceFlagDryRun      bool
 	sourceFlagPurge       bool
 	sourceFlagNoPrompt    bool
+
+	// Selection flags for `source add`. Picker is used when none are set
+	// and stdin is a TTY; otherwise these drive scripted installs.
+	sourceFlagBlueprints stringSliceCSV
+	sourceFlagTemplates  stringSliceCSV
+	sourceFlagLocalRoles stringSliceCSV
+	sourceFlagAll        bool
+	sourceFlagCatalog    bool
+	sourceFlagDirectory  string
 )
 
 var sourceCmd = &cobra.Command{
@@ -175,124 +248,443 @@ var sourceCmd = &cobra.Command{
 }
 
 var sourceAddCmd = &cobra.Command{
-	Use:   "add <url | tarball | directory>",
-	Short: "Register a source",
-	Long: `Register an external source of blueprints.
+	Use:   "add <url | tarball | existing-sourceID>",
+	Short: "Register a source or manage what's installed from an existing one",
+	Long: `Register an external source of blueprints, or manage installs from a source you've
+already registered.
 
-The argument is auto-detected:
-  ludus source add https://github.com/foo/bar    # git URL
-  ludus source add ./source.tar.gz               # uploaded tarball/zip
-  ludus source add ./local-source-dir            # tar + upload from local dir`,
-	Args: cobra.ExactArgs(1),
+The positional argument is classified by shape:
+  ludus source add https://github.com/foo/bar    # git URL — register + pick
+  ludus source add ./source.tar.gz               # uploaded tarball/zip — register + pick
+  ludus source add goad                          # existing sourceID — open the picker
+  ludus source add -d ./local-source-dir         # local directory (must use -d)
+
+Run without selection flags in a TTY to open the interactive picker. Pass
+--blueprints / --templates / --source-roles for a scripted install. Pass --all
+to install everything. Pass --catalog to walk the source and render its
+catalog without registering anything (tables by default, raw JSON when
+combined with --json).`,
+	Args: cobra.MaximumNArgs(1),
 	Run:  runSourceAdd,
 }
 
 func runSourceAdd(cmd *cobra.Command, args []string) {
 	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+	flags := readSourceAddFlags()
 
-	req := dto.CreateSourceRequest{
+	// Resolve the target. -d wins outright. Otherwise fall through to the
+	// positional argument.
+	var arg string
+	switch {
+	case flags.Directory != "":
+		arg = flags.Directory
+	case len(args) == 1:
+		arg = args[0]
+	default:
+		logger.Logger.Fatal("source add requires a URL, tarball, or existing sourceID (or -d <dir>)")
+	}
+
+	// --catalog: walk the source (or fetch the existing-source catalog) and
+	// dump the JSON. Registers nothing. Honors -d for explicit directory.
+	if flags.Catalog {
+		runSourceCatalogDump(client, arg, flags)
+		return
+	}
+
+	mode := selectInstallMode(flags, stdinIsTerminal())
+
+	// Detection ladder:
+	//   1. -d <dir>     → register-then-install via tar+upload
+	//   2. git URL      → register-then-install
+	//   3. local archive → register-then-install
+	//   4. existing sourceID → fetch catalog and open picker (no register)
+	if flags.Directory == "" && detectSourceArg(arg) == sourceArgUnknown {
+		catalog, ok := tryFetchCatalog(client, arg)
+		if ok {
+			runExistingSourceFlow(client, arg, catalog, flags, mode)
+			return
+		}
+		logger.Logger.Fatalf("could not interpret %q: expected a git URL, tarball/zip path, or existing sourceID (pass -d for a local directory)", arg)
+	}
+
+	registerResp, ok, err := postSourceRegister(client, arg, flags)
+	if err != nil {
+		logger.Logger.Fatal(err)
+	}
+	if !ok {
+		// Transport-level failure: the rest layer already surfaced the error.
+		return
+	}
+
+	if mode == modeInstallAll {
+		doInstallAll(client, registerResp.SourceID, sourcepicker.Advanced{
+			GlobalRoles: flags.GlobalRoles,
+			Force:       flags.Force,
+			IsAdmin:     clientIsAdmin(),
+		})
+		return
+	}
+
+	selection, advanced, committed, err := chooseSelection(mode, flags, registerResp.Catalog)
+	if err != nil {
+		logger.Logger.Fatal(err)
+	}
+	if !committed {
+		logger.Logger.Infof("Aborted. Run `ludus source add %s` to resume.", registerResp.SourceID)
+		return
+	}
+	if isEmptySelection(selection) {
+		// Committing with nothing selected is a no-op; the server would 400
+		// such a request anyway. Skip the round-trip.
+		logger.Logger.Infof("Nothing selected. Run `ludus source add %s` to resume.", registerResp.SourceID)
+		return
+	}
+
+	doInstall(client, registerResp.SourceID, selection, advanced)
+}
+
+// isEmptySelection reports whether the picker committed without ticking
+// anything. The server would 400 such a request; we short-circuit to keep
+// the CLI message clean.
+func isEmptySelection(sel dto.InstallSelectionDTO) bool {
+	return len(sel.Blueprints)+len(sel.Templates)+len(sel.LocalRoles) == 0
+}
+
+// runSourceCatalogDump renders the source's catalog without registering
+// anything. For an already-registered source it hits GET /sources/{id}/catalog;
+// for an unregistered URL/path it registers temporarily, renders, and deletes
+// the row. With --json the output is the raw catalog JSON (pipeable to jq);
+// otherwise we render section-by-section tables.
+func runSourceCatalogDump(client *resty.Client, arg string, flags sourceFlags) {
+	// Already-registered source: just hit /catalog.
+	if flags.Directory == "" && detectSourceArg(arg) == sourceArgUnknown {
+		if cat, ok := tryFetchCatalog(client, arg); ok {
+			emitCatalog(cat)
+			return
+		}
+		logger.Logger.Fatalf("could not interpret %q: pass a git URL, archive path, or existing sourceID (use -d for a local directory)", arg)
+	}
+
+	// Unregistered: register, capture catalog, delete the row to leave no trace.
+	registerResp, ok, err := postSourceRegister(client, arg, flags)
+	if err != nil {
+		logger.Logger.Fatal(err)
+	}
+	if !ok {
+		return // rest layer surfaced the error already
+	}
+	emitCatalog(registerResp.Catalog)
+	// Best-effort cleanup — leaves a registered-but-uninstalled source on
+	// failure, which the user can `rm` manually.
+	rmPath := fmt.Sprintf("/sources/%s", registerResp.SourceID)
+	_, _ = rest.GenericDeleteWithBody(client, buildURLWithRangeAndUserID(rmPath), []byte(`{}`))
+}
+
+func emitCatalog(cat dto.SourceCatalogDTO) {
+	if jsonFormat {
+		body, err := json.MarshalIndent(cat, "", "  ")
+		if err != nil {
+			logger.Logger.Fatal(err)
+		}
+		fmt.Printf("%s\n", body)
+		return
+	}
+	renderCatalogTables(cat)
+}
+
+// renderCatalogTables prints the catalog as tablewriter sections. Each
+// category gets its own heading + table; empty sections are noted in dim
+// text rather than an empty table so the output stays scannable.
+func renderCatalogTables(cat dto.SourceCatalogDTO) {
+	if cat.SourceName != "" {
+		fmt.Printf("Source: %s (%s)\n", cat.SourceName, cat.SourceID)
+	} else {
+		fmt.Printf("Source: %s\n", cat.SourceID)
+	}
+
+	renderBlueprintsTable(cat.Blueprints)
+	renderItemsTable("Templates", cat.Templates, false)
+	renderItemsTable("Source roles", cat.LocalRoles, false)
+	renderItemsTable("Blueprint roles", cat.GalaxyRoles, true)
+	renderItemsTable("Blueprint collections", cat.GalaxyCollections, true)
+	renderItemsTable("Subscription roles", cat.SubscriptionRoles, true)
+
+	if len(cat.UndeclaredDependencies) > 0 {
+		fmt.Printf("\nUndeclared dependencies (%d)\n", len(cat.UndeclaredDependencies))
+		payload := make([]undeclaredDependencyPayload, 0, len(cat.UndeclaredDependencies))
+		for _, d := range cat.UndeclaredDependencies {
+			payload = append(payload, undeclaredDependencyPayload{
+				BlueprintID:      d.BlueprintID,
+				Role:             d.Role,
+				Kind:             d.Kind,
+				ParentCollection: d.ParentCollection,
+			})
+		}
+		roles, collections := groupUndeclaredPayloads(payload)
+		if len(roles) > 0 {
+			fmt.Println("  Missing roles:")
+			for _, e := range roles {
+				fmt.Printf("    %s  in: %s\n", e.label, strings.Join(e.blueprints, ", "))
+			}
+			fmt.Println("    → declare in requirements.yml or ship as a local role under roles/")
+		}
+		if len(collections) > 0 {
+			fmt.Println("  Missing collections:")
+			for _, e := range collections {
+				fmt.Printf("    %s  in: %s\n", e.label, strings.Join(e.blueprints, ", "))
+			}
+			fmt.Println("    → declare the parent collection in requirements.yml")
+		}
+	}
+}
+
+func renderBlueprintsTable(items []dto.CatalogBlueprintDTO) {
+	if len(items) == 0 {
+		return // skip empty sections; user only sees what's actually shippable
+	}
+	fmt.Printf("\nBlueprints (%d)\n", len(items))
+	t := tablewriter.NewWriter(os.Stdout)
+	t.SetHeader([]string{"ID", "Name", "Version", "State"})
+	for _, bp := range items {
+		t.Append([]string{bp.ID, bp.Name, bp.Version, prettyState(bp.State, bp.InstalledVersion)})
+	}
+	t.Render()
+}
+
+// renderItemsTable handles templates / roles / collections. `withImpliedBy`
+// adds a column for the blueprint(s) that pulled the item in (only useful
+// for galaxy/subscription/collection sections). Empty sections are
+// skipped entirely — user only sees what the source actually ships.
+func renderItemsTable(heading string, items []dto.CatalogItemDTO, withImpliedBy bool) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Printf("\n%s (%d)\n", heading, len(items))
+	t := tablewriter.NewWriter(os.Stdout)
+	header := []string{"Name", "Version", "State"}
+	if withImpliedBy {
+		header = append(header, "Required by")
+	}
+	t.SetHeader(header)
+	for _, it := range items {
+		row := []string{it.Name, it.Version, prettyState(it.State, it.InstalledVersion)}
+		if withImpliedBy {
+			row = append(row, strings.Join(it.ImpliedBy, ", "))
+		}
+		t.Append(row)
+	}
+	t.Render()
+}
+
+func prettyState(state, installedVersion string) string {
+	switch state {
+	case "installed":
+		return "installed"
+	case "upgrade_available":
+		if installedVersion != "" {
+			return "△ installed " + installedVersion + " → upgrade"
+		}
+		return "△ upgrade"
+	case "not_installed", "":
+		return "not installed"
+	}
+	return state
+}
+
+// tryFetchCatalog probes GET /sources/{id}/catalog; on 404 (or any other
+// non-success) it returns ok=false so the caller can fall through to the
+// "unknown argument" error. Other errors are not surfaced to the user from
+// here — they would shadow the more-actionable "could not interpret" hint.
+func tryFetchCatalog(client *resty.Client, sourceID string) (dto.SourceCatalogDTO, bool) {
+	body, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/catalog"))
+	if !ok {
+		return dto.SourceCatalogDTO{}, false
+	}
+	var cat dto.SourceCatalogDTO
+	if err := json.Unmarshal(body, &cat); err != nil {
+		return dto.SourceCatalogDTO{}, false
+	}
+	if cat.SourceID == "" {
+		// Defensive: a 200 with the wrong shape shouldn't be treated as a hit.
+		return dto.SourceCatalogDTO{}, false
+	}
+	return cat, true
+}
+
+// runExistingSourceFlow drives selection + install against an already-
+// registered source. Mirrors the post-register branch of runSourceAdd but
+// skips the upload/git work since the source content is already on disk.
+func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.SourceCatalogDTO, flags sourceFlags, mode installMode) {
+	if mode == modeInstallAll {
+		doInstallAll(client, sourceID, sourcepicker.Advanced{
+			GlobalRoles: flags.GlobalRoles,
+			Force:       flags.Force,
+			IsAdmin:     clientIsAdmin(),
+		})
+		return
+	}
+
+	selection, advanced, committed, err := chooseSelection(mode, flags, cat)
+	if err != nil {
+		logger.Logger.Fatal(err)
+	}
+	if !committed {
+		logger.Logger.Info("Aborted.")
+		return
+	}
+	if isEmptySelection(selection) {
+		logger.Logger.Info("Nothing selected; nothing to install.")
+		return
+	}
+	doInstall(client, sourceID, selection, advanced)
+}
+
+// readSourceAddFlags snapshots the package-level flag vars wired onto
+// sourceAddCmd into a sourceFlags struct so the orchestration helpers stay
+// pure.
+func readSourceAddFlags() sourceFlags {
+	return sourceFlags{
 		ID:          sourceFlagID,
+		Ref:         sourceFlagRef,
+		Directory:   sourceFlagDirectory,
+		Catalog:     sourceFlagCatalog,
+		All:         sourceFlagAll,
+		Blueprints:  []string(sourceFlagBlueprints),
+		Templates:   []string(sourceFlagTemplates),
+		LocalRoles:  []string(sourceFlagLocalRoles),
 		GlobalRoles: sourceFlagGlobalRoles,
 		Force:       sourceFlagForce,
-		DryRun:      sourceFlagDryRun,
+	}
+}
+
+// postSourceRegister performs the multipart/upload/git registration request.
+// Always register-only: the server fetches+walks and returns a
+// RegisterSourceResponse with the catalog. Install is a separate call via
+// doInstall.
+func postSourceRegister(client *resty.Client, arg string, flags sourceFlags) (dto.RegisterSourceResponse, bool, error) {
+	req := dto.CreateSourceRequest{
+		ID:          flags.ID,
+		GlobalRoles: flags.GlobalRoles,
+		Force:       flags.Force,
 	}
 	var fileField, fileName string
 	var fileBytes []byte
 
-	arg := args[0]
-	switch detectSourceArg(arg) {
-	case sourceArgGit:
-		req.Type = "git"
-		req.URL = arg
-		req.Ref = sourceFlagRef
-	case sourceArgArchive:
-		data, err := os.ReadFile(arg)
-		if err != nil {
-			logger.Logger.Fatal(err)
-		}
-		fileField = "archive"
-		fileBytes = data
-		fileName = filepath.Base(arg)
-		req.Type = "upload"
-	case sourceArgDirectory:
+	// -d/--directory forces directory tar+upload regardless of what the path
+	// looks like. Otherwise classify by URL/archive — directories must come
+	// in via the flag to keep behavior consistent across source subcommands.
+	switch {
+	case flags.Directory != "":
 		roleTar, err := tarDirectoryInMemory(arg)
 		if err != nil {
-			logger.Logger.Fatalf("tar %s: %s", arg, err)
+			return dto.RegisterSourceResponse{}, false, fmt.Errorf("tar %s: %w", arg, err)
 		}
 		gz, gzErr := gzipBytes(roleTar.Bytes())
 		if gzErr != nil {
-			logger.Logger.Fatalf("gzip tar: %s", gzErr)
+			return dto.RegisterSourceResponse{}, false, fmt.Errorf("gzip tar: %w", gzErr)
 		}
 		fileField = "archive"
 		fileBytes = gz
 		fileName = filepath.Base(strings.TrimSuffix(arg, string(os.PathSeparator))) + ".tar.gz"
 		req.Type = "upload"
 	default:
-		logger.Logger.Fatalf("could not interpret %q: expected a git URL, tarball/zip path, or local directory", arg)
+		switch detectSourceArg(arg) {
+		case sourceArgGit:
+			req.Type = "git"
+			req.URL = arg
+			req.Ref = flags.Ref
+		case sourceArgArchive:
+			data, err := os.ReadFile(arg)
+			if err != nil {
+				return dto.RegisterSourceResponse{}, false, err
+			}
+			fileField = "archive"
+			fileBytes = data
+			fileName = filepath.Base(arg)
+			req.Type = "upload"
+		default:
+			return dto.RegisterSourceResponse{}, false, fmt.Errorf("could not interpret %q: expected a git URL or tarball/zip path (use -d for a local directory)", arg)
+		}
 	}
 
 	endpoint := buildURLWithRangeAndUserID("/sources")
 	var responseJSON []byte
 	var success bool
-
 	if fileField != "" {
 		responseJSON, success = rest.FileUpload(client, "POST", endpoint, fileField, fileName, fileBytes, createSourceRequestToForm(req))
 	} else {
 		responseJSON, success = rest.GenericJSONPost(client, endpoint, req)
 	}
 
-	if didFailOrWantJSON(success, responseJSON) {
-		return
+	if !success {
+		// Transport-level failure; rest layer already surfaced the error.
+		return dto.RegisterSourceResponse{}, false, nil
 	}
 
-	if sourceFlagDryRun {
-		printDryRunPlan(responseJSON)
-		return
+	var resp dto.RegisterSourceResponse
+	if err := json.Unmarshal(responseJSON, &resp); err != nil {
+		return dto.RegisterSourceResponse{}, false, fmt.Errorf("decode register response: %w", err)
 	}
-	var resp syncResultPayload
-	if err := json.Unmarshal(responseJSON, &resp); err != nil || resp.SourceID == "" {
-		logger.Logger.Info(string(responseJSON))
-		return
-	}
-	printSyncFailures(fmt.Sprintf("Source '%s'", resp.SourceID), resp)
+	return resp, true, nil
 }
 
-// printDryRunPlan renders the JSON returned by `source add --dry-run` as a
-// human-readable summary. The shape mirrors ludus-api's DryRunPlan.
-func printDryRunPlan(body []byte) {
-	var plan struct {
-		SourceName             string                        `json:"sourceName"`
-		BlueprintIDs           []string                      `json:"blueprintIDs"`
-		Templates              []string                      `json:"templates"`
-		LocalRoles             []string                      `json:"localRoles"`
-		GalaxyRoles            []string                      `json:"galaxyRoles"`
-		SubscriptionRoles      []string                      `json:"subscriptionRoles"`
-		UndeclaredDependencies []undeclaredDependencyPayload `json:"undeclaredDependencies"`
+func chooseSelection(mode installMode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, error) {
+	switch mode {
+	case modeScripted:
+		return dto.InstallSelectionDTO{
+				Blueprints: flags.Blueprints,
+				Templates:  flags.Templates,
+				LocalRoles: flags.LocalRoles,
+			}, sourcepicker.Advanced{
+				GlobalRoles: flags.GlobalRoles,
+				Force:       flags.Force,
+				IsAdmin:     clientIsAdmin(),
+			}, true, nil
+	case modeInteractive:
+		return sourcepicker.Run(cat, dto.InstallSelectionDTO{}, sourcepicker.Advanced{
+			GlobalRoles: flags.GlobalRoles,
+			Force:       flags.Force,
+			IsAdmin:     clientIsAdmin(),
+		})
+	default:
+		return dto.InstallSelectionDTO{}, sourcepicker.Advanced{}, false, fmt.Errorf("unreachable: mode %v", mode)
 	}
-	if err := json.Unmarshal(body, &plan); err != nil {
-		logger.Logger.Info(string(body))
+}
+
+// clientIsAdmin is currently a stub — the server already gates --global-roles
+// for non-admins, so this only affects the picker's display.
+func clientIsAdmin() bool { return true }
+
+func doInstall(client *resty.Client, sourceID string, sel dto.InstallSelectionDTO, adv sourcepicker.Advanced) {
+	postInstall(client, sourceID, dto.InstallRequest{
+		Selection:   sel,
+		GlobalRoles: adv.GlobalRoles,
+		Force:       adv.Force,
+	})
+}
+
+// doInstallAll is the "install everything walked" shortcut used by --all
+// and non-TTY invocations. The server expands installAll=true into a sync
+// with no selection scope.
+func doInstallAll(client *resty.Client, sourceID string, adv sourcepicker.Advanced) {
+	postInstall(client, sourceID, dto.InstallRequest{
+		InstallAll:  true,
+		GlobalRoles: adv.GlobalRoles,
+		Force:       adv.Force,
+	})
+}
+
+func postInstall(client *resty.Client, sourceID string, body dto.InstallRequest) {
+	resp, ok := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/install"), body)
+	if didFailOrWantJSON(ok, resp) {
 		return
 	}
-	fmt.Println("Dry run — nothing was persisted or installed.")
-	if plan.SourceName != "" {
-		fmt.Printf("\nSource: %s\n", plan.SourceName)
+	var sync syncResultPayload
+	if err := json.Unmarshal(resp, &sync); err != nil || sync.SourceID == "" {
+		logger.Logger.Info(string(resp))
+		return
 	}
-	rows := [][2]any{
-		{"Blueprints", plan.BlueprintIDs},
-		{"Templates", plan.Templates},
-		{"Local roles", plan.LocalRoles},
-		{"Galaxy roles", plan.GalaxyRoles},
-		{"Subscription roles", plan.SubscriptionRoles},
-	}
-	for _, row := range rows {
-		items := row[1].([]string)
-		if len(items) == 0 {
-			fmt.Printf("  %-19s (none)\n", row[0])
-			continue
-		}
-		fmt.Printf("  %-19s %s\n", row[0], strings.Join(items, ", "))
-	}
-	printUndeclaredDependencies(plan.UndeclaredDependencies)
+	printSyncFailures(fmt.Sprintf("Source '%s'", sourceID), "installed", sync)
 }
 
 func isSourceURL(s string) bool {
@@ -313,12 +705,12 @@ const (
 	sourceArgUnknown sourceArgKind = iota
 	sourceArgGit
 	sourceArgArchive
-	sourceArgDirectory
 )
 
 // detectSourceArg classifies a positional source argument. URL wins outright;
-// otherwise stat the path: a directory always tars+uploads, and a regular file
-// is treated as an archive when the suffix matches.
+// regular files with an archive suffix are treated as archives. Directories
+// do not auto-detect — they must be passed via `-d`/`--directory` so source
+// add and source update behave consistently.
 func detectSourceArg(arg string) sourceArgKind {
 	if isSourceURL(arg) {
 		return sourceArgGit
@@ -328,7 +720,7 @@ func detectSourceArg(arg string) sourceArgKind {
 		return sourceArgUnknown
 	}
 	if info.IsDir() {
-		return sourceArgDirectory
+		return sourceArgUnknown
 	}
 	if isSourceArchivePath(arg) {
 		return sourceArgArchive
@@ -360,11 +752,12 @@ var sourceListCmd = &cobra.Command{
 			return
 		}
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Source ID", "Name", "Type", "Authors", "Last Synced", "Status"})
+		table.SetHeader([]string{"Source ID", "Name", "Owner", "Type", "Authors", "Last Synced", "Status"})
 		for _, s := range sources {
 			table.Append([]string{
 				s.SourceID,
 				s.Name,
+				s.OwnerUserID,
 				s.Type,
 				strings.Join(s.Authors, ", "),
 				s.LastSyncedAt,
@@ -550,17 +943,24 @@ func runSourceSync(cmd *cobra.Command, args []string) {
 	body, _ := json.Marshal(dto.SyncSourceRequest{
 		GlobalRoles: sourceFlagGlobalRoles,
 		Force:       sourceFlagForce,
-		DryRun:      sourceFlagDryRun,
 	})
 
-	for _, sid := range targets {
+	// Multi-target syncs without a header leave per-source errors floating
+	// — the rest layer's "Error from server!" line says nothing about which
+	// source failed. Prepend a counted divider per source so success and
+	// failure both attach to a sourceID, and the user knows how far along
+	// the batch is. The rest layer already spins during each HTTP call.
+	total := len(targets)
+	if total > 1 {
+		fmt.Printf("Syncing %d git sources...\n", total)
+	}
+	for i, sid := range targets {
+		if total > 1 {
+			fmt.Printf("\n== [%d/%d] %s ==\n", i+1, total, sid)
+		}
 		path := fmt.Sprintf("/sources/%s/sync", sid)
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(path), string(body))
 		if didFailOrWantJSON(success, responseJSON) {
-			continue
-		}
-		if sourceFlagDryRun {
-			printDryRunPlan(responseJSON)
 			continue
 		}
 		var resp syncResultPayload
@@ -568,18 +968,18 @@ func runSourceSync(cmd *cobra.Command, args []string) {
 			logger.Logger.Info(string(responseJSON))
 			continue
 		}
-		printSyncFailures(fmt.Sprintf("Source '%s'", resp.SourceID), resp)
+		printSyncFailures(fmt.Sprintf("Source '%s'", resp.SourceID), "synced", resp)
 	}
 }
 
 var sourceUpdateCmd = &cobra.Command{
-	Use:   "update <sourceID> [<tarball-or-directory>]",
+	Use:   "update <sourceID> [<tarball>]",
 	Short: "Change a source's tracked ref or content",
 	Long: `Update a source.
 
   ludus source update <id> --ref main           # git: change tracked ref
   ludus source update <id> ./new-source.tar.gz  # upload: replace content
-  ludus source update <id> ./source-dir         # upload: tar a dir and replace`,
+  ludus source update <id> -d ./source-dir      # upload: tar a directory and replace`,
 	Args: cobra.RangeArgs(1, 2),
 	Run:  runSourceUpdate,
 }
@@ -589,9 +989,26 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 	sid := args[0]
 	path := fmt.Sprintf("/sources/%s", sid)
 
+	if len(args) == 2 && sourceFlagDirectory != "" {
+		logger.Logger.Fatal("pass either a positional tarball path or -d <dir>, not both")
+	}
+
 	var fileField, fileName string
 	var fileBytes []byte
-	if len(args) == 2 {
+	switch {
+	case sourceFlagDirectory != "":
+		roleTar, err := tarDirectoryInMemory(sourceFlagDirectory)
+		if err != nil {
+			logger.Logger.Fatal(err)
+		}
+		gz, gzErr := gzipBytes(roleTar.Bytes())
+		if gzErr != nil {
+			logger.Logger.Fatal(gzErr)
+		}
+		fileField = "archive"
+		fileBytes = gz
+		fileName = filepath.Base(strings.TrimSuffix(sourceFlagDirectory, string(os.PathSeparator))) + ".tar.gz"
+	case len(args) == 2:
 		switch detectSourceArg(args[1]) {
 		case sourceArgArchive:
 			data, err := os.ReadFile(args[1])
@@ -601,25 +1018,13 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 			fileField = "archive"
 			fileBytes = data
 			fileName = filepath.Base(args[1])
-		case sourceArgDirectory:
-			roleTar, err := tarDirectoryInMemory(args[1])
-			if err != nil {
-				logger.Logger.Fatal(err)
-			}
-			gz, gzErr := gzipBytes(roleTar.Bytes())
-			if gzErr != nil {
-				logger.Logger.Fatal(gzErr)
-			}
-			fileField = "archive"
-			fileBytes = gz
-			fileName = filepath.Base(strings.TrimSuffix(args[1], string(os.PathSeparator))) + ".tar.gz"
 		default:
-			logger.Logger.Fatalf("could not interpret %q: expected a tarball/zip path or local directory", args[1])
+			logger.Logger.Fatalf("could not interpret %q: expected a tarball/zip path (use -d for a local directory)", args[1])
 		}
 	}
 
 	if fileField == "" && sourceFlagRef == "" {
-		logger.Logger.Fatal("provide --ref (git) or a tarball/directory path (upload)")
+		logger.Logger.Fatal("provide --ref (git) or a tarball path / -d <dir> (upload)")
 	}
 
 	if fileField != "" {
@@ -637,7 +1042,7 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 			logger.Logger.Info(string(responseJSON))
 			return
 		}
-		printSyncFailures(fmt.Sprintf("Source '%s'", resp.SourceID), resp)
+		printSyncFailures(fmt.Sprintf("Source '%s'", resp.SourceID), "updated", resp)
 		return
 	}
 
@@ -700,19 +1105,34 @@ var sourceRmCmd = &cobra.Command{
 }
 
 func init() {
+	// Cobra alphabetizes flags in --help by default; keep registration
+	// order so related flags stay grouped: identifiers, then directory
+	// override, then the selection block, then the catalog read-only
+	// view, and finally execution modifiers.
+	sourceAddCmd.Flags().SortFlags = false
 	sourceAddCmd.Flags().StringVar(&sourceFlagID, "id", "", "explicit sourceID; overrides auto-derived slug")
 	sourceAddCmd.Flags().StringVar(&sourceFlagRef, "ref", "", "git branch/tag/commit (git sources only)")
+	sourceAddCmd.Flags().StringVarP(&sourceFlagDirectory, "directory", "d", "", "treat the value as a local directory (required for directory uploads)")
+
+	// Selection group — what to install from the source.
+	sourceAddCmd.Flags().BoolVar(&sourceFlagAll, "all", false, "install everything from the source")
+	sourceAddCmd.Flags().Var(&sourceFlagBlueprints, "blueprints", "blueprint IDs to install (CSV or repeated)")
+	sourceAddCmd.Flags().Var(&sourceFlagTemplates, "templates", "template names to install (CSV or repeated)")
+	sourceAddCmd.Flags().Var(&sourceFlagLocalRoles, "source-roles", "source role names to install (CSV or repeated)")
+
+	sourceAddCmd.Flags().BoolVar(&sourceFlagCatalog, "catalog", false, "walk the source and render its catalog (tables by default, JSON with --json); registers nothing")
+
 	sourceAddCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide")
 	sourceAddCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "overwrite already-installed templates and galaxy/local roles")
-	sourceAddCmd.Flags().BoolVar(&sourceFlagDryRun, "dry-run", false, "preview without persisting or installing")
 
 	// Sync flags (reuses sourceFlagRef, etc. from add).
 	sourceSyncCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide")
 	sourceSyncCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "overwrite already-installed templates and galaxy/local roles")
-	sourceSyncCmd.Flags().BoolVar(&sourceFlagDryRun, "dry-run", false, "preview without persisting or installing")
 
 	// Update flags.
+	sourceUpdateCmd.Flags().SortFlags = false
 	sourceUpdateCmd.Flags().StringVar(&sourceFlagRef, "ref", "", "new git branch/tag/commit (git sources)")
+	sourceUpdateCmd.Flags().StringVarP(&sourceFlagDirectory, "directory", "d", "", "tar a local directory and upload it as the new source content (upload sources)")
 	sourceUpdateCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide (upload only)")
 	sourceUpdateCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "overwrite already-installed templates and galaxy/local roles (upload only)")
 

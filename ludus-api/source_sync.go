@@ -2,16 +2,18 @@ package ludusapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 type SyncResult struct {
@@ -19,14 +21,25 @@ type SyncResult struct {
 	LocalRoleResults       []ArtifactResult       `json:"localRoleResults"`
 	RoleResults            []RoleInstallResult    `json:"roleResults"`
 	UndeclaredDependencies []UndeclaredDependency `json:"undeclaredDependencies,omitempty"`
-	DryRun                 *DryRunPlan            `json:"dryRun,omitempty"`
 }
 
 type UndeclaredDependency struct {
 	BlueprintID string `json:"blueprintID"`
 	Role        string `json:"role"`
-	Hint        string `json:"hint,omitempty"`
+	// Kind is the classification used by the renderer to compose grouped
+	// guidance. Server emits structured kinds so consumers don't re-parse
+	// the ref string. Values: "missing_role" | "missing_collection".
+	Kind string `json:"kind"`
+	// ParentCollection is populated when Kind == "missing_collection" and
+	// names the collection the FQCN role belongs to (e.g.
+	// "community.crypto" for ref "community.crypto.openssl_certificate").
+	ParentCollection string `json:"parentCollection,omitempty"`
 }
+
+const (
+	UndeclaredKindRole       = "missing_role"
+	UndeclaredKindCollection = "missing_collection"
+)
 
 type ArtifactResult struct {
 	Name    string `json:"name"`
@@ -37,24 +50,17 @@ type ArtifactResult struct {
 type SyncOptions struct {
 	GlobalRoles bool
 	Force       bool
-	DryRun      bool
 	// Archive: tarball bytes for upload-type sources. Empty means "use whatever
 	// is already on disk" — startup re-syncs of upload sources rely on that.
 	Archive         []byte
 	ArchiveFilename string
-}
 
-// DryRunPlan is what `source add --dry-run` returns: what would happen if the
-// sync ran, without persisting anything.
-type DryRunPlan struct {
-	SourceName             string                 `json:"sourceName"`
-	BlueprintIDs           []string               `json:"blueprintIDs"`
-	Templates              []string               `json:"templates"`
-	LocalRoles             []string               `json:"localRoles"`
-	GalaxyRoles            []string               `json:"galaxyRoles"`
-	GalaxyCollections      []string               `json:"galaxyCollections,omitempty"`
-	SubscriptionRoles      []string               `json:"subscriptionRoles"`
-	UndeclaredDependencies []UndeclaredDependency `json:"undeclaredDependencies,omitempty"`
+	// Selection scopes which walked items get registered/installed. nil means
+	// "install everything walked" — set by the install handler when
+	// installAll=true, and the default for backfilled / pre-existing source
+	// rows. Future syncs honor whatever the source's stored installSelection
+	// is.
+	Selection *InstallSelection
 }
 
 // sourceSyncLocks serialises runSourceSync per source record. Concurrent syncs on
@@ -69,12 +75,13 @@ func lockSourceSync(sourceRecordID string) func() {
 	return mu.Unlock
 }
 
-// runSourceSync fetches/extracts the source on disk, walks it, upserts
-// source-derived blueprints, registers shipped templates and local roles, and
-// runs the unioned role install. Used by both source-add (the heavy first run)
-// and source-sync (idempotent re-application). Synchronous.
-func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sourceRecord *core.Record, opts SyncOptions) (*SyncResult, error) {
-	defer lockSourceSync(sourceRecord.Id)()
+// fetchAndWalkSource brings the source's on-disk checkout to its declared
+// ref (git) or extracted archive bytes (upload), then walks the result. It's
+// the shared "make the working tree current and tell me what's there" step
+// for runSourceSync, the register-only branch of CreateSource, and the
+// catalog/install-preview handlers. Caller must already hold the per-source
+// sync lock.
+func fetchAndWalkSource(app core.App, sourceRecord *core.Record, opts SyncOptions) (*WalkedSource, error) {
 	checkoutDir := SourceCheckoutDir(sourceRecord.Id)
 
 	switch sourceRecord.GetString("type") {
@@ -147,8 +154,19 @@ func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sour
 		return nil, err
 	}
 
-	if opts.DryRun {
-		return &SyncResult{DryRun: computeDryRunPlan(e, app, walked, sourceRecord)}, nil
+	return walked, nil
+}
+
+// runSourceSync fetches/extracts the source on disk, walks it, upserts
+// source-derived blueprints, registers shipped templates and local roles, and
+// runs the unioned role install. Used by both source-add (the heavy first run)
+// and source-sync (idempotent re-application). Synchronous.
+func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sourceRecord *core.Record, opts SyncOptions) (*SyncResult, error) {
+	defer lockSourceSync(sourceRecord.Id)()
+
+	walked, err := fetchAndWalkSource(app, sourceRecord, opts)
+	if err != nil {
+		return nil, err
 	}
 
 	applySourceManifestToRecord(sourceRecord, walked.Source)
@@ -156,13 +174,13 @@ func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sour
 		return nil, err
 	}
 
-	if err := upsertSourceBlueprints(app, sourceRecord, walked); err != nil {
+	if err := upsertSourceBlueprints(app, sourceRecord, walked, opts.Selection); err != nil {
 		markSyncFailed(app, sourceRecord, err)
 		return nil, err
 	}
 
 	res := &SyncResult{}
-	res.TemplateResults = registerTemplates(app, sourceRecord, walked, opts.Force)
+	res.TemplateResults = registerTemplates(app, sourceRecord, walked, opts.Force, opts.Selection)
 	res.LocalRoleResults = registerLocalRoles(app, sourceRecord, walked, opts)
 	res.RoleResults = installUnionedRoles(e, app, sourceRecord, walked, opts)
 	res.UndeclaredDependencies = findUndeclaredDependencies(walked)
@@ -175,6 +193,9 @@ func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sour
 	} else {
 		sourceRecord.Set("lastSyncStatus", "partial")
 		sourceRecord.Set("lastSyncError", truncateError(strings.Join(failures, "; "), 4000))
+	}
+	if opts.Selection != nil {
+		sourceRecord.Set("installSelection", opts.Selection)
 	}
 	if err := app.Save(sourceRecord); err != nil {
 		return res, err
@@ -228,7 +249,7 @@ func applySourceManifestToRecord(src *core.Record, sm *SourceManifest) {
 // blueprintID, owner, sharedUsers, and sharedGroups left untouched so
 // permission grants persist across syncs. Rows for blueprints removed from
 // the source are pruned.
-func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource) error {
+func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource, selection *InstallSelection) error {
 	collection, err := app.FindCollectionByNameOrId("blueprints")
 	if err != nil {
 		return fmt.Errorf("find blueprints collection: %w", err)
@@ -237,8 +258,21 @@ func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource
 	sourceID := src.GetString("sourceID")
 	owner := src.GetString("owner")
 
+	selectedBP := func(bpID string) bool {
+		if selection == nil {
+			return true
+		}
+		return slices.Contains(selection.Blueprints, bpID)
+	}
+
 	seen := map[string]struct{}{}
 	for _, bp := range walked.Blueprints {
+		if bp.Manifest == nil {
+			continue
+		}
+		if !selectedBP(bp.Manifest.ID) {
+			continue
+		}
 		seen[bp.Manifest.ID] = struct{}{}
 
 		records, err := app.FindRecordsByFilter("blueprints",
@@ -332,7 +366,8 @@ func SyncAllSourcesOnStartup(app core.App) {
 			sem <- struct{}{}
 			go func(s *core.Record) {
 				defer func() { <-sem }()
-				_, _ = runSourceSync(context.Background(), nil, app, s, SyncOptions{})
+				opts := SyncOptions{Selection: loadInstallSelection(s)}
+				_, _ = runSourceSync(context.Background(), nil, app, s, opts)
 			}(src)
 		}
 		for i := 0; i < cap(sem); i++ {
@@ -341,60 +376,46 @@ func SyncAllSourcesOnStartup(app core.App) {
 	}()
 }
 
-func computeDryRunPlan(e *core.RequestEvent, app core.App, walked *WalkedSource, src *core.Record) *DryRunPlan {
-	plan := &DryRunPlan{}
-	if walked.Source != nil {
-		plan.SourceName = walked.Source.Name
-	}
-	if plan.SourceName == "" {
-		plan.SourceName = src.GetString("name")
-	}
-
-	for _, bp := range walked.Blueprints {
-		plan.BlueprintIDs = append(plan.BlueprintIDs, bp.Manifest.ID)
-	}
-
-	for _, d := range walked.Templates {
-		plan.Templates = append(plan.Templates, filepath.Base(d))
-	}
-	sort.Strings(plan.Templates)
-
-	for _, d := range walked.LocalRoles {
-		plan.LocalRoles = append(plan.LocalRoles, filepath.Base(d))
-	}
-	sort.Strings(plan.LocalRoles)
-
-	// Plan reports exactly what the sync will install, matching the
-	// declared-only install policy: each section of each blueprint's
-	// requirements.yml.
-	galaxySet := map[string]struct{}{}
-	collectionSet := map[string]struct{}{}
-	subSet := map[string]struct{}{}
-	for _, bp := range walked.Blueprints {
-		gr, col, sub := declaredFromRequirements(bp.RequirementsYAML)
-		for _, n := range gr {
-			galaxySet[n] = struct{}{}
-		}
-		for _, n := range col {
-			collectionSet[n] = struct{}{}
-		}
-		for _, n := range sub {
-			subSet[n] = struct{}{}
-		}
-	}
-	for n := range galaxySet {
-		plan.GalaxyRoles = append(plan.GalaxyRoles, n)
-	}
-	sort.Strings(plan.GalaxyRoles)
-	for n := range collectionSet {
-		plan.GalaxyCollections = append(plan.GalaxyCollections, n)
-	}
-	sort.Strings(plan.GalaxyCollections)
-	for n := range subSet {
-		plan.SubscriptionRoles = append(plan.SubscriptionRoles, n)
-	}
-	sort.Strings(plan.SubscriptionRoles)
-
-	plan.UndeclaredDependencies = findUndeclaredDependencies(walked)
-	return plan
+// loadInstallSelection reads the persisted picker selection off a source
+// record. nil means "no selection on file — install everything" (matches
+// the runSourceSync filter semantics).
+func loadInstallSelection(src *core.Record) *InstallSelection {
+	return decodeInstallSelectionRaw(src.Get("installSelection"))
 }
+
+// decodeInstallSelectionRaw converts a JSON-field value into an
+// InstallSelection. The PocketBase JSONField surfaces as a few different Go
+// types depending on how it was stored (types.JSONRaw on direct reads,
+// []byte / string on some code paths, nil when unset), so we type-switch
+// instead of relying on cast.ToString — that's been load-bearing behavior
+// across pocketbase versions and we want to lock the read path. Returns nil
+// for any null/empty/parse-error case so callers always get the "install
+// everything" fallback rather than a partial selection.
+func decodeInstallSelectionRaw(raw any) *InstallSelection {
+	var bytes []byte
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	case types.JSONRaw:
+		bytes = []byte(v)
+	default:
+		marshaled, err := json.Marshal(v)
+		if err != nil {
+			return nil
+		}
+		bytes = marshaled
+	}
+	if len(bytes) == 0 || string(bytes) == "null" {
+		return nil
+	}
+	var sel InstallSelection
+	if err := json.Unmarshal(bytes, &sel); err != nil {
+		return nil
+	}
+	return &sel
+}
+

@@ -8,16 +8,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
 	"gopkg.in/yaml.v3"
 )
 
-func registerTemplates(app core.App, src *core.Record, walked *WalkedSource, force bool) []ArtifactResult {
+func registerTemplates(app core.App, src *core.Record, walked *WalkedSource, force bool, selection *InstallSelection) []ArtifactResult {
 	var results []ArtifactResult
 	for _, dir := range walked.Templates {
 		name := filepath.Base(dir)
+		if selection != nil && !slices.Contains(selection.Templates, name) {
+			continue
+		}
 		if err := addTemplateFromDirectory(app, dir, force); err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
@@ -72,6 +76,9 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 	}
 	for _, dir := range walked.LocalRoles {
 		name := filepath.Base(dir)
+		if opts.Selection != nil && !slices.Contains(opts.Selection.LocalRoles, name) {
+			continue
+		}
 		if err := addLocalRoleFromDirectory(app, dir, ownerProxmoxUsername, opts.GlobalRoles, opts.Force); err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
@@ -251,8 +258,18 @@ func installUnionedRoles(e *core.RequestEvent, app core.App, src *core.Record, w
 		}
 	}
 
+	selectedBP := func(bpID string) bool {
+		if opts.Selection == nil {
+			return true
+		}
+		return slices.Contains(opts.Selection.Blueprints, bpID)
+	}
+
 	var out []RoleInstallResult
 	for _, bp := range walked.Blueprints {
+		if bp.Manifest == nil || !selectedBP(bp.Manifest.ID) {
+			continue
+		}
 		results := installRolesForBlueprint(e, app, bp, ResolverOpts{
 			ForceRoles:       opts.Force,
 			GlobalRoles:      opts.GlobalRoles,

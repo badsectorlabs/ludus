@@ -100,14 +100,22 @@ func createSourcesCollection(app core.App) error {
 		&core.TextField{Name: "url"},
 		&core.TextField{Name: "ref"},
 		&core.RelationField{
-			Name:         "owner",
-			CollectionId: usersCollection.Id,
-			Required:     true,
-			MaxSelect:    1,
+			Name:          "owner",
+			CollectionId:  usersCollection.Id,
+			Required:      true,
+			MaxSelect:     1,
+			CascadeDelete: true,
 		},
 		&core.DateField{Name: "lastSyncedAt"},
+		// lastSyncStatus values: "" (never synced or register-only), "ok",
+		// "partial" (sync completed with per-artifact failures recorded in
+		// lastSyncError), "error" (clone/walk failed before any install).
 		&core.TextField{Name: "lastSyncStatus"},
 		&core.TextField{Name: "lastSyncError"},
+		// installSelection is JSON-encoded *InstallSelection. nil/missing
+		// means "install everything on sync" — that's the default for
+		// installAll=true and any pre-existing row.
+		&core.JSONField{Name: "installSelection", MaxSize: 100_000},
 		&core.AutodateField{Name: "created", OnCreate: true},
 		&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 	)

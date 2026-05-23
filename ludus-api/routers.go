@@ -987,6 +987,20 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"GetSourceCatalog",
+		http.MethodGet,
+		"/sources/{sourceID}/catalog",
+		GetSourceCatalog,
+	},
+
+	{
+		"InstallSource",
+		http.MethodPost,
+		"/sources/{sourceID}/install",
+		InstallSource,
+	},
+
+	{
 		"ListSourceBlueprints",
 		http.MethodGet,
 		"/sources/{sourceID}/blueprints",

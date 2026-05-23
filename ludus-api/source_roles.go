@@ -182,7 +182,42 @@ func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansible
 	if err != nil && len(results) == 0 {
 		return nil, fmt.Errorf("ansible-galaxy collection install failed: %s: %w", strings.TrimSpace(string(out)), err)
 	}
+
+	// Backfill: ansible-galaxy emits "Nothing to do. All requested collections
+	// are already installed." with NO per-collection lines when everything is
+	// already on disk. Without this, the parser returns zero results and the
+	// caller never records source_artifacts rows for already-installed
+	// collections — they vanish from the source view even though the bytes
+	// are right there. When the command succeeded, treat every declared
+	// collection as OK so the artifact registry stays accurate.
+	if err == nil {
+		seen := map[string]bool{}
+		for _, r := range results {
+			seen[r.Name] = true
+		}
+		for _, c := range declaredCollectionEntries(requirementsYAML) {
+			if c.Name == "" || seen[c.Name] {
+				continue
+			}
+			results = append(results, RoleInstallResult{Name: c.Name, Version: c.Version, OK: true})
+		}
+	}
 	return results, nil
+}
+
+// declaredCollectionEntries returns the `collections:` entries from a
+// requirements.yml verbatim — name and version preserved. Used by the
+// install path to backfill already-installed collections that
+// ansible-galaxy skipped without printing per-collection lines.
+func declaredCollectionEntries(requirementsYAML []byte) []RequirementsCollection {
+	if len(requirementsYAML) == 0 {
+		return nil
+	}
+	var doc RequirementsDoc
+	if err := yaml.Unmarshal(requirementsYAML, &doc); err != nil {
+		return nil
+	}
+	return doc.Collections
 }
 
 // hasRequirementsCollections is true when the requirements.yml contains at
@@ -249,16 +284,17 @@ func findUndeclaredDependencies(walked *WalkedSource) []UndeclaredDependency {
 					continue
 				}
 				out = append(out, UndeclaredDependency{
-					BlueprintID: bpID,
-					Role:        ref,
-					Hint:        "add the parent collection " + parent + " to Ludus and list it under collections: in requirements.yml",
+					BlueprintID:      bpID,
+					Role:             ref,
+					Kind:             UndeclaredKindCollection,
+					ParentCollection: parent,
 				})
 				continue
 			}
 			out = append(out, UndeclaredDependency{
 				BlueprintID: bpID,
 				Role:        ref,
-				Hint:        "add the role " + ref + " to Ludus and declare it in requirements.yml under roles: (or subscription_roles: for the Ludus subscription catalog), or ship it as a local role under the source's roles/ directory",
+				Kind:        UndeclaredKindRole,
 			})
 		}
 	}

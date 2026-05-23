@@ -667,6 +667,58 @@ type SourceResponse struct {
 	LastSyncStatus string   `json:"lastSyncStatus,omitempty"`
 	LastSyncError  string   `json:"lastSyncError,omitempty"`
 }
+// RegisterSourceResponse is what POST /sources returns. Always a catalog —
+// installs are driven via POST /sources/{id}/install (with `installAll=true`
+// for the "install everything" shortcut).
+type RegisterSourceResponse struct {
+	SourceID string           `json:"sourceID"`
+	Catalog  SourceCatalogDTO `json:"catalog"`
+}
+
+// SourceCatalogDTO mirrors the internal SourceCatalog for the wire.
+type SourceCatalogDTO struct {
+	SourceID               string                    `json:"sourceID"`
+	SourceName             string                    `json:"sourceName"`
+	Blueprints             []CatalogBlueprintDTO     `json:"blueprints"`
+	Templates              []CatalogItemDTO          `json:"templates"`
+	LocalRoles             []CatalogItemDTO          `json:"localRoles"`
+	GalaxyRoles            []CatalogItemDTO          `json:"galaxyRoles"`
+	GalaxyCollections      []CatalogItemDTO          `json:"galaxyCollections"`
+	SubscriptionRoles      []CatalogItemDTO          `json:"subscriptionRoles"`
+	UndeclaredDependencies []UndeclaredDependencyDTO `json:"undeclaredDependencies,omitempty"`
+}
+
+type CatalogBlueprintDTO struct {
+	ID                        string   `json:"id"`
+	Name                      string   `json:"name"`
+	Version                   string   `json:"version"`
+	State                     string   `json:"state"`
+	InstalledVersion          string   `json:"installedVersion,omitempty"`
+	RequiredTemplates         []string `json:"requiredTemplates,omitempty"`
+	RequiredLocalRoles        []string `json:"requiredLocalRoles,omitempty"`
+	RequiredGalaxyRoles       []string `json:"requiredGalaxyRoles,omitempty"`
+	RequiredGalaxyCollections []string `json:"requiredGalaxyCollections,omitempty"`
+}
+
+type CatalogItemDTO struct {
+	Name               string            `json:"name"`
+	Version            string            `json:"version,omitempty"`
+	State              string            `json:"state"`
+	InstalledVersion   string            `json:"installedVersion,omitempty"`
+	ImpliedBy          []string          `json:"impliedBy,omitempty"`
+	VersionByBlueprint map[string]string `json:"versionByBlueprint,omitempty"`
+}
+
+// UndeclaredDependencyDTO mirrors the internal UndeclaredDependency.
+// Kind classifies the gap so renderers can dedupe + group items and emit
+// one guidance message per kind, instead of one prose hint per item.
+type UndeclaredDependencyDTO struct {
+	BlueprintID      string `json:"blueprintID"`
+	Role             string `json:"role"`
+	Kind             string `json:"kind"`                       // "missing_role" | "missing_collection"
+	ParentCollection string `json:"parentCollection,omitempty"` // populated when kind=missing_collection
+}
+
 type SourceBlueprintListItem struct {
 	ID                string   `json:"id"`
 	SourceID          string   `json:"sourceID"`

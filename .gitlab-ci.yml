@@ -1366,16 +1366,21 @@ post-deploy blueprints-as-admin:
     - changes:
       - ludus-client/cmd/blueprint.go
       - ludus-client/cmd/source.go
+      - ludus-client/cmd/source_mode.go
+      - ludus-client/internal/sourcepicker/**.go
       - ludus-api/api_blueprint_management.go
       - ludus-api/api_source_management.go
       - ludus-api/blueprint_dir.go
       - ludus-api/blueprint_resolver.go
       - ludus-api/blueprint_access.go
       - ludus-api/range_config_write.go
+      - ludus-api/source_catalog.go
       - ludus-api/source_install.go
       - ludus-api/source_roles.go
       - ludus-api/source_sync.go
       - ludus-api/source_walker.go
+      - ludus-server/ci/fixtures/source-template/**
+      - ludus-server/ci/source-selection-test.sh
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1447,9 +1452,10 @@ post-deploy blueprints-as-admin:
     - '! ludus blueprint list | grep ci-bp-main'
     # Sources — registered from a bundled fixture so CI never depends on a remote repo.
     # The fixture ships a blueprint, a shared packer template, and a shared local ansible role.
-    - ludus source add /opt/ludus/ci/fixtures/source-template --id ci-src --force
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --force
     - 'ludus source list | grep -q "ci-src "'
     - 'ludus blueprint list | grep -q "ci-src/example"'
+    - 'ludus blueprint list | grep -q "ci-src/secondary"' # both fixture blueprints installed via install-all default
     - 'ludus templates list | grep -q "example-debian-12"'
     - 'ludus ansible role list | grep -q "say_hello"'
     - ludus blueprint info ci-src/example | tee /tmp/ci-src-example.info
@@ -1464,7 +1470,7 @@ post-deploy blueprints-as-admin:
     # sources so the operator can re-sync them. Co-claimed roles come back
     # after a sync; only when no live source still claims the role does
     # it stay gone.
-    - ludus source add /opt/ludus/ci/fixtures/source-template --id ci-src2 --force
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src2 --force
     - ludus source rm ci-src --no-prompt --purge 2>&1 | grep -q "ci-src2"  # affectedSources surfaced
     - '! ludus ansible role list | grep -q geerlingguy.docker'              # purge removed the on-disk role
     - ludus source sync ci-src2                                              # re-sync restores it
@@ -1473,6 +1479,25 @@ post-deploy blueprints-as-admin:
     - '! ludus ansible role list | grep -q geerlingguy.docker'
     - '! ludus ansible role list | grep -q "say_hello"'
     - '! ludus templates list | grep -q "example-debian-12"'
+    # Scripted selective install: pick one blueprint + its template + the
+    # bundled local role; secondary is intentionally left out.
+    - ludus source rm ci-src-pick --no-prompt --purge || true
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-pick --blueprints example --templates example-debian-12 --source-roles say_hello
+    - 'ludus blueprint list | grep -q "ci-src-pick/example"'
+    - '! ludus blueprint list | grep -q "ci-src-pick/secondary"'
+    # Idempotent re-add: same sourceID + wider selection picks up the
+    # previously skipped blueprint without disturbing already-installed ones.
+    - ludus source add ci-src-pick --blueprints example,secondary --templates example-debian-12 --source-roles say_hello
+    - 'ludus blueprint list | grep -q "ci-src-pick/example"'
+    - 'ludus blueprint list | grep -q "ci-src-pick/secondary"'
+    - ludus source rm ci-src-pick --no-prompt --purge
+    # --global-roles: admin install scope. Roles land in the instance-wide
+    # global-roles dir, not the owner's per-user ansible roles dir.
+    - ludus source rm ci-src-global --no-prompt --purge || true
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-global --all --global-roles --force
+    - test -d /opt/ludus/resources/global-roles/say_hello
+    - ludus source rm ci-src-global --no-prompt --purge
+    - '! test -d /opt/ludus/resources/global-roles/say_hello'
 
 post-deploy ranges-as-admin:
   stage: test

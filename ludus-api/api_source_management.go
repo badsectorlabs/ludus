@@ -46,8 +46,11 @@ func archiveOverLimit(e *core.RequestEvent) bool {
 }
 
 // CreateSource handles POST /sources. Body is JSON or multipart;
-// upload-type sources require an `archive` file field. Runs sync inline and
-// rolls the source row back if the first sync fails.
+// upload-type sources require an `archive` file field. Register-only: the
+// source row is created, the repo is fetched and walked, and the catalog is
+// returned. The caller drives the install via POST /sources/{id}/install
+// (with `installAll=true` for "install everything"). Failures during
+// register roll the row back so the caller can retry without rm.
 func CreateSource(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
 	if user == nil {
@@ -74,7 +77,6 @@ func CreateSource(e *core.RequestEvent) error {
 		req.Ref = strings.TrimSpace(e.Request.FormValue("ref"))
 		req.GlobalRoles = e.Request.FormValue("globalRoles") == "true"
 		req.Force = e.Request.FormValue("force") == "true"
-		req.DryRun = e.Request.FormValue("dryRun") == "true"
 	} else {
 		if err := e.BindBody(&req); err != nil {
 			return JSONError(e, http.StatusBadRequest, fmt.Sprintf("invalid request: %v", err))
@@ -110,8 +112,44 @@ func CreateSource(e *core.RequestEvent) error {
 		"owner = {:o} && sourceID = {:s}", "", 1, 0,
 		map[string]any{"o": user.Id, "s": sourceID})
 	if len(existing) > 0 {
-		return JSONError(e, http.StatusConflict,
-			fmt.Sprintf("source %q already exists; pick a different source ID", sourceID))
+		// Re-register against an existing source. Three sub-cases:
+		//   1. Same sourceID, different type → 409 (e.g. git ID hit with an
+		//      upload archive). Avoids silent content swaps.
+		//   2. Same sourceID, same type, different git URL → 409. Most likely
+		//      a slug collision the caller didn't realise; tell them to
+		//      override the sourceID or to use PATCH to change the URL.
+		//   3. Otherwise → idempotent re-walk, preserve status and selection,
+		//      return fresh catalog.
+		if existing[0].GetString("type") != req.Type {
+			return JSONError(e, http.StatusConflict,
+				fmt.Sprintf("source %q already exists with type %q; pick a different source ID or use PATCH to change content",
+					sourceID, existing[0].GetString("type")))
+		}
+		if req.Type == "git" && req.URL != "" && req.URL != existing[0].GetString("url") {
+			return JSONError(e, http.StatusConflict,
+				fmt.Sprintf("source %q already exists pointing at %s; override the sourceID or use PATCH to change the URL",
+					sourceID, existing[0].GetString("url")))
+		}
+		// Register-only re-walk: fetch fresh content (for git, re-clone; for
+		// upload, leave on-disk content alone unless a new archive came in),
+		// recompute the catalog, return.
+		walkOpts := SyncOptions{}
+		if req.Type == "upload" {
+			archiveBytes, archiveName, _ := readMultipartArchive(e, "archive")
+			walkOpts.Archive = archiveBytes
+			walkOpts.ArchiveFilename = archiveName
+		}
+		unlock := lockSourceSync(existing[0].Id)
+		walked, walkErr := fetchAndWalkSource(e.App, existing[0], walkOpts)
+		unlock()
+		if walkErr != nil {
+			return JSONError(e, http.StatusBadRequest, walkErr.Error())
+		}
+		catalog := ComputeSourceCatalog(e.App, existing[0], walked)
+		return e.JSON(http.StatusOK, dto.RegisterSourceResponse{
+			SourceID: existing[0].GetString("sourceID"),
+			Catalog:  toCatalogDTO(catalog),
+		})
 	}
 
 	collection, err := e.App.FindCollectionByNameOrId("sources")
@@ -157,33 +195,36 @@ func CreateSource(e *core.RequestEvent) error {
 	opts := SyncOptions{
 		GlobalRoles:     req.GlobalRoles,
 		Force:           req.Force,
-		DryRun:          req.DryRun,
 		Archive:         uploadBytes,
 		ArchiveFilename: uploadFilename,
 	}
 
-	// Dry-run: sync, return the plan, roll the row + on-disk checkout back.
-	if req.DryRun {
-		syncResult, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
+	// Register-only: fetch+walk, capture the source manifest on the record,
+	// and return the catalog so the caller can drive the picker. Status stays
+	// empty until an install is committed — a sync on a register-only source
+	// is a benign no-op since nothing was downloaded.
+	unlock := lockSourceSync(src.Id)
+	walked, walkErr := fetchAndWalkSource(e.App, src, opts)
+	if walkErr != nil {
+		unlock()
 		_ = os.RemoveAll(SourceCheckoutDir(src.Id))
 		_ = e.App.Delete(src)
-		if syncErr != nil {
-			return JSONError(e, http.StatusBadRequest, syncErr.Error())
-		}
-		if syncResult == nil || syncResult.DryRun == nil {
-			return JSONError(e, http.StatusInternalServerError, "no dry-run plan produced")
-		}
-		return e.JSON(http.StatusOK, syncResult.DryRun)
+		return JSONError(e, http.StatusBadRequest, walkErr.Error())
 	}
-
-	// First-sync failure rolls the row back so the caller can retry without rm.
-	syncResult, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
-	if syncErr != nil {
+	applySourceManifestToRecord(src, walked.Source)
+	src.Set("lastSyncError", "")
+	if saveErr := e.App.Save(src); saveErr != nil {
+		unlock()
 		_ = os.RemoveAll(SourceCheckoutDir(src.Id))
 		_ = e.App.Delete(src)
-		return JSONError(e, http.StatusBadRequest, syncErr.Error())
+		return JSONError(e, http.StatusInternalServerError, saveErr.Error())
 	}
-	return e.JSON(http.StatusOK, sourceSyncResponse(sourceID, syncResult))
+	catalog := ComputeSourceCatalog(e.App, src, walked)
+	unlock()
+	return e.JSON(http.StatusOK, dto.RegisterSourceResponse{
+		SourceID: src.GetString("sourceID"),
+		Catalog:  toCatalogDTO(catalog),
+	})
 }
 
 // sourceSyncResponse wraps a SyncResult for the wire and tags the source
@@ -227,7 +268,7 @@ func deriveSourceIDFromRequest(req *dto.CreateSourceRequest, e *core.RequestEven
 	basename = regexp.MustCompile(`-+`).ReplaceAllString(basename, "-")
 	basename = strings.Trim(basename, "-")
 	if basename == "" || !sourceSlugRegex.MatchString(basename) || reservedSourceIDs[basename] {
-		return "", fmt.Errorf("could not auto-derive sourceID; pass --id explicitly")
+		return "", fmt.Errorf("could not auto-derive sourceID; provide an explicit sourceID override")
 	}
 	return basename, nil
 }
@@ -676,9 +717,17 @@ func findSourceByVisibleID(e *core.RequestEvent, sourceID string) (*core.Record,
 	// 2 rows so we can detect collisions and force the caller to disambiguate
 	// rather than silently picking one — that path was a real authorization
 	// hazard for admin queries.
+	//
+	// Admin scoping: an admin acting on their own behalf can target any user's
+	// source (the cross-tenant path below). When the request carried an
+	// explicit `?userID=X` impersonation (which the middleware already used to
+	// swap `user` to X), treat the call as scoped to that user — otherwise an
+	// admin impersonating another admin still hits the cross-tenant branch and
+	// the disambiguation hint becomes a dead end.
+	impersonating := e.Request.URL.Query().Get("userID") != ""
 	var records []*core.Record
 	var err error
-	if user.IsAdmin() {
+	if user.IsAdmin() && !impersonating {
 		records, err = e.App.FindRecordsByFilter("sources",
 			"sourceID = {:s}", "+owner", 2, 0,
 			map[string]any{"s": sourceID})
@@ -709,7 +758,7 @@ func findSourceByVisibleID(e *core.RequestEvent, sourceID string) (*core.Record,
 // upload sources, reinstalls from the existing on-disk checkout — the same
 // archive bytes that were stored when the source was created. To push a new
 // archive version for an upload source, PATCH the source with the archive
-// instead. dryRun returns the plan without touching state.
+// instead.
 func SyncSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
@@ -733,19 +782,7 @@ func SyncSource(e *core.RequestEvent) error {
 	opts := SyncOptions{
 		GlobalRoles: req.GlobalRoles,
 		Force:       req.Force,
-		DryRun:      req.DryRun,
-	}
-
-	// Dry-run: run sync synchronously and return the plan; no persisted state changes.
-	if req.DryRun {
-		result, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
-		if syncErr != nil {
-			return JSONError(e, http.StatusInternalServerError, syncErr.Error())
-		}
-		if result == nil || result.DryRun == nil {
-			return JSONError(e, http.StatusInternalServerError, "no dry-run plan produced")
-		}
-		return e.JSON(http.StatusOK, result.DryRun)
+		Selection:   loadInstallSelection(src),
 	}
 
 	syncResult, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
@@ -932,4 +969,152 @@ func ListSourceRoles(e *core.RequestEvent) error {
 	}
 	return e.JSON(http.StatusOK, out)
 }
+
+// GetSourceCatalog handles GET /sources/{sourceID}/catalog. Re-walks the
+// existing on-disk checkout, joins it with installed-artifact state, and
+// returns the picker-facing view. Read-only — does not refetch from the
+// remote.
+func GetSourceCatalog(e *core.RequestEvent) error {
+	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
+	if err != nil {
+		return err
+	}
+	checkoutDir := SourceCheckoutDir(src.Id)
+	walked, werr := WalkSourceRepo(checkoutDir)
+	if werr != nil {
+		return JSONError(e, http.StatusInternalServerError, werr.Error())
+	}
+	catalog := ComputeSourceCatalog(e.App, src, walked)
+	return e.JSON(http.StatusOK, toCatalogDTO(catalog))
+}
+
+// InstallSource handles POST /sources/{sourceID}/install. The caller picks
+// what to install via either an explicit Selection (blueprints / templates /
+// local-roles) or InstallAll=true for "everything walked". InstallAll leaves
+// the source's installSelection field unset so future syncs keep installing
+// every newly walked item — the pre-selection behavior.
+func InstallSource(e *core.RequestEvent) error {
+	user, err := requireUser(e)
+	if err != nil {
+		return err
+	}
+	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
+	if err != nil {
+		return err
+	}
+	if !user.IsAdmin() && src.GetString("owner") != user.Id {
+		return JSONError(e, http.StatusForbidden, "only the owner or an admin can install a source")
+	}
+
+	var req dto.InstallRequest
+	if err := e.BindBody(&req); err != nil {
+		return JSONError(e, http.StatusBadRequest, fmt.Sprintf("invalid request: %v", err))
+	}
+	if req.GlobalRoles && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
+	}
+	hasSelection := !isEmptySelection(req.Selection)
+	if !req.InstallAll && !hasSelection {
+		return JSONError(e, http.StatusBadRequest,
+			"set installAll=true or provide a non-empty selection")
+	}
+	if req.InstallAll && hasSelection {
+		return JSONError(e, http.StatusBadRequest,
+			"installAll and selection are mutually exclusive")
+	}
+
+	opts := SyncOptions{
+		GlobalRoles: req.GlobalRoles,
+		Force:       req.Force,
+	}
+	if hasSelection {
+		opts.Selection = &InstallSelection{
+			Blueprints: req.Selection.Blueprints,
+			Templates:  req.Selection.Templates,
+			LocalRoles: req.Selection.LocalRoles,
+		}
+	}
+	// installAll: opts.Selection stays nil, runSourceSync installs every
+	// walked item (and the source's installSelection field stays null).
+	result, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
+	if syncErr != nil {
+		return JSONError(e, http.StatusInternalServerError, syncErr.Error())
+	}
+	return e.JSON(http.StatusOK, sourceSyncResponse(src.GetString("sourceID"), result))
+}
+
+func isEmptySelection(s dto.InstallSelectionDTO) bool {
+	return len(s.Blueprints) == 0 && len(s.Templates) == 0 && len(s.LocalRoles) == 0
+}
+
+// toCatalogDTO copies an internal SourceCatalog onto the wire DTO. Trivial
+// field-for-field — kept here so the DTO package stays free of the internal
+// catalog types.
+func toCatalogDTO(c *SourceCatalog) dto.SourceCatalogDTO {
+	if c == nil {
+		return dto.SourceCatalogDTO{}
+	}
+	out := dto.SourceCatalogDTO{
+		SourceID:          c.SourceID,
+		SourceName:        c.SourceName,
+		Blueprints:        make([]dto.CatalogBlueprintDTO, 0, len(c.Blueprints)),
+		Templates:         make([]dto.CatalogItemDTO, 0, len(c.Templates)),
+		LocalRoles:        make([]dto.CatalogItemDTO, 0, len(c.LocalRoles)),
+		GalaxyRoles:       make([]dto.CatalogItemDTO, 0, len(c.GalaxyRoles)),
+		GalaxyCollections: make([]dto.CatalogItemDTO, 0, len(c.GalaxyCollections)),
+		SubscriptionRoles: make([]dto.CatalogItemDTO, 0, len(c.SubscriptionRoles)),
+	}
+	for _, bp := range c.Blueprints {
+		out.Blueprints = append(out.Blueprints, dto.CatalogBlueprintDTO{
+			ID:                        bp.ID,
+			Name:                      bp.Name,
+			Version:                   bp.Version,
+			State:                     bp.State,
+			InstalledVersion:          bp.InstalledVersion,
+			RequiredTemplates:         bp.RequiredTemplates,
+			RequiredLocalRoles:        bp.RequiredLocalRoles,
+			RequiredGalaxyRoles:       bp.RequiredGalaxyRoles,
+			RequiredGalaxyCollections: bp.RequiredGalaxyCollections,
+		})
+	}
+	out.Templates = catalogItemsToDTO(c.Templates)
+	out.LocalRoles = catalogItemsToDTO(c.LocalRoles)
+	out.GalaxyRoles = catalogItemsToDTO(c.GalaxyRoles)
+	out.GalaxyCollections = catalogItemsToDTO(c.GalaxyCollections)
+	out.SubscriptionRoles = catalogItemsToDTO(c.SubscriptionRoles)
+	out.UndeclaredDependencies = undeclaredDepsToDTO(c.UndeclaredDependencies)
+	return out
+}
+
+func catalogItemsToDTO(items []CatalogItem) []dto.CatalogItemDTO {
+	out := make([]dto.CatalogItemDTO, 0, len(items))
+	for _, it := range items {
+		out = append(out, dto.CatalogItemDTO{
+			Name:               it.Name,
+			Version:            it.Version,
+			State:              it.State,
+			InstalledVersion:   it.InstalledVersion,
+			ImpliedBy:          it.ImpliedBy,
+			VersionByBlueprint: it.VersionByBlueprint,
+		})
+	}
+	return out
+}
+
+func undeclaredDepsToDTO(deps []UndeclaredDependency) []dto.UndeclaredDependencyDTO {
+	if len(deps) == 0 {
+		return nil
+	}
+	out := make([]dto.UndeclaredDependencyDTO, 0, len(deps))
+	for _, d := range deps {
+		out = append(out, dto.UndeclaredDependencyDTO{
+			BlueprintID:      d.BlueprintID,
+			Role:             d.Role,
+			Kind:             d.Kind,
+			ParentCollection: d.ParentCollection,
+		})
+	}
+	return out
+}
+
 

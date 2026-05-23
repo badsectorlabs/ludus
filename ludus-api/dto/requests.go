@@ -214,6 +214,9 @@ type SetGroupQuotaRequest struct {
 type AutoShutdownRequest struct {
 	AutoShutdownTimeout string `json:"autoShutdownTimeout"`
 }
+// CreateSourceRequest is the body for POST /sources. Register-only: the
+// source row is created, the repo is fetched and walked, and a catalog is
+// returned. Callers drive the install via POST /sources/{id}/install.
 type CreateSourceRequest struct {
 	ID          string `json:"id,omitempty" form:"id"`
 	Type        string `json:"type" form:"type"`
@@ -221,7 +224,23 @@ type CreateSourceRequest struct {
 	Ref         string `json:"ref,omitempty" form:"ref"`
 	GlobalRoles bool   `json:"globalRoles,omitempty" form:"globalRoles"`
 	Force       bool   `json:"force,omitempty" form:"force"`
-	DryRun      bool   `json:"dryRun,omitempty" form:"dryRun"`
+}
+
+// InstallRequest is the body for POST /sources/{sourceID}/install. Exactly
+// one of Selection (non-empty) or InstallAll=true must be set. InstallAll
+// is the "everything walked" shortcut for CI/scripted callers and is
+// equivalent to passing the full catalog as the selection.
+type InstallRequest struct {
+	Selection   InstallSelectionDTO `json:"selection,omitempty"`
+	InstallAll  bool                `json:"installAll,omitempty"`
+	GlobalRoles bool                `json:"globalRoles,omitempty"`
+	Force       bool                `json:"force,omitempty"`
+}
+
+type InstallSelectionDTO struct {
+	Blueprints []string `json:"blueprints,omitempty"`
+	Templates  []string `json:"templates,omitempty"`
+	LocalRoles []string `json:"localRoles,omitempty"`
 }
 type UpdateSourceRequest struct {
 	Ref         string `json:"ref"`
@@ -231,7 +250,6 @@ type UpdateSourceRequest struct {
 type SyncSourceRequest struct {
 	GlobalRoles bool `json:"globalRoles,omitempty" form:"globalRoles"`
 	Force       bool `json:"force,omitempty" form:"force"`
-	DryRun      bool `json:"dryRun,omitempty" form:"dryRun"`
 }
 type DeleteSourceRequest struct {
 	Purge bool `json:"purge,omitempty"`

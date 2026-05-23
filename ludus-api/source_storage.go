@@ -53,10 +53,12 @@ func CloneOrUpdateGit(checkoutDir, gitURL, ref string) error {
 	return nil
 }
 
-// gitEnvWithSafeDirectory: the systemd unit runs without HOME so user-level
-// gitconfig isn't read. `git -c safe.directory=*` doesn't propagate to
-// subprocesses git spawns either. The env vars below are picked up by every
-// git in the process tree.
+// gitEnvWithSafeDirectory inherits the service environment (HOME included —
+// systemd sets it from User=ludus) and injects safe.directory=* via env
+// because `git -c safe.directory=*` does not propagate to subprocesses git
+// spawns. Any gitconfig, credential helpers, or SSH keys configured for the
+// `ludus` user are picked up normally; private-repo support is therefore an
+// operator setup task (see docs/using-ludus/sources.md), not a code change.
 func gitEnvWithSafeDirectory() []string {
 	return append(os.Environ(),
 		"GIT_CONFIG_COUNT=1",

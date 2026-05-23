@@ -1581,7 +1581,6 @@ Flags:
         --ref string      git branch/tag/commit (git sources only)
         --global-roles    admin only: install roles instance-wide
         --force           overwrite already-installed templates and galaxy/local roles
-        --dry-run         preview without persisting or installing
 ```
 
 ### Source List
@@ -1604,21 +1603,21 @@ Usage:
 Flags:
         --global-roles   admin only: install roles instance-wide
         --force          overwrite already-installed templates and galaxy/local roles
-        --dry-run        preview without persisting or installing
 ```
 
 ### Source Update
 
-Change a source's tracked ref (git) or replace its content (upload). For uploads, the path argument is auto-detected as a tarball/zip or a local directory.
+Change a source's tracked ref (git) or replace its content (upload). For uploads, pass a tarball/zip path as the positional argument, or use `-d <dir>` to tar and upload a local directory.
 
 ```
 Usage:
-  ludus source update <sourceID> [<tarball-or-directory>] [flags]
+  ludus source update <sourceID> [<tarball>] [flags]
 
 Flags:
-        --ref string      new git branch/tag/commit (git sources)
-        --global-roles    admin only: install roles instance-wide (upload only)
-        --force           overwrite already-installed templates and galaxy/local roles (upload only)
+        --ref string         new git branch/tag/commit (git sources)
+    -d, --directory string   tar a local directory and upload it as the new source content (upload sources)
+        --global-roles       admin only: install roles instance-wide (upload only)
+        --force              overwrite already-installed templates and galaxy/local roles (upload only)
 ```
 
 ### Source RM

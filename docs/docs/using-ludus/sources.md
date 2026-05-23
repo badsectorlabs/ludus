@@ -7,11 +7,14 @@ keywords: [sources, sharing, blueprints, ansible, packer, git]
 
 # 📦 Sources
 
-A source is a versioned bundle of Packer templates, Ansible roles, and blueprints, served from a git repo, tarball, or local directory. `ludus source add` registers the contents in one step.
+A source is a versioned bundle of Packer templates, Ansible roles, and blueprints, served from a git repo, tarball, or local directory. `ludus source add` registers it and opens an interactive picker for what to install.
 
 ```bash
-# Register the Bad Sector Labs source
+# Register and pick what to install (interactive)
 ludus source add https://github.com/badsectorlabs/ludus-blueprints
+
+# Or install everything from the source non-interactively
+ludus source add https://github.com/badsectorlabs/ludus-blueprints --all
 
 # Build any required templates that aren't built yet
 ludus templates build
@@ -61,7 +64,9 @@ ludus blueprint apply badsectorlabs-ludus-blueprints/goad
 ludus range deploy
 ```
 
-`source add` registers the templates and roles, and installs declared galaxy/git role dependencies. Templates are registered but not built; run `ludus templates build` separately.
+By default `source add` runs in two phases: it registers the source (clone or extract + walk), then opens an interactive picker for which blueprints, templates, and source-bundled roles to install. The picker also lists the galaxy roles a selected blueprint will pull in. Pass `--all` to skip the picker, or pass `--blueprints`/`--templates`/`--source-roles` to script the selection. In a non-TTY context (CI, piped stdin) `add` defaults to `--all`.
+
+Templates are registered but not built; run `ludus templates build` separately.
 
 Slug-prefixed IDs (`badsectorlabs-ludus-blueprints/goad`) keep blueprints from different sources separate. If two sources both ship `goad`, they appear as `badsectorlabs-ludus-blueprints/goad` and `secteam-workshop-labs/goad`. Apply by full prefix.
 
@@ -84,11 +89,24 @@ A source doesn't need to ship blueprints. Register a roles-only or templates-onl
 
 ```bash
 # terminal-command-local
-ludus source add https://github.com/foo/ludus-role-pack
-# Roles are now installed for your user; no apply step.
+ludus source add https://github.com/foo/ludus-role-pack --all
+# Roles installed for your user; no apply step.
 ```
 
 Templates work the same way; run `ludus templates build` to produce VM images.
+
+### Pick or Extend What's Installed
+
+Run `source add <existing-sourceID>` to open the picker against a source you already registered. Useful for installing additional items later, or for finishing a source whose picker you closed without committing.
+
+```bash
+# terminal-command-local
+ludus source add badsectorlabs-ludus-blueprints                 # opens picker
+ludus source add badsectorlabs-ludus-blueprints --blueprints goad  # scripted
+ludus source add badsectorlabs-ludus-blueprints --all              # install everything in the catalog
+```
+
+Re-adding the same git URL is idempotent — Ludus re-pulls and refreshes the catalog without touching what's already installed. Re-adding the same sourceID with a different URL returns `409`; override the sourceID or use `ludus source update --ref` to change the tracked ref.
 
 ### Retry a Partial Source Add
 
@@ -100,6 +118,29 @@ ludus blueprint install badsectorlabs-ludus-blueprints/goad
 ```
 
 Works on any blueprint you can see, whether it's local or from a source.
+
+### Private Git Repos
+
+Ludus runs `git clone` under the `ludus` system user, inheriting whatever git auth that user has configured on the host — no Ludus-side flags or secret storage. Here is a recipe for setting up an SSH deploy key:
+
+```bash
+# terminal-command-host (run as root on the Ludus host)
+sudo -u ludus -H bash -c '
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  cp /path/to/deploy_key ~/.ssh/id_ed25519
+  chmod 600 ~/.ssh/id_ed25519
+  ssh-keyscan github.com >> ~/.ssh/known_hosts
+'
+# Then register the source with an SSH URL:
+ludus source add git@github.com:owner/private-repo
+```
+
+Other git auth schemes (HTTPS credential helpers, `~/.git-credentials`, SSH agents, etc.) also work in principle — anything you can make `sudo -u ludus -H git clone <url>` succeed with on the host will work for Ludus.
+
+Caveats:
+
+- Host-wide: every Ludus user on the instance clones with the same credentials. For multi-tenant deployments where users need distinct git access, treat private sources as not yet supported — per-source credentials are not implemented.
+- The systemd unit applies `ProtectHome=read-only`, so the service can read `/home/ludus/` but cannot write to it. Set up credentials from a root shell, not from inside the service.
 
 ## Authoring a Source
 
@@ -197,19 +238,19 @@ When absent, Ludus defaults `name` to the derived sourceID and `homepage` to the
 
 ### Local development workflow
 
-Develop your source locally — pass the directory path directly:
+Develop your source locally — pass the directory via `-d`:
 
 ```bash
 # First registration: tars and uploads the directory
 # terminal-command-local
-ludus source add ./my-source-repo --id mysource
+ludus source add -d ./my-source-repo --id mysource
 
 # After edits, push the new content
 # terminal-command-local
-ludus source update mysource ./my-source-repo
+ludus source update mysource -d ./my-source-repo
 ```
 
-When ready, push to a remote and switch to the git form:
+When ready, push to a remote and switch to the git form.
 
 ```bash
 # terminal-command-local
@@ -266,11 +307,11 @@ ludus blueprint share group <sourceID>/lab-2 students
 
 | Command | Description |
 |---------|-------------|
-| `ludus source add <url\|tarball\|directory>` | Register a new source (argument auto-detected) |
+| `ludus source add <url\|tarball\|directory\|existing-sourceID>` | Register a new source or open the picker for an existing one (argument auto-detected) |
 | `ludus source list` | List registered sources |
-| `ludus source sync [<sourceID>]` | Re-pull a git source (no-op for upload sources) |
+| `ludus source sync [<sourceID>]` | Re-pull a git source and re-apply its persisted selection (no-op for upload sources, and a benign no-op for sources that were registered without an install committed) |
 | `ludus source update <sourceID> --ref <ref>` | Change a git source's tracked ref |
-| `ludus source update <sourceID> <tarball\|directory>` | Push new content to an upload source |
+| `ludus source update <sourceID> <tarball>` (or `-d <dir>`) | Push new content to an upload source |
 | `ludus source rm <sourceID>` | Remove a source (`--purge` also removes templates/roles registered only by this source) |
 
 ### Blueprint Commands (Extended for Sources)
@@ -286,10 +327,13 @@ ludus blueprint share group <sourceID>/lab-2 students
 
 | Flag | Available on | Description |
 |------|-------------|-------------|
+| `--all` | `source add` | Skip the picker; install everything the source ships |
+| `--blueprints <ids>` | `source add` | Scripted selection: blueprint IDs to install (CSV or repeated) |
+| `--templates <names>` | `source add` | Scripted selection: template names to install (CSV or repeated) |
+| `--source-roles <names>` | `source add` | Scripted selection: source-bundled role names to install (CSV or repeated) |
 | `--global-roles` | `source add`, `source sync`, `source update`, `blueprint install` | Admin only. Install roles instance-wide instead of user-scoped |
 | `--force` | `source add`, `source sync`, `source update` | Overwrite already-installed templates and galaxy/local roles |
 | `--force-roles` | `blueprint install` | Overwrite already-installed galaxy/local roles |
-| `--dry-run` | `source add`, `source sync` | Preview planned operations without persisting or installing |
 | `--purge` | `source rm` | Also remove templates/roles registered only by this source |
 | `--id <sourceID>` | `source add` | Override the auto-derived sourceID |
 | `--ref <ref>` | `source add`, `source update` | Git branch, tag, or commit to track |

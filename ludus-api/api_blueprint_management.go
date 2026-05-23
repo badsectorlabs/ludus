@@ -496,9 +496,14 @@ func DeleteBlueprint(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You do not own this blueprint and cannot delete it")
 	}
 
-	if blueprintRecord.GetString("source") != "" {
-		return JSONError(e, http.StatusConflict,
-			"cannot delete a source-derived blueprint; remove or sync the source instead")
+	// Guard source-derived blueprints, but only when the source row still
+	// exists — an FK pointing at a deleted row is an orphan that must be
+	// removable directly (the source it belonged to is already gone).
+	if srcID := blueprintRecord.GetString("source"); srcID != "" {
+		if _, srcErr := e.App.FindRecordById("sources", srcID); srcErr == nil {
+			return JSONError(e, http.StatusConflict,
+				"cannot delete a source-derived blueprint; remove or sync the source instead")
+		}
 	}
 
 	blueprintDirPath := blueprintRecord.GetString("blueprintDirPath")
@@ -920,9 +925,13 @@ func UpdateBlueprintConfig(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You do not own this blueprint and cannot update it")
 	}
 
-	if blueprintRecord.GetString("source") != "" {
-		return JSONError(e, http.StatusConflict,
-			"cannot edit a source-derived blueprint; copy it to a local blueprint first or edit the source")
+	// Same orphan-FK escape hatch as DeleteBlueprint: only block edits when
+	// the source row actually still exists.
+	if srcID := blueprintRecord.GetString("source"); srcID != "" {
+		if _, srcErr := e.App.FindRecordById("sources", srcID); srcErr == nil {
+			return JSONError(e, http.StatusConflict,
+				"cannot edit a source-derived blueprint; copy it to a local blueprint first or edit the source")
+		}
 	}
 
 	var payload dto.UpdateBlueprintConfigRequest
