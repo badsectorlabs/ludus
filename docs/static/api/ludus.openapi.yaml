@@ -5462,6 +5462,42 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /blueprints/import:
+    post:
+      summary: Import blueprint
+      deprecated: false
+      description: >-
+        Uploads a .tar.gz blueprint bundle (multipart form field 'archive') and
+        creates a new blueprint from it.
+      operationId: importBlueprint
+      tags:
+        - Blueprint Management
+      parameters: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                archive:
+                  type: string
+                  format: binary
+                  description: Bundle .tar.gz produced by /blueprints/{blueprintID}/export.
+                  example: ''
+              required:
+                - archive
+        required: true
+      responses:
+        '201':
+          description: Imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintMutationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /blueprints/{blueprintID}/apply:
     post:
       summary: Apply blueprint to range
@@ -5777,43 +5813,6 @@ paths:
               schema:
                 type: string
                 format: binary
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/import:
-    post:
-      summary: Import blueprint
-      deprecated: false
-      description: >-
-        Uploads a .tar.gz blueprint bundle (multipart form field 'archive') and
-        creates a new blueprint from it.
-      operationId: importBlueprint
-      tags:
-        - Blueprint Management
-      parameters: []
-      requestBody:
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                archive:
-                  type: string
-                  format: binary
-                  description: Bundle .tar.gz produced by /blueprints/{blueprintID}/export.
-                  example: ''
-              required:
-                - archive
-            examples: {}
-        required: true
-      responses:
-        '201':
-          description: Imported
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BlueprintCreatedResponse'
           headers: {}
       security:
         - JWT: []
@@ -6354,7 +6353,6 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/DeleteSourceRequest'
-            examples: {}
       responses:
         '200':
           description: Source deleted
@@ -6438,7 +6436,6 @@ paths:
                   type: string
                   format: binary
                   example: ''
-            examples: {}
       responses:
         '200':
           description: >-
@@ -6494,6 +6491,76 @@ paths:
           headers: {}
         '400':
           description: Source is upload-type; sync is git-only.
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/catalog:
+    get:
+      summary: Get source catalog
+      deprecated: false
+      description: >-
+        Returns the on-disk source's current contents — blueprints, templates,
+        source-bundled roles, and required galaxy/subscription roles — with each
+        item annotated by its install state for this source. Drives the
+        interactive picker on every open.
+      operationId: getSourceCatalog
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Catalog with per-item install state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceCatalog'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/install:
+    post:
+      summary: Install items from a source
+      deprecated: false
+      description: >-
+        Applies a selection of blueprints/templates/source-roles to a registered
+        source. Galaxy and subscription roles are pulled in automatically by the
+        selected blueprints' requirements. Selection is persisted on the source
+        record and honored by subsequent syncs.
+      operationId: installSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallRequest'
+      responses:
+        '200':
+          description: Sync result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResultResponse'
+          headers: {}
+        '400':
+          description: Selection is empty or malformed.
           headers: {}
       security:
         - JWT: []
@@ -6579,7 +6646,9 @@ paths:
                 items:
                   $ref: '#/components/schemas/SourceBlueprintListItem'
           headers: {}
-      security: []
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /sources/blueprints/{id}/manifest:
     get:
       summary: Get source blueprint manifest
@@ -6609,7 +6678,9 @@ paths:
                 additionalProperties: true
                 properties: {}
           headers: {}
-      security: []
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /sources/{sourceID}/templates:
     get:
       summary: List source templates
@@ -7777,6 +7848,226 @@ components:
           type: array
           items:
             type: string
+    InstallSelection:
+      type: object
+      description: >-
+        User's persisted picker selection. `null`/absent on a source record
+        means "install everything walked on sync" — set automatically when the
+        caller invokes `/install` with `installAll=true`, and the default for
+        pre-existing rows. Empty arrays are rejected by the install endpoint
+        when `installAll` is also false.
+      properties:
+        blueprints:
+          type: array
+          description: sourceBlueprintID values to install.
+          items:
+            type: string
+        templates:
+          type: array
+          description: Template names to install.
+          items:
+            type: string
+        localRoles:
+          type: array
+          description: Source-bundled role names to install.
+          items:
+            type: string
+    InstallRequest:
+      type: object
+      description: >-
+        Body for POST /sources/{sourceID}/install. Exactly one of `selection`
+        (non-empty) or `installAll=true` must be set.
+      properties:
+        selection:
+          $ref: '#/components/schemas/InstallSelection'
+        installAll:
+          type: boolean
+          description: >-
+            Install everything walked from the source, equivalent to passing the
+            full catalog as the selection. Mutually exclusive with `selection`.
+        globalRoles:
+          type: boolean
+          description: Admin only. Install roles instance-wide.
+        force:
+          type: boolean
+          description: Overwrite already-installed templates and galaxy/local roles.
+    RegisterSourceResponse:
+      type: object
+      description: >-
+        Returned by POST /sources. The source is registered and walked but no
+        install has been committed. Callers drive the picker against the
+        included catalog and follow up with POST /sources/{sourceID}/install
+        (use `installAll=true` for the "install everything" shortcut).
+      required:
+        - sourceID
+        - catalog
+      properties:
+        sourceID:
+          type: string
+        catalog:
+          $ref: '#/components/schemas/SourceCatalog'
+    SourceCatalog:
+      type: object
+      description: >-
+        Picker-facing view of a registered source: every artifact the source
+        ships, joined with the install state for this source row. Driven by GET
+        /sources/{sourceID}/catalog and the body of RegisterSourceResponse.
+      required:
+        - sourceID
+        - sourceName
+        - blueprints
+        - templates
+        - localRoles
+        - galaxyRoles
+        - galaxyCollections
+        - subscriptionRoles
+      properties:
+        sourceID:
+          type: string
+        sourceName:
+          type: string
+        blueprints:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogBlueprint'
+        templates:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        localRoles:
+          type: array
+          description: Source-bundled Ansible roles (the source's roles/ dir).
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        galaxyRoles:
+          type: array
+          description: Galaxy roles declared by any blueprint's requirements.yml.
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        galaxyCollections:
+          type: array
+          description: Galaxy collections declared by any blueprint's requirements.yml.
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        subscriptionRoles:
+          type: array
+          description: >-
+            Ludus subscription roles declared by any blueprint's
+            requirements.yml (license-gated install pipeline).
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        undeclaredDependencies:
+          type: array
+          description: >-
+            Range-config role references the picker found but couldn't cover via
+            requirements.yml or a source-bundled local role.
+          items:
+            $ref: '#/components/schemas/UndeclaredDependency'
+    CatalogBlueprint:
+      type: object
+      description: >-
+        A blueprint shipped by a source, with its install state for this source
+        row and the artifacts it would pull in if selected.
+      required:
+        - id
+        - name
+        - version
+        - state
+      properties:
+        id:
+          type: string
+          description: sourceBlueprintID — unique within the source.
+        name:
+          type: string
+        version:
+          type: string
+        state:
+          type: string
+          enum:
+            - not_installed
+            - installed
+            - upgrade_available
+        installedVersion:
+          type: string
+          description: Set when state is installed or upgrade_available.
+        requiredTemplates:
+          type: array
+          items:
+            type: string
+        requiredLocalRoles:
+          type: array
+          items:
+            type: string
+        requiredGalaxyRoles:
+          type: array
+          items:
+            type: string
+        requiredGalaxyCollections:
+          type: array
+          items:
+            type: string
+    CatalogItem:
+      type: object
+      description: >-
+        One template / role / collection in a SourceCatalog. `impliedBy` lists
+        the parent blueprint IDs that pulled it in. `versionByBlueprint` carries
+        per-blueprint version pins for galaxy roles/collections so consumers can
+        detect divergent pins across selected blueprints.
+      required:
+        - name
+        - state
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        state:
+          type: string
+          enum:
+            - not_installed
+            - installed
+            - upgrade_available
+        installedVersion:
+          type: string
+        impliedBy:
+          type: array
+          description: Blueprint IDs that require this item.
+          items:
+            type: string
+        versionByBlueprint:
+          type: object
+          description: >-
+            Per-blueprint pinned version for galaxy roles/collections, keyed by
+            blueprint ID. Empty when no blueprint pins a version.
+          additionalProperties:
+            type: string
+          properties: {}
+    UndeclaredDependency:
+      type: object
+      description: >-
+        A range-config role reference that isn't covered by the blueprint's
+        requirements.yml or a source-bundled local role. The picker surfaces
+        these so the user can declare them before deploy.
+      required:
+        - blueprintID
+        - role
+        - kind
+      properties:
+        blueprintID:
+          type: string
+        role:
+          type: string
+        kind:
+          type: string
+          enum:
+            - missing_role
+            - missing_collection
+        parentCollection:
+          type: string
+          description: >-
+            Populated when kind is missing_collection. The collection parent of
+            an FQCN role reference whose parent collection isn't declared in
+            requirements.yml.
   responses: {}
   securitySchemes:
     ApiKeyAuth:
