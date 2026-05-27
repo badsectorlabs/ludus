@@ -35,7 +35,7 @@ const (
 )
 
 var ansibleTags = []string{"all", "access-control", "additional-tools", "allow-share-access", "assign-ip", "custom-choco", "custom-groups", "dcs", "debug", "dns-rewrites",
-	"domain-join", "install-office", "install-visual-studio", "network", "nexus", "share", "sysprep", "user-defined-roles", "vm-deploy", "windows"}
+	"domain-join", "install-office", "install-visual-studio", "linux-packages", "network", "nexus", "share", "sysprep", "user-defined-roles", "vm-deploy", "windows"}
 
 // DeployRange - deploys the range according to the range config
 func DeployRange(e *core.RequestEvent) error {
