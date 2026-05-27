@@ -672,6 +672,7 @@ install check:
   timeout: 1h
   script:
     - sudo cat /opt/ludus/install/install.log
+    - sudo grep -E '^ListenPort = 51820$' /etc/wireguard/wg0.conf
 
 #############
 # TEMPLATES #
@@ -2286,6 +2287,7 @@ cluster-install-check:
   timeout: 1h
   script:
     - sudo cat /opt/ludus/install/install.log
+    - sudo grep -E '^ListenPort = 51820$' /etc/wireguard/wg0.conf
     - echo "Install check completed via custom executor check loop"
 
 cluster-verify-sdn:

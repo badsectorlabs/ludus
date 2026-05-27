@@ -264,7 +264,7 @@
           groups:
             - ludus_users
   vars:
-    port: "{{ wireguard_port }}"
+    wg_port: "{{ wireguard_port }}"
     server_cidr: "198.51.100.1/24"
   tasks:
     - name: Install proxmox and ansible packer plugin
@@ -330,13 +330,6 @@
         group: root
         mode: '0644'
 
-    - name: Start the ludus admin service
-      ansible.builtin.service:
-        name: ludus-admin.service
-        state: started
-        enabled: true
-        daemon_reload: true
-
     - name: Create systemd service file for ludus
       ansible.builtin.template:
         src: ludus.service.j2
@@ -345,13 +338,6 @@
         group: root
         mode: '0644'
 
-    - name: Start the ludus service
-      ansible.builtin.service:
-        name: ludus
-        state: started
-        enabled: true
-        daemon_reload: true
-    
     - name: Restart dnsmasq
       ansible.builtin.service:
         name: dnsmasq
@@ -362,6 +348,24 @@
         path: "{{ ludus_install_path }}/install/.stage-3-complete"
         state: touch
         mode: '0644'
+
+    - name: Start the ludus admin service
+      ansible.builtin.service:
+        name: ludus-admin.service
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    - name: Pause to allow the admin service to start
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: Start the ludus service
+      ansible.builtin.service:
+        name: ludus
+        state: started
+        enabled: true
+        daemon_reload: true
 
     - name: Alert
       ansible.builtin.pause:
