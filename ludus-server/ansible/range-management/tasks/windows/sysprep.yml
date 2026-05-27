@@ -41,31 +41,19 @@
 - name: Run Sysprep
   ansible.windows.win_shell: C:\Windows\System32\Sysprep\sysprep.exe /generalize /quiet /reboot /oobe /unattend:C:\ludus\sysprep\oob-disable.xml
 
-- name: Wait for 60 seconds for sysprep to finish
-  ansible.builtin.pause:
-    seconds: 60
+- name: Wait for WinRM credentials to work after sysprep reboot
+  ansible.builtin.wait_for_connection:
+    delay: 60
+    timeout: 1800
+    sleep: 10
+    connect_timeout: 5
 
-- name: Wait for WinRM
-  ansible.builtin.wait_for:
-    host: "{{ ansible_host }}"
-    port: 5986
-    delay: 10
-    state: started
-  delegate_to: localhost
-  register: wait_result
-
-- name: Wait for 60 seconds for the second reboot
-  ansible.builtin.pause:
-    seconds: 60
-
-- name: Wait for WinRM
-  ansible.builtin.wait_for:
-    host: "{{ ansible_host }}"
-    port: 5986
-    delay: 10
-    state: started
-  delegate_to: localhost
-  register: wait_result
+- name: Wait for WinRM credentials to work after sysprep second reboot
+  ansible.builtin.wait_for_connection:
+    delay: 60
+    timeout: 1800
+    sleep: 10
+    connect_timeout: 5
 
 - name: Create sysprepd file
   ansible.windows.win_file:

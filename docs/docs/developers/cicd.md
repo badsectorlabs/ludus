@@ -25,21 +25,25 @@ To set up a CI/CD runner for Ludus development you must meet the following requi
 
 To setup the CI/CD runner and template follow these steps:
 
-1. Create a Gitlab runner with the tag `ludus-proxmox-runner`. Do not check `Run untagged jobs`.
+1. Build the `debian-13-x64-server-template` Ludus template.
 
-2. Copy the Gitlab runner token
+2. Install and register a GitLab Runner on the Ludus host with the tag `ludus-proxmox-runner-parallel`. Do not check `Run untagged jobs`.
 
-3. Review the settings in `/opt/ludus/ci/setup.sh` to ensure they match your environment (i.e. `PROXMOX_VM_STORAGE_POOL`)
+3. Clone the Ludus repository on the Ludus host and run the CI bootstrap as root:
 
-4. Run `/opt/ludus/ci/setup.sh` with appropriate env variables as root on the Ludus server:
-
-```
-PROXMOX_USERNAME=root@pam PROXMOX_PASSWORD=password /opt/ludus/ci/setup.sh
+```shell-session
+LUDUS_ADMIN_API_KEY=JD... ./ludus-server/ci/bootstrap-ci-host.sh
 ```
 
-5. When the playbook finishes running, you will see a `debian-12-x64-server-ludus-ci-template` template in the Proxmox web UI and `ludus templates list` (admins only).
+You can also provide Proxmox credentials directly:
 
-6. Review the settings in `/opt/ludus/ci/base.sh`, specifically the `PROXMOX_NODE` setting and modify it as necessary.
+```shell-session
+PROXMOX_USERNAME=erik-hunstad@pam PROXMOX_PASSWORD='...' ./ludus-server/ci/bootstrap-ci-host.sh
+```
+
+When the bootstrap finishes, you will see `debian-13-x64-server-ludus-ci-template`, the protected `ci-seed-*` templates, the cluster VMs, and the build VM in the Proxmox web UI. The existing GitLab Runner will be configured to use the Ludus custom executor scripts in `/opt/ludus/ci`. CI VMs default to 250GB root disks; set `CI_VM_DISK_SIZE=300G` or another `G` value before running the bootstrap if your template/range workload needs more space.
+
+The cluster VMs are bootstrapped with `lae.proxmox` as a nested two-node Proxmox cluster before their `clean` snapshots are taken. VMID `1005` is node `ludus`, VMID `1006` is node `ludus2`, VM disk storage is the Ceph RBD datastore `ceph`, and ISO storage is the CephFS datastore `cephfs`.
 
 Now that CI is setup and configured, any commits that are pushed to the Ludus project will build and test as appropriate.
 
@@ -57,8 +61,7 @@ The available tags are listed below:
 - `[build docs]` - force a documentation build
 - `[build pages]` - force a documentation build and pages deploy
 - `[full build]` - run every step of the CI pipeline, no matter how small the change to the code base
-- `[manual]` - only run the documentation build (if docs have changed) and binary build, then push the code to an already running CI VM (typically used with the `[VMID-XYZ]` tag, defaults to the runner with least uptime)
-- `[VMID-XYZ]` - run jobs on the specified VM where `XYZ` is the numeric VMID of the CI/CD VM.
+- `[manual]` - only run the documentation build (if docs have changed) and binary build, then start a manual testing job on a pre-built CI VM
 - `[client tests]` - test basic client commands that do not deploy templates or ranges
 - `[template tests]` - run a template build and wait for all templates to complete building
 - `[range tests]` - run a range deploy and wait for it to succeed. This uses the `simple-domain.yml` range config.
@@ -86,7 +89,7 @@ Run these commands on a Debian 13 VM, then power it off and save it as a templat
 ```
 hostname ludus-ci-debian-13
 
-# Resize the disk by hand if needed (should be ~250GB)
+# Resize the disk by hand if needed (bootstrap uses 250GB by default)
 fdisk /dev/vda1
 p
 d
