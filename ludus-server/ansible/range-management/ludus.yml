@@ -60,7 +60,7 @@
       loop: "{{ ludus }}"
     - name: Add all VLAN interfaces to the router
       ansible.builtin.include_tasks: tasks/router/add-vlan-to-router.yml
-      loop: "{{ vlans }}"
+      loop: "{{ vlans | default([]) }}"
   vars:
     vmbr_number: "{{ range_second_octet + 1000 }}"
 
