@@ -220,10 +220,19 @@
     type: dword
     state: present
 
+- name: Gather BUILTIN\Users group name by SID (multilingual)
+  ansible.windows.win_shell: |
+    (Get-WmiObject win32_group -Filter "SID='S-1-5-32-545'").Name
+  register: builtin_users_group_name_command
+
+- name: Set the BUILTIN\Users group name
+  ansible.builtin.set_fact:
+    builtin_users_group_name: "{{ builtin_users_group_name_command.stdout | trim }}"
+
 - name: Ensure BUILTIN\Users can read and execute C:\ludus
   ansible.windows.win_acl:
     path: C:\ludus
-    user: BUILTIN\Users
+    user: "{{ builtin_users_group_name }}"
     rights: ReadAndExecute
     type: allow
     inherit: ContainerInherit,ObjectInherit

@@ -264,23 +264,27 @@ func VNetExists(client *goproxmox.Client, vnetName string) (bool, error) {
 	return true, nil
 }
 
-// ZoneExists checks if an SDN zone already exists using go-proxmox library
+// ZoneExists checks if an SDN zone already exists without unmarshalling full zone options.
+// Required until https://github.com/luthermonson/go-proxmox/pull/297 is merged
 func ZoneExists(client *goproxmox.Client, zoneName string) (bool, error) {
 	ctx := context.Background()
-	cluster, err := client.Cluster(ctx)
-	if err != nil {
-		return false, fmt.Errorf("failed to get cluster client: %w", err)
+	type sdnZoneSummary struct {
+		Name string `json:"zone"`
 	}
 
-	// Use library's SDNZone function - returns error if not found
-	_, err = cluster.SDNZone(ctx, zoneName)
+	var zones []sdnZoneSummary
+	err := client.Get(ctx, "/cluster/sdn/zones", &zones)
 	if err != nil {
-		if strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no such") {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to check SDN zone existence: %w", err)
+		return false, fmt.Errorf("failed to list SDN zones: %w", err)
 	}
-	return true, nil
+
+	for _, zone := range zones {
+		if zone.Name == zoneName {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // GetVNetSubnets returns all subnets for a VNet using go-proxmox library

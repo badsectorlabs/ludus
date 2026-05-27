@@ -10,7 +10,7 @@ defaults:
   ad_domain_safe_mode_password: P@ssword123
   timezone: "America/Los_Angeles"
   enable_dynamic_wallpaper: false
-  target_node: EH-Ludus
+  target_node: ludus
 
 ludus:
   - vm_name: deb1-CITEST

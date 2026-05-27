@@ -1,69 +1,72 @@
 #!/usr/bin/env bash
 
 # /opt/ludus/ci/prepare.sh
+#
+# Custom executor prepare phase. Runs once per job before the script.
+#
+# - Claim/release jobs (build type contains "claim" or "release") do no VM
+#   work here.
+# - Cluster jobs delegate to prepare-cluster.sh.
+# - All non-cluster test jobs resolve or create their per-pipeline CI clone.
+
+set -eo pipefail
 
 currentDir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-source ${currentDir}/base.sh # Get variables from base script
+source "${currentDir}/base.sh"
 
 echo "CUSTOM_ENV_LUDUS_BUILD_TYPE: $CUSTOM_ENV_LUDUS_BUILD_TYPE"
 
-# This will set VM_ID
-source ${currentDir}/get-vm-ip.sh
-
-if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"cluster"* ]]; then
-    source ${currentDir}/prepare-cluster.sh
+# --- Claim/release jobs need no VM prep ---
+if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"claim"* || "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"release"* ]]; then
+    echo "Claim/release job ($CUSTOM_ENV_LUDUS_BUILD_TYPE) - no VM prep needed"
     exit 0
 fi
 
-SKIP_BUILD="false"
-if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && ("$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "any-built" || "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot") ]]; then
-    if [[ -z "$VM_ID" ]]; then
-        echo "Could not find a runner VM, will build one"
-    else
-        echo "Using VM: $VM_ID ($VM_IP)"
-        SKIP_BUILD="true"
-    fi
-elif [[ ! -z "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP" == "take-snapshot" ]]; then
-    qm listsnapshot $VM_ID | grep -q "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME"
-    if [[ $? -ne 0 ]]; then
-        echo "Snapshotting VM: ($VM_ID) $RUNNER_VM_NAME -> $CUSTOM_ENV_LUDUS_SNAPSHOT_NAME"
-        qm snapshot $VM_ID "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" --vmstate true # TODO replace this with API when runner is properly run as gitlab-runner
-        if [[ $? -ne 0 ]]; then
-            exit "$BUILD_FAILURE_EXIT_CODE"
+# --- Cluster handling (dedicated shared VMs) ---
+if [[ -n "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"cluster"* ]]; then
+    source "${currentDir}/prepare-cluster.sh"
+    exit 0
+fi
+
+# --- Resolve or create the target VM (sets VM_ID, VM_IP) ---
+resolve_vm
+
+echo "Pipeline $PIPELINE_ID | VM $VM_ID ($VM_IP) | Type: $CUSTOM_ENV_LUDUS_BUILD_TYPE | Snapshot: $CUSTOM_ENV_LUDUS_SNAPSHOT_NAME | Series: ${VM_SERIES:-n/a}"
+
+# --- Rollback for build VM (any-built) ---
+if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "any-built" ]]; then
+    # Build VM doesn't need rollback - it supports concurrent builds.
+    echo "Ensuring build VM $VM_ID is accessible..."
+    for i in {1..10}; do
+        if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no -F /home/gitlab-runner/.ssh/config gitlab-runner@"$VM_IP" "echo ready" 2>/dev/null; then
+            echo "Build VM $VM_ID is accessible at $VM_IP"
+            break
         fi
-    fi
-fi
-
-if [[ ! -z "$CUSTOM_ENV_LUDUS_BUILD_TYPE" && "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" && "$SKIP_BUILD" == "true" && ! -f /tmp/.ludus-ci-$CUSTOM_ENV_CI_PIPELINE_ID-$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME-rolled-back ]]; then
-    # We want to use a snapshot and we have a CI VM that already exists
-    qm listsnapshot $VM_ID | grep -q "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME"
-    if [[ $? -eq 0 ]]; then
-        # We know the snapshot we want to roll back to exists, but let's check to see if it was just taken.
-        # If the snapshot is less than 2 minutes old, we can asume that the job asking for a rollback is coming directly after the snapshot was taken
-        # and therefore we don't actually need to roll it back
-        SNAPTIME=$(pvesh get nodes/$PROXMOX_NODE/qemu/$VM_ID/snapshot --output-format=json | jq --arg SNAPNAME "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" '.[] | select(.name == $SNAPNAME) | .snaptime')
-        CURRENT_TIME=$(date +%s)
-        DIFF=$(($CURRENT_TIME - $SNAPTIME))
-        if [[ "$DIFF" -gt 120 ]]; then
-            echo "Rolling back VM $VM_ID to $CUSTOM_ENV_LUDUS_SNAPSHOT_NAME snapshot"
-            qm rollback $VM_ID "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" --start
-        else
-            echo "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME snapshot for VM $VM_ID is < 2 minutes old. Not rolling back."
+        if [[ $i -eq 10 ]]; then
+            echo "ERROR: Build VM $VM_ID not accessible at $VM_IP"
+            exit "${BUILD_FAILURE_EXIT_CODE:-1}"
         fi
-        # Use a file to track rollbacks for this pipline - only roll back once per pipeline per snapshot name
-        touch /tmp/.ludus-ci-$CUSTOM_ENV_CI_PIPELINE_ID-$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME-rolled-back
-    else
-        echo "Failed to rollback VM $VM_ID to snapshot $CUSTOM_ENV_LUDUS_SNAPSHOT_NAME"
-        SKIP_BUILD="false"
-    fi
+        sleep 5
+    done
 fi
 
-if [[ "$SKIP_BUILD" == "false" ]]; then
-    # Do it
-    ansible-playbook -i /opt/ludus/ansible/range-management/proxmox.py --extra-vars "api_user=$PROXMOX_USERNAME \
-    api_password=$PROXMOX_PASSWORD api_host=$PROXMOX_HOSTNAME node_name=$PROXMOX_NODE ludus_install_path=$LUDUS_DIR \
-    runner_vm_name=$RUNNER_VM_NAME skip_build=$SKIP_BUILD" $LUDUS_DIR/ci/prepare.yml
+if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "full" || "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
+    wait_for_ci_vm_ssh "$VM_ID" "$VM_IP" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
 fi
 
-# Clean up old rollback files (over 2 days old)
-find /tmp/ -name '.ludus-ci*' -type f -mtime +2 -exec rm {} +
+if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
+    case "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" in
+        "templates_built")
+            wait_for_ludus_command "$VM_IP" "/opt/ludus/ci/.apikey-admin" "ludus templates list --json" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+            ;;
+        "range_built_admin")
+            wait_for_ludus_command "$VM_IP" "/opt/ludus/ci/.apikey-admin" "ludus range list --json" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+            ;;
+        "range_built_user"|"integration_ready")
+            wait_for_ludus_command "$VM_IP" "/opt/ludus/ci/.apikey-user" "ludus range list --json" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+            ;;
+    esac
+fi
+
+# --- Clean up old tracking files (over 2 days old) ---
+find /tmp/ -name '.ludus-ci-*' -type f -mtime +2 -exec rm {} + 2>/dev/null || true

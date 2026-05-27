@@ -264,6 +264,38 @@
       ansible.builtin.meta: refresh_inventory
       when: vms_without_ip | default([]) | length > 0
 
+- name: Ensure all VM control interfaces are available
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Wait for Windows VMs to accept WinRM connections
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item.vm_name].ansible_host }}"
+        port: 5986
+        delay: 3
+        state: started
+        timeout: 900
+      loop: "{{ ludus }}"
+      loop_control:
+        label: "{{ item.vm_name }}"
+      when:
+        - item.unmanaged is not defined or (item.unmanaged is defined and not item.unmanaged)
+        - item.windows is defined
+
+    - name: Wait for Linux and macOS VMs to accept SSH connections
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item.vm_name].ansible_host }}"
+        port: 22
+        delay: 3
+        state: started
+        timeout: 900
+      loop: "{{ ludus }}"
+      loop_control:
+        label: "{{ item.vm_name }}"
+      when:
+        - item.unmanaged is not defined or (item.unmanaged is defined and not item.unmanaged)
+        - (item.linux is defined and item.linux) or (item.macos is defined and item.macos)
+
 - name: Configure IP and Hostname for all VMs
   tags: [assign-ip]
   hosts: "{{ hostvars['localhost']['range_vms'] | default([]) }}"

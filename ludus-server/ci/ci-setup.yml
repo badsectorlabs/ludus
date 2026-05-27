@@ -1,5 +1,7 @@
 - name: Create the gitlab-runner user and deploy a Debian 13 VM
   hosts: localhost
+  vars:
+    ci_vm_disk_size: "250G"
   tasks:
     - name: Check inventory
       ansible.builtin.fail:
@@ -74,8 +76,8 @@
               bridge-stp off
               bridge-fd 0
               post-up   echo 1 > /proc/sys/net/ipv4/ip_forward
-              post-up   iptables -t nat -A POSTROUTING -s '203.0.113.254/24' -o {{ proxmox_interface }} -j MASQUERADE
-              post-down iptables -t nat -D POSTROUTING -s '203.0.113.254/24' -o {{ proxmox_interface }} -j MASQUERADE
+              post-up   iptables -t nat -A POSTROUTING -s '203.0.113.0/24' -o {{ proxmox_interface }} -j MASQUERADE
+              post-down iptables -t nat -D POSTROUTING -s '203.0.113.0/24' -o {{ proxmox_interface }} -j MASQUERADE
       register: interfaces_status
 
     - name: Enable new interface
@@ -90,7 +92,8 @@
         block: |
           server=203.0.113.254
           interface=ludusci
-          dhcp-range=203.0.113.100,203.0.113.250,255.255.255.0,12h
+          dhcp-range=203.0.113.100,203.0.113.179,255.255.255.0,12h
+          dhcp-range=203.0.113.190,203.0.113.250,255.255.255.0,12h
           dhcp-option=ludusci,3,203.0.113.254
         create: true
       register: dnsmasq_written
@@ -121,19 +124,24 @@
       when: clone_vm is successful
       until: vm_id != -1
 
-    # Disk changes are not supported after a VM is created via proxmox_kvm
-    # - name: Change the disk size
-    #   community.general.proxmox_kvm:
-    #     api_user: "{{ api_user }}"
-    #     api_password: "{{ api_password }}"
-    #     api_host: "{{ api_host }}"
-    #     node: "{{ node_name }}"
-    #     vmid: "{{ vm_id }}"
-    #     sata:
-    #       sata0: "ZFS:250,format=raw" # expand the disk to 250GB, TODO: make the storage a variable
-    #     timeout: 15
-    #     update: true
-    #   when: clone_vm is changed and clone_vm.vmid != -1
+    - name: Expand the CI template VM disk
+      ansible.builtin.shell: |
+        set -euo pipefail
+        desired="{{ ci_vm_disk_size }}"
+        current=$(qm config {{ vm_id }} | awk -F'size=' '/^virtio0:/ { split($2, fields, ","); print fields[1] }')
+        current_gib=${current%G}
+        desired_gib=${desired%G}
+        if [ "$current_gib" -lt "$desired_gib" ]; then
+          qm resize {{ vm_id }} virtio0 "$desired"
+          echo resized
+        else
+          echo unchanged
+        fi
+      args:
+        executable: /bin/bash
+      register: ci_template_disk_resize
+      changed_when: "'resized' in ci_template_disk_resize.stdout"
+      when: clone_vm is changed and clone_vm.vmid != -1
 
     - name: Update the VM description by vmid
       community.general.proxmox_kvm:
@@ -212,21 +220,39 @@
             state: started
 
     - name: Wait for VM to acquire an IP address
-      command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host debian-13-x64-server-ludus-ci
+      ansible.builtin.shell: |
+        for i in $(seq 1 90); do
+          IP=$(qm agent {{ vm_id }} network-get-interfaces 2>/dev/null \
+            | jq -r '.[]? | ."ip-addresses"[]? | ."ip-address"? // empty' \
+            | grep '^203\.0\.113\.' \
+            | head -n1)
+          if [ -n "$IP" ]; then
+            echo "$IP"
+            exit 0
+          fi
+          sleep 5
+        done
+        exit 1
       register: nodecheck
       changed_when: false
-      until: (nodecheck.stdout | default('') | from_json).ansible_host | default('') | ansible.utils.ipaddr
-      retries: 30
-      delay: 5
       when: clone_vm is changed
 
-    - name: Save off the IP for use with checking on the WinRM/SSH connectivity
-      set_fact:
-        last_deployed_ip: "{{ (nodecheck.stdout | from_json).ansible_host | default('') | ansible.utils.ipaddr }}"
+    - name: Save off the IP for use with checking on the SSH connectivity
+      ansible.builtin.set_fact:
+        last_deployed_ip: "{{ nodecheck.stdout | trim }}"
       when: clone_vm is changed
 
-    # The VM interface update changes the IP of the VM with DHCP, without this the inventory has the old IP still
-    - meta: refresh_inventory
+    - name: Add CI template VM to in-memory inventory
+      ansible.builtin.add_host:
+        name: debian-13-x64-server-ludus-ci
+        ansible_host: "{{ last_deployed_ip }}"
+        ansible_connection: ssh
+        ansible_user: debian
+        ansible_ssh_pass: debian
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        become_method: sudo
+        ansible_sudo_pass: debian
+      when: clone_vm is changed
 
     - name: Wait for the host's control interface (SSH) to come up
       action:
@@ -247,6 +273,30 @@
     - become_method: sudo
     - ansible_sudo_pass: debian
   tasks:
+    - name: Grow root partition to fill the CI disk
+      ansible.builtin.shell: |
+        set -euo pipefail
+        root_dev=$(findmnt -n -o SOURCE /)
+        if [ "$root_dev" != "/dev/vda1" ]; then
+          echo "root device is $root_dev; expected /dev/vda1"
+          exit 0
+        fi
+        disk_size=$(blockdev --getsize64 /dev/vda)
+        part_size=$(blockdev --getsize64 /dev/vda1)
+        if [ $((disk_size - part_size)) -lt 1048576 ]; then
+          echo "root partition already fills disk"
+          exit 0
+        fi
+        printf ', +\n' | sfdisk --force -N 1 /dev/vda >/tmp/ludus-ci-growroot.log 2>&1 || {
+          cat /tmp/ludus-ci-growroot.log
+          exit 1
+        }
+        partx -u /dev/vda || true
+        resize2fs /dev/vda1
+      args:
+        executable: /bin/bash
+      become: true
+
     - name: Install curl and ca-certificates
       ansible.builtin.apt:
         name:
@@ -356,49 +406,81 @@
     - ansible_ssh_pass: debian
     - become_method: sudo
     - ansible_sudo_pass: debian
-  roles:
-    - role: gantsign.golang
-      golang_version: '1.24.2'
   tasks:
+    - name: Set Go version
+      ansible.builtin.set_fact:
+        ci_go_version: "{{ ci_go_version | default('1.26.3') }}"
+
+    - name: Download Go language SDK
+      ansible.builtin.get_url:
+        url: "https://go.dev/dl/go{{ ci_go_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/go{{ ci_go_version }}.linux-amd64.tar.gz"
+        mode: "0644"
+      become: true
+
+    - name: Remove existing Go installation
+      ansible.builtin.file:
+        path: /usr/local/go
+        state: absent
+      become: true
+
+    - name: Install Go language SDK
+      ansible.builtin.unarchive:
+        src: "/tmp/go{{ ci_go_version }}.linux-amd64.tar.gz"
+        dest: /usr/local
+        remote_src: true
+      become: true
+
+    - name: Add Go to system PATH
+      ansible.builtin.copy:
+        dest: /etc/profile.d/go.sh
+        content: |
+          export PATH=$PATH:/usr/local/go/bin
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+
     # Install node + yarn to build the documentation
     - name: Install node
       ansible.builtin.shell: curl -fsSL https://deb.nodesource.com/setup_21.x | bash - && apt-get install -y nodejs
+      become: true
 
     - name: Install yarn
       ansible.builtin.shell: npm install --global yarn
+      become: true
       
     - name: Install bun
       ansible.builtin.shell: npm install --global bun
+      become: true
       
 - name: Add gitlab-runner to proxmox and convert the VM to a template
   hosts: localhost
-  roles:
-    - role: lae.proxmox
-      pve_group: "{{ proxmox_node }}"
-      pve_run_system_upgrades: false
-      pve_reboot_on_kernel_update: false
-      pve_cluster_enabled: false
-      pve_zfs_enabled: false
-      pve_users:
-        - name: "gitlab-runner@pam"
-          password: "{{ lookup('password', ludus_install_path + '/ci/.gitlab-runner-password length=24 chars=ascii_letters,digits') }}"
-      pve_acls:
-        - path: "/pool/CICD"
-          roles: ["PVEAdmin"]
-          users:
-            - "gitlab-runner@pam"
-          groups:
-            - "ludus_admins"
-        - path: "/storage/{{ proxmox_vm_storage_pool }}"
-          roles: ["DatastoreUser"]
-          users:
-            - "gitlab-runner@pam"
-        - path: "/sdn/zones/localnetwork/ludusci"
-          roles: ["PVESDNUser"]
-          users:
-            - "gitlab-runner@pam"
-
   tasks:
+    - name: Load gitlab-runner Proxmox password
+      ansible.builtin.set_fact:
+        runner_pve_password: "{{ lookup('password', ludus_install_path + '/ci/.gitlab-runner-password length=24 chars=ascii_letters,digits') }}"
+      no_log: true
+
+    - name: Ensure gitlab-runner Proxmox user exists
+      ansible.builtin.shell: |
+        if pveum user list | awk '{print $1}' | grep -qx 'gitlab-runner@pam'; then
+          printf '%s\n%s\n' "$RUNNER_PVE_PASSWORD" "$RUNNER_PVE_PASSWORD" | pveum passwd gitlab-runner@pam
+        else
+          pveum user add gitlab-runner@pam --password "$RUNNER_PVE_PASSWORD"
+        fi
+      environment:
+        RUNNER_PVE_PASSWORD: "{{ runner_pve_password }}"
+      no_log: true
+
+    - name: Ensure gitlab-runner Proxmox ACLs exist
+      ansible.builtin.command: "pveum aclmod {{ item.path }} {{ item.principal_type }} {{ item.principal }} -role {{ item.role }}"
+      loop:
+        - { path: "/pool/CICD", principal_type: "-user", principal: "gitlab-runner@pam", role: "PVEAdmin" }
+        - { path: "/pool/CICD", principal_type: "-group", principal: "ludus_admins", role: "PVEAdmin" }
+        - { path: "/storage/{{ proxmox_vm_storage_pool }}", principal_type: "-user", principal: "gitlab-runner@pam", role: "DatastoreUser" }
+        - { path: "/sdn/zones/localnetwork/ludusci", principal_type: "-user", principal: "gitlab-runner@pam", role: "PVESDNUser" }
+
     - name: Change name
       community.general.proxmox_kvm:
         api_user: "{{ api_user }}"
@@ -440,15 +522,19 @@
         url: https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-linux-amd64
         dest: /usr/local/bin/gitlab-runner
         mode: '0755'
+      when: gitlab_runner_register | default(true) | bool
 
     - name: Install the gitlab runner
       ansible.builtin.shell: gitlab-runner install --working-directory /home/gitlab-runner --user gitlab-runner
+      when: gitlab_runner_register | default(true) | bool
 
     - name: Register the gitlab runner
-      ansible.builtin.shell: gitlab-runner register --non-interactive --executor custom --tag-list "ludus-proxmox-runner" --locked --maximum-timeout 21600 --custom-prepare-exec /opt/ludus/ci/prepare.sh --custom-run-exec /opt/ludus/ci/run.sh --custom-cleanup-exec /opt/ludus/ci/cleanup.sh --cache-dir /home/gitlab-runner/cache --builds-dir /home/gitlab-runner/builds --registration-token {{ gitlab_registration_token }} --url {{ gitlab_url }}
+      ansible.builtin.shell: gitlab-runner register --non-interactive --executor custom --tag-list "ludus-proxmox-runner-parallel" --locked --maximum-timeout 21600 --custom-prepare-exec /opt/ludus/ci/prepare.sh --custom-run-exec /opt/ludus/ci/run.sh --custom-cleanup-exec /opt/ludus/ci/cleanup.sh --cache-dir /home/gitlab-runner/cache --builds-dir /home/gitlab-runner/builds --registration-token {{ gitlab_registration_token }} --url {{ gitlab_url }}
+      when: gitlab_runner_register | default(true) | bool
 
     - name: Run the gitlab runner
       ansible.builtin.shell: gitlab-runner start
+      when: gitlab_runner_register | default(true) | bool
 
     # This is required as the register command does not support concurrency settings
     # See https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1539
@@ -456,7 +542,9 @@
       ansible.builtin.replace:
         path: "/etc/gitlab-runner/config.toml"
         regexp: "concurrent *= *\\d+"
-        replace: "concurrent = 3"
+        replace: "concurrent = 12"
+      when: gitlab_runner_configure | default(true) | bool
 
     - name: Restart GitLab runner
       ansible.builtin.shell: gitlab-runner restart
+      when: gitlab_runner_configure | default(true) | bool
