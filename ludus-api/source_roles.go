@@ -1,6 +1,7 @@
 package ludusapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -199,7 +200,15 @@ func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansible
 			if c.Name == "" || seen[c.Name] {
 				continue
 			}
-			results = append(results, RoleInstallResult{Name: c.Name, Version: c.Version, OK: true})
+			// Prefer the on-disk version from MANIFEST.json over the declared
+			// pin: requirements.yml often omits the version (or uses a range
+			// like ">=1.2.0" that isn't a real version), but ansible-galaxy
+			// has already resolved it to a concrete release on disk.
+			version := readGalaxyInstalledCollectionVersion(ansibleHome, c.Name)
+			if version == "" {
+				version = c.Version
+			}
+			results = append(results, RoleInstallResult{Name: c.Name, Version: version, OK: true})
 		}
 	}
 	return results, nil
@@ -506,6 +515,36 @@ func parseRequestedVersions(data []byte) map[string]string {
 		}
 	}
 	return out
+}
+
+// readGalaxyInstalledCollectionVersion returns the version recorded in
+// MANIFEST.json for an installed Ansible collection, or "" if the file is
+// missing or unreadable.
+func readGalaxyInstalledCollectionVersion(ansibleHome, name string) string {
+	if ansibleHome == "" {
+		return ""
+	}
+	dot := strings.Index(name, ".")
+	if dot <= 0 || dot == len(name)-1 {
+		return ""
+	}
+	manifestPath := filepath.Join(
+		ansibleHome, "collections", "ansible_collections",
+		name[:dot], name[dot+1:], "MANIFEST.json",
+	)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		CollectionInfo struct {
+			Version string `json:"version"`
+		} `json:"collection_info"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return ""
+	}
+	return doc.CollectionInfo.Version
 }
 
 func readGalaxyInstalledVersion(rolesPath, name string) string {
