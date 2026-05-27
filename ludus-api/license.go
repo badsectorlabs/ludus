@@ -109,7 +109,6 @@ func (s *Server) checkLicense() {
 			return
 		}
 
-		log.Println("LICENSE: license file is genuine!")
 		license = &dataset.License
 		entitlements = dataset.Entitlements
 		if len(entitlements) == 0 {
@@ -163,17 +162,6 @@ func (s *Server) checkLicense() {
 			log.Printf("LICENSE: %v\n", err)
 			return
 		}
-		if license.Expiry != nil {
-			log.Printf("LICENSE: active, expires: %s, licensed to %s\n", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
-			s.LicenseMessage = fmt.Sprintf("License active, expires: %s, licensed to %s", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
-			s.LicenseName = license.Name
-			s.LicenseExpiry = license.Expiry
-		} else {
-			log.Println("LICENSE: active, does not expire, licensed to", license.Name)
-			s.LicenseMessage = fmt.Sprintf("License active, does not expire, licensed to %s", license.Name)
-			s.LicenseName = license.Name
-			s.LicenseExpiry = nil
-		}
 		s.LicenseValid = true
 		// Extract entitlements from license
 		entitlements, err = license.Entitlements(ctx)
@@ -181,6 +169,18 @@ func (s *Server) checkLicense() {
 			log.Printf("LICENSE: unable to get entitlements: %v", err)
 			s.Entitlements = []string{}
 		}
+	}
+
+	if license.Expiry != nil {
+		log.Printf("LICENSE: active, expires: %s, licensed to %s\n", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
+		s.LicenseMessage = fmt.Sprintf("License active, expires: %s, licensed to %s", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
+		s.LicenseName = license.Name
+		s.LicenseExpiry = license.Expiry
+	} else {
+		log.Println("LICENSE: active, does not expire, licensed to", license.Name)
+		s.LicenseMessage = fmt.Sprintf("License active, does not expire, licensed to %s", license.Name)
+		s.LicenseName = license.Name
+		s.LicenseExpiry = nil
 	}
 
 	s.Entitlements = make([]string, len(entitlements))
