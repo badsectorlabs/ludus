@@ -171,14 +171,6 @@ func deleteRangeResources(targetRange *models.Range, force bool, e *core.Request
 		return fmt.Errorf("failed to remove range directory: %w", err)
 	}
 
-	// Delete all VM records referencing this range before deleting the range itself,
-	// otherwise PocketBase will reject the deletion due to the required foreign key.
-	_, err = e.App.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").Bind(dbx.Params{"range_id": targetRange.Id}).Execute()
-	if err != nil {
-		return fmt.Errorf("failed to delete VM records for range: %w", err)
-	}
-
-	// Delete the range object from the database
 	err = e.App.Delete(targetRange)
 	if err != nil {
 		return fmt.Errorf("failed to delete range from database: %w", err)
