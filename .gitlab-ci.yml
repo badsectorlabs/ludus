@@ -758,16 +758,56 @@ templates check:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 2h
-  retry:
-    max: 2
+  timeout: 5h
   script:
     - *ci-setup-admin
-    # If there is no template building process, start one
-    # This may happen on a failed ISO upload
-    - pgrep -f 'packer' || ludus templates build
-    # Wait for all templates to build
-    - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
+    - |
+      TEMPLATE_RETRIES=3
+      declare -A TEMPLATE_RETRY_COUNTS=()
+
+      # If there is no template building process, start one.
+      # This may happen on a failed ISO upload.
+      pgrep -f 'packer' >/dev/null || ludus templates build
+
+      while true; do
+        UNBUILT_TEMPLATES=$(ludus templates list --json | jq -r '.[] | select(.built == false) | .name')
+        if [ -z "$UNBUILT_TEMPLATES" ]; then
+          break
+        fi
+
+        if pgrep -f 'packer' >/dev/null; then
+          date
+          sleep 60
+          continue
+        fi
+
+        RETRY_TEMPLATES=()
+        FAILED_TEMPLATES=()
+        while IFS= read -r TEMPLATE_NAME; do
+          [ -z "$TEMPLATE_NAME" ] && continue
+          TEMPLATE_RETRY_COUNT=${TEMPLATE_RETRY_COUNTS[$TEMPLATE_NAME]:-0}
+          if [ "$TEMPLATE_RETRY_COUNT" -lt "$TEMPLATE_RETRIES" ]; then
+            TEMPLATE_RETRY_COUNT=$((TEMPLATE_RETRY_COUNT + 1))
+            TEMPLATE_RETRY_COUNTS[$TEMPLATE_NAME]=$TEMPLATE_RETRY_COUNT
+            RETRY_TEMPLATES+=("$TEMPLATE_NAME")
+            echo "$TEMPLATE_NAME failed to build; retrying ($TEMPLATE_RETRY_COUNT/$TEMPLATE_RETRIES)"
+          else
+            FAILED_TEMPLATES+=("$TEMPLATE_NAME")
+          fi
+        done <<< "$UNBUILT_TEMPLATES"
+
+        if [ "${#FAILED_TEMPLATES[@]}" -ne 0 ]; then
+          echo "Template builds failed after $TEMPLATE_RETRIES retries:"
+          printf '%s\n' "${FAILED_TEMPLATES[@]}"
+          ludus templates list
+          exit 1
+        fi
+
+        RETRY_TEMPLATE_NAMES=$(IFS=,; echo "${RETRY_TEMPLATES[*]}")
+        ludus templates build -n "$RETRY_TEMPLATE_NAMES"
+        date
+        sleep 60
+      done
     - ludus templates list
     # Parallel builds should create separate template log history entries.
     - export TEMPLATE_LOG_HISTORY_COUNT=$(ludus templates logs --history --json | jq 'length')
