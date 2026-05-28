@@ -210,16 +210,66 @@ REMOTE
     return 1
 }
 
+wait_for_cluster_ssh() {
+    local ATTEMPTS="${1:-90}"
+    local IP
+
+    for IP in $CLUSTER_NODES; do
+        local READY=0
+        for i in $(seq 1 "$ATTEMPTS"); do
+            if ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" "echo ready"; then
+                READY=1
+                break
+            fi
+            sleep 5
+        done
+
+        if [[ "$READY" != "1" ]]; then
+            echo "ERROR: Cluster node $IP did not become reachable after rollback" >&2
+            return 1
+        fi
+    done
+}
+
+rollback_cluster_to_snapshot() {
+    local SNAP="$1"
+    local READY_ATTEMPTS="${2:-90}"
+    local VMID STATUS
+
+    echo "Stopping cluster nodes before rolling back to '$SNAP'"
+    for VMID in "$NODE1" "$NODE2"; do
+        STATUS="$(qm status "$VMID" | awk '{print $2}')"
+        if [[ "$STATUS" != "stopped" ]]; then
+            qm shutdown "$VMID" --timeout 60 || qm stop "$VMID" --skiplock 1 || return 1
+        fi
+    done
+
+    for VMID in "$NODE1" "$NODE2"; do
+        STATUS="$(qm status "$VMID" | awk '{print $2}')"
+        if [[ "$STATUS" != "stopped" ]]; then
+            echo "ERROR: Cluster VM $VMID is still $STATUS; refusing rollback" >&2
+            return 1
+        fi
+    done
+
+    echo "Rolling back cluster nodes to '$SNAP'"
+    qm rollback "$NODE1" "$SNAP" || return 1
+    qm rollback "$NODE2" "$SNAP" || return 1
+
+    for VMID in "$NODE1" "$NODE2"; do
+        STATUS="$(qm status "$VMID" | awk '{print $2}')"
+        if [[ "$STATUS" != "running" ]]; then
+            qm start "$VMID" || return 1
+        fi
+    done
+
+    wait_for_cluster_ssh "$READY_ATTEMPTS"
+}
+
 if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "clean-cluster" ]]; then
     echo "Reverting cluster nodes to 'clean' snapshot"
-    qm rollback "$NODE1" clean --start 1
-    qm rollback "$NODE2" clean --start 1
+    rollback_cluster_to_snapshot clean 90 || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
     CLUSTER_ROLLED_BACK=1
-    for IP in $CLUSTER_NODES; do
-        for i in {1..90}; do
-            ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" "echo ready" && break || sleep 5
-        done
-    done
 elif [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "cluster-from-snapshot" ]]; then
     SNAP="$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME"
     if ! qm listsnapshot "$NODE1" | grep -q "$SNAP"; then
@@ -231,25 +281,15 @@ elif [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "cluster-from-snapshot" ]]; then
         DIFF=$(( $(date +%s) - SNAPTIME ))
         if [[ "$DIFF" -gt 120 ]]; then
             echo "Rolling back cluster to $SNAP"
-            qm rollback "$NODE1" "$SNAP" --start
-            qm rollback "$NODE2" "$SNAP" --start
+            rollback_cluster_to_snapshot "$SNAP" 30 || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
             CLUSTER_ROLLED_BACK=1
-            for IP in $CLUSTER_NODES; do
-                for i in {1..30}; do
-                    ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" "echo ready" && break || sleep 5
-                done
-            done
         else
             echo "$SNAP snapshot is < 2 minutes old. Not rolling back."
         fi
         touch "/tmp/.ludus-ci-cluster-${PIPELINE_ID}-${SNAP}-rolled-back"
         qm reboot "$NODE1"
         qm reboot "$NODE2"
-        for IP in $CLUSTER_NODES; do
-            for i in {1..90}; do
-                ssh -o ConnectTimeout=3 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" "echo ready" && break || sleep 5
-            done
-        done
+        wait_for_cluster_ssh 90 || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
         sleep 60
     fi
 elif [[ "$CUSTOM_ENV_LUDUS_INSTALL_STEP" == "take-cluster-snapshot" ]]; then
