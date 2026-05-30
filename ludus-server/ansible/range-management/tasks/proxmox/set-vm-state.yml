@@ -10,11 +10,11 @@
 
 - name: Get a JSON blob of vmids and vm names
   ansible.builtin.uri:
-    url: "https://127.0.0.1:8006/api2/json/cluster/resources"
+    url: "{{ proxmox_url }}/api2/json/cluster/resources"
     method: GET
     validate_certs: false
     headers:
-      Authorization: "PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}"
+      Authorization: "PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}"
   register: vm_ids_response
 
 - name: Parse vmids from JSON and append to list
