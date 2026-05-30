@@ -3,6 +3,8 @@ package ludusapi
 import (
 	"fmt"
 	"log"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,10 +26,19 @@ type Configuration struct {
 	ProxmoxNode               string        `mapstructure:"proxmox_node" yaml:"proxmox_node"`
 	ProxmoxInterface          string        `mapstructure:"proxmox_interface" yaml:"proxmox_interface"`
 	ProxmoxInvalidCert        bool          `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
-	ProxmoxURL                string        `mapstructure:"proxmox_url" yaml:"proxmox_url"`
+	ProxmoxURL                string        `mapstructure:"proxmox_url" yaml:"proxmox_url"`           // Deprecated: use proxmox_endpoints
+	ProxmoxEndpoints          []string      `mapstructure:"proxmox_endpoints" yaml:"proxmox_endpoints"`
+	ProxmoxTokenID            string        `mapstructure:"proxmox_token_id" yaml:"proxmox_token_id"`
+	ProxmoxTokenSecret        string        `mapstructure:"proxmox_token_secret" yaml:"proxmox_token_secret"`
+	ProxmoxUserRealm          string        `mapstructure:"proxmox_user_realm" yaml:"proxmox_user_realm"`
 	ProxmoxHostname           string        `mapstructure:"proxmox_hostname" yaml:"proxmox_hostname"`
 	ProxmoxLocalIP            string        `mapstructure:"proxmox_local_ip" yaml:"proxmox_local_ip"`
-	ProxmoxPublicIP           string        `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"`
+	ProxmoxPublicIP           string        `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"` // Deprecated: use wireguard_endpoint
+	WireguardEndpoint         string        `mapstructure:"wireguard_endpoint" yaml:"wireguard_endpoint"`
+	LudusNATIP                string        `mapstructure:"ludus_nat_ip" yaml:"ludus_nat_ip"`
+	LudusNATGateway           string        `mapstructure:"ludus_nat_gateway" yaml:"ludus_nat_gateway"`
+	TLSCertFile               string        `mapstructure:"tls_cert_file" yaml:"tls_cert_file"`
+	TLSKeyFile                string        `mapstructure:"tls_key_file" yaml:"tls_key_file"`
 	ProxmoxGateway            string        `mapstructure:"proxmox_gateway" yaml:"proxmox_gateway"`
 	ProxmoxNetmask            string        `mapstructure:"proxmox_netmask" yaml:"proxmox_netmask"`
 	ProxmoxVMStoragePool      string        `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
@@ -74,12 +85,15 @@ func (s *Server) ParseConfig() {
 
 	// Set defaults
 	viper.SetDefault("proxmox_invalid_cert", true)
-	viper.SetDefault("proxmox_url", "https://127.0.0.1:8006")
-	viper.SetDefault("proxmox_public_ip", "127.0.0.1")
 	viper.SetDefault("proxmox_vm_storage_pool", "local")
 	viper.SetDefault("proxmox_vm_storage_format", "qcow2")
 	viper.SetDefault("proxmox_iso_storage_pool", "local")
-	viper.SetDefault("ludus_nat_interface", "vmbr1000")
+	viper.SetDefault("ludus_nat_interface", "ludusnat")
+	viper.SetDefault("proxmox_user_realm", "pve")
+	viper.SetDefault("ludus_nat_ip", "192.0.2.253")
+	viper.SetDefault("ludus_nat_gateway", "192.0.2.254")
+	viper.SetDefault("tls_cert_file", ludusInstallPath+"/tls/server.crt")
+	viper.SetDefault("tls_key_file", ludusInstallPath+"/tls/server.key")
 	viper.SetDefault("prevent_user_ansible_add", false)
 	viper.SetDefault("data_directory", "/opt/ludus/db")
 	viper.SetDefault("database_encryption_key", "hZD6RwYxrcQ7CS4lRxjdKI7thWp3jg48")
@@ -109,6 +123,9 @@ func (s *Server) ParseConfig() {
 	ConfigMu.Unlock()
 	if err != nil {
 		log.Fatalf("Unable to decode into struct, %v", err)
+	}
+	if err := ServerConfiguration.ApplyShimAndValidate(); err != nil {
+		log.Fatalf("config validation: %v", err)
 	}
 	// By default hostname is the node name, but not always
 	if ServerConfiguration.ProxmoxHostname == "" {
@@ -143,6 +160,43 @@ func (s *Server) ParseConfig() {
 			log.Println("Configuration reloaded from file")
 		}
 	})
+}
+
+// ApplyShimAndValidate migrates deprecated fields and validates the config.
+// Called after viper.Unmarshal in ParseConfig and by tests.
+func (c *Configuration) ApplyShimAndValidate() error {
+	// Shim: proxmox_url -> proxmox_endpoints
+	if len(c.ProxmoxEndpoints) == 0 && c.ProxmoxURL != "" {
+		log.Printf("WARN: config key 'proxmox_url' is deprecated; use 'proxmox_endpoints: [%q]'", c.ProxmoxURL)
+		c.ProxmoxEndpoints = []string{c.ProxmoxURL}
+	}
+	// Shim: proxmox_public_ip -> wireguard_endpoint
+	if c.WireguardEndpoint == "" && c.ProxmoxPublicIP != "" {
+		log.Printf("WARN: config key 'proxmox_public_ip' is deprecated; use 'wireguard_endpoint'")
+		c.WireguardEndpoint = c.ProxmoxPublicIP
+	}
+	// Default realm (for direct-unmarshal callers like tests)
+	if c.ProxmoxUserRealm == "" {
+		c.ProxmoxUserRealm = "pve"
+	}
+	// Validate endpoints
+	if len(c.ProxmoxEndpoints) == 0 {
+		return fmt.Errorf("proxmox_endpoints must contain at least one URL")
+	}
+	for _, ep := range c.ProxmoxEndpoints {
+		u, err := url.Parse(ep)
+		if err != nil {
+			return fmt.Errorf("proxmox_endpoints: invalid URL %q: %w", ep, err)
+		}
+		host := u.Hostname()
+		if host == "127.0.0.1" || strings.EqualFold(host, "localhost") || host == "::1" {
+			return fmt.Errorf("proxmox_endpoints: %q uses 127.0.0.1/localhost — Ludus now runs in an LXC and must reach Proxmox over the network; use the node's real IP", ep)
+		}
+	}
+	if c.ProxmoxTokenID == "" || c.ProxmoxTokenSecret == "" {
+		return fmt.Errorf("proxmox_token_id and proxmox_token_secret are required")
+	}
+	return nil
 }
 
 // ApplyPortDefaultsAndValidate backfills DefaultPort / DefaultAdminPort for
