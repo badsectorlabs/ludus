@@ -42,7 +42,6 @@ var PB *pocketbase.PocketBase
 var app core.App
 var LudusPluginHandlerManager *HandlerManager
 var DebugProxmox bool
-var UseSDN bool
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
@@ -85,13 +84,6 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	if err := app.Bootstrap(); err != nil {
 		logger.Error(fmt.Sprintf("Error bootstrapping PocketBase: %v", err))
 		os.Exit(1)
-	}
-
-	var err error
-	UseSDN, err = IsClusterMode()
-	if err != nil {
-		logger.Debug(fmt.Sprintf("Unable to check for cluster mode: %v", err))
-		UseSDN = false
 	}
 
 	// Run migrations before InitDb(); PocketBase normally runs them on Serve, but we use the app

@@ -19,6 +19,10 @@ const (
 	NATVNetName       = "ludusnat"
 )
 
+// UseSDN is always true: Ludus runs in an LXC and manages all range
+// networking via Proxmox SDN, regardless of cluster size.
+const UseSDN = true
+
 // IsClusterMode checks if this Proxmox instance is part of a cluster.
 // First checks if the user has explicitly set cluster_mode in config.
 // If not set, falls back to API detection by checking if there are multiple nodes.
