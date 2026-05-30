@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"ludusapi/models"
+	"ludusapi/pveclient"
 	"net/http"
 	"os/exec"
 	"regexp"
@@ -145,48 +146,28 @@ func GetGoProxmoxClientForUserUsingToken(e *core.RequestEvent) (*goproxmox.Clien
 	return client, nil
 }
 
+var rootPVEClient *pveclient.Client
+
+// GetRootPVEClient returns the singleton failover-aware Proxmox client built
+// from ServerConfiguration. Callers should prefer this over GetRootGoProxmoxClient.
+func GetRootPVEClient() (*pveclient.Client, error) {
+	if rootPVEClient != nil {
+		return rootPVEClient, nil
+	}
+	c, err := pveclient.New(ServerConfiguration.PVEClientConfig())
+	if err != nil {
+		return nil, err
+	}
+	rootPVEClient = c
+	return c, nil
+}
+
 func GetRootGoProxmoxClient() (*goproxmox.Client, error) {
-
-	rawCachedClient := app.Store().Get("proxmoxClient_root")
-	cachedClient, ok := rawCachedClient.(*goproxmox.Client)
-	if ok {
-		return cachedClient, nil
-	}
-
-	rootUserRecord, err := app.FindFirstRecordByData("users", "userID", "ROOT")
+	pc, err := GetRootPVEClient()
 	if err != nil {
-		return nil, errors.New("unable to get root user object: " + err.Error())
+		return nil, err
 	}
-	rootUserObject := &models.User{}
-	rootUserObject.SetProxyRecord(rootUserRecord)
-	tokenID := rootUserObject.ProxmoxTokenId()
-	tokenSecret, err := DecryptStringFromDatabase(rootUserObject.ProxmoxTokenSecret())
-	if err != nil {
-		return nil, errors.New("unable to decrypt proxmox token secret for root user: " + err.Error())
-	}
-	insecureHTTPClient := http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: ServerConfiguration.ProxmoxInvalidCert,
-			},
-		},
-	}
-
-	var customLogger *goproxmox.LeveledLogger
-	if DebugProxmox {
-		customLogger = &goproxmox.LeveledLogger{Level: goproxmox.LevelDebug}
-	} else {
-		customLogger = &goproxmox.LeveledLogger{Level: goproxmox.LevelInfo}
-	}
-
-	client := goproxmox.NewClient(ServerConfiguration.ProxmoxURL+"/api2/json",
-		goproxmox.WithHTTPClient(&insecureHTTPClient),
-		goproxmox.WithAPIToken(tokenID, tokenSecret),
-		goproxmox.WithLogger(customLogger),
-	)
-
-	app.Store().Set("proxmoxClient_root", client)
-	return client, nil
+	return pc.Raw(), nil
 }
 
 func createProxmoxAPITokenForUserWithoutContext(username string, userRealm string, proxmoxPassword string) (string, string, error) {
