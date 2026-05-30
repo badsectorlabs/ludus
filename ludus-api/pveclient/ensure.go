@@ -44,6 +44,9 @@ func (c *Client) EnsureRole(ctx context.Context, name string, privs []string) er
 }
 
 func (c *Client) EnsureACL(ctx context.Context, path, role string, groups, users []string) error {
+	if len(groups) == 0 && len(users) == 0 {
+		return fmt.Errorf("EnsureACL: at least one group or user required")
+	}
 	form := url.Values{"path": {path}, "roles": {role}, "propagate": {"1"}}
 	if len(groups) > 0 {
 		form.Set("groups", strings.Join(groups, ","))
@@ -88,7 +91,9 @@ func (c *Client) EnsureSubnet(ctx context.Context, vnet, cidr, gateway string, s
 	listPath := "/api2/json/cluster/sdn/vnets/" + url.PathEscape(vnet) + "/subnets"
 	if err := c.do(ctx, "GET", listPath, nil, &r); err == nil {
 		for _, s := range r.Data {
-			if strings.Contains(s.Subnet, strings.ReplaceAll(cidr, "/", "-")) || strings.HasSuffix(s.Subnet, cidr) {
+			// Proxmox subnet IDs are "<zone>-<ip>-<prefix>", e.g. "ludus-192.0.2.0-24".
+			// Anchor on the dash-prefixed suffix to avoid "/1" matching "/10".
+			if strings.HasSuffix(s.Subnet, "-"+strings.ReplaceAll(cidr, "/", "-")) {
 				return nil
 			}
 		}

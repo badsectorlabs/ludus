@@ -41,7 +41,7 @@ func TestEnsureSDNZone_Idempotent(t *testing.T) {
 	var posts int32
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api2/json/cluster/sdn/zones/ludus", func(w http.ResponseWriter, r *http.Request) {
-		if posts == 0 {
+		if atomic.LoadInt32(&posts) == 0 {
 			w.WriteHeader(500) // not found yet
 			return
 		}
@@ -177,6 +177,28 @@ func TestEnsureSubnet_Idempotent(t *testing.T) {
 	_ = c.EnsureSubnet(t.Context(), "ludusnat", "192.0.2.0/24", "192.0.2.254", true)
 	if posts != 1 {
 		t.Fatalf("expected 1 POST, got %d", posts)
+	}
+}
+
+func TestEnsureSubnet_NoFalseMatchOnPrefixSubstring(t *testing.T) {
+	var posts int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/sdn/vnets/test/subnets", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			// /16 exists; ensure asking for /1 still POSTs (does not false-match)
+			json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+				{"subnet": "ludus-10.0.0.0-16"},
+			}})
+		case "POST":
+			atomic.AddInt32(&posts, 1)
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	_ = c.EnsureSubnet(t.Context(), "test", "10.0.0.0/1", "10.0.0.1", false)
+	if atomic.LoadInt32(&posts) != 1 {
+		t.Fatal("expected POST: /1 must not match existing /16")
 	}
 }
 
