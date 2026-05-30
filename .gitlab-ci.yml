@@ -474,6 +474,23 @@ documentation:
       - built-docs
     expire_in: 1 week
 
+go-unit-tests:
+  stage: build
+  tags:
+    - ludus-proxmox-runner-parallel
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+  script:
+    - cd ludus-api && go test ./... -v -race -coverprofile=coverage.out
+    - cd ../ludus-server && go test ./... -v -race
+  coverage: '/coverage: \d+\.\d+% of statements/'
+  artifacts:
+    paths:
+      - ludus-api/coverage.out
+    expire_in: 1 week
+
 #########
 # BUILD #
 #########
