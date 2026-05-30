@@ -34,7 +34,7 @@ const bootstrapMarker = "/opt/ludus/install/.bootstrap-complete"
 
 // Privilege sets mirror current ansible/proxmox-install/stage-3.yml.
 var (
-	privsPacker = []string{"VM.Config.Disk", "VM.Config.CPU", "VM.Config.Memory", "VM.Config.Network", "VM.Config.Options", "VM.Config.CDROM", "VM.Config.Cloudinit", "VM.Config.HWType", "VM.PowerMgmt", "VM.Audit", "VM.Allocate", "VM.Monitor", "VM.Console", "Datastore.AllocateSpace", "Datastore.AllocateTemplate", "Datastore.Audit", "Sys.Audit", "Sys.Modify", "SDN.Use"}
+	privsPacker = []string{"VM.Config.Disk", "VM.Config.CPU", "VM.Config.Memory", "VM.Config.Network", "VM.Config.Options", "VM.Config.CDROM", "VM.Config.Cloudinit", "VM.Config.HWType", "VM.PowerMgmt", "VM.Audit", "VM.Allocate", "VM.Monitor", "VM.Console", "Datastore.AllocateSpace", "Datastore.AllocateTemplate", "Datastore.Audit", "Sys.Audit", "Sys.Modify", "SDN.Use", "Sys.AccessNetwork"}
 	privsUser   = append([]string{"Pool.Audit", "VM.Clone", "VM.Snapshot", "VM.Snapshot.Rollback"}, privsPacker...)
 	privsAdmin  = append([]string{"Pool.Allocate", "User.Modify", "Realm.AllocateUser", "Permissions.Modify", "SDN.Allocate"}, privsUser...)
 )
@@ -79,7 +79,10 @@ func bootstrapProxmoxObjects(ctx context.Context, pc PVEClient, cfg ludusapi.Con
 	var peers []string
 	if nodes > 1 {
 		zoneType = "vxlan"
-		peers, _ = pc.ClusterNodeIPs(ctx)
+		peers, err = pc.ClusterNodeIPs(ctx)
+		if err != nil {
+			return fmt.Errorf("preflight cluster node IPs: %w", err)
+		}
 	}
 	logf("bootstrap: PVE %s, %d node(s), SDN zone type=%s", v.Version, nodes, zoneType)
 
@@ -99,21 +102,7 @@ func bootstrapProxmoxObjects(ctx context.Context, pc PVEClient, cfg ludusapi.Con
 			return fmt.Errorf("pool %s: %w", p, err)
 		}
 	}
-	// ACLs
-	acls := []struct {
-		path, role string
-		groups     []string
-	}{
-		{"/pool/SHARED", "LudusUser", []string{"ludus_users", "ludus_admins"}},
-		{"/pool/ADMIN", "LudusAdmin", []string{"ludus_admins"}},
-		{"/sdn/zones/" + cfg.SDNZone, "LudusUser", []string{"ludus_users", "ludus_admins"}},
-	}
-	for _, a := range acls {
-		if err := pc.EnsureACL(ctx, a.path, a.role, a.groups, nil); err != nil {
-			return fmt.Errorf("acl %s: %w", a.path, err)
-		}
-	}
-	// SDN
+	// SDN — must exist before ACLs reference /sdn/zones/<zone>
 	if err := pc.EnsureSDNZone(ctx, cfg.SDNZone, zoneType, peers); err != nil {
 		return fmt.Errorf("sdn zone: %w", err)
 	}
@@ -125,6 +114,21 @@ func bootstrapProxmoxObjects(ctx context.Context, pc PVEClient, cfg ludusapi.Con
 	}
 	if err := pc.ApplySDN(ctx); err != nil {
 		return fmt.Errorf("apply sdn: %w", err)
+	}
+	// ACLs
+	acls := []struct {
+		path, role string
+		groups     []string
+	}{
+		{"/pool/SHARED", "LudusUser", []string{"ludus_users", "ludus_admins"}},
+		{"/pool/ADMIN", "LudusAdmin", []string{"ludus_admins"}},
+		{"/sdn/zones/" + cfg.SDNZone, "LudusUser", []string{"ludus_users", "ludus_admins"}},
+		{"/nodes", "LudusPacker", []string{"ludus_users", "ludus_admins"}},
+	}
+	for _, a := range acls {
+		if err := pc.EnsureACL(ctx, a.path, a.role, a.groups, nil); err != nil {
+			return fmt.Errorf("acl %s: %w", a.path, err)
+		}
 	}
 	_ = installDir // reserved for future per-install state
 	return nil

@@ -83,6 +83,7 @@ func TestBootstrap_EnsureSequence_SingleNode(t *testing.T) {
 		"EnsureVNet:ludusnat",
 		"EnsureSubnet:ludusnat:192.0.2.0/24",
 		"ApplySDN",
+		"EnsureACL:/nodes:LudusPacker",
 	}
 	got := map[string]bool{}
 	for _, c := range m.calls {
