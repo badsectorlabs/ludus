@@ -69,7 +69,7 @@
 - name: Add network interface to router
   community.general.proxmox_nic:
     api_user: "{{ api_user }}"
-    api_token_id: "{{ proxmox_token_id }}"
+    api_token_id: "{{ api_token_id }}"
     api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     vmid: "{{ router_vm_id }}"

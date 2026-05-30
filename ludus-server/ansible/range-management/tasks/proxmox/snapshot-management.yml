@@ -10,7 +10,7 @@
 - name: Remove previous clean snapshot
   community.general.proxmox_snap:
     api_user: "{{ api_user }}"
-    api_token_id: "{{ proxmox_token_id }}"
+    api_token_id: "{{ api_token_id }}"
     api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     vmid: "{{ item }}"
@@ -34,7 +34,7 @@
 - name: Create new clean snapshot
   community.general.proxmox_snap:
     api_user: "{{ api_user }}"
-    api_token_id: "{{ proxmox_token_id }}"
+    api_token_id: "{{ api_token_id }}"
     api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     vmid: "{{ item }}"
@@ -68,7 +68,7 @@
 - name: Revert VM to snapshot
   community.general.proxmox_snap:
     api_user: "{{ api_user }}"
-    api_token_id: "{{ proxmox_token_id }}"
+    api_token_id: "{{ api_token_id }}"
     api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     vmid: "{{ item }}"
@@ -84,7 +84,7 @@
 - name: Start the VMs
   community.general.proxmox_kvm:
     api_user: "{{ api_user }}"
-    api_token_id: "{{ proxmox_token_id }}"
+    api_token_id: "{{ api_token_id }}"
     api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     node: "{{ node_name }}"
