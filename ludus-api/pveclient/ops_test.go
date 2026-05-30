@@ -142,3 +142,144 @@ func TestCreateToken(t *testing.T) {
 		t.Fatalf("bad token: %+v", tok)
 	}
 }
+
+func TestNodeStatus(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/nodes/pve/status", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+			"cpu":     0.05,
+			"uptime":  12345,
+			"memory":  map[string]any{"total": 8192, "used": 4096, "free": 4096},
+			"loadavg": []string{"0.10", "0.05", "0.01"},
+		}})
+	})
+	c := fakeAPI(t, mux)
+	ns, err := c.NodeStatus(t.Context(), "pve")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ns.CPU != 0.05 || ns.Uptime != 12345 || ns.Memory.Total != 8192 {
+		t.Fatalf("bad parse: %+v", ns)
+	}
+}
+
+func TestClusterNodeIPs(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/status", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+			{"type": "cluster", "name": "c1", "ip": ""},
+			{"type": "node", "name": "pve1", "ip": "10.0.0.1"},
+			{"type": "node", "name": "pve2", "ip": "10.0.0.2"},
+		}})
+	})
+	c := fakeAPI(t, mux)
+	ips, err := c.ClusterNodeIPs(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ips) != 2 || ips[0] != "10.0.0.1" || ips[1] != "10.0.0.2" {
+		t.Fatalf("bad ips: %v", ips)
+	}
+}
+
+func TestNextVMID_String(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/nextid", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": "200"})
+	})
+	c := fakeAPI(t, mux)
+	id, err := c.NextVMID(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 200 {
+		t.Fatalf("expected 200, got %d", id)
+	}
+}
+
+func TestNextVMID_Float(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/nextid", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": 201.0})
+	})
+	c := fakeAPI(t, mux)
+	id, err := c.NextVMID(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 201 {
+		t.Fatalf("expected 201, got %d", id)
+	}
+}
+
+func TestDeleteUser(t *testing.T) {
+	var deleted bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/access/users/alice@pve", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" {
+			deleted = true
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	if err := c.DeleteUser(t.Context(), "alice@pve"); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted {
+		t.Fatal("DELETE not called")
+	}
+}
+
+func TestUserExists(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/access/users/alice@pve", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"userid": "alice@pve"}})
+	})
+	mux.HandleFunc("/api2/json/access/users/ghost@pve", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		w.Write([]byte("user does not exist"))
+	})
+	c := fakeAPI(t, mux)
+
+	exists, err := c.UserExists(t.Context(), "alice@pve")
+	if err != nil || !exists {
+		t.Fatalf("expected alice to exist: exists=%v err=%v", exists, err)
+	}
+
+	exists, err = c.UserExists(t.Context(), "ghost@pve")
+	if err != nil || exists {
+		t.Fatalf("expected ghost to not exist: exists=%v err=%v", exists, err)
+	}
+}
+
+func TestDeleteToken(t *testing.T) {
+	var deleted bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/access/users/alice@pve/token/ludus", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" {
+			deleted = true
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	if err := c.DeleteToken(t.Context(), "alice@pve", "ludus"); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted {
+		t.Fatal("DELETE not called")
+	}
+}
+
+func TestVerifyTokenOnAll_AllGood(t *testing.T) {
+	c := fakeAPI(t, http.NewServeMux())
+	if err := c.VerifyTokenOnAll(t.Context()); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestRaw_NotNil(t *testing.T) {
+	c := fakeAPI(t, http.NewServeMux())
+	if c.Raw() == nil {
+		t.Fatal("Raw() should not be nil after successful New")
+	}
+}

@@ -60,3 +60,158 @@ func TestEnsureSDNZone_Idempotent(t *testing.T) {
 		t.Fatalf("expected 1 POST, got %d", posts)
 	}
 }
+
+func TestEnsureGroup_Idempotent(t *testing.T) {
+	var posts int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/access/groups/ludus_users", func(w http.ResponseWriter, r *http.Request) {
+		if atomic.LoadInt32(&posts) == 0 {
+			w.WriteHeader(500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"groupid": "ludus_users"}})
+	})
+	mux.HandleFunc("/api2/json/access/groups", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			atomic.AddInt32(&posts, 1)
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	_ = c.EnsureGroup(t.Context(), "ludus_users")
+	_ = c.EnsureGroup(t.Context(), "ludus_users")
+	if posts != 1 {
+		t.Fatalf("expected 1 POST, got %d", posts)
+	}
+}
+
+func TestEnsureRole_CreatesAndUpdatesPrivs(t *testing.T) {
+	var posts, puts int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/access/roles/LudusUser", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			if atomic.LoadInt32(&posts) == 0 {
+				w.WriteHeader(500)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
+		case "PUT":
+			atomic.AddInt32(&puts, 1)
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	mux.HandleFunc("/api2/json/access/roles", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			atomic.AddInt32(&posts, 1)
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	_ = c.EnsureRole(t.Context(), "LudusUser", []string{"VM.Audit"})
+	_ = c.EnsureRole(t.Context(), "LudusUser", []string{"VM.Audit", "VM.Clone"})
+	if posts != 1 || puts != 1 {
+		t.Fatalf("expected 1 POST + 1 PUT, got posts=%d puts=%d", posts, puts)
+	}
+}
+
+func TestEnsureVNet_Idempotent(t *testing.T) {
+	var posts int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/sdn/vnets/ludusnat", func(w http.ResponseWriter, r *http.Request) {
+		if atomic.LoadInt32(&posts) == 0 {
+			w.WriteHeader(500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"vnet": "ludusnat"}})
+	})
+	mux.HandleFunc("/api2/json/cluster/sdn/vnets", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			atomic.AddInt32(&posts, 1)
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	_ = c.EnsureVNet(t.Context(), "ludus", "ludusnat", 0, true)
+	_ = c.EnsureVNet(t.Context(), "ludus", "ludusnat", 0, true)
+	if posts != 1 {
+		t.Fatalf("expected 1 POST, got %d", posts)
+	}
+}
+
+func TestEnsureACL_AlwaysPUT(t *testing.T) {
+	var puts int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/access/acl", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" {
+			atomic.AddInt32(&puts, 1)
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	_ = c.EnsureACL(t.Context(), "/pool/SHARED", "LudusUser", []string{"ludus_users"}, nil)
+	_ = c.EnsureACL(t.Context(), "/pool/SHARED", "LudusUser", []string{"ludus_users"}, nil)
+	if puts != 2 {
+		t.Fatalf("expected 2 PUT (server-side idempotent), got %d", puts)
+	}
+}
+
+func TestEnsureSubnet_Idempotent(t *testing.T) {
+	var posts int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/sdn/vnets/ludusnat/subnets", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			data := []map[string]any{}
+			if atomic.LoadInt32(&posts) > 0 {
+				data = append(data, map[string]any{"subnet": "ludus-192.0.2.0-24"})
+			}
+			json.NewEncoder(w).Encode(map[string]any{"data": data})
+		case "POST":
+			atomic.AddInt32(&posts, 1)
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	_ = c.EnsureSubnet(t.Context(), "ludusnat", "192.0.2.0/24", "192.0.2.254", true)
+	_ = c.EnsureSubnet(t.Context(), "ludusnat", "192.0.2.0/24", "192.0.2.254", true)
+	if posts != 1 {
+		t.Fatalf("expected 1 POST, got %d", posts)
+	}
+}
+
+func TestApplySDN(t *testing.T) {
+	var puts int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/sdn", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" {
+			atomic.AddInt32(&puts, 1)
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	if err := c.ApplySDN(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if puts != 1 {
+		t.Fatalf("expected 1 PUT, got %d", puts)
+	}
+}
+
+func TestReloadNodeNetwork(t *testing.T) {
+	var puts int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/nodes/pve/network", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" {
+			atomic.AddInt32(&puts, 1)
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	if err := c.ReloadNodeNetwork(t.Context(), "pve"); err != nil {
+		t.Fatal(err)
+	}
+	if puts != 1 {
+		t.Fatalf("expected 1 PUT, got %d", puts)
+	}
+}
