@@ -485,7 +485,7 @@ go-unit-tests:
   script:
     - cd ludus-api && go test ./... -v -race -coverprofile=coverage.out
     - cd ../ludus-server && go test ./... -v -race
-  coverage: '/coverage: \d+\.\d+% of statements/'
+  coverage: '/coverage: \d+(?:\.\d+)?% of statements/'
   artifacts:
     paths:
       - ludus-api/coverage.out
