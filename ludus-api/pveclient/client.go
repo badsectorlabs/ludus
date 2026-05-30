@@ -1,6 +1,7 @@
 package pveclient
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -185,7 +186,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, ou
 	for attempt := 0; attempt < 2; attempt++ {
 		var rdr io.Reader
 		if bodyBytes != nil {
-			rdr = strings.NewReader(string(bodyBytes))
+			rdr = bytes.NewReader(bodyBytes)
 		}
 		c.mu.RLock()
 		base := c.endpoints[c.activeIdx].url

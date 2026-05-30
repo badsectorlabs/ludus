@@ -103,6 +103,9 @@ func (c *Client) CreateUser(ctx context.Context, userid, password string, groups
 	if len(groups) > 0 {
 		form.Set("groups", strings.Join(groups, ","))
 	}
+	if !strings.Contains(userid, "@") {
+		return "", fmt.Errorf("CreateUser: userid %q missing @realm suffix", userid)
+	}
 	realm := userid[strings.LastIndex(userid, "@")+1:]
 	if realm == "pve" && password != "" {
 		form.Set("password", password)
@@ -121,7 +124,10 @@ func (c *Client) UserExists(ctx context.Context, userid string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if strings.Contains(err.Error(), "500") || strings.Contains(err.Error(), "does not exist") {
+	// Proxmox returns HTTP 500 (not 404) with body "...does not exist" for
+	// missing users. Match the formatted ": 500:" delimiter from do() to avoid
+	// false positives on paths/userids containing "500".
+	if strings.Contains(err.Error(), ": 500:") || strings.Contains(err.Error(), "does not exist") {
 		return false, nil
 	}
 	return false, err
