@@ -10,6 +10,7 @@ import (
 	"io"
 	"ludusapi/models"
 	"maps"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -24,6 +25,68 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	yaml "sigs.k8s.io/yaml"
 )
+
+// activeProxmoxEndpoint returns the URL of the currently-active Proxmox API
+// endpoint from the failover client, falling back to the first configured
+// endpoint if the client is unavailable.
+func activeProxmoxEndpoint() string {
+	ep := ServerConfiguration.ProxmoxEndpoints[0]
+	if pc, err := GetRootPVEClient(); err == nil {
+		ep = pc.ActiveEndpoint()
+	}
+	return ep
+}
+
+// proxmoxAPIVars returns the Proxmox connection extra-vars that every
+// playbook invocation needs, derived from the active failover endpoint.
+func proxmoxAPIVars() map[string]interface{} {
+	ep := activeProxmoxEndpoint()
+	u, _ := url.Parse(ep)
+	hosts := []string{ServerConfiguration.LudusNATIP, ServerConfiguration.LudusNATGateway}
+	for _, e := range ServerConfiguration.ProxmoxEndpoints {
+		if pu, err := url.Parse(e); err == nil {
+			hosts = append(hosts, pu.Hostname())
+		}
+	}
+	return map[string]interface{}{
+		"proxmox_url":          ep,
+		"proxmox_api_host":     u.Hostname(),
+		"proxmox_api_port":     u.Port(),
+		"proxmox_token_id":     ServerConfiguration.ProxmoxTokenID,
+		"proxmox_token_secret": ServerConfiguration.ProxmoxTokenSecret,
+		"ludus_nat_ip":         ServerConfiguration.LudusNATIP,
+		"ludus_nat_gateway":    ServerConfiguration.LudusNATGateway,
+		"ludus_nat_interface":  ServerConfiguration.LudusNATInterface,
+		"ludus_infra_deny_ips": hosts,
+	}
+}
+
+// writeSecretExtraVarsFile pops proxmox_token_secret from vars, writes it to a
+// 0600 temp JSON file for use as `--extra-vars @file`, and returns the path.
+// This keeps the root API token secret off the ansible-playbook argv (visible
+// in ps). Caller must os.Remove the returned path.
+func writeSecretExtraVarsFile(vars map[string]interface{}) (string, error) {
+	secretVars := map[string]interface{}{
+		"proxmox_token_secret": vars["proxmox_token_secret"],
+	}
+	delete(vars, "proxmox_token_secret")
+	f, err := os.CreateTemp("", "ludus-vars-*.json")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(f.Name(), 0600); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := json.NewEncoder(f).Encode(secretVars); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	f.Close()
+	return f.Name(), nil
+}
 
 func getMergedDefaults(rangeConfigPath string) map[string]interface{} {
 	mergedDefaults := map[string]interface{}{}
@@ -111,6 +174,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		"vm_target_nodes":           vmTargetNodes,
 		"ludus_cluster_mode":        UseSDN,
 	}
+	maps.Copy(userVars, proxmoxAPIVars())
 
 	// Extra vars files are merged at top-level only; without this, a user-provided
 	// partial defaults object replaces all server defaults.
@@ -118,6 +182,14 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 
 	// Merge userVars with any extraVars provided
 	maps.Copy(userVars, extraVars)
+
+	// proxmox_token_secret must not appear on argv (visible in ps).
+	// Move it to a 0600 temp JSON file passed via --extra-vars @file.
+	secretFilePath, err := writeSecretExtraVarsFile(userVars)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(secretFilePath)
 
 	// Always include the ludus, server, and user configs
 	var serverAndUserConfigs []string
@@ -136,6 +208,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		// For regular Ludus users, provide the dynamic inventory
 		inventory = ludusInstallPath + "/ansible/range-management/proxmox.py"
 	}
+	serverAndUserConfigs = append(serverAndUserConfigs, "@"+secretFilePath)
 
 	// Check if the user specified a limit, and if so, make sure it has 'localhost' in it
 	if limit != "" {
@@ -200,7 +273,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		// Inject vars for the proxmox.py dynamic inventory script
 		execute.WithEnvVar("PROXMOX_NODE", ServerConfiguration.ProxmoxNode),
 		execute.WithEnvVar("PROXMOX_INVALID_CERT", strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert)),
-		execute.WithEnvVar("PROXMOX_URL", ServerConfiguration.ProxmoxURL),
+		execute.WithEnvVar("PROXMOX_URL", activeProxmoxEndpoint()),
 		execute.WithEnvVar("PROXMOX_HOSTNAME", ServerConfiguration.ProxmoxHostname),
 		// Inject creds for the proxmox.py dynamic inventory script
 		execute.WithEnvVar("PROXMOX_USERNAME", user.ProxmoxUsername()+"@"+user.ProxmoxRealm()),
@@ -289,7 +362,22 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 // request event or range context.
 func runUserManagementPlaybookStandalone(playbookPath string, extraVars map[string]interface{}) (string, error) {
 	buff := new(bytes.Buffer)
-	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
+
+	userVars := proxmoxAPIVars()
+	maps.Copy(userVars, extraVars)
+
+	// proxmox_token_secret must not appear on argv (visible in ps).
+	secretFilePath, err := writeSecretExtraVarsFile(userVars)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(secretFilePath)
+
+	serverAndUserConfigs := []string{
+		fmt.Sprintf("@%s/config.yml", ludusInstallPath),
+		fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath),
+		"@" + secretFilePath,
+	}
 
 	ansiblePlaybookConnectionOptions := &options.AnsibleConnectionOptions{
 		Connection: "local",
@@ -298,7 +386,7 @@ func runUserManagementPlaybookStandalone(playbookPath string, extraVars map[stri
 	ansiblePlaybookOptions := &playbook.AnsiblePlaybookOptions{
 		Inventory:     "127.0.0.1",
 		ExtraVarsFile: serverAndUserConfigs,
-		ExtraVars:     extraVars,
+		ExtraVars:     userVars,
 		Tags:          "",
 		Verbose:       false,
 	}
@@ -322,7 +410,7 @@ func runUserManagementPlaybookStandalone(playbookPath string, extraVars map[stri
 		execute.WithEnvVar("ANSIBLE_HOME", fmt.Sprintf("%s/install", ludusInstallPath)),
 		execute.WithEnvVar("PROXMOX_NODE", ServerConfiguration.ProxmoxNode),
 		execute.WithEnvVar("PROXMOX_INVALID_CERT", strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert)),
-		execute.WithEnvVar("PROXMOX_URL", ServerConfiguration.ProxmoxURL),
+		execute.WithEnvVar("PROXMOX_URL", activeProxmoxEndpoint()),
 		execute.WithEnvVar("PROXMOX_HOSTNAME", ServerConfiguration.ProxmoxHostname),
 	)
 
