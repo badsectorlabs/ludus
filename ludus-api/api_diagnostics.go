@@ -62,6 +62,7 @@ func GetDiagnostics(e *core.RequestEvent) error {
 		AverageSeekTime: pveperf.AverageSeekTime,
 		FsyncsPerSecond: pveperf.FsyncsPerSecond,
 		DNSExt:          pveperf.DNSExt,
+		Note:            pveperf.Note,
 	}
 
 	response := dto.GetDiagnosticsResponse{

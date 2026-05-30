@@ -460,6 +460,7 @@ type GetDiagnosticsResponsePveperf struct {
 	AverageSeekTime string  `json:"average_seek_time"`
 	FsyncsPerSecond float64 `json:"fsyncs_per_second"`
 	DNSExt          string  `json:"dns_ext"`
+	Note            string  `json:"note,omitempty"`
 }
 
 type GetConsoleWebsocketTicketResponse struct {
