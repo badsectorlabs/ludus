@@ -1,6 +1,7 @@
 package ludusapi
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"math"
@@ -24,19 +25,34 @@ import (
 var UserIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,20}$`)
 
 // provisionNewUser handles the common provisioning steps for a new Ludus user:
-// assigns a user number, creates a default range, runs the add-user ansible playbook,
-// generates an API key, creates a Proxmox API token, grants Proxmox access,
-// and saves the user record. The caller must set Name, UserId, Email, Password,
-// ProxmoxUsername, ProxmoxRealm, and ProxmoxPassword on the user before calling.
-// Returns the plaintext API key on success.
-func provisionNewUser(txApp core.App, user *models.User, plaintextPassword string) (string, error) {
+// assigns a user number, creates a default range, creates the Proxmox-side user
+// via the API, runs the add-user ansible playbook, generates an API key, creates
+// a Proxmox API token, grants Proxmox access, and saves the user record. The
+// caller must set Name, UserId, Email, Password, ProxmoxUsername, ProxmoxRealm,
+// and ProxmoxPassword on the user before calling.
+// Returns the plaintext API key and any Proxmox-side warning (e.g. @pam realm
+// password not settable via API) on success.
+func provisionNewUser(txApp core.App, user *models.User, plaintextPassword string) (apiKey string, proxmoxWarn string, err error) {
 	user.SetUserNumber(findNextAvailableUserNumber(txApp))
 	if user.UserNumber() > 150 {
-		return "", fmt.Errorf("cannot create more than 150 users")
+		return "", "", fmt.Errorf("cannot create more than 150 users")
 	}
 
 	if err := CreateDefaultUserRangeForBootstrap(txApp, user); err != nil {
-		return "", fmt.Errorf("creating default range: %w", err)
+		return "", "", fmt.Errorf("creating default range: %w", err)
+	}
+
+	pc, err := GetRootPVEClient()
+	if err != nil {
+		return "", "", fmt.Errorf("get root pve client: %w", err)
+	}
+	userid := user.ProxmoxUsername() + "@" + user.ProxmoxRealm()
+	proxmoxWarn, err = pc.CreateUser(context.Background(), userid, plaintextPassword, []string{"ludus_users"})
+	if err != nil {
+		return "", "", fmt.Errorf("create proxmox user %s: %w", userid, err)
+	}
+	if proxmoxWarn != "" {
+		logger.Warn(proxmoxWarn)
 	}
 
 	extraVars := map[string]interface{}{
@@ -49,36 +65,36 @@ func provisionNewUser(txApp core.App, user *models.User, plaintextPassword strin
 	}
 	output, err := RunAddUserPlaybookStandalone(extraVars)
 	if err != nil {
-		return "", fmt.Errorf("running add-user playbook: %w (output: %s)", err, output)
+		return "", "", fmt.Errorf("running add-user playbook: %w (output: %s)", err, output)
 	}
 
-	apiKey := GenerateAPIKey(user.UserId())
+	apiKey = GenerateAPIKey(user.UserId())
 	hashedAPIKey, err := HashString(apiKey)
 	if err != nil {
-		return "", fmt.Errorf("hashing API key: %w", err)
+		return "", "", fmt.Errorf("hashing API key: %w", err)
 	}
 	user.SetHashedApikey(hashedAPIKey)
 
 	tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm(), plaintextPassword)
 	if err != nil {
-		return "", fmt.Errorf("creating Proxmox API token: %w", err)
+		return "", "", fmt.Errorf("creating Proxmox API token: %w", err)
 	}
 	encryptedTokenSecret, err := EncryptStringForDatabase(tokenSecret)
 	if err != nil {
-		return "", fmt.Errorf("encrypting Proxmox token secret: %w", err)
+		return "", "", fmt.Errorf("encrypting Proxmox token secret: %w", err)
 	}
 	user.SetProxmoxTokenId(tokenID)
 	user.SetProxmoxTokenSecret(encryptedTokenSecret)
 
 	if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
-		return "", fmt.Errorf("granting Proxmox access to default range: %w", err)
+		return "", "", fmt.Errorf("granting Proxmox access to default range: %w", err)
 	}
 
 	if err := txApp.Save(user); err != nil {
-		return "", fmt.Errorf("saving user: %w", err)
+		return "", "", fmt.Errorf("saving user: %w", err)
 	}
 
-	return apiKey, nil
+	return apiKey, proxmoxWarn, nil
 }
 
 // AddUser - adds a user to the system
@@ -153,7 +169,7 @@ func AddUser(e *core.RequestEvent) error {
 	user.SetIsAdmin(addUserJSON.IsAdmin)
 	// Convert to lower-case, and replace spaces with "-"
 	user.SetProxmoxUsername(strings.ReplaceAll(strings.ToLower(addUserJSON.Name), " ", "-"))
-	user.SetProxmoxRealm("pam") // For now, always use PAM for user authentication
+	user.SetProxmoxRealm(ServerConfiguration.ProxmoxUserRealm)
 	encryptedPassword, err := EncryptStringForDatabase(addUserJSON.Password)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error encrypting Proxmox password: %v", err))
@@ -184,7 +200,7 @@ func AddUser(e *core.RequestEvent) error {
 		defer func() {
 			if wasError {
 				removeUserFromHostSystem(user.ProxmoxUsername())
-				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
+				removeUserFromProxmox(user.ProxmoxUsername(), user.ProxmoxRealm())
 				removePool(user.UserId())
 				defaultRangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
 				if err == nil {
@@ -194,20 +210,21 @@ func AddUser(e *core.RequestEvent) error {
 			}
 		}()
 
-		apiKey, err := provisionNewUser(txApp, user, addUserJSON.Password)
+		apiKey, proxmoxWarn, err := provisionNewUser(txApp, user, addUserJSON.Password)
 		if err != nil {
 			wasError = true
 			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error provisioning user: %v", err))
 		}
 
 		response := dto.AddUserResponse{
-			Name:            user.Name(),
-			UserID:          user.UserId(),
-			DateCreated:     user.Created().Time(),
-			DateLastActive:  user.Updated().Time(),
-			IsAdmin:         user.IsAdmin(),
-			ProxmoxUsername: user.ProxmoxUsername(),
-			ApiKey:          apiKey,
+			Name:                user.Name(),
+			UserID:              user.UserId(),
+			DateCreated:         user.Created().Time(),
+			DateLastActive:      user.Updated().Time(),
+			IsAdmin:             user.IsAdmin(),
+			ProxmoxUsername:     user.ProxmoxUsername(),
+			ApiKey:              apiKey,
+			ProxmoxPasswordNote: proxmoxWarn,
 		}
 		return e.JSON(http.StatusCreated, response)
 	})
@@ -319,7 +336,7 @@ func ProvisionOAuth2User(e *core.RequestEvent) error {
 	user.SetPassword(req.Password)
 	user.SetIsAdmin(req.IsAdmin)
 	user.SetProxmoxUsername(req.ProxmoxUsername)
-	user.SetProxmoxRealm("pam")
+	user.SetProxmoxRealm(ServerConfiguration.ProxmoxUserRealm)
 	encryptedPassword, err := EncryptStringForDatabase(req.Password)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error encrypting password: %v", err))
@@ -331,7 +348,7 @@ func ProvisionOAuth2User(e *core.RequestEvent) error {
 		defer func() {
 			if wasError {
 				removeUserFromHostSystem(user.ProxmoxUsername())
-				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
+				removeUserFromProxmox(user.ProxmoxUsername(), user.ProxmoxRealm())
 				removePool(user.UserId())
 				defaultRangeRecord, findErr := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
 				if findErr == nil && defaultRangeRecord != nil {
@@ -341,7 +358,7 @@ func ProvisionOAuth2User(e *core.RequestEvent) error {
 			}
 		}()
 
-		_, err := provisionNewUser(txApp, user, req.Password)
+		_, _, err := provisionNewUser(txApp, user, req.Password)
 		if err != nil {
 			wasError = true
 			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error provisioning user: %v", err))
@@ -403,7 +420,7 @@ func DeleteUser(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error running ansible playbook: %v (output: %v)", err, output))
 	}
 
-	err = removeUserFromProxmox(user.ProxmoxUsername(), "pam")
+	err = removeUserFromProxmox(user.ProxmoxUsername(), user.ProxmoxRealm())
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing user from Proxmox: %v", err))
 	}

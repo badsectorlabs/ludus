@@ -220,7 +220,7 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 	user.SetPassword(cfg.Password)
 	user.SetIsAdmin(true)
 	user.SetProxmoxUsername(proxmoxUsername)
-	user.SetProxmoxRealm("pam")
+	user.SetProxmoxRealm(ServerConfiguration.ProxmoxUserRealm)
 	encryptedPassword, err := EncryptStringForDatabase(cfg.Password)
 	if err != nil {
 		return fmt.Errorf("encrypting password: %w", err)
@@ -232,7 +232,7 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 		defer func() {
 			if wasError {
 				removeUserFromHostSystem(user.ProxmoxUsername())
-				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
+				removeUserFromProxmox(user.ProxmoxUsername(), user.ProxmoxRealm())
 				removePool(user.UserId())
 				defaultRangeRecord, findErr := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
 				if findErr == nil && defaultRangeRecord != nil {

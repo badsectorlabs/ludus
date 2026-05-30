@@ -11,13 +11,14 @@ type AddTemplateFromTarResponse struct {
 	Result string `json:"result,omitempty"`
 }
 type AddUserResponse struct {
-	DateCreated     time.Time `json:"dateCreated,omitempty"`
-	DateLastActive  time.Time `json:"dateLastActive,omitempty"`
-	IsAdmin         bool      `json:"isAdmin"`
-	ProxmoxUsername string    `json:"proxmoxUsername,omitempty"`
-	Name            string    `json:"name"`
-	UserID          string    `json:"userID"`
-	ApiKey          string    `json:"apiKey,omitempty"`
+	DateCreated         time.Time `json:"dateCreated,omitempty"`
+	DateLastActive      time.Time `json:"dateLastActive,omitempty"`
+	IsAdmin             bool      `json:"isAdmin"`
+	ProxmoxUsername     string    `json:"proxmoxUsername,omitempty"`
+	Name                string    `json:"name"`
+	UserID              string    `json:"userID"`
+	ApiKey              string    `json:"apiKey,omitempty"`
+	ProxmoxPasswordNote string    `json:"proxmoxPasswordNote,omitempty"`
 }
 type AllowResponse struct {
 	Allowed []string                  `json:"allowed,omitempty"`
