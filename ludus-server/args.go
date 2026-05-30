@@ -8,20 +8,15 @@ import (
 )
 
 var (
-	interactiveInstall bool
-	updateFlag         bool
-	versionFlag        bool
-	helpFlag           bool
-	noPromptFlag       bool
-	nodeName           string
-	autoGenerateConfig bool
-	noAnsibleUpdate    bool
-	debugFlag          bool
+	updateFlag      bool
+	versionFlag     bool
+	helpFlag        bool
+	noAnsibleUpdate bool
+	debugFlag       bool
 )
 
 func init() {
 	flag.BoolVar(&updateFlag, "update", false, "update the ludus install with this binary and embedded files and restart the ludus services")
-	flag.BoolVar(&noPromptFlag, "no-prompt", false, "run the installer without prompting for confirmation")
 	flag.BoolVar(&versionFlag, "v", false, "print the version of this ludus server")
 	flag.BoolVar(&versionFlag, "version", false, "print the version of this ludus server")
 	flag.BoolVar(&helpFlag, "h", false, "display help information")
@@ -67,17 +62,6 @@ func checkArgs() {
 	logger = slog.New(handler)
 	slog.SetDefault(logger)
 	slog.Debug("Debug mode enabled via flag or environment variable")
-
-	interactiveInstall = !noPromptFlag
-	autoGenerateConfig = noPromptFlag
-
-	if noPromptFlag {
-		if flag.NArg() > 0 {
-			nodeName = flag.Arg(0)
-		} else {
-			nodeName = ""
-		}
-	}
 }
 
 func printHelp() {
@@ -86,16 +70,12 @@ Ludus is a project to enable teams to quickly and
 safely deploy test environments (ranges) to test tools and
 techniques against representative virtual machines.
 
-When run without arguments, Ludus will check for a Ludus
-install at /opt/ludus and prompt the user to install Ludus
-if an existing install is not found.
-
-When run with --no-prompt an optional node name can be provided as an
-argument to set the proxmox node name in the configuration file.
+When run without arguments, ludus-server reads /opt/ludus/config.yml,
+performs first-boot bootstrap against the configured Proxmox cluster
+if not already complete, then serves the API.
 
 Usage:
     ludus-server
-    ludus-server --no-prompt [nodename]
     ludus-server --update
 
 Flags:

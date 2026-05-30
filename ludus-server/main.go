@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"embed"
 	"fmt"
@@ -28,7 +29,7 @@ var ludusPath string
 var GitCommitHash string
 var VersionString string
 var LudusVersion string = VersionString + "+" + GitCommitHash
-var existingProxmox bool
+var config ludusapi.Configuration
 var logger *slog.Logger
 
 // Embed the ansible directory into the binary for simple distribution
@@ -174,34 +175,20 @@ func main() {
 	}
 	ludusPath = filepath.Dir(ex)
 
-	// Sanity checks
 	checkArgs()
-	generateConfigIfAutomatedInstall()
-
-	// If we're done installing, serve the API
-	if fileExists(fmt.Sprintf("%s/install/.stage-3-complete", ludusInstallPath)) && !fileExists("/etc/systemd/system/ludus-install.service") {
-		checkConfig()
-		serve()
-	}
+	checkConfig()
 
 	log.Printf("Ludus server %s", LudusVersion)
 
-	// The install hasn't finished, so make sure we're root, then run through the install
-	checkRoot()
-
-	getInstallStep(existingProxmox)
-	// Use pip to install ansible because Debian's ansible apt package is 4 versions out of date (2.10, current is 2.14)
-	installAnsibleWithPip()
-	// Make sure we have the ansible galaxy package required for Ludus
-	installAnsibleRequirements()
-	// Run the install playbooks with ansible now that it is installed
-	runInstallPlaybook(existingProxmox)
-	// If initial-admin.yml exists, run bootstrap to create ROOT + initial admin.
-	time.Sleep(3 * time.Second)
-	if interactiveInstall {
-		initialAdminPath := fmt.Sprintf("%s/install/initial-admin.yml", ludusInstallPath)
-		if fileExists(initialAdminPath) {
-			runBootstrapOnly()
+	// First boot inside the LXC: provision Proxmox objects + local state via the
+	// Go bootstrap path (replaces the old ansible proxmox-install playbooks).
+	if !fileExists(bootstrapMarker) {
+		checkRoot()
+		ctx := context.Background()
+		if err := bootstrap(ctx, config); err != nil {
+			log.Fatalf("bootstrap failed: %v", err)
 		}
+		runBootstrapOnly() // create ROOT user + admin key
 	}
+	serve()
 }
