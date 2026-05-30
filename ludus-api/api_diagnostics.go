@@ -194,34 +194,11 @@ type PveperfInfo struct {
 }
 
 // getPveperf returns node performance data via the Proxmox API.
-// Replaces the former pveperf binary shell-out. Benchmark fields that require
-// running pveperf directly on the node (CPUBogomips, HdSize, BufferedReads,
-// AverageSeekTime, FsyncsPerSecond, DNSExt) are not available through the
-// Proxmox API and are returned as zero/empty values.
+// pveperf benchmark fields (bogomips, fsync/sec, hd read, dns) require
+// running a binary on the node and are not available via the Proxmox API.
+// Return zeros with an explanatory Note. See spec §15.
 func getPveperf() (*PveperfInfo, error) {
-	pc, err := GetRootPVEClient()
-	if err != nil {
-		return nil, err
-	}
-	ns, err := pc.NodeStatus(context.Background(), ServerConfiguration.ProxmoxNode)
-	if err != nil {
-		return nil, err
-	}
-
-	// RegexPerSecond is approximated from CPU utilisation * uptime as a
-	// convenience; the remaining benchmark fields require the pveperf binary
-	// and are not available via the API.
-	_ = ns // NodeStatus fields (CPU, Memory, Uptime, LoadAvg) available for future use.
-
 	return &PveperfInfo{
-		// Benchmark fields not available without pveperf binary on the node.
-		CPUBogomips:     0,
-		RegexPerSecond:  0,
-		HdSize:          "",
-		BufferedReads:   "",
-		AverageSeekTime: "",
-		FsyncsPerSecond: 0,
-		DNSExt:          "",
-		Note:            "pveperf benchmark fields (CPU bogomips, HD read MB/s, fsyncs/sec, DNS resolution time) are not available via the Proxmox API and require direct node access; values are zeroed.",
+		Note: "pveperf benchmarks unavailable via Proxmox API (Ludus runs in LXC); fields zeroed",
 	}, nil
 }
