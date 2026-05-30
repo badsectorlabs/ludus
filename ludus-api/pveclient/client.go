@@ -252,3 +252,13 @@ func (c *Client) advance(failedURL string) {
 	}
 	// No healthy endpoints; stay on current and let next request error.
 }
+
+// Builder is satisfied by ludusapi.Configuration; avoids import cycle.
+type Builder interface {
+	PVEClientConfig() Config
+}
+
+// FromBuilder constructs a Client from anything that knows how to produce a Config.
+func FromBuilder(b Builder) (*Client, error) {
+	return New(b.PVEClientConfig())
+}

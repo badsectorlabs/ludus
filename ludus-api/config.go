@@ -10,6 +10,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
+
+	"ludusapi/pveclient"
 )
 
 const ludusInstallPath string = "/opt/ludus"
@@ -230,4 +232,15 @@ func (c *Configuration) ApplyPortDefaultsAndValidate() error {
 		return fmt.Errorf("port and admin_port must differ (got %d for both)", c.Port)
 	}
 	return nil
+}
+
+// PVEClientConfig returns a pveclient.Config populated from this Configuration.
+// It satisfies pveclient.Builder, enabling pveclient.FromBuilder(cfg) call sites.
+func (c *Configuration) PVEClientConfig() pveclient.Config {
+	return pveclient.Config{
+		Endpoints:   c.ProxmoxEndpoints,
+		TokenID:     c.ProxmoxTokenID,
+		TokenSecret: c.ProxmoxTokenSecret,
+		InsecureTLS: c.ProxmoxInvalidCert,
+	}
 }
