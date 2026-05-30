@@ -139,16 +139,9 @@ func checkPackerPluginVersions() error {
 			if pluginName == "packer-plugin-ansible" {
 				Run("PACKER_PLUGIN_PATH="+ludusInstallPath+"/resources/packer/plugins packer plugins install github.com/hashicorp/ansible v"+minVersion, false, true)
 			} else if pluginName == "packer-plugin-proxmox" {
-				// Check that Proxmox version is > 9.1 otherwise stay on packer plugin version 1.2.3 since Proxmox < 9.1 can only do raw format TPM drives
-				proxmoxVersion, err := RunWithOutput("pveversion | cut -d '/' -f 2")
-				if err != nil {
-					return fmt.Errorf("error checking proxmox version: %v", err)
-				}
-				if !versionMeetsMinimum(strings.TrimSpace(proxmoxVersion), "9.1.0") {
-					log.Printf("Proxmox version %s is less than 9.1.0. Staying on packer plugin version 1.2.3. Upgrade proxmox to use TPM enabled VMs with snapshots.", proxmoxVersion)
-					Run("PACKER_PLUGIN_PATH="+ludusInstallPath+"/resources/packer/plugins packer plugins install github.com/badsectorlabs/proxmox v1.2.3", false, true)
-					continue
-				}
+				// LXC deps are baked at image-build time and the design floor is
+				// Proxmox >= 9.1, so we no longer shell out to pveversion to pick
+				// a legacy plugin pin.
 				Run("PACKER_PLUGIN_PATH="+ludusInstallPath+"/resources/packer/plugins packer plugins install github.com/badsectorlabs/proxmox v"+minVersion, false, true)
 			}
 		} else {

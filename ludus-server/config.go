@@ -1,141 +1,22 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	ludusapi "ludusapi"
-	"net"
 	"os"
-	"strings"
 
-	"github.com/pocketbase/pocketbase/tools/security"
 	"gopkg.in/yaml.v2"
 )
 
-// get interface information for the machine, and create a config automatically
-// useful for CI/CD tests
+// automatedConfigGenerator previously probed the Proxmox host (pveversion, pvesh,
+// net.Interfaces, ip route) to synthesize a config.yml on first run. The server
+// now runs inside an LXC and cannot reach those host facilities; install.sh on
+// the Proxmox host is responsible for generating config.yml and pushing it into
+// the container. Any code path that still reaches this function is a bug.
 func automatedConfigGenerator(writeToFile bool) {
-	// Name this node with the Pipeline ID if we are in CI
-	// Make sure this is not all numbers or it will be interpreted
-	// as an IP address
-	if fileExists("/usr/bin/pveversion") && nodeName != "" {
-		log.Fatal("Cannot specify a node name when running on Proxmox. Remove the node name from the command line.")
-	} else if fileExists("/usr/bin/pveversion") { // On proxmox installs, the node name is the hostname
-		nodeName = strings.TrimSpace(Run("hostname", false, false))
-		// Make sure vmbr1000 is not currently in use
-		type InterfaceConfig struct {
-			Iface string `json:"iface"`
-			// Other fields omitted for brevity
-		}
-		// We must set the locale to en_US.UTF-8 to get the correct output from pvesh, exporting it via the install script doesn't affect this sub-shell
-		ifaceJSONString := strings.TrimSpace(Run(fmt.Sprintf("LANGUAGE=en_US.UTF-8 LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8 pvesh get /nodes/%s/network --output-format json", nodeName), false, false))
-		var configs []InterfaceConfig
-		err := json.Unmarshal([]byte(ifaceJSONString), &configs)
-		if err != nil {
-			log.Printf("Error unmarshaling JSON while getting networks: %v", err)
-			// Assume there is no vmbr1000 interface if we can't get the network information
-			configs = []InterfaceConfig{}
-		}
-
-		vmbr1000Found := false
-		for _, config := range configs {
-			if strings.EqualFold(config.Iface, "vmbr1000") {
-				vmbr1000Found = true
-				break
-			}
-		}
-
-		if vmbr1000Found {
-			log.Fatal("The 'vmbr1000' interface was found on this server already. Specify a nonexistent vmbr value for 'ludus_nat_interface' in /opt/ludus/config.yml")
-		}
-	} else {
-		nodeName = "ludus"
-	}
-
-	interfaces, _ := net.Interfaces()
-	_, localhost, _ := net.ParseCIDR("127.0.0.0/8")
-	for _, inter := range interfaces {
-		addrs, _ := inter.Addrs()
-		for _, ipaddr := range addrs {
-			ipv4, ipnet, _ := net.ParseCIDR(ipaddr.String())
-			isIPv4 := ipv4.To4()
-			if isIPv4 != nil && !localhost.Contains(ipv4) {
-				// TODO clean this up/do it in Go. Since we know we will be on a Debian 12 box, it's ok for now
-				gateway := strings.Trim(Run("ip route show | grep default | grep -Po '(?<=via )[^ ]*'", false, true), "\n")
-				config.ProxmoxNode = nodeName
-				config.ProxmoxInterface = inter.Name
-				config.ProxmoxLocalIP = ipv4.String()
-				config.ProxmoxPublicIP = ipv4.String()
-				config.ProxmoxGateway = gateway
-				config.ProxmoxNetmask = fmt.Sprintf("%d.%d.%d.%d", ipnet.Mask[0], ipnet.Mask[1], ipnet.Mask[2], ipnet.Mask[3])
-				config.ProxmoxVMStoragePool = "local"
-				config.ProxmoxVMStorageFormat = "qcow2"
-				config.ProxmoxISOStoragePool = "local"
-				if inCluster {
-					config.LudusNATInterface = "ludusnat"
-				} else {
-					config.LudusNATInterface = "vmbr1000"
-				}
-				config.PreventUserAnsibleAdd = false
-				config.ProxmoxInvalidCert = true
-				config.ProxmoxURL = "https://127.0.0.1:8006"
-				config.LicenseKey = "community"
-				config.ExposeAdminPort = false
-				config.Port = ludusapi.DefaultPort
-				config.AdminPort = ludusapi.DefaultAdminPort
-				config.DataDirectory = fmt.Sprintf("%s/db", ludusInstallPath)
-				config.DatabaseEncryptionKey = security.RandomString(32)
-				config.WireguardPort = 51820
-				config.MaxLogHistory = 100
-				if inCluster {
-					config.ClusterMode = true
-					config.SDNZone = "ludus"
-					config.VXLANTagBase = 0
-				} else {
-					config.ClusterMode = false
-				}
-				if writeToFile {
-					f, err := os.Create(fmt.Sprintf("%s/config.yml", ludusPath))
-					if err != nil {
-						log.Fatal(err)
-					}
-					defer f.Close()
-					_, err = f.WriteString("---\n")
-					if err != nil {
-						log.Fatal(err)
-					}
-					f.WriteString(fmt.Sprintf("proxmox_node: %s\n", config.ProxmoxNode))
-					f.WriteString(fmt.Sprintf("proxmox_interface: %s\n", inter.Name))
-					f.WriteString(fmt.Sprintf("proxmox_local_ip: %s\n", ipv4.String()))
-					f.WriteString(fmt.Sprintf("proxmox_public_ip: %s\n", ipv4.String()))
-					f.WriteString(fmt.Sprintf("proxmox_gateway: %s\n", gateway))
-					f.WriteString(fmt.Sprintf("proxmox_netmask: %d.%d.%d.%d\n", ipnet.Mask[0], ipnet.Mask[1], ipnet.Mask[2], ipnet.Mask[3]))
-					f.WriteString("proxmox_vm_storage_pool: local\n")
-					f.WriteString("proxmox_vm_storage_format: qcow2\n")
-					f.WriteString("proxmox_iso_storage_pool: local\n")
-					f.WriteString("ludus_nat_interface: vmbr1000\n")
-					f.WriteString("prevent_user_ansible_add: false\n")
-					f.WriteString("license_key: community\n")
-					f.WriteString("expose_admin_port: false\n")
-					f.WriteString(fmt.Sprintf("port: %d\n", config.Port))
-					f.WriteString(fmt.Sprintf("admin_port: %d\n", config.AdminPort))
-					f.WriteString(fmt.Sprintf("data_directory: %s/db\n", ludusInstallPath))
-					f.WriteString(fmt.Sprintf("database_encryption_key: %s\n", config.DatabaseEncryptionKey))
-					f.WriteString(fmt.Sprintf("wireguard_port: %d\n", 51820))
-					f.WriteString(fmt.Sprintf("max_log_history: %d\n", config.MaxLogHistory))
-					if inCluster {
-						f.WriteString(fmt.Sprintf("cluster_mode: %t\n", config.ClusterMode))
-						f.WriteString(fmt.Sprintf("sdn_zone: %s\n", config.SDNZone))
-						f.WriteString(fmt.Sprintf("vxlan_tag_base: %d\n", config.VXLANTagBase))
-					}
-				} else {
-
-				}
-				return
-			}
-		}
-	}
+	_ = writeToFile
+	log.Fatalf("auto-config generation removed: config.yml is generated by install.sh and pushed into the LXC. Set up %s/config.yml manually or run install.sh on the Proxmox host.", ludusInstallPath)
 }
 
 // Load the config file from disk into the config struct
