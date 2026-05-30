@@ -689,28 +689,10 @@ func PostCredentials(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot update the password for another user")
 	}
 
-	err = setProxmoxSystemPassword(user.ProxmoxUsername(), user.ProxmoxRealm(), credsToUpdate.ProxmoxPassword)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error setting Proxmox system password: %v", err))
-	}
-
-	// Encrypt the new password
-	encryptedPassword, err := EncryptStringForDatabase(credsToUpdate.ProxmoxPassword)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error encrypting Proxmox password: %v", err))
-	}
-
-	// Update the user record with the new password
-	user.SetProxmoxPassword(encryptedPassword)
-	user.SetPassword(credsToUpdate.ProxmoxPassword)
-	err = app.Save(user)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error saving user: %v", err))
-	}
-
-	// File saved successfully. Return proper result
-	response := dto.PostCredentialsResponse{
-		Result: fmt.Sprintf("The Ludus and Proxmox password for %s has been successfully updated", user.UserId()),
-	}
-	return e.JSON(http.StatusOK, response)
+	// The Proxmox /access/password endpoint is not available to API tokens, and ludus-api
+	// no longer runs co-located with pveum. Password rotation must be done on a cluster node.
+	// TODO(Phase D): restore DB-side credential update once @pve realm + ticket-auth path lands.
+	return JSONError(e, http.StatusNotImplemented,
+		fmt.Sprintf("Cannot change Proxmox password via API token. Run on any cluster node: pveum passwd %s@%s",
+			user.ProxmoxUsername(), user.ProxmoxRealm()))
 }
