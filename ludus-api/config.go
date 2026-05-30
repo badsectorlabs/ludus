@@ -153,11 +153,15 @@ func (s *Server) ParseConfig() {
 	viper.WatchConfig()
 	viper.OnConfigChange(func(e fsnotify.Event) {
 		ConfigMu.Lock()
-		defer ConfigMu.Unlock()
 		if err := viper.Unmarshal(&ServerConfiguration); err != nil {
 			log.Printf("Error reloading config: %v", err)
-		} else {
-			log.Println("Configuration reloaded from file")
+			ConfigMu.Unlock()
+			return
+		}
+		log.Println("Configuration reloaded from file")
+		ConfigMu.Unlock()
+		if err := ServerConfiguration.ApplyShimAndValidate(); err != nil {
+			log.Printf("ERROR: hot-reloaded config is invalid: %v (config left in inconsistent state; fix and save again)", err)
 		}
 	})
 }
@@ -184,9 +188,15 @@ func (c *Configuration) ApplyShimAndValidate() error {
 		return fmt.Errorf("proxmox_endpoints must contain at least one URL")
 	}
 	for _, ep := range c.ProxmoxEndpoints {
+		if !strings.Contains(ep, "://") {
+			return fmt.Errorf("proxmox_endpoints: %q must include scheme (e.g. https://%s)", ep, ep)
+		}
 		u, err := url.Parse(ep)
 		if err != nil {
 			return fmt.Errorf("proxmox_endpoints: invalid URL %q: %w", ep, err)
+		}
+		if u.Scheme != "https" && u.Scheme != "http" {
+			return fmt.Errorf("proxmox_endpoints: %q must include scheme (e.g. https://%s)", ep, ep)
 		}
 		host := u.Hostname()
 		if host == "127.0.0.1" || strings.EqualFold(host, "localhost") || host == "::1" {

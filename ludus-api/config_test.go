@@ -71,3 +71,25 @@ proxmox_token_secret: abc
 		t.Fatalf("expected default realm pve, got %q", c.ProxmoxUserRealm)
 	}
 }
+
+func TestConfig_RejectMissingScheme(t *testing.T) {
+	_, err := loadConfigFromYAML(t, `
+proxmox_endpoints: ["10.0.0.5:8006"]
+proxmox_token_id: root@pam!ludus
+proxmox_token_secret: abc
+`)
+	if err == nil || !strings.Contains(err.Error(), "scheme") {
+		t.Fatalf("expected scheme rejection, got: %v", err)
+	}
+}
+
+func TestConfig_DeprecatedURLLocalhostRejected(t *testing.T) {
+	_, err := loadConfigFromYAML(t, `
+proxmox_url: https://127.0.0.1:8006
+proxmox_token_id: root@pam!ludus
+proxmox_token_secret: abc
+`)
+	if err == nil || !strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("expected shimmed legacy localhost to be rejected, got: %v", err)
+	}
+}
