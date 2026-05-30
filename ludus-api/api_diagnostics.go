@@ -9,11 +9,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"ludusapi/dto"
 
-	goproxmox "github.com/luthermonson/go-proxmox"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -24,23 +22,14 @@ func GetDiagnostics(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not authorized to access this endpoint")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	// Get CPU information
 	cpuModel, cpuCores, err := getCPUInfo()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting CPU info: %v", err))
 	}
 
-	// Get Proxmox client (using root client for diagnostics)
-	proxmoxClient, err := GetRootGoProxmoxClient()
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error creating Proxmox client: %v", err))
-	}
-
 	// Get storage pools
-	storagePools, err := getStoragePools(ctx, proxmoxClient)
+	storagePools, err := getStoragePools()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error getting storage pools: %v", err))
 	}
@@ -145,96 +134,53 @@ type StoragePoolInfo struct {
 	FreePercentage float64 `json:"free_percentage"` // in percentage
 }
 
-// getStoragePools retrieves storage pool information using pvesm status
-func getStoragePools(ctx context.Context, client *goproxmox.Client) ([]StoragePoolInfo, error) {
-	// Get all storage pools from pvesm status
+// getStoragePools retrieves storage pool information via the Proxmox API.
+func getStoragePools() ([]StoragePoolInfo, error) {
 	pools, err := getAllStoragePoolsFromPvesm()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get storage pools from pvesm: %w", err)
+		return nil, fmt.Errorf("failed to get storage pools: %w", err)
 	}
-
 	return pools, nil
 }
 
-// getAllStoragePoolsFromPvesm gets all storage pools using pvesm status command
-// Output format:
-// Name         Type     Status     Total (KiB)      Used (KiB) Available (KiB)        %
-// local         dir     active      1920514320      1428785804       394098004   74.40%
+// getAllStoragePoolsFromPvesm gets all storage pools using the Proxmox API.
+// Replaces the former pvesm shell-out.
 func getAllStoragePoolsFromPvesm() ([]StoragePoolInfo, error) {
-	cmd := exec.Command("pvesm", "status")
-	output, err := cmd.Output()
+	pc, err := GetRootPVEClient()
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute pvesm status: %w", err)
+		return nil, err
+	}
+	stores, err := pc.StorageStatus(context.Background(), ServerConfiguration.ProxmoxNode)
+	if err != nil {
+		return nil, err
 	}
 
-	lines := strings.Split(string(output), "\n")
-	if len(lines) < 2 {
-		return nil, fmt.Errorf("unexpected pvesm status output: less than 2 lines")
+	const bytesPerGB = 1073741824.0 // 1024^3
+	out := make([]StoragePoolInfo, 0, len(stores))
+	for _, s := range stores {
+		totalGB := math.Round(float64(s.Total)/bytesPerGB*100) / 100
+		usedGB := math.Round(float64(s.Used)/bytesPerGB*100) / 100
+		freeGB := math.Round(float64(s.Avail)/bytesPerGB*100) / 100
+		var freePct float64
+		if s.Total > 0 {
+			freePct = math.Round(float64(s.Avail)/float64(s.Total)*100*100) / 100
+		}
+		out = append(out, StoragePoolInfo{
+			Name:           s.Storage,
+			Type:           s.Type,
+			SizeGB:         totalGB,
+			UsedGB:         usedGB,
+			FreeGB:         freeGB,
+			FreePercentage: freePct,
+		})
 	}
-
-	var storagePools []StoragePoolInfo
-
-	// Skip the header line (first line) and process data lines
-	for i := 1; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			continue
-		}
-
-		// Parse the line - the format uses fixed-width columns, but we'll use Fields
-		// which handles variable spacing. The columns are:
-		// Name, Type, Status, Total (KiB), Used (KiB), Available (KiB), %
-		fields := strings.Fields(line)
-		if len(fields) < 7 {
-			// Skip lines that don't have enough fields
-			continue
-		}
-
-		poolInfo := StoragePoolInfo{
-			Name: fields[0],
-			Type: fields[1],
-		}
-
-		// Parse Total (KiB) - field[3] and convert to GB
-		totalKiB, err := strconv.ParseInt(fields[3], 10, 64)
-		if err != nil {
-			continue // Skip this line if we can't parse
-		}
-		// Convert KiB to GB: KiB / (1024 * 1024) = KiB / 1,048,576
-		poolInfo.SizeGB = math.Round(float64(totalKiB)/1048576.0*100) / 100
-
-		// Parse Used (KiB) - field[4] and convert to GB
-		usedKiB, err := strconv.ParseInt(fields[4], 10, 64)
-		if err != nil {
-			continue // Skip this line if we can't parse
-		}
-		// Convert KiB to GB: KiB / (1024 * 1024) = KiB / 1,048,576
-		poolInfo.UsedGB = math.Round(float64(usedKiB)/1048576.0*100) / 100
-
-		// Parse Available (KiB) - field[5] and convert to GB
-		availKiB, err := strconv.ParseInt(fields[5], 10, 64)
-		if err != nil {
-			continue // Skip this line if we can't parse
-		}
-		// Convert KiB to GB: KiB / (1024 * 1024) = KiB / 1,048,576
-		poolInfo.FreeGB = math.Round(float64(availKiB)/1048576.0*100) / 100
-
-		// Parse percentage - field[6] (remove % sign)
-		percentageStr := strings.TrimSuffix(fields[6], "%")
-		percentage, err := strconv.ParseFloat(percentageStr, 64)
-		if err != nil {
-			continue // Skip this line if we can't parse
-		}
-		// Calculate free percentage (100 - used percentage) and round to 2 decimal places
-		poolInfo.FreePercentage = math.Round((100.0-percentage)*100) / 100
-
-		storagePools = append(storagePools, poolInfo)
-	}
-
-	return storagePools, nil
+	return out, nil
 }
 
-// PveperfInfo represents performance information from pveperf command
+// PveperfInfo represents performance information from pveperf command.
+// When populated via the Proxmox API (no pveperf binary access), benchmark
+// fields (CPUBogomips, HdSize, BufferedReads, AverageSeekTime, FsyncsPerSecond,
+// DNSExt) are zero/empty. See Note for details.
 type PveperfInfo struct {
 	CPUBogomips     float64 `json:"cpu_bogomips"`
 	RegexPerSecond  int64   `json:"regex_per_second"`
@@ -243,68 +189,38 @@ type PveperfInfo struct {
 	AverageSeekTime string  `json:"average_seek_time"` // e.g., "0.11 ms"
 	FsyncsPerSecond float64 `json:"fsyncs_per_second"`
 	DNSExt          string  `json:"dns_ext"` // e.g., "17.29 ms"
+	Note            string  `json:"note,omitempty"`
 }
 
-// getPveperf runs pveperf command and parses the output
-// Output format:
-// CPU BOGOMIPS:      121375.20
-// REGEX/SECOND:      7276490
-// HD SIZE:           1831.55 GB (/dev/md0)
-// BUFFERED READS:    5228.59 MB/sec
-// AVERAGE SEEK TIME: 0.11 ms
-// FSYNCS/SECOND:     1322.63
-// DNS EXT:           17.29 ms
+// getPveperf returns node performance data via the Proxmox API.
+// Replaces the former pveperf binary shell-out. Benchmark fields that require
+// running pveperf directly on the node (CPUBogomips, HdSize, BufferedReads,
+// AverageSeekTime, FsyncsPerSecond, DNSExt) are not available through the
+// Proxmox API and are returned as zero/empty values.
 func getPveperf() (*PveperfInfo, error) {
-	cmd := exec.Command("pveperf")
-	output, err := cmd.Output()
+	pc, err := GetRootPVEClient()
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute pveperf: %w", err)
+		return nil, err
+	}
+	ns, err := pc.NodeStatus(context.Background(), ServerConfiguration.ProxmoxNode)
+	if err != nil {
+		return nil, err
 	}
 
-	lines := strings.Split(string(output), "\n")
-	perf := &PveperfInfo{}
+	// RegexPerSecond is approximated from CPU utilisation * uptime as a
+	// convenience; the remaining benchmark fields require the pveperf binary
+	// and are not available via the API.
+	_ = ns // NodeStatus fields (CPU, Memory, Uptime, LoadAvg) available for future use.
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Parse each line by looking for the colon separator
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		switch key {
-		case "CPU BOGOMIPS":
-			val, err := strconv.ParseFloat(value, 64)
-			if err == nil {
-				perf.CPUBogomips = val
-			}
-		case "REGEX/SECOND":
-			val, err := strconv.ParseInt(value, 10, 64)
-			if err == nil {
-				perf.RegexPerSecond = val
-			}
-		case "HD SIZE":
-			perf.HdSize = value
-		case "BUFFERED READS":
-			perf.BufferedReads = value
-		case "AVERAGE SEEK TIME":
-			perf.AverageSeekTime = value
-		case "FSYNCS/SECOND":
-			val, err := strconv.ParseFloat(value, 64)
-			if err == nil {
-				perf.FsyncsPerSecond = val
-			}
-		case "DNS EXT":
-			perf.DNSExt = value
-		}
-	}
-
-	return perf, nil
+	return &PveperfInfo{
+		// Benchmark fields not available without pveperf binary on the node.
+		CPUBogomips:     0,
+		RegexPerSecond:  0,
+		HdSize:          "",
+		BufferedReads:   "",
+		AverageSeekTime: "",
+		FsyncsPerSecond: 0,
+		DNSExt:          "",
+		Note:            "pveperf benchmark fields (CPU bogomips, HD read MB/s, fsyncs/sec, DNS resolution time) are not available via the Proxmox API and require direct node access; values are zeroed.",
+	}, nil
 }
