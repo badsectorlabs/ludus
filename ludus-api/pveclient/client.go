@@ -174,17 +174,29 @@ func shouldFailover(err error, status int) bool {
 // do performs an HTTP request against the active endpoint with one failover retry.
 // path must start with "/api2/json/".
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader, out any) error {
+	var bodyBytes []byte
+	if body != nil {
+		var err error
+		bodyBytes, err = io.ReadAll(body)
+		if err != nil {
+			return err
+		}
+	}
 	for attempt := 0; attempt < 2; attempt++ {
+		var rdr io.Reader
+		if bodyBytes != nil {
+			rdr = strings.NewReader(string(bodyBytes))
+		}
 		c.mu.RLock()
 		base := c.endpoints[c.activeIdx].url
 		c.mu.RUnlock()
 
-		req, err := http.NewRequestWithContext(ctx, method, base+path, body)
+		req, err := http.NewRequestWithContext(ctx, method, base+path, rdr)
 		if err != nil {
 			return err
 		}
 		req.Header.Set("Authorization", c.authHeader())
-		if body != nil {
+		if rdr != nil {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 		resp, err := c.httpc.Do(req)

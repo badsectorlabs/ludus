@@ -92,9 +92,12 @@ func TestDo_NoFailoverOn403(t *testing.T) {
 		w.WriteHeader(403)
 	}))
 	defer srv.Close()
-	c, _ := New(Config{Endpoints: []string{srv.URL, srv.URL}, TokenID: "t", TokenSecret: "s"})
+	c, err := New(Config{Endpoints: []string{srv.URL, srv.URL}, TokenID: "t", TokenSecret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer c.Close()
-	err := c.do(t.Context(), "GET", "/api2/json/access/users", nil, nil)
+	err = c.do(t.Context(), "GET", "/api2/json/access/users", nil, nil)
 	if err == nil {
 		t.Fatal("expected 403 error")
 	}
