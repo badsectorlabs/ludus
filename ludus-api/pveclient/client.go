@@ -214,14 +214,18 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, ou
 			}
 			return fmt.Errorf("proxmox %s %s: %d: %s", method, path, status, respBody)
 		}
-		c.advance()
+		c.advance(base)
 	}
 	return errors.New("pveclient: unreachable") // not hit
 }
 
-func (c *Client) advance() {
+func (c *Client) advance(failedURL string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.endpoints[c.activeIdx].url != failedURL {
+		// Another goroutine already failed over; don't double-mark.
+		return
+	}
 	c.endpoints[c.activeIdx].healthy = false
 	c.log.Warn("pveclient: marking endpoint unhealthy", "url", c.endpoints[c.activeIdx].url)
 	for i := 1; i <= len(c.endpoints); i++ {

@@ -52,3 +52,53 @@ func TestNew_AllDead(t *testing.T) {
 		t.Fatal("expected error when all endpoints unreachable")
 	}
 }
+
+func TestDo_FailsOverOn503(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/version" {
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": "8.0"}})
+			return
+		}
+		w.WriteHeader(503)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": "8.0"}})
+	}))
+	defer good.Close()
+
+	c, err := New(Config{Endpoints: []string{bad.URL, good.URL}, TokenID: "t", TokenSecret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	var out apiResp[map[string]any]
+	if err := c.do(t.Context(), "GET", "/api2/json/cluster/nextid", nil, &out); err != nil {
+		t.Fatalf("expected failover success, got %v", err)
+	}
+	if c.ActiveEndpoint() != good.URL {
+		t.Fatalf("did not fail over: active=%s", c.ActiveEndpoint())
+	}
+}
+
+func TestDo_NoFailoverOn403(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/version" {
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": "8.0"}})
+			return
+		}
+		hits++
+		w.WriteHeader(403)
+	}))
+	defer srv.Close()
+	c, _ := New(Config{Endpoints: []string{srv.URL, srv.URL}, TokenID: "t", TokenSecret: "s"})
+	defer c.Close()
+	err := c.do(t.Context(), "GET", "/api2/json/access/users", nil, nil)
+	if err == nil {
+		t.Fatal("expected 403 error")
+	}
+	if hits != 1 {
+		t.Fatalf("expected 1 hit (no retry), got %d", hits)
+	}
+}
