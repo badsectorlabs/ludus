@@ -236,31 +236,19 @@
     numeric: true
     rule_num: 3
 
-- name: Deny range traffic to the host local IP
+- name: Deny range traffic to Ludus infrastructure IPs (Proxmox endpoints + NAT)
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
     source: "10.{{ range_second_octet }}.0.0/16"
-    destination: "{{ proxmox_local_ip }}"
+    destination: "{{ item }}"
     protocol: all
-    comment: "Default: Deny traffic to the host IP of {{ proxmox_local_ip }}"
+    comment: "Default: Deny traffic to Ludus infra IP {{ item }}"
     jump: REJECT
     state: present
     action: insert
     numeric: true
     rule_num: 4
-
-- name: Deny range traffic to the host public IP
-  ansible.builtin.iptables:
-    chain: LUDUS_DEFAULTS
-    source: "10.{{ range_second_octet }}.0.0/16"
-    destination: "{{ proxmox_public_ip }}"
-    protocol: all
-    comment: "Default: Deny traffic to the public IP of {{ proxmox_public_ip }}"
-    jump: REJECT
-    state: present
-    action: insert
-    numeric: true
-    rule_num: 5
+  loop: "{{ ludus_infra_deny_ips | default([]) }}"
 
 # Since user wireguard rules are added to the LUDUS_DEFAULTS chain add this rule after the user defined rules so it will be on top
 - name: Deny all range traffic to user defined "always_blocked_networks"
