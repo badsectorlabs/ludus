@@ -31,6 +31,7 @@ type Client struct {
 	raw       *goproxmox.Client // bound to active endpoint; rebuilt on failover
 	log       *slog.Logger
 	stopProbe chan struct{}
+	closeOnce sync.Once
 }
 
 func New(cfg Config) (*Client, error) {
@@ -81,7 +82,10 @@ func New(cfg Config) (*Client, error) {
 }
 
 func (c *Client) Close() {
-	close(c.stopProbe)
+	c.closeOnce.Do(func() {
+		close(c.stopProbe)
+		c.httpc.CloseIdleConnections()
+	})
 }
 
 func (c *Client) ActiveEndpoint() string {
@@ -129,15 +133,27 @@ func (c *Client) healthLoop() {
 		case <-c.stopProbe:
 			return
 		case <-t.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			c.mu.Lock()
+			// Snapshot unhealthy endpoints under read lock.
+			c.mu.RLock()
+			var toProbe []int
 			for i := range c.endpoints {
-				if !c.endpoints[i].healthy && c.probe(ctx, i) {
+				if !c.endpoints[i].healthy {
+					toProbe = append(toProbe, i)
+				}
+			}
+			c.mu.RUnlock()
+			if len(toProbe) == 0 {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			for _, i := range toProbe {
+				if c.probe(ctx, i) {
+					c.mu.Lock()
 					c.endpoints[i].healthy = true
+					c.mu.Unlock()
 					c.log.Info("pveclient: endpoint restored", "url", c.endpoints[i].url)
 				}
 			}
-			c.mu.Unlock()
 			cancel()
 		}
 	}
@@ -146,18 +162,11 @@ func (c *Client) healthLoop() {
 // shouldFailover returns true for transport errors and gateway HTTP codes.
 func shouldFailover(err error, status int) bool {
 	if err != nil {
+		// http.Client.Do wraps transport errors in *url.Error, which
+		// implements net.Error; this also covers context.DeadlineExceeded
+		// and *net.OpError.
 		var ne net.Error
-		if errors.As(err, &ne) {
-			return true
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return true
-		}
-		var oe *net.OpError
-		if errors.As(err, &oe) {
-			return true
-		}
-		return false
+		return errors.As(err, &ne)
 	}
 	return status == 502 || status == 503 || status == 504
 }
@@ -192,15 +201,18 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, ou
 			return nil
 		}
 		status := 0
+		var respBody string
 		if resp != nil {
 			status = resp.StatusCode
+			b, _ := io.ReadAll(resp.Body)
+			respBody = string(b)
 			resp.Body.Close()
 		}
 		if !shouldFailover(err, status) || attempt == 1 {
 			if err != nil {
 				return err
 			}
-			return fmt.Errorf("proxmox %s %s: %d", method, path, status)
+			return fmt.Errorf("proxmox %s %s: %d: %s", method, path, status, respBody)
 		}
 		c.advance()
 	}
