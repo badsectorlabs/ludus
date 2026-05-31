@@ -563,6 +563,10 @@ ludus_install_server() {
       local TOK_JSON
       TOK_JSON=$(pveum user token add root@pam ludus --privsep 0 --output-format json 2>/dev/null || true)
       if [[ -z "${TOK_JSON}" ]]; then
+        if [[ "${NO_PROMPT:-0}" == "1" ]]; then
+          print_message "[!] Token root@pam!ludus already exists. Re-run with --token-id 'root@pam!ludus' --token-secret <secret>, or delete it first: pveum user token remove root@pam ludus" "error"
+          exit 1
+        fi
         print_message "[!] Token 'root@pam!ludus' already exists." "warn"
         local yn
         read -r -p "[?] Delete and recreate it? [y/N] " yn </dev/tty
@@ -570,7 +574,8 @@ ludus_install_server() {
           pveum user token remove root@pam ludus
           TOK_JSON=$(pveum user token add root@pam ludus --privsep 0 --output-format json)
         else
-          read -r -p "[?] Enter existing token secret: " TOKEN_SECRET </dev/tty
+          read -r -s -p "[?] Enter existing token secret: " TOKEN_SECRET </dev/tty
+          echo
           TOKEN_ID="root@pam!ludus"
         fi
       fi
@@ -617,8 +622,16 @@ ludus_install_server() {
       read -r -p "[?] LXC eth0 gateway: " ETH0_GW </dev/tty
     fi
 
-    read -r -p "[?] WireGuard endpoint (IP/host clients dial) [${ETH0_IP%%/*}]: " WG_EP </dev/tty
-    WG_EP=${WG_EP:-${ETH0_IP%%/*}}
+    local WG_DEFAULT=""
+    if [[ "${ETH0_IP}" != "dhcp" ]]; then
+      WG_DEFAULT="${ETH0_IP%%/*}"
+    fi
+    read -r -p "[?] WireGuard endpoint (IP/host clients dial)${WG_DEFAULT:+ [${WG_DEFAULT}]}: " WG_EP </dev/tty
+    WG_EP=${WG_EP:-${WG_DEFAULT}}
+    if [[ -z "${WG_EP}" ]]; then
+      print_message "[!] WireGuard endpoint is required" "error"
+      exit 1
+    fi
 
     read -r -p "[?] VM storage pool [local]: " VM_STORAGE </dev/tty
     VM_STORAGE=${VM_STORAGE:-local}
@@ -631,7 +644,14 @@ ludus_install_server() {
     VMID=${VMID:-$(curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/nextid" | _json 'd["data"]')}
     STORAGE=${STORAGE:-local-lvm}
     ETH0_IP=${ETH0_IP:-dhcp}
-    WG_EP=${WG_EP:-auto}
+    if [[ -z "${WG_EP:-}" ]]; then
+      if [[ "${ETH0_IP}" != "dhcp" ]]; then
+        WG_EP="${ETH0_IP%%/*}"
+      else
+        print_message "[!] --wg-endpoint is required in --no-prompt mode when eth0 uses DHCP" "error"
+        exit 1
+      fi
+    fi
     VM_STORAGE=${VM_STORAGE:-local}
     ISO_STORAGE=${ISO_STORAGE:-local}
     LICENSE=${LICENSE:-community}
@@ -662,11 +682,18 @@ ludus_install_server() {
     --data-urlencode "subnet=192.0.2.0/24" --data-urlencode "type=subnet" \
     --data-urlencode "gateway=192.0.2.254" --data-urlencode "snat=1" >/dev/null 2>&1 || true
   curl -sk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn" >/dev/null
-  local _i
+  local _i SDN_OK=0
   for _i in $(seq 1 30); do
-    curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn" | grep -q '"state":"ok"' && break
+    if curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn" | grep -q '"state":"ok"'; then
+      SDN_OK=1
+      break
+    fi
     sleep 1
   done
+  if [[ "${SDN_OK}" != "1" ]]; then
+    print_message "[!] SDN apply did not reach state=ok within 30s. Check: pvesh get /cluster/sdn" "error"
+    exit 1
+  fi
   print_message "[+] SDN zone/vnet applied" "ok"
 
   # ---- 4. Template -------------------------------------------------------------
@@ -697,7 +724,8 @@ ludus_install_server() {
     --cores 4 --memory 4096 --swap 512 --rootfs "${STORAGE}:20" \
     --net0 "name=eth0,bridge=vmbr0,${ETH0_CFG},firewall=0" \
     --net1 "name=eth1,bridge=ludusnat,ip=192.0.2.253/24" \
-    --onboot 1 --startup order=99
+    --onboot 1 --startup order=99 \
+    || { print_message "[!] pct create failed" "error"; exit 1; }
   cat >> "/etc/pve/lxc/${VMID}.conf" <<EOF
 lxc.cgroup2.devices.allow: c 10:200 rwm
 lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
