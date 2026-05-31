@@ -45,4 +45,4 @@ Assuming your iso is stored in the `local` pool.
 
 The MTU of your Ludus host may be less than the standard 1500, which is the MTU for the `vmbr100` "WAN" network and each range network.
 
-If this is the case, you can add `mtu 1420` (or the value of your WAN interface's MTU) to `/etc/network/interfaces` on the Proxmox host. Range networks are SDN VNets in the `ludus` zone and are created automatically by `ludus-server` — there is no playbook to edit. If you need a custom MTU on every range network, set it on the `ludus` SDN zone (Datacenter → SDN → Zones → `ludus` → MTU) and apply the SDN config.
+If this is the case, you can add `mtu 1420` (or the value of your WAN interface's MTU) to `/etc/network/interfaces`. To make this change apply to users created in the future, edit the template in `/opt/ludus/ansible/user-management/vmbr-management.yml` to add the MTU value to the interface block.
