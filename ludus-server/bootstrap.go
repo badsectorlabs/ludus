@@ -32,7 +32,7 @@ type PVEClient interface {
 
 const bootstrapMarker = "/opt/ludus/install/.bootstrap-complete"
 
-// Privilege sets mirror current ansible/proxmox-install/stage-3.yml.
+// Privilege sets mirror what the legacy proxmox-install ansible (stage-3) granted.
 var (
 	privsPacker = []string{"VM.Config.Disk", "VM.Config.CPU", "VM.Config.Memory", "VM.Config.Network", "VM.Config.Options", "VM.Config.CDROM", "VM.Config.Cloudinit", "VM.Config.HWType", "VM.PowerMgmt", "VM.Audit", "VM.Allocate", "VM.Monitor", "VM.Console", "Datastore.AllocateSpace", "Datastore.AllocateTemplate", "Datastore.Audit", "Sys.Audit", "Sys.Modify", "SDN.Use", "Sys.AccessNetwork"}
 	privsUser   = append([]string{"Pool.Audit", "VM.Clone", "VM.Snapshot", "VM.Snapshot.Rollback"}, privsPacker...)

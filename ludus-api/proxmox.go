@@ -115,32 +115,8 @@ func GetRootGoProxmoxClient() (*goproxmox.Client, error) {
 	return pc.Raw(), nil
 }
 
-func createProxmoxAPITokenForUserWithoutContext(username string, userRealm string, proxmoxPassword string) (string, string, error) {
-	proxmoxCredentials := &goproxmox.Credentials{
-		Username: username + "@" + userRealm,
-		Password: proxmoxPassword,
-	}
-	insecureHTTPClient := http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: ServerConfiguration.ProxmoxInvalidCert,
-			},
-		},
-	}
-
-	var customLogger *goproxmox.LeveledLogger
-	if DebugProxmox {
-		customLogger = &goproxmox.LeveledLogger{Level: goproxmox.LevelDebug}
-	} else {
-		customLogger = &goproxmox.LeveledLogger{Level: goproxmox.LevelInfo}
-	}
-	proxmoxClient := goproxmox.NewClient(ServerConfiguration.ProxmoxURL+"/api2/json",
-		goproxmox.WithHTTPClient(&insecureHTTPClient),
-		goproxmox.WithCredentials(proxmoxCredentials),
-		goproxmox.WithLogger(customLogger),
-	)
-
-	return createProxmoxAPITokenForUserWithClient(proxmoxClient, username, userRealm)
+func createProxmoxAPITokenForUserWithoutContext(username string, userRealm string) (string, string, error) {
+	return createProxmoxAPITokenForUserWithClient(nil, username, userRealm)
 }
 
 func createProxmoxAPITokenForUserWithClient(_ *goproxmox.Client, username, userRealm string) (string, string, error) {
@@ -209,19 +185,15 @@ func removePool(poolName string) error {
 }
 
 func giveUserAccessToRange(username string, realm string, poolName string, rangeNumber int) error {
-	if UseSDN {
-		if err := sdnVNetACLAction(username, realm, rangeNumber, false); err != nil {
-			return err
-		}
+	if err := sdnVNetACLAction(username, realm, rangeNumber, false); err != nil {
+		return err
 	}
 	return poolACLAction(username, realm, poolName, false)
 }
 
 func removeUserAccessFromRange(username string, realm string, poolName string, rangeNumber int) error {
-	if UseSDN {
-		if err := sdnVNetACLAction(username, realm, rangeNumber, true); err != nil {
-			return err
-		}
+	if err := sdnVNetACLAction(username, realm, rangeNumber, true); err != nil {
+		return err
 	}
 	return poolACLAction(username, realm, poolName, true)
 }
@@ -385,19 +357,15 @@ func removeUserFromGroupInProxmox(username string, realm string, groupName strin
 }
 
 func grantGroupAccessToRangeInProxmox(groupID string, poolName string, rangeNumber int) error {
-	if UseSDN {
-		if err := grantGroupAccessToSDNVNet(groupID, rangeNumber); err != nil {
-			return err
-		}
+	if err := grantGroupAccessToSDNVNet(groupID, rangeNumber); err != nil {
+		return err
 	}
 	return groupACLAction(groupID, poolName, false)
 }
 
 func revokeGroupAccessToRangeInProxmox(groupID string, poolName string, rangeNumber int) error {
-	if UseSDN {
-		if err := revokeGroupAccessToSDNVNet(groupID, rangeNumber); err != nil {
-			return err
-		}
+	if err := revokeGroupAccessToSDNVNet(groupID, rangeNumber); err != nil {
+		return err
 	}
 	return groupACLAction(groupID, poolName, true)
 }

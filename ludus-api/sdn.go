@@ -9,30 +9,20 @@ import (
 	"time"
 
 	goproxmox "github.com/luthermonson/go-proxmox"
-	"github.com/spf13/viper"
 )
 
 // SDN Zone types
 const (
-	SDNZoneTypeSimple = "simple" // For standalone (local OVS)
-	SDNZoneTypeVXLAN  = "vxlan"  // For cluster mode
+	SDNZoneTypeSimple = "simple" // Single-node SDN zone
+	SDNZoneTypeVXLAN  = "vxlan"  // Multi-node cluster SDN zone
 	NATVNetName       = "ludusnat"
 )
 
-// UseSDN is always true: Ludus runs in an LXC and manages all range
-// networking via Proxmox SDN, regardless of cluster size.
-const UseSDN = true
-
-// IsClusterMode checks if this Proxmox instance is part of a cluster.
-// First checks if the user has explicitly set cluster_mode in config.
-// If not set, falls back to API detection by checking if there are multiple nodes.
+// IsClusterMode reports whether this Proxmox instance has more than one node.
+// Ludus always uses SDN regardless of this result; it only affects whether the
+// SDN zone must be a user-preconfigured VXLAN zone (cluster) vs a simple zone
+// auto-created at bootstrap (single node).
 func IsClusterMode() (bool, error) {
-	// Check if user has explicitly set cluster_mode in config
-	if viper.IsSet("cluster_mode") {
-		logger.Debug(fmt.Sprintf("Cluster mode explicitly set in config to: %t", ServerConfiguration.ClusterMode))
-		return ServerConfiguration.ClusterMode, nil
-	}
-
 	client, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return false, fmt.Errorf("failed to get proxmox client: %w", err)
@@ -421,19 +411,13 @@ func manageRangeVNet(rangeID string, rangeNumber int, present bool) error {
 }
 
 // setupNATVNet creates the NAT VNet (ludusnat) for the 192.0.2.0/24 network
-// This is only used in cluster mode; non-cluster hosts use vmbr1000.
+// in the configured SDN zone.
 func setupNATVNet() error {
 	ctx := context.Background()
 
 	client, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return fmt.Errorf("failed to get proxmox client: %w", err)
-	}
-
-	// Check if we're in cluster mode - only setup SDN for clusters
-	if !UseSDN {
-		logger.Debug("Not in cluster mode, skipping SDN NAT VNet setup (using standalone vmbr1000)")
-		return nil
 	}
 
 	cluster, err := client.Cluster(ctx)
@@ -499,24 +483,18 @@ func setupNATVNet() error {
 	return nil
 }
 
-// setupSDNZone creates the Ludus SDN zone for cluster mode.
-// Non-cluster hosts skip this entirely and use vmbr management.
-// In cluster mode, requires a pre-configured zone (user must create it with correct VXLAN peer IPs).
+// setupSDNZone verifies the Ludus SDN zone exists.
+// On single-node installs the zone is auto-created at bootstrap; on multi-node
+// clusters the user must pre-create a VXLAN zone with correct peer IPs.
 func setupSDNZone() error {
 	client, err := GetRootGoProxmoxClient()
 	if err != nil {
 		return fmt.Errorf("failed to get proxmox client: %w", err)
 	}
 
-	// Detect cluster mode via API - only setup SDN for clusters
 	clusterMode, err := IsClusterMode()
 	if err != nil {
 		return fmt.Errorf("failed to detect cluster mode: %w", err)
-	}
-
-	if !clusterMode {
-		logger.Debug("Not in cluster mode, skipping SDN zone setup (using vmbr management)")
-		return nil
 	}
 
 	zoneName := ServerConfiguration.SDNZone
@@ -530,11 +508,13 @@ func setupSDNZone() error {
 		return fmt.Errorf("failed to check SDN zone: %w", err)
 	}
 
-	// In cluster mode, zone must be pre-configured by user with correct VXLAN peer IPs
 	if !zoneExists {
-		return fmt.Errorf("cluster mode requires a pre-configured SDN zone. Create zone '%s' in Proxmox with correct VXLAN peer IPs, then retry", zoneName)
+		if clusterMode {
+			return fmt.Errorf("multi-node cluster requires a pre-configured SDN zone. Create zone '%s' in Proxmox with correct VXLAN peer IPs, then retry", zoneName)
+		}
+		return fmt.Errorf("SDN zone '%s' not found; it should have been created at bootstrap", zoneName)
 	}
-	logger.Debug(fmt.Sprintf("Using existing SDN zone %s for cluster mode", zoneName))
+	logger.Debug(fmt.Sprintf("Using existing SDN zone %s", zoneName))
 	return nil
 }
 

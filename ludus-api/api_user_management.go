@@ -56,12 +56,9 @@ func provisionNewUser(txApp core.App, user *models.User, plaintextPassword strin
 	}
 
 	extraVars := map[string]interface{}{
-		"username":          user.ProxmoxUsername(),
-		"user_id":           user.UserId(),
-		"user_number":       user.UserNumber(),
-		"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
-		"user_is_admin":     user.IsAdmin(),
-		"proxmox_password":  plaintextPassword,
+		"username":    user.ProxmoxUsername(),
+		"user_id":     user.UserId(),
+		"user_number": user.UserNumber(),
 	}
 	output, err := RunAddUserPlaybookStandalone(extraVars)
 	if err != nil {
@@ -75,7 +72,7 @@ func provisionNewUser(txApp core.App, user *models.User, plaintextPassword strin
 	}
 	user.SetHashedApikey(hashedAPIKey)
 
-	tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm(), plaintextPassword)
+	tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm())
 	if err != nil {
 		return "", "", fmt.Errorf("creating Proxmox API token: %w", err)
 	}
@@ -184,11 +181,6 @@ func AddUser(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, "User with that name already exists")
 	}
 
-	// Check if the username already exists on the host system
-	if userExistsOnHostSystem(user.ProxmoxUsername()) {
-		return JSONError(e, http.StatusBadRequest, "User with that name already exists on the host system. Ludus uses the PAM for user authentication, so you must use a unique username for each Ludus user.")
-	}
-
 	if poolExists(user.UserId()) {
 		return JSONError(e, http.StatusBadRequest, fmt.Sprintf("Pool with the name %s already exists", user.UserId()))
 	}
@@ -199,7 +191,6 @@ func AddUser(e *core.RequestEvent) error {
 		wasError := false
 		defer func() {
 			if wasError {
-				removeUserFromHostSystem(user.ProxmoxUsername())
 				removeUserFromProxmox(user.ProxmoxUsername(), user.ProxmoxRealm())
 				removePool(user.UserId())
 				defaultRangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
@@ -315,10 +306,6 @@ func ProvisionOAuth2User(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, "User with that proxmox username already exists")
 	}
 
-	if userExistsOnHostSystem(req.ProxmoxUsername) {
-		return JSONError(e, http.StatusBadRequest, "User with that name already exists on the host system")
-	}
-
 	if poolExists(req.UserID) {
 		return JSONError(e, http.StatusBadRequest, fmt.Sprintf("Pool with the name %s already exists", req.UserID))
 	}
@@ -347,7 +334,6 @@ func ProvisionOAuth2User(e *core.RequestEvent) error {
 		wasError := false
 		defer func() {
 			if wasError {
-				removeUserFromHostSystem(user.ProxmoxUsername())
 				removeUserFromProxmox(user.ProxmoxUsername(), user.ProxmoxRealm())
 				removePool(user.UserId())
 				defaultRangeRecord, findErr := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
@@ -410,10 +396,9 @@ func DeleteUser(e *core.RequestEvent) error {
 	user.SetProxyRecord(userRecord)
 
 	extraVars := map[string]interface{}{
-		"username":      user.ProxmoxUsername(),
-		"user_id":       user.UserId(),
-		"user_number":   user.UserNumber(),
-		"user_is_admin": user.IsAdmin(),
+		"username":    user.ProxmoxUsername(),
+		"user_id":     user.UserId(),
+		"user_number": user.UserNumber(),
 	}
 	output, err := RunDeleteUserPlaybookStandalone(extraVars)
 	if err != nil {
@@ -450,11 +435,6 @@ func DeleteUser(e *core.RequestEvent) error {
 			}
 		}
 	}
-	err = removeUserFromHostSystem(user.ProxmoxUsername())
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing user from host system: %v", err))
-	}
-
 	// Reassign any blueprints owned by this user to ROOT so the foreign key constraint doesn't block deletion
 	rootUserRecord, err := app.FindFirstRecordByData("users", "userID", "ROOT")
 	if err != nil {

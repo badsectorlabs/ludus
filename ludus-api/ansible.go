@@ -169,10 +169,9 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		// Pass license entitlements to ansible
 		"ludus_entitlements": server.Entitlements,
 		"wireguard_port":     ServerConfiguration.WireguardPort,
-		// Cluster mode target node settings
+		// Per-VM node placement
 		"range_default_target_node": rangeDefaultTargetNode,
 		"vm_target_nodes":           vmTargetNodes,
-		"ludus_cluster_mode":        UseSDN,
 	}
 	maps.Copy(userVars, proxmoxAPIVars())
 
@@ -434,7 +433,7 @@ func runUserManagementPlaybookStandalone(playbookPath string, extraVars map[stri
 
 // RunAddUserPlaybookStandalone runs the add-user playbook without a request event.
 // Used when creating the initial admin user during InitDb. extraVars must include:
-// username, user_id, user_number, proxmox_public_ip, user_is_admin, proxmox_password.
+// username, user_id, user_number.
 func RunAddUserPlaybookStandalone(extraVars map[string]interface{}) (string, error) {
 	return runUserManagementPlaybookStandalone(
 		ludusInstallPath+"/ansible/user-management/add-user.yml",
@@ -789,17 +788,6 @@ func computeTargetNodes(e *core.RequestEvent, rangeID string) (string, map[strin
 	}
 	if config.Router != nil {
 		config.Router.VMName = rangeIDTemplateRegex.ReplaceAllString(config.Router.VMName, rangeID)
-	}
-
-	// Not in cluster mode, use the configured node
-	if !UseSDN {
-		for _, vm := range config.Ludus {
-			vmTargetNodes[vm.VMName] = ServerConfiguration.ProxmoxNode
-		}
-		if config.Router != nil {
-			vmTargetNodes[config.Router.VMName] = ServerConfiguration.ProxmoxNode
-		}
-		return ServerConfiguration.ProxmoxNode, vmTargetNodes
 	}
 
 	// Determine the default target node

@@ -1,3 +1,0 @@
-- import_playbook: stage-1.yml
-- import_playbook: stage-2.yml
-- import_playbook: stage-3.yml

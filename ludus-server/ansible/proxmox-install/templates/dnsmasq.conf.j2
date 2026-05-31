@@ -1,4 +1,0 @@
-bind-interfaces
-dhcp-leasefile=/var/lib/misc/dnsmasq.leases
-no-resolv
-server={{ ( ansible_dns.nameservers | reject('match', '^127\.|^::1') | list | default(['1.1.1.1'], true) )[0] }}

@@ -26,7 +26,6 @@ const (
 // Configurations exported
 type Configuration struct {
 	ProxmoxNode               string        `mapstructure:"proxmox_node" yaml:"proxmox_node"`
-	ProxmoxInterface          string        `mapstructure:"proxmox_interface" yaml:"proxmox_interface"`
 	ProxmoxInvalidCert        bool          `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
 	ProxmoxURL                string        `mapstructure:"proxmox_url" yaml:"proxmox_url"`           // Deprecated: use proxmox_endpoints
 	ProxmoxEndpoints          []string      `mapstructure:"proxmox_endpoints" yaml:"proxmox_endpoints"`
@@ -34,15 +33,12 @@ type Configuration struct {
 	ProxmoxTokenSecret        string        `mapstructure:"proxmox_token_secret" yaml:"proxmox_token_secret"`
 	ProxmoxUserRealm          string        `mapstructure:"proxmox_user_realm" yaml:"proxmox_user_realm"`
 	ProxmoxHostname           string        `mapstructure:"proxmox_hostname" yaml:"proxmox_hostname"`
-	ProxmoxLocalIP            string        `mapstructure:"proxmox_local_ip" yaml:"proxmox_local_ip"`
 	ProxmoxPublicIP           string        `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"` // Deprecated: use wireguard_endpoint
 	WireguardEndpoint         string        `mapstructure:"wireguard_endpoint" yaml:"wireguard_endpoint"`
 	LudusNATIP                string        `mapstructure:"ludus_nat_ip" yaml:"ludus_nat_ip"`
 	LudusNATGateway           string        `mapstructure:"ludus_nat_gateway" yaml:"ludus_nat_gateway"`
 	TLSCertFile               string        `mapstructure:"tls_cert_file" yaml:"tls_cert_file"`
 	TLSKeyFile                string        `mapstructure:"tls_key_file" yaml:"tls_key_file"`
-	ProxmoxGateway            string        `mapstructure:"proxmox_gateway" yaml:"proxmox_gateway"`
-	ProxmoxNetmask            string        `mapstructure:"proxmox_netmask" yaml:"proxmox_netmask"`
 	ProxmoxVMStoragePool      string        `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
 	ProxmoxVMStorageFormat    string        `mapstructure:"proxmox_vm_storage_format" yaml:"proxmox_vm_storage_format"`
 	ProxmoxISOStoragePool     string        `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
@@ -58,8 +54,7 @@ type Configuration struct {
 	WireguardPort             int           `mapstructure:"wireguard_port" yaml:"wireguard_port"`
 	MaxLogHistory             int           `mapstructure:"max_log_history" yaml:"max_log_history"` // Max number of log history entries to keep per range/user (default: 100)
 	InactivityShutdownTimeout time.Duration `mapstructure:"inactivity_shutdown_timeout" yaml:"inactivity_shutdown_timeout"`
-	// Cluster mode settings
-	ClusterMode  bool   `mapstructure:"cluster_mode" yaml:"cluster_mode"`     // Auto-detected via API during startup, can be overridden
+	// SDN settings
 	SDNZone      string `mapstructure:"sdn_zone" yaml:"sdn_zone"`             // The SDN zone name for Ludus networking (default: "ludus")
 	VXLANTagBase int    `mapstructure:"vxlan_tag_base" yaml:"vxlan_tag_base"` // Base VXLAN tag (VNI) added to range number (default: 0)
 	// Quota defaults - applied to users who don't have explicit quotas or group defaults
@@ -102,9 +97,6 @@ func (s *Server) ParseConfig() {
 	viper.SetDefault("wireguard_port", 51820)
 	viper.SetDefault("port", DefaultPort)
 	viper.SetDefault("admin_port", DefaultAdminPort)
-	// Do not set a default for cluster_mode to force viper to leave it unset unless provided,
-	// so we can detect if user has explicitly set it or not and fallback to API if unset.
-	// (See IsClusterMode in sdn.go for logic)
 	viper.SetDefault("sdn_zone", "ludus") // Default SDN zone name
 	viper.SetDefault("vxlan_tag_base", 0) // Base VXLAN tag added to range number
 	viper.SetDefault("default_quota_ram", 0)

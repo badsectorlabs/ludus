@@ -105,10 +105,9 @@
     api_host: "{{ api_host }}"
     vmid: "{{ vm_id }}"
     interface: net0
-    # In cluster mode: use range_bridge_name (e.g., 'r1')
-    # In non-cluster mode with vmbr_number: use 'vmbr{vmbr_number}'
-    # Otherwise: use bridge_interface (e.g., 'ludusnat' for NAT network in cluster, 'vmbr1000' in non-cluster)
-    bridge: "{{ range_bridge_name if (range_bridge_name is defined and vmbr_number is defined) else ('vmbr' + (vmbr_number | string) if vmbr_number is defined else (bridge_interface | default('ludusnat'))) }}"
+    # Range VMs attach to range_bridge_name (e.g., 'r1' SDN VNet) when vmbr_number is set;
+    # otherwise to bridge_interface (the NAT VNet, default 'ludusnat').
+    bridge: "{{ range_bridge_name if (range_bridge_name is defined and vmbr_number is defined) else (bridge_interface | default('ludusnat')) }}"
     tag: "{{ vlan | default(1) }}"
     model: "{{'e1000' if 'antisandbox' in template_vm_name else 'virtio' }}" # Use virtio unless the template has 'antisandbox' in the name, then use e1000 (no driver required)
   when: clone_vm is changed

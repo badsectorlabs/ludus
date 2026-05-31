@@ -15,7 +15,7 @@ Address = 198.51.100.{{ .user_number }}/32
 
 [Peer]
 PublicKey = {{ .server_public_key }}
-Endpoint = {{ .proxmox_public_ip }}:{{ .wireguard_port}}
+Endpoint = {{ .wireguard_endpoint }}:{{ .wireguard_port}}
 AllowedIPs = {{ .allowed_ips }}
 PersistentKeepalive = 25
 `
@@ -48,7 +48,7 @@ func getWireGuardConfigForUser(user *models.User) (string, error) {
 	if err := template.Execute(&result, map[string]interface{}{
 		"client_private_key": strings.TrimSpace(string(clientPrivateKey)),
 		"server_public_key":  strings.TrimSpace(string(serverPublicKey)),
-		"proxmox_public_ip":  ServerConfiguration.ProxmoxPublicIP,
+		"wireguard_endpoint": ServerConfiguration.WireguardEndpoint,
 		"user_number":        user.UserNumber(),
 		"allowed_ips":        allowedIPs,
 		"wireguard_port":     ServerConfiguration.WireguardPort,

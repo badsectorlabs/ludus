@@ -12,8 +12,7 @@
   vars:
     template_vm_name: "{{ router.template | default('debian-11-x64-server-template') }}"
     vm_name: "{{ router.vm_name | default(default_router_vm_name) }}"
-    # In cluster mode (SDN): use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
-    bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
+    bridge_interface: "{{ ludus_nat_interface }}"
     vm_groups: '"{{ range_id }}","{{ range_id }}_router"'
     is_linux: true
     ram: "{{ router.ram_gb | default(2) }}"
@@ -859,8 +858,7 @@
       vars:
         template_vm_name: debian-11-x64-server-template
         vm_name: ADMIN-nexus-3-oss
-        # In cluster mode: use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
-        bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
+        bridge_interface: "{{ ludus_nat_interface }}"
         vm_groups: '"admin"'
         is_linux: true
         is_windows: false
@@ -880,8 +878,7 @@
     - name: Configure IP and Hostname
       ansible.builtin.include_tasks: tasks/proxmox/configure-ip-and-hostname.yml
       vars:
-        # In cluster mode: use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
-        bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
+        bridge_interface: "{{ ludus_nat_interface }}"
         static_ip: "192.0.2.2"
         cidr_netmask: "24"
         default_gateway: "192.0.2.254"
@@ -1032,8 +1029,7 @@
       vars:
         template_vm_name: debian-12-x64-server-template
         vm_name: ADMIN-share
-        # In cluster mode: use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
-        bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
+        bridge_interface: "{{ ludus_nat_interface }}"
         vm_groups: '"admin"'
         is_linux: true
         is_windows: false
@@ -1053,8 +1049,7 @@
     - name: Configure IP and Hostname
       ansible.builtin.include_tasks: tasks/proxmox/configure-ip-and-hostname.yml
       vars:
-        # In cluster mode: use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
-        bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
+        bridge_interface: "{{ ludus_nat_interface }}"
         static_ip: "192.0.2.3"
         cidr_netmask: "24"
         default_gateway: "192.0.2.254"

@@ -200,9 +200,6 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 	if matchingUsers > 0 {
 		return fmt.Errorf("user with name %s already exists", proxmoxUsername)
 	}
-	if userExistsOnHostSystem(proxmoxUsername) {
-		return fmt.Errorf("username %s already exists on the host system", proxmoxUsername)
-	}
 	if poolExists(cfg.UserID) {
 		return fmt.Errorf("pool %s already exists", cfg.UserID)
 	}
@@ -231,7 +228,6 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 	err = app.RunInTransaction(func(txApp core.App) error {
 		defer func() {
 			if wasError {
-				removeUserFromHostSystem(user.ProxmoxUsername())
 				removeUserFromProxmox(user.ProxmoxUsername(), user.ProxmoxRealm())
 				removePool(user.UserId())
 				defaultRangeRecord, findErr := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
@@ -254,12 +250,9 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 		}
 
 		extraVars := map[string]interface{}{
-			"username":          user.ProxmoxUsername(),
-			"user_id":           user.UserId(),
-			"user_number":       user.UserNumber(),
-			"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
-			"user_is_admin":     true,
-			"proxmox_password":  cfg.Password,
+			"username":    user.ProxmoxUsername(),
+			"user_id":     user.UserId(),
+			"user_number": user.UserNumber(),
 		}
 		output, err := RunAddUserPlaybookStandalone(extraVars)
 		if err != nil {
@@ -275,7 +268,7 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 		}
 		user.SetHashedApikey(hashedAPIKey)
 
-		tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm(), cfg.Password)
+		tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm())
 		if err != nil {
 			wasError = true
 			return fmt.Errorf("creating Proxmox API token: %w", err)
@@ -526,9 +519,6 @@ func populateUserFieldsFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEve
 	}
 	if matchingUsers > 0 {
 		return fmt.Errorf("user with proxmox username %s already exists", proxmoxUsername)
-	}
-	if userExistsOnHostSystem(proxmoxUsername) {
-		return fmt.Errorf("username %s already exists on the host system", proxmoxUsername)
 	}
 	if poolExists(userID) {
 		return fmt.Errorf("pool %s already exists", userID)

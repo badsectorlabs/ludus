@@ -74,8 +74,7 @@
     api_host: "{{ api_host }}"
     vmid: "{{ router_vm_id }}"
     interface: "net{{ router_net_interface }}"
-    # In cluster mode: use range_bridge_name (e.g., 'r1'); in non-cluster mode: use 'vmbr{vmbr_number}'
-    bridge: "{{ range_bridge_name | default('vmbr' + (vmbr_number | string)) }}"
+    bridge: "{{ range_bridge_name }}"
     tag: "{{ item }}"
   when: interface_name is undefined or vlan_mac_command.stdout | length == 0
   register: network_add

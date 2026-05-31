@@ -33,24 +33,6 @@ func GetSDNMigrationStatus(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, "Failed to get Proxmox client: "+err.Error())
 	}
 
-	// Detect cluster mode
-	clusterMode := UseSDN
-
-	// Non-cluster hosts don't use SDN - they use vmbr management
-	if !clusterMode {
-		status := dto.SDNStatus{
-			SDNZoneExists:      false,
-			NATVNetExists:      false,
-			NeedsMigration:     false,
-			ClusterMode:        false,
-			RequiresManualZone: false,
-			CurrentSDNZone:     "",
-			LudusNATInterface:  ServerConfiguration.LudusNATInterface,
-			Message:            "Not in cluster mode. Using vmbr network management - no SDN migration needed.",
-		}
-		return e.JSON(http.StatusOK, status)
-	}
-
 	// Get configured zone name with fallback to default
 	zoneName := ServerConfiguration.SDNZone
 	if zoneName == "" {
@@ -79,8 +61,9 @@ func GetSDNMigrationStatus(e *core.RequestEvent) error {
 		}
 	}
 
-	// In cluster mode, users must manually create the zone with correct VXLAN peer IPs
-	requiresManualZone := !zoneExists
+	// On multi-node clusters, users must manually create the zone with correct VXLAN peer IPs
+	clusterMode, _ := IsClusterMode()
+	requiresManualZone := clusterMode && !zoneExists
 
 	status := dto.SDNStatus{
 		SDNZoneExists:      zoneExists,
@@ -95,15 +78,14 @@ func GetSDNMigrationStatus(e *core.RequestEvent) error {
 
 	// Add helpful message when manual zone creation is required
 	if requiresManualZone {
-		status.Message = fmt.Sprintf("Cluster mode requires a pre-configured SDN zone. Create zone '%s' in Proxmox with correct VXLAN peer IPs before running migration.", zoneName)
+		status.Message = fmt.Sprintf("Multi-node cluster requires a pre-configured SDN zone. Create zone '%s' in Proxmox with correct VXLAN peer IPs before running migration.", zoneName)
 	}
 
 	return e.JSON(http.StatusOK, status)
 }
 
-// MigrateToSDN migrates existing bridge-based networking to SDN VNets
-// All operations use the Proxmox API for portability
-// This is only applicable to cluster mode - non-cluster hosts use vmbr management
+// MigrateToSDN migrates existing bridge-based networking to SDN VNets.
+// All operations use the Proxmox API for portability.
 func MigrateToSDN(e *core.RequestEvent) error {
 	if os.Geteuid() != 0 {
 		return JSONError(e, http.StatusForbidden, fmt.Sprintf("Migration must be run via ludus-admin on 127.0.0.1:%d", ServerConfiguration.AdminPort))
@@ -116,14 +98,7 @@ func MigrateToSDN(e *core.RequestEvent) error {
 
 	ctx := context.Background()
 
-	clusterMode := UseSDN
-
-	// Non-cluster hosts don't need SDN migration - they use vmbr management
-	if !clusterMode {
-		return JSONResult(e, http.StatusOK, "Not in cluster mode. Using vmbr network management - no SDN migration needed.")
-	}
-
-	logger.Info(fmt.Sprintf("Starting SDN migration (cluster mode: %t)", clusterMode))
+	logger.Info("Starting SDN migration")
 
 	// 2. Check/create SDN zone
 	zoneName := ServerConfiguration.SDNZone
@@ -136,12 +111,11 @@ func MigrateToSDN(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, "Failed to check SDN zone: "+err.Error())
 	}
 
-	// In cluster mode, zone must be pre-configured by user with correct VXLAN peer IPs
 	if !zoneExists {
 		return JSONError(e, http.StatusBadRequest,
-			fmt.Sprintf("Cluster mode requires a pre-configured SDN zone. Create zone '%s' in Proxmox with correct VXLAN peer IPs, then retry", zoneName))
+			fmt.Sprintf("SDN zone '%s' not found. On multi-node clusters create it in Proxmox with correct VXLAN peer IPs; on single-node it should have been created at bootstrap", zoneName))
 	}
-	logger.Info(fmt.Sprintf("Using existing SDN zone '%s' for cluster mode", zoneName))
+	logger.Info(fmt.Sprintf("Using existing SDN zone '%s'", zoneName))
 
 	// 3. Create NAT VNet if not exists
 	natExists, _ := VNetExists(client, NATVNetName)
@@ -269,26 +243,18 @@ func migrateRangeVMsToVNet(client *goproxmox.Client, ctx context.Context, rangeI
 	return nil
 }
 
-// SetupSDNInfrastructure creates the SDN zone and NAT VNet without migrating existing ranges
-// This is used during fresh installations in cluster mode.
-// Non-cluster hosts skip this and use vmbr management.
+// SetupSDNInfrastructure verifies the SDN zone and creates the NAT VNet without
+// migrating existing ranges. Used during fresh installations.
 func SetupSDNInfrastructure(e *core.RequestEvent) error {
 	if os.Geteuid() != 0 {
 		return JSONError(e, http.StatusForbidden, fmt.Sprintf("SDN setup must be run via ludus-admin on 127.0.0.1:%d", ServerConfiguration.AdminPort))
 	}
 
-	// Check if we're in cluster mode
-	if !UseSDN {
-		return JSONResult(e, http.StatusOK, "Not in cluster mode. Using vmbr network management - no SDN setup needed.")
-	}
-
-	// Setup SDN zone (cluster mode only)
 	err := setupSDNZone()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Failed to setup SDN zone: "+err.Error())
 	}
 
-	// Setup NAT VNet (cluster mode only)
 	err = setupNATVNet()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Failed to setup NAT VNet: "+err.Error())

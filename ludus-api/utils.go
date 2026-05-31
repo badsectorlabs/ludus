@@ -10,14 +10,12 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/user"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/alessio/shellescape"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/security"
@@ -439,30 +437,6 @@ func getUIDandGIDFromUsername(username string) (int, int, error) {
 	}
 
 	return uid, gid, nil
-}
-
-// userExistsOnHostSystem checks if a user exists on the host system
-func userExistsOnHostSystem(username string) bool {
-	shellEscapedUsername := shellescape.Quote(username)
-	cmd := exec.Command("/usr/bin/id", shellEscapedUsername)
-	return cmd.Run() == nil
-}
-
-// removeUserFromHostSystem removes a user from the host system
-func removeUserFromHostSystem(username string) error {
-	shellEscapedUsername := shellescape.Quote(username)
-	cmd := exec.Command("/usr/sbin/userdel", "-r", shellEscapedUsername)
-	err := cmd.Run()
-	if err != nil {
-		if err.Error() == "exit status 6" {
-			// User does not exist on the host system, this is not an error for our use case
-			return nil
-		} else {
-			fmt.Printf("Failed to remove user %s from host system: %s\n", username, err)
-			return err
-		}
-	}
-	return nil
 }
 
 // HasRangeAccess checks if a user has access to a range through direct assignment or group membership
