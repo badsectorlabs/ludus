@@ -17,9 +17,10 @@ cleanup() {
   nft delete table inet ludus-airgap-test 2>/dev/null
   ip link del ludus-airgap 2>/dev/null
   rm -f /tmp/cfg.yml
+  rm -f "/var/lib/vz/template/cache/${TMPL_NAME}" 2>/dev/null || true
   exit "$rc"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # Isolated bridge with no uplink
 if ! ip link show ludus-airgap &>/dev/null; then
@@ -45,13 +46,12 @@ lxc.cgroup2.devices.allow: c 10:200 rwm
 lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
 EOF
 
-# Allow LXC -> Proxmox API on host's real IP (air-gap = no INTERNET, but Proxmox must be reachable)
-HOST_IP=$(hostname -I | awk '{print $1}')
-ip route add "$HOST_IP" dev ludus-airgap 2>/dev/null || true
-nft insert rule inet ludus-airgap-test fwd iifname "ludus-airgap" ip daddr "$HOST_IP" tcp dport 8006 accept
+# pveproxy binds :::8006, so the container reaches the API at the bridge IP.
+# This keeps the air-gap test honest: only the directly-connected /24 is reachable.
+PVE_API_IP=172.31.255.1
 
 cat > /tmp/cfg.yml <<EOF
-proxmox_endpoints: ["https://${HOST_IP}:8006"]
+proxmox_endpoints: ["https://${PVE_API_IP}:8006"]
 proxmox_token_id: ${TOKEN_ID}
 proxmox_token_secret: ${TOKEN_SECRET}
 proxmox_node: ${NODE}
