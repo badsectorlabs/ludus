@@ -528,8 +528,10 @@ func removeRouteForRangeNetworkInVNet(rangeNumber int) error {
 
 func routeForRangeNetworkInVNetAction(rangeNumber int, present bool) error {
 
-	// Edit the /etc/network/if-up.d/sdn-routes file and make sure it contains and ip route command for the range network
-	sdnRoutesFile := "/etc/network/if-up.d/sdn-routes"
+	// Edit the /etc/network/if-up.d/ludus-routes file and make sure it contains an ip route command for the range network.
+	// Ludus runs inside an LXC: the NAT interface is eth1 (not the host's "ludusnat" bridge), and we omit `dev` so the
+	// kernel selects the interface from the via address.
+	sdnRoutesFile := "/etc/network/if-up.d/ludus-routes"
 
 	// Create the file if it doesn't exist and make it executable
 	if !FileExists(sdnRoutesFile) {
@@ -540,17 +542,17 @@ func routeForRangeNetworkInVNetAction(rangeNumber int, present bool) error {
 	}
 
 	block := fmt.Sprintf(`
-if [ "$IFACE" = "r%d" ]; then
-	ip route replace 10.%d.0.0/16 via 192.0.2.%d dev %s
+if [ "$IFACE" = "eth1" ]; then
+	ip route replace 10.%d.0.0/16 via 192.0.2.%d
 fi
-	`, rangeNumber, rangeNumber, 100+rangeNumber, NATVNetName)
+	`, rangeNumber, 100+rangeNumber)
 	_, err := applyBlockInFileAtPath(sdnRoutesFile, fmt.Sprintf("# LUDUS MANAGED BLOCK FOR RANGE %d {mark}", rangeNumber), block, present)
 	if err != nil {
 		return fmt.Errorf("failed to apply block in file: %w", err)
 	}
 	if present {
 		// Add the route immediately
-		err = Run(fmt.Sprintf("ip route add 10.%d.0.0/16 via 192.0.2.%d dev %s", rangeNumber, 100+rangeNumber, NATVNetName), "/tmp", "/tmp/sdn-routes.log")
+		err = Run(fmt.Sprintf("ip route add 10.%d.0.0/16 via 192.0.2.%d", rangeNumber, 100+rangeNumber), "/tmp", "/tmp/sdn-routes.log")
 		if err != nil {
 			return fmt.Errorf("failed to add route: %w", err)
 		}

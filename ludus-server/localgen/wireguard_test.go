@@ -36,4 +36,14 @@ func TestEnsureWireguard(t *testing.T) {
 	if string(pk1) != string(pk2) {
 		t.Fatal("private key regenerated")
 	}
+	// wg0.conf must be preserved on second run (imported configs contain [Peer] blocks)
+	confPath := filepath.Join(dir, "wg0.conf")
+	if err := os.WriteFile(confPath, []byte("[Interface]\n# imported\n[Peer]\nPublicKey = x\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_ = EnsureWireguard(cfg)
+	conf2, _ := os.ReadFile(confPath)
+	if !strings.Contains(string(conf2), "[Peer]") {
+		t.Fatalf("wg0.conf was overwritten on second run:\n%s", conf2)
+	}
 }

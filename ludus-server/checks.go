@@ -31,6 +31,10 @@ func checkConfig() {
 		log.Fatalf("Error decoding config: %v", err)
 	}
 
+	config.ApplyDefaults()
+	if err := config.ApplyShimAndValidate(); err != nil {
+		log.Fatalf("config validation: %v", err)
+	}
 	if err := config.ApplyPortDefaultsAndValidate(); err != nil {
 		log.Fatalf("%v", err)
 	}

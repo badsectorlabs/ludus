@@ -763,6 +763,7 @@ EOF
   sleep 5
   pct exec "${VMID}" -- mkdir -p /opt/ludus
   pct push "${VMID}" "${CFG}" /opt/ludus/config.yml --perms 0600
+  pct exec "${VMID}" -- chown ludus:ludus /opt/ludus/config.yml
   rm -f "${CFG}"
 
   if [[ -n "${IMPORT_DB:-}" ]]; then
@@ -772,7 +773,7 @@ EOF
     pct exec "${VMID}" -- rm /tmp/ludus-import.tar.gz
   fi
 
-  pct exec "${VMID}" -- systemctl restart ludus
+  pct exec "${VMID}" -- systemctl restart ludus-admin ludus
   print_message "[+] Waiting for first-boot bootstrap (up to 5m) ..." "info"
   for _i in $(seq 1 60); do
     if pct exec "${VMID}" -- test -f /opt/ludus/install/.bootstrap-complete 2>/dev/null; then
@@ -1018,15 +1019,19 @@ main() {
       { [[ "${EUID}" == "0" ]] && { { command_exists pkg-config && [[ ! -f "$(pkg-config --variable=completionsdir bash-completion)/ludus" ]]; } || { ! command_exists pkg-config && [[ ! -f "/usr/share/bash-completion/completions/ludus" ]]; }; } } || \
       { [[ "${EUID}" != "0" ]] && [[ ! -f "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/ludus" ]]; }; }; then
 
-    print_message "[?] Would you like to install shell completions so tab works with the 'ludus' command?" "warn"
-    
-    if [[ "$SHELL" == "/bin/zsh" ]]; then
-      print_message "[?] (y/n): " "warn"
-      read -r completions_response </dev/tty
+    if [[ "${NO_PROMPT:-0}" != "1" ]]; then
+      print_message "[?] Would you like to install shell completions so tab works with the 'ludus' command?" "warn"
+
+      if [[ "$SHELL" == "/bin/zsh" ]]; then
+        print_message "[?] (y/n): " "warn"
+        read -r completions_response </dev/tty
+      else
+        read -r -p "[?] (y/n): " completions_response </dev/tty
+      fi
     else
-      read -r -p "[?] (y/n): " completions_response </dev/tty
+      completions_response=n
     fi
-    
+
     case "${completions_response}" in
       y|Y ) 
         print_message "[+] Installing Ludus completions" "info"

@@ -118,6 +118,7 @@ func (s *Server) ParseConfig() {
 	if err != nil {
 		log.Fatalf("Unable to decode into struct, %v", err)
 	}
+	ServerConfiguration.ApplyDefaults()
 	if err := ServerConfiguration.ApplyShimAndValidate(); err != nil {
 		log.Fatalf("config validation: %v", err)
 	}
@@ -160,6 +161,47 @@ func (s *Server) ParseConfig() {
 	})
 }
 
+// ApplyDefaults backfills zero-value fields with the same defaults Viper would
+// apply in ParseConfig. Used by ludus-server which loads config via plain yaml.
+func (c *Configuration) ApplyDefaults() {
+	if c.ProxmoxUserRealm == "" {
+		c.ProxmoxUserRealm = "pve"
+	}
+	if c.LudusNATInterface == "" {
+		c.LudusNATInterface = "ludusnat"
+	}
+	if c.LudusNATIP == "" {
+		c.LudusNATIP = "192.0.2.253"
+	}
+	if c.LudusNATGateway == "" {
+		c.LudusNATGateway = "192.0.2.254"
+	}
+	if c.TLSCertFile == "" {
+		c.TLSCertFile = ludusInstallPath + "/tls/server.crt"
+	}
+	if c.TLSKeyFile == "" {
+		c.TLSKeyFile = ludusInstallPath + "/tls/server.key"
+	}
+	if c.SDNZone == "" {
+		c.SDNZone = "ludus"
+	}
+	if c.DataDirectory == "" {
+		c.DataDirectory = ludusInstallPath + "/db"
+	}
+	if c.WireguardPort == 0 {
+		c.WireguardPort = 51820
+	}
+	if c.ProxmoxVMStoragePool == "" {
+		c.ProxmoxVMStoragePool = "local"
+	}
+	if c.ProxmoxVMStorageFormat == "" {
+		c.ProxmoxVMStorageFormat = "qcow2"
+	}
+	if c.ProxmoxISOStoragePool == "" {
+		c.ProxmoxISOStoragePool = "local"
+	}
+}
+
 // ApplyShimAndValidate migrates deprecated fields and validates the config.
 // Called after viper.Unmarshal in ParseConfig and by tests.
 func (c *Configuration) ApplyShimAndValidate() error {
@@ -196,6 +238,11 @@ func (c *Configuration) ApplyShimAndValidate() error {
 		if host == "127.0.0.1" || strings.EqualFold(host, "localhost") || host == "::1" {
 			return fmt.Errorf("proxmox_endpoints: %q uses 127.0.0.1/localhost — Ludus now runs in an LXC and must reach Proxmox over the network; use the node's real IP", ep)
 		}
+	}
+	// Reverse-shim: populate deprecated ProxmoxURL from the first endpoint so
+	// legacy call sites (per-user clients, packer, ansible-inventory) keep working.
+	if c.ProxmoxURL == "" {
+		c.ProxmoxURL = c.ProxmoxEndpoints[0]
 	}
 	if c.ProxmoxTokenID == "" || c.ProxmoxTokenSecret == "" {
 		return fmt.Errorf("proxmox_token_id and proxmox_token_secret are required")

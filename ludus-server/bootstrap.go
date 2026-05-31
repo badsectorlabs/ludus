@@ -182,6 +182,10 @@ func bootstrapLocalState(cfg ludusapi.Configuration) error {
 			return err
 		}
 	}
+	// chown -R ludus:ludus /opt/ludus so the non-root ludus.service can read/write.
+	if err := exec.Command("chown", "-R", "ludus:ludus", "/opt/ludus").Run(); err != nil {
+		logf("WARN: chown /opt/ludus: %v (continuing)", err)
+	}
 	// Enable services
 	for _, svc := range []string{"wg-quick@wg0", "dnsmasq"} {
 		if err := exec.Command("systemctl", "enable", "--now", svc).Run(); err != nil {

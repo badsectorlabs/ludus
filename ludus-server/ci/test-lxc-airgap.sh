@@ -17,7 +17,7 @@ cleanup() {
   nft delete table inet ludus-airgap-test 2>/dev/null
   ip link del ludus-airgap 2>/dev/null
   rm -f /tmp/cfg.yml
-  rm -f "/var/lib/vz/template/cache/${TMPL_NAME}" 2>/dev/null || true
+  rm -f "/var/lib/vz/template/cache/${TMPL_NAME:-}" 2>/dev/null || true
   exit "$rc"
 }
 trap cleanup EXIT INT TERM
@@ -63,7 +63,7 @@ database_encryption_key: $(head -c 24 /dev/urandom | base64 | head -c 32)
 EOF
 pct start "$VMID"; sleep 5
 pct push "$VMID" /tmp/cfg.yml /opt/ludus/config.yml --perms 0600
-pct exec "$VMID" -- systemctl restart ludus
+pct exec "$VMID" -- systemctl restart ludus-admin ludus
 
 for _ in $(seq 1 60); do
   pct exec "$VMID" -- test -f /opt/ludus/install/.bootstrap-complete && break

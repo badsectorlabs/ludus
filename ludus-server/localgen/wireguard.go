@@ -49,6 +49,9 @@ func EnsureWireguard(cfg WGConfig) error {
 		}
 	}
 
+	if fileExists(confPath) {
+		return nil // preserve imported config (with [Peer] blocks)
+	}
 	conf := fmt.Sprintf(`[Interface]
 Address = %s
 ListenPort = %d

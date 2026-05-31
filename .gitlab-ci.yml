@@ -277,6 +277,7 @@ stages:
 
 .cluster-rules: &cluster-rules
   rules:
+    - when: never  # Disabled: on-host install replaced by LXC; see test-install-sh / test-lxc-airgap
     - if: $CI_COMMIT_TAG
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -661,6 +662,7 @@ install kickoff:
   needs:
     - build all
   rules:
+    - when: never  # Disabled: on-host install replaced by LXC; see test-install-sh / test-lxc-airgap
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -693,6 +695,7 @@ install check:
     - install kickoff
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - when: never  # Disabled: on-host install replaced by LXC; see test-install-sh / test-lxc-airgap
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
