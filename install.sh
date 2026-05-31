@@ -85,11 +85,26 @@ print_help() {
 
   help_header="Ludus Installer Script"
   help_message="Usage:
-  -p INSTALL_PREFIX
+  -p, --prefix INSTALL_PREFIX
       Prefix to install the Ludus client into.  Directory must already exist.
       Default = /usr/local/bin
-  
-  -h
+
+  Server (LXC) install flags — only used on a Proxmox host:
+  --version VER          Ludus version to install (default: latest release tag)
+  --template-file PATH   Use a local LXC template tarball (air-gapped install)
+  --token-id ID          Proxmox API token ID (e.g. root@pam!ludus)
+  --token-secret SECRET  Proxmox API token secret
+  --no-prompt            Non-interactive; use defaults / supplied flags
+  --vmid N               VMID for the Ludus LXC (default: cluster nextid)
+  --storage NAME         Storage for the LXC rootfs (default: local-lvm)
+  --ip CIDR|dhcp         LXC eth0 address (default: dhcp)
+  --gw IP                LXC eth0 gateway (required if --ip is not dhcp)
+  --endpoints \"URL ...\"  Space-separated Proxmox API endpoints
+  --wg-endpoint HOST     WireGuard endpoint clients will dial
+  --license KEY          License key (default: community)
+  --import-db TARBALL    Import an existing ludus DB/WireGuard tarball
+
+  -h, --help
       Prints this helpful message and exit."
 
   echo "${help_header}"
@@ -508,6 +523,256 @@ EOF
 
 
 #---  FUNCTION  ----------------------------------------------------------------
+#          NAME:  ludus_install_server
+#   DESCRIPTION:  Installs the Ludus server as an LXC container on a Proxmox
+#                 host: generates/validates an API token, bootstraps the SDN
+#                 zone + NAT VNet, fetches the LXC appliance template, creates
+#                 and configures the container, and waits for first-boot.
+#    PARAMETERS:  none — reads global flag vars (TOKEN_ID, VMID, ENDPOINTS, ...)
+#                 LUDUS_VERSION must be set by the caller.
+#       RETURNS:  0 = Server LXC running and bootstrapped
+#                 exits non-zero on failure
+#-------------------------------------------------------------------------------
+ludus_install_server() {
+  # ---- 0. Preflight ------------------------------------------------------------
+  command_exists pveversion || { print_message "[!] Not a Proxmox host (pveversion not found)" "error"; exit 1; }
+  command_exists curl       || { print_message "[!] curl is required" "error"; exit 1; }
+  command_exists python3    || { print_message "[!] python3 is required" "error"; exit 1; }
+
+  local PVE_VER
+  PVE_VER=$(pveversion | cut -d/ -f2 | cut -d. -f1)
+  if [[ "${PVE_VER}" -lt 8 ]]; then
+    print_message "[!] Proxmox 8.0+ is required (found ${PVE_VER}.x)" "error"
+    exit 1
+  fi
+
+  if [[ -z "${LANGUAGE+x}" ]]; then
+    export LANGUAGE=en_US.UTF-8 LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8
+  fi
+
+  # Tiny JSON helper — avoids a jq dependency on the PVE host
+  _json() { python3 -c "import sys,json; d=json.load(sys.stdin); print($1)"; }
+
+  local NODE
+  NODE=$(hostname)
+
+  # ---- 1. Token ----------------------------------------------------------------
+  if [[ -z "${TOKEN_ID:-}" || -z "${TOKEN_SECRET:-}" ]]; then
+    if [[ "${EUID}" -eq 0 ]]; then
+      print_message "[+] Generating API token root@pam!ludus ..." "info"
+      local TOK_JSON
+      TOK_JSON=$(pveum user token add root@pam ludus --privsep 0 --output-format json 2>/dev/null || true)
+      if [[ -z "${TOK_JSON}" ]]; then
+        print_message "[!] Token 'root@pam!ludus' already exists." "warn"
+        local yn
+        read -r -p "[?] Delete and recreate it? [y/N] " yn </dev/tty
+        if [[ "${yn}" =~ ^[Yy]$ ]]; then
+          pveum user token remove root@pam ludus
+          TOK_JSON=$(pveum user token add root@pam ludus --privsep 0 --output-format json)
+        else
+          read -r -p "[?] Enter existing token secret: " TOKEN_SECRET </dev/tty
+          TOKEN_ID="root@pam!ludus"
+        fi
+      fi
+      if [[ -n "${TOK_JSON}" ]]; then
+        TOKEN_ID=$(echo "${TOK_JSON}"     | _json 'd["full-tokenid"]')
+        TOKEN_SECRET=$(echo "${TOK_JSON}" | _json 'd["value"]')
+      fi
+    else
+      read -r -p  "[?] Proxmox API token ID (e.g. root@pam!ludus): " TOKEN_ID </dev/tty
+      read -r -sp "[?] Proxmox API token secret: " TOKEN_SECRET </dev/tty; echo
+    fi
+  fi
+
+  local AUTH EP_LOCAL
+  AUTH="Authorization: PVEAPIToken=${TOKEN_ID}=${TOKEN_SECRET}"
+  EP_LOCAL="https://localhost:8006"
+  if ! curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/version" | grep -q version; then
+    print_message "[!] Proxmox API token validation failed" "error"
+    exit 1
+  fi
+  print_message "[+] Proxmox API token validated" "ok"
+
+  # ---- 2. Gather config --------------------------------------------------------
+  local CLUSTER_JSON DEFAULT_EPS DEFAULT_VMID DEFAULT_STORAGE
+  CLUSTER_JSON=$(curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/status")
+  DEFAULT_EPS=$(echo "${CLUSTER_JSON}" | _json '" ".join("https://"+n["ip"]+":8006" for n in d["data"] if n["type"]=="node" and n.get("ip"))' 2>/dev/null || echo "")
+  [[ -z "${DEFAULT_EPS}" ]] && DEFAULT_EPS="https://$(hostname -I | awk '{print $1}'):8006"
+
+  if [[ "${NO_PROMPT:-0}" != "1" ]]; then
+    read -r -p "[?] Proxmox API endpoints (space-separated) [${DEFAULT_EPS}]: " ENDPOINTS </dev/tty
+    ENDPOINTS=${ENDPOINTS:-${DEFAULT_EPS}}
+
+    DEFAULT_VMID=$(curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/nextid" | _json 'd["data"]')
+    read -r -p "[?] LXC VMID [${DEFAULT_VMID}]: " VMID </dev/tty
+    VMID=${VMID:-${DEFAULT_VMID}}
+
+    DEFAULT_STORAGE=$(curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/nodes/${NODE}/storage?content=rootdir" | _json 'd["data"][0]["storage"]' 2>/dev/null || echo "local-lvm")
+    read -r -p "[?] LXC rootfs storage [${DEFAULT_STORAGE}]: " STORAGE </dev/tty
+    STORAGE=${STORAGE:-${DEFAULT_STORAGE}}
+
+    read -r -p "[?] LXC eth0 IP (CIDR, or 'dhcp') [dhcp]: " ETH0_IP </dev/tty
+    ETH0_IP=${ETH0_IP:-dhcp}
+    if [[ "${ETH0_IP}" != "dhcp" ]]; then
+      read -r -p "[?] LXC eth0 gateway: " ETH0_GW </dev/tty
+    fi
+
+    read -r -p "[?] WireGuard endpoint (IP/host clients dial) [${ETH0_IP%%/*}]: " WG_EP </dev/tty
+    WG_EP=${WG_EP:-${ETH0_IP%%/*}}
+
+    read -r -p "[?] VM storage pool [local]: " VM_STORAGE </dev/tty
+    VM_STORAGE=${VM_STORAGE:-local}
+    read -r -p "[?] ISO storage pool [local]: " ISO_STORAGE </dev/tty
+    ISO_STORAGE=${ISO_STORAGE:-local}
+    read -r -p "[?] License key [community]: " LICENSE </dev/tty
+    LICENSE=${LICENSE:-community}
+  else
+    ENDPOINTS=${ENDPOINTS:-${DEFAULT_EPS}}
+    VMID=${VMID:-$(curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/nextid" | _json 'd["data"]')}
+    STORAGE=${STORAGE:-local-lvm}
+    ETH0_IP=${ETH0_IP:-dhcp}
+    WG_EP=${WG_EP:-auto}
+    VM_STORAGE=${VM_STORAGE:-local}
+    ISO_STORAGE=${ISO_STORAGE:-local}
+    LICENSE=${LICENSE:-community}
+  fi
+
+  # ---- 3. SDN bootstrap --------------------------------------------------------
+  local NODE_COUNT ZONE_TYPE PEERS
+  NODE_COUNT=$(echo "${CLUSTER_JSON}" | _json 'sum(1 for n in d["data"] if n["type"]=="node")')
+  ZONE_TYPE=simple
+  PEERS=""
+  if [[ "${NODE_COUNT}" -gt 1 ]]; then
+    ZONE_TYPE=vxlan
+    PEERS=$(echo "${CLUSTER_JSON}" | _json '",".join(n["ip"] for n in d["data"] if n["type"]=="node")')
+  fi
+  print_message "[+] Creating SDN zone 'ludus' (${ZONE_TYPE}) ..." "info"
+  if ! curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/zones/ludus" | grep -q '"zone"'; then
+    # shellcheck disable=SC2086
+    curl -sk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/zones" \
+      --data-urlencode "zone=ludus" --data-urlencode "type=${ZONE_TYPE}" \
+      --data-urlencode "ipam=pve" ${PEERS:+--data-urlencode "peers=${PEERS}"} >/dev/null
+  fi
+  if ! curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat" | grep -q '"vnet"'; then
+    curl -sk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/vnets" \
+      --data-urlencode "vnet=ludusnat" --data-urlencode "zone=ludus" \
+      --data-urlencode "vlanaware=1" >/dev/null
+  fi
+  curl -sk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets" \
+    --data-urlencode "subnet=192.0.2.0/24" --data-urlencode "type=subnet" \
+    --data-urlencode "gateway=192.0.2.254" --data-urlencode "snat=1" >/dev/null 2>&1 || true
+  curl -sk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn" >/dev/null
+  local _i
+  for _i in $(seq 1 30); do
+    curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn" | grep -q '"state":"ok"' && break
+    sleep 1
+  done
+  print_message "[+] SDN zone/vnet applied" "ok"
+
+  # ---- 4. Template -------------------------------------------------------------
+  local TMPL_NAME TMPL_CACHE R2_BASE
+  TMPL_NAME="ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst"
+  TMPL_CACHE="/var/lib/vz/template/cache/${TMPL_NAME}"
+  if [[ -n "${TEMPLATE_FILE:-}" ]]; then
+    print_message "[+] Using local template ${TEMPLATE_FILE}" "info"
+    cp "${TEMPLATE_FILE}" "${TMPL_CACHE}"
+  elif [[ ! -f "${TMPL_CACHE}" ]]; then
+    print_message "[+] Downloading LXC template ${TMPL_NAME} ..." "info"
+    R2_BASE="${LUDUS_R2_BASE:-https://lxc.ludus.cloud}"
+    curl -fL "${R2_BASE}/ludus-lxc/${LUDUS_VERSION}/${TMPL_NAME}" -o "${TMPL_CACHE}"
+    curl -fsSL "${R2_BASE}/ludus-lxc/${LUDUS_VERSION}/checksums.txt" -o /tmp/ludus-checksums.txt
+    ( cd /var/lib/vz/template/cache && sha256sum -c /tmp/ludus-checksums.txt --ignore-missing ) \
+      || { print_message "[!] Template checksum verification failed" "error"; exit 1; }
+  else
+    print_message "[+] Template ${TMPL_NAME} already present in cache" "info"
+  fi
+
+  # ---- 5. Create container -----------------------------------------------------
+  local ETH0_CFG
+  ETH0_CFG="ip=${ETH0_IP}"
+  [[ -n "${ETH0_GW:-}" ]] && ETH0_CFG="${ETH0_CFG},gw=${ETH0_GW}"
+  print_message "[+] Creating LXC ${VMID} (rootfs on ${STORAGE}) ..." "info"
+  pct create "${VMID}" "local:vztmpl/${TMPL_NAME}" \
+    --hostname ludus --unprivileged 1 --features nesting=1,keyctl=1 \
+    --cores 4 --memory 4096 --swap 512 --rootfs "${STORAGE}:20" \
+    --net0 "name=eth0,bridge=vmbr0,${ETH0_CFG},firewall=0" \
+    --net1 "name=eth1,bridge=ludusnat,ip=192.0.2.253/24" \
+    --onboot 1 --startup order=99
+  cat >> "/etc/pve/lxc/${VMID}.conf" <<EOF
+lxc.cgroup2.devices.allow: c 10:200 rwm
+lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+EOF
+
+  # ---- 6. Configure ------------------------------------------------------------
+  local CFG
+  CFG=/tmp/ludus-config.$$.yml
+  cat > "${CFG}" <<EOF
+proxmox_endpoints:
+$(for e in ${ENDPOINTS}; do echo "  - ${e}"; done)
+proxmox_token_id: ${TOKEN_ID}
+proxmox_token_secret: ${TOKEN_SECRET}
+proxmox_node: ${NODE}
+proxmox_user_realm: pve
+proxmox_vm_storage_pool: ${VM_STORAGE}
+proxmox_vm_storage_format: qcow2
+proxmox_iso_storage_pool: ${ISO_STORAGE}
+proxmox_invalid_cert: true
+ludus_nat_interface: ludusnat
+ludus_nat_ip: 192.0.2.253
+ludus_nat_gateway: 192.0.2.254
+wireguard_endpoint: ${WG_EP}
+wireguard_port: 51820
+sdn_zone: ludus
+license_key: ${LICENSE}
+expose_admin_port: false
+port: 8080
+admin_port: 8081
+data_directory: /opt/ludus/db
+database_encryption_key: $(head -c 24 /dev/urandom | base64 | head -c 32)
+EOF
+  chmod 0600 "${CFG}"
+  pct start "${VMID}"
+  sleep 5
+  pct exec "${VMID}" -- mkdir -p /opt/ludus
+  pct push "${VMID}" "${CFG}" /opt/ludus/config.yml --perms 0600
+  rm -f "${CFG}"
+
+  if [[ -n "${IMPORT_DB:-}" ]]; then
+    print_message "[+] Importing DB/WireGuard state from ${IMPORT_DB} ..." "info"
+    pct push "${VMID}" "${IMPORT_DB}" /tmp/ludus-import.tar.gz
+    pct exec "${VMID}" -- tar xzf /tmp/ludus-import.tar.gz -C / --strip-components=0
+    pct exec "${VMID}" -- rm /tmp/ludus-import.tar.gz
+  fi
+
+  pct exec "${VMID}" -- systemctl restart ludus
+  print_message "[+] Waiting for first-boot bootstrap (up to 5m) ..." "info"
+  for _i in $(seq 1 60); do
+    if pct exec "${VMID}" -- test -f /opt/ludus/install/.bootstrap-complete 2>/dev/null; then
+      break
+    fi
+    sleep 5
+  done
+
+  # ---- 7. Output ---------------------------------------------------------------
+  if pct exec "${VMID}" -- test -f /opt/ludus/install/.bootstrap-complete; then
+    local LXC_IP
+    LXC_IP=$(pct exec "${VMID}" -- hostname -I | awk '{print $1}')
+    echo
+    print_message "[+] Ludus is running in LXC ${VMID}" "ok"
+    print_message "    API:        https://${LXC_IP}:8080" "info"
+    print_message "    Admin API:  https://${LXC_IP}:8081 (localhost-only inside LXC by default)" "info"
+    print_message "    WireGuard:  ${WG_EP}:51820" "info"
+    echo
+    print_message "[+] Next: install ludus-client and run 'ludus user add <name>'" "info"
+  else
+    print_message "[!] Bootstrap did not complete. Last 50 log lines:" "error"
+    pct exec "${VMID}" -- tail -50 /opt/ludus/install/install.log 2>/dev/null || true
+    exit 1
+  fi
+}
+
+
+#---  FUNCTION  ----------------------------------------------------------------
 #          NAME:  main
 #   DESCRIPTION:  Does everything
 #    PARAMETERS:  1 = prefix
@@ -750,164 +1015,33 @@ main() {
     print_message "[+] Shell completions already installed" "info"
   fi
   
-  if [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && [[ ! -d /opt/ludus ]]; then 
-    # Check if this is a Debian 12 or 13 host by reading /etc/debian_version
-    if [[ -f /etc/os-release ]]; then
-      # shellcheck source=/dev/null
-      source /etc/os-release
-      if [[ "${ID}" == "debian" ]] && { [[ "${VERSION_ID}" == "12" ]] || [[ "${VERSION_ID}" == "13" ]]; }; then
-        print_message "[?] Would you like to install the Ludus server on this host?" "warn"
-        if [[ "$SHELL" == "/bin/zsh" ]]; then
-          print_message "[?] (y/n): " "warn"
-          read -r install_server </dev/tty
-        else
-          read -r -p "[?] (y/n): " install_server </dev/tty
-        fi
-        case "${install_server}" in
-          "y" ) print_message "[+] Installing Ludus server" "info"
-                if [[ -f /usr/bin/pveversion ]] && [[ -z ${LANGUAGE+x} ]]; then
-                  print_message "[+] Detected Proxmox host with unset LANGUAGE env var. Setting locale to en_US.UTF-8" "info"
-                  export LANGUAGE=en_US.UTF-8
-                  export LC_ALL=en_US.UTF-8
-                  export LANG=en_US.UTF-8
-                  export LC_CTYPE=en_US.UTF-8
-                fi
-                # Download
-                download_file "${ludus_base_url}/ludus-server-${LATEST_TAG}" "${tmpdir}" "ludus-server-${LATEST_TAG}"
-                download_file_rcode="${?}"
-                if [[ "${download_file_rcode}" == "0" ]]; then
-                  print_message "[+] Downloaded ludus-server-${LATEST_TAG} into ${tmpdir}" "info"
-                elif [[ "${download_file_rcode}" == "1" ]]; then
-                  print_message "[+] Failed to download ludus-server-${LATEST_TAG}" "error"
-                  exit 1
-                elif [[ "${download_file_rcode}" == "20" ]]; then
-                  print_message "[+] Failed to locate curl or wget" "error"
-                  exit 1
-                else
-                  print_message "[+] Return code of download tool returned an unexpected value of ${download_file_rcode}" "error"
-                  exit 1
-                fi
-                # Move the server
-                mv "${tmpdir}/ludus-server-${LATEST_TAG}" "${tmpdir}/ludus-server" 
-                # Checksum check
-                checksum_check "${tmpdir}/${ludus_checksum_file}" "${tmpdir}/ludus-server" "${tmpdir}"
-                checksum_check_rcode="${?}"
-                if [[ "${checksum_check_rcode}" == "0" ]]; then
-                  print_message "[+] Checksum of ${tmpdir}/ludus-server-${LATEST_TAG} verified" "ok"
-                elif [[ "${checksum_check_rcode}" == "1" ]]; then
-                  print_message "[+] Failed to verify checksum of ${tmpdir}/ludus-server-${LATEST_TAG}" "error"
-                  exit 1
-                elif [[ "${checksum_check_rcode}" == "20" ]]; then
-                  print_message "[+] Failed to find tool to verify sha256 sums" "error"
-                  exit 1
-                elif [[ "${checksum_check_rcode}" == "30" ]]; then
-                  print_message "[+] Failed to change into working directory ${tmpdir}" "error"
-                  exit 1
-                elif [[ "${checksum_check_rcode}" == "31" ]]; then
-                  print_message "[+] Failed to change back into working directory. Are you running this in a directory you have no access to?" "error"
-                  exit 1
-                else
-                  print_message "[+] Unknown return code returned while checking checksum of ${tmpdir}/ludus-server-${LATEST_TAG}. Returned ${checksum_check_rcode}" "error"
-                  exit 1
-                fi
-                # Chmod
-                chmod +x "${tmpdir}/ludus-server"
-                # Install
-                if [[ "${EUID}" == "0" ]]; then
-                  "${tmpdir}/ludus-server"
-                else
-                  if command -v sudo >/dev/null 2>&1; then
-                    sudo "${tmpdir}/ludus-server"
-                  else
-                    print_message "[+] Failed to locate 'sudo' command" "error"
-                    exit 1
-                  fi
-                fi
-                ;;
-          "n" ) print_message "[+] Skipping Ludus server installation" "info"
-                ;;
-            * ) print_message "[-_-] Invalid response. Skipping Ludus server installation" "error"
-                ;;
-        esac
-        fi
-      fi # End of /etc/os-release check
-  elif [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && [[ -d /opt/ludus ]]; then
-    if [[ ! -f /etc/systemd/system/ludus.service ]] && [[ ! -f /etc/systemd/system/ludus-install.service ]]; then
-      print_message "[!] The /opt/ludus directory exists but Ludus is not installed and is not currently installing" "error"
-      print_message "[!] Remove the /opt/ludus directory and re-run this script if you wish to install" "error"
-      exit 1
-    elif [[ ! -f /etc/systemd/system/ludus.service ]] && [[ -f /etc/systemd/system/ludus-install.service ]]; then
-      print_message "[!] Ludus is currently installing!" "error"
-      exit 1    
+  # ---- Server install (LXC mode) ---------------------------------------------
+  # Only offered on Proxmox VE hosts (linux/amd64 with pveversion).
+  if [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && command_exists pveversion; then
+    if [[ "${NO_PROMPT:-0}" == "1" ]]; then
+      install_server="y"
     else
-      print_message "[+] Ludus server already installed in /opt/ludus" "info"
-      print_message "[?] Would you like to update the Ludus server on this host?" "warn"
+      print_message "[?] Proxmox detected. Install the Ludus server (LXC container) on this host?" "warn"
       if [[ "$SHELL" == "/bin/zsh" ]]; then
         print_message "[?] (y/n): " "warn"
-        read -r update_server </dev/tty
+        read -r install_server </dev/tty
       else
-        read -r -p "[?] (y/n): " update_server </dev/tty
+        read -r -p "[?] (y/n): " install_server </dev/tty
       fi
-      case "${update_server}" in
-        "y" ) print_message "[+] Updating Ludus server" "info"
-              # Download
-              download_file "${ludus_base_url}/ludus-server-${LATEST_TAG}" "${tmpdir}" "ludus-server-${LATEST_TAG}"
-              download_file_rcode="${?}"
-              if [[ "${download_file_rcode}" == "0" ]]; then
-                print_message "[+] Downloaded ludus-server-${LATEST_TAG} into ${tmpdir}" "info"
-              elif [[ "${download_file_rcode}" == "1" ]]; then
-                print_message "[+] Failed to download ludus-server-${LATEST_TAG}" "error"
-                exit 1
-              elif [[ "${download_file_rcode}" == "20" ]]; then
-                print_message "[+] Failed to locate curl or wget" "error"
-                exit 1
-              else
-                print_message "[+] Return code of download tool returned an unexpected value of ${download_file_rcode}" "error"
-                exit 1
-              fi
-              # Move the server
-              mv "${tmpdir}/ludus-server-${LATEST_TAG}" "${tmpdir}/ludus-server" 
-              # Checksum check
-              checksum_check "${tmpdir}/${ludus_checksum_file}" "${tmpdir}/ludus-server" "${tmpdir}"
-              checksum_check_rcode="${?}"
-              if [[ "${checksum_check_rcode}" == "0" ]]; then
-                print_message "[+] Checksum of ${tmpdir}/ludus-server-${LATEST_TAG} verified" "ok"
-              elif [[ "${checksum_check_rcode}" == "1" ]]; then
-                print_message "[+] Failed to verify checksum of ${tmpdir}/ludus-server-${LATEST_TAG}" "error"
-                exit 1
-              elif [[ "${checksum_check_rcode}" == "20" ]]; then
-                print_message "[+] Failed to find tool to verify sha256 sums" "error"
-                exit 1
-              elif [[ "${checksum_check_rcode}" == "30" ]]; then
-                print_message "[+] Failed to change into working directory ${tmpdir}" "error"
-                exit 1
-              elif [[ "${checksum_check_rcode}" == "31" ]]; then
-                print_message "[+] Failed to change back into working directory. Are you running this in a directory you have no access to?" "error"
-                exit 1
-              else
-                print_message "[+] Unknown return code returned while checking checksum of ${tmpdir}/ludus-server-${LATEST_TAG}. Returned ${checksum_check_rcode}" "error"
-                exit 1
-              fi
-              # Chmod
-              chmod +x "${tmpdir}/ludus-server"
-              # Update
-              if [[ "${EUID}" == "0" ]]; then
-                "${tmpdir}/ludus-server" --update
-              else
-                if command -v sudo >/dev/null 2>&1; then
-                  sudo "${tmpdir}/ludus-server" --update
-                else
-                  print_message "[+] Failed to locate 'sudo' command" "error"
-                  exit 1
-                fi
-              fi
-              ;;
-        "n" ) print_message "[+] Skipping Ludus server update" "info"
-              ;;
-          * ) print_message "[-_-] Invalid response. Skipping Ludus server update" "error"
-              ;;
-      esac
-    fi # Ludus service check
+    fi
+    case "${install_server}" in
+      y|Y )
+        print_message "[+] Installing Ludus server (LXC mode)" "info"
+        LUDUS_VERSION="${LUDUS_VERSION:-${LATEST_TAG}}"
+        ludus_install_server
+        ;;
+      n|N )
+        print_message "[+] Skipping Ludus server installation" "info"
+        ;;
+      * )
+        print_message "[-_-] Invalid response. Skipping Ludus server installation" "error"
+        ;;
+    esac
   fi
 
   exit 0
@@ -916,16 +1050,25 @@ main() {
 #-------------------------------------------------------------------------------
 #  ARGUMENT PARSING
 #-------------------------------------------------------------------------------
-OPTS="hp:"
-while getopts "${OPTS}" optchar; do
-  case "${optchar}" in
-    'h' ) print_help
-          exit 0
-          ;;
-    'p' ) INSTALL_PREFIX="${OPTARG}"
-          ;;
-     /? ) print_message "Unknown option ${OPTARG}" "warn"
-          ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help      ) print_help; exit 0;;
+    -p|--prefix    ) INSTALL_PREFIX="$2"; shift 2;;
+    # ---- server (LXC) install flags ----
+    --version      ) LUDUS_VERSION="$2"; shift 2;;
+    --template-file) TEMPLATE_FILE="$2"; shift 2;;
+    --token-id     ) TOKEN_ID="$2"; shift 2;;
+    --token-secret ) TOKEN_SECRET="$2"; shift 2;;
+    --no-prompt    ) NO_PROMPT=1; shift;;
+    --vmid         ) VMID="$2"; shift 2;;
+    --storage      ) STORAGE="$2"; shift 2;;
+    --ip           ) ETH0_IP="$2"; shift 2;;
+    --gw           ) ETH0_GW="$2"; shift 2;;
+    --endpoints    ) ENDPOINTS="$2"; shift 2;;
+    --import-db    ) IMPORT_DB="$2"; shift 2;;
+    --wg-endpoint  ) WG_EP="$2"; shift 2;;
+    --license      ) LICENSE="$2"; shift 2;;
+    *              ) print_message "Unknown option $1" "warn"; shift;;
   esac
 done
 
