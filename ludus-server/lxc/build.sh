@@ -36,5 +36,5 @@ make LUDUS_VERSION="${LUDUS_VERSION}"
 
 OUT="ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst"
 mv ludus_*.tar.zst "../../${OUT}" 2>/dev/null || mv *.tar.zst "../../${OUT}"
-sha256sum "../../${OUT}" > "../../${OUT}.sha256"
+(cd ../.. && sha256sum "${OUT}" > "${OUT}.sha256")
 echo "Built: ${OUT}"

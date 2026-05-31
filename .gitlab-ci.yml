@@ -621,10 +621,10 @@ build-lxc-template:
         - ludus-server/lxc/**/*
         - ludus-server/ansible/requirements.yml
   before_script:
-    - apt-get update && apt-get install -y dab make unzip zstd
+    - sudo apt-get update && sudo apt-get install -y dab make unzip zstd
   script:
     - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
-    - ludus-server/lxc/build.sh
+    - sudo -E ludus-server/lxc/build.sh
   artifacts:
     paths:
       - "ludus-*-debian13-amd64.tar.zst"
