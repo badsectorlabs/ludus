@@ -1,0 +1,35 @@
+[Unit]
+Description=Ludus API Server
+Wants=network-online.target
+After=network-online.target ludus-admin.service wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=ludus
+Group=ludus
+WorkingDirectory=/opt/ludus
+ExecStart=/opt/ludus/ludus-server
+Restart=always
+RestartSec=5
+RestartMaxDelaySec=1h
+RestartSteps=10
+Environment=ANSIBLE_COLLECTIONS_PATH=/opt/ludus/collections
+Environment=PATH=/opt/ludus/venv/bin:/usr/local/bin:/usr/bin:/bin
+RemoveIPC=true
+PrivateTmp=true
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateDevices=yes
+DevicePolicy=closed
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=true
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+ReadWritePaths=/opt/ludus
+
+[Install]
+WantedBy=multi-user.target

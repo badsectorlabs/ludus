@@ -1,0 +1,21 @@
+[Unit]
+Description=Ludus Admin API Server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Admin mode is selected by euid==0 (see main.go serve()): running as root
+# binds to AdminPort and performs first-boot bootstrap. No --admin flag exists.
+User=root
+WorkingDirectory=/opt/ludus
+ExecStart=/opt/ludus/ludus-server
+Restart=always
+RestartSec=5
+RestartMaxDelaySec=1h
+RestartSteps=10
+Environment=ANSIBLE_COLLECTIONS_PATH=/opt/ludus/collections
+Environment=PATH=/opt/ludus/venv/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target
