@@ -1,4 +1,4 @@
-BASEDIR:=$(shell dab basedir)
+BASEDIR = $(shell dab basedir)
 LUDUS_VERSION ?= 0.0.0-dev
 
 .PHONY: all bootstrap install finalize clean
@@ -6,7 +6,6 @@ LUDUS_VERSION ?= 0.0.0-dev
 all: bootstrap install finalize
 
 bootstrap:
-	sed -i "s/__LUDUS_VERSION__/$(LUDUS_VERSION)/" dab.conf
 	dab init
 	dab bootstrap --minimal
 

@@ -26,6 +26,11 @@ if [[ ! -f ../../binaries/ludus-server ]]; then
   exit 1
 fi
 
+# Substitute version into dab.conf before make parses BASEDIR.
+# Work on a fresh copy from git so re-runs are idempotent.
+git checkout -- dab.conf 2>/dev/null || true
+sed -i "s/__LUDUS_VERSION__/${LUDUS_VERSION}/" dab.conf
+
 make clean || true
 make LUDUS_VERSION="${LUDUS_VERSION}"
 
