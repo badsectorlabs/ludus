@@ -607,6 +607,30 @@ build all:
       fi
     - echo "Compile complete."
 
+build-lxc-template:
+  stage: build
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: "build all"
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_MESSAGE =~ /\[build-lxc\]/
+    - changes:
+        - ludus-server/lxc/**/*
+        - ludus-server/ansible/requirements.yml
+  before_script:
+    - apt-get update && apt-get install -y dab make unzip zstd
+  script:
+    - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
+    - ludus-server/lxc/build.sh
+  artifacts:
+    paths:
+      - "ludus-*-debian13-amd64.tar.zst"
+      - "ludus-*-debian13-amd64.tar.zst.sha256"
+    expire_in: 1 week
+
 #########
 # CLAIM #
 #########
@@ -648,7 +672,6 @@ install kickoff:
       when: never
     - changes: # Only run if we need to test installer related changes
         - ludus-server/*.go
-        - ludus-server/ansible/proxmox-install/**/*
   variables:
     LUDUS_BUILD_TYPE: full # We have to test the install process, so do a full build
     LUDUS_INSTALL_STEP: kickoff
@@ -681,7 +704,6 @@ install check:
       when: never
     - changes: # Only run if we need to test installer related changes
         - ludus-server/*.go
-        - ludus-server/ansible/proxmox-install/**/*
   variables:
     LUDUS_BUILD_TYPE: full
     LUDUS_INSTALL_STEP: check
@@ -2791,6 +2813,33 @@ beta-release:
         fi
       done
 
+upload-lxc-r2:
+  stage: upload
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: build-lxc-template
+      artifacts: true
+  variables:
+    LUDUS_BUILD_TYPE: any-built
+    GIT_STRATEGY: none
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - export RCLONE_CONFIG_R2_TYPE="s3"
+    - export RCLONE_CONFIG_R2_PROVIDER="Cloudflare"
+    - export RCLONE_CONFIG_R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+    - export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+    - export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+    - export VER="${CI_COMMIT_TAG}"
+    - TMPL="ludus-${VER}-debian13-amd64.tar.zst"
+    - sha256sum "${TMPL}" > checksums.txt
+    - echo "Uploading LXC template ${TMPL} to Cloudflare R2..."
+    - rclone copy "${TMPL}" "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
+    - rclone copy "${TMPL}.sha256" "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
+    - rclone copy checksums.txt "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
+    - echo "${VER}" | rclone rcat "r2:ludus-lxc/latest.txt" --s3-no-check-bucket
+
 gitlab-upload:
   stage: upload
   resource_group: ludus-build-vm
@@ -2918,6 +2967,7 @@ release:
   needs:
     - build all
     - gitlab-upload
+    - upload-lxc-r2
   variables:
     LUDUS_BUILD_TYPE: any-built
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
@@ -2942,4 +2992,5 @@ release:
       {\"name\":\"ludus-client_macOS-arm64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_macOS-arm64-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\"},
       {\"name\":\"ludus-client_windows-386-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-386-${CI_COMMIT_TAG}.exe\"},
-      {\"name\":\"ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\"}]"'
+      {\"name\":\"ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\"},
+      {\"name\":\"ludus-${CI_COMMIT_TAG}-debian13-amd64.tar.zst\", \"url\":\"https://lxc.ludus.cloud/ludus-lxc/${CI_COMMIT_TAG}/ludus-${CI_COMMIT_TAG}-debian13-amd64.tar.zst\", \"link_type\":\"package\"}]"'
