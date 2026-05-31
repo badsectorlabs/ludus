@@ -2560,6 +2560,45 @@ cluster-test-range-default:
       fi
       echo "Cluster placement verified: $TOTAL VMs across both nodes, 1 on Node1, 2 on Node2"
 
+#############
+# LXC TESTS #
+#############
+test-lxc-airgap:
+  stage: test
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: build-lxc-template
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_MESSAGE =~ /\[build-lxc\]/
+  timeout: 30m
+  script:
+    - export TOKEN_ID="${CI_PROXMOX_TOKEN_ID}" TOKEN_SECRET="${CI_PROXMOX_TOKEN_SECRET}"
+    - VMID=$(curl -sk -H "Authorization: PVEAPIToken=${TOKEN_ID}=${TOKEN_SECRET}" https://localhost:8006/api2/json/cluster/nextid | python3 -c "import sys,json;print(json.load(sys.stdin)['data'])")
+    - sudo -E ludus-server/ci/test-lxc-airgap.sh "$VMID" "ludus-${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}-debian13-amd64.tar.zst"
+
+test-install-sh:
+  stage: test
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: build-lxc-template
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_MESSAGE =~ /\[build-lxc\]/
+  timeout: 30m
+  script:
+    - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
+    - sudo -E ./install.sh --no-prompt --template-file "ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst" --vmid 9999 --storage local-lvm --ip dhcp --wg-endpoint 127.0.0.1 --token-id "${CI_PROXMOX_TOKEN_ID}" --token-secret "${CI_PROXMOX_TOKEN_SECRET}"
+    - LXC_IP=$(sudo pct exec 9999 -- hostname -I | awk '{print $1}')
+    - curl -sk "https://${LXC_IP}:8080/api/v1/version" | grep -q version
+  after_script:
+    - sudo pct stop 9999 || true
+    - sudo pct destroy 9999 || true
+
 #################
 # RELEASE CLAIM #
 #################
