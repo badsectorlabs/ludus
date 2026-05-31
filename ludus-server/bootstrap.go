@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	_ "modernc.org/sqlite"
 
 	"ludusapi"
 	"ludusapi/pveclient"
@@ -50,8 +53,27 @@ func bootstrap(ctx context.Context, cfg ludusapi.Configuration) error {
 	if err := bootstrapProxmoxObjects(ctx, pc, cfg, "/opt/ludus"); err != nil {
 		return err
 	}
+	// Capture before bootstrapLocalState: EnsureWireguard will create the key
+	// if absent, so checking afterward can't tell imported-vs-generated apart.
+	wgKeyExisted := fileExists("/etc/wireguard/server-private-key")
 	if err := bootstrapLocalState(cfg); err != nil {
 		return err
+	}
+	dbPath := filepath.Join(cfg.DataDirectory, "data.db")
+	ranges := loadImportedRanges(dbPath)
+	users := loadImportedUsers(dbPath)
+	if len(ranges) > 0 || len(users) > 0 {
+		logf("bootstrap: reconciling imported DB (%d ranges, %d users)", len(ranges), len(users))
+		warns, err := reconcileImportedState(ctx, pc, cfg, ranges, users, "/etc/network/if-up.d/ludus-routes")
+		if err != nil {
+			return fmt.Errorf("reconcile: %w", err)
+		}
+		for _, w := range warns {
+			logf("WARN: %s", w)
+		}
+	}
+	if !wgKeyExisted && len(users) > 0 {
+		logf("WARN: WireGuard server key was regenerated; existing client configs will break. Copy old /etc/wireguard/ or run `ludus user wg regen --all`")
 	}
 	if err := os.MkdirAll(filepath.Dir(bootstrapMarker), 0755); err != nil {
 		return err
@@ -187,6 +209,60 @@ func logf(format string, args ...any) {
 		f.Close()
 	}
 	fmt.Printf(format+"\n", args...)
+}
+
+// queryPocketBase opens the PocketBase sqlite file read-only and runs q.
+// Caller must Close() both returned values (db first via rows.Close(), then db.Close()).
+func queryPocketBase(dbPath, q string) (*sql.DB, *sql.Rows, error) {
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := db.Query(q)
+	if err != nil {
+		db.Close()
+		return nil, nil, err
+	}
+	return db, rows, nil
+}
+
+// loadImportedRanges reads range numbers from a pre-existing PocketBase DB.
+// Returns nil on any error (missing file, schema mismatch) — bootstrap treats
+// "no imported state" as the safe default.
+func loadImportedRanges(dbPath string) []importedRange {
+	db, rows, err := queryPocketBase(dbPath, "SELECT rangeNumber FROM ranges")
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+	defer rows.Close()
+	var out []importedRange
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err == nil {
+			out = append(out, importedRange{Number: n})
+		}
+	}
+	return out
+}
+
+// loadImportedUsers reads Proxmox userids (username@realm) from a pre-existing
+// PocketBase DB, excluding the synthetic ROOT user.
+func loadImportedUsers(dbPath string) []importedUser {
+	db, rows, err := queryPocketBase(dbPath, "SELECT proxmoxUsername, proxmoxRealm FROM users WHERE userID != 'ROOT'")
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+	defer rows.Close()
+	var out []importedUser
+	for rows.Next() {
+		var name, realm string
+		if err := rows.Scan(&name, &realm); err == nil {
+			out = append(out, importedUser{ProxmoxUsername: name + "@" + realm})
+		}
+	}
+	return out
 }
 
 // Compile-time assertion that *pveclient.Client satisfies PVEClient.
