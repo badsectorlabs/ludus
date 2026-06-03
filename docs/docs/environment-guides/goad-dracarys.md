@@ -28,14 +28,8 @@ Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to
 
 ```bash
 #terminal-command-local
-git clone https://gitlab.com/badsectorlabs/ludus
-#terminal-command-local
-cd ludus/templates
-#terminal-command-local
-ludus templates add -d win2025-server-x64-tpm 
-#terminal-command-local
-ludus templates add -d ubuntu-24.04-x64-server
-[INFO]  Successfully added template
+ludus source add ludus-source-bsl --templates win2025-server-x64-tpm-template,ubuntu-24.04-x64-server-template
+[INFO]  Source 'ludus-source-bsl' installed successfully.
 #terminal-command-local
 ludus templates build
 [INFO]  Template building started - this will take a while. Building 1 template(s) at a time.

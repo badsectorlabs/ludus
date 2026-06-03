@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -49,8 +48,8 @@ func archiveOverLimit(e *core.RequestEvent) bool {
 // upload-type sources require an `archive` file field. Register-only: the
 // source row is created, the repo is fetched and walked, and the catalog is
 // returned. The caller drives the install via POST /sources/{id}/install
-// (with `installAll=true` for "install everything"). Failures during
-// register roll the row back so the caller can retry without rm.
+// (an absent selection installs everything). Failures during register roll
+// the row back so the caller can retry without rm.
 func CreateSource(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
 	if user == nil {
@@ -117,17 +116,17 @@ func CreateSource(e *core.RequestEvent) error {
 		//      upload archive). Avoids silent content swaps.
 		//   2. Same sourceID, same type, different git URL → 409. Most likely
 		//      a slug collision the caller didn't realise; tell them to
-		//      override the sourceID or to use PATCH to change the URL.
+		//      use a different sourceID (a source's URL can't be repointed).
 		//   3. Otherwise → idempotent re-walk, preserve status and selection,
 		//      return fresh catalog.
 		if existing[0].GetString("type") != req.Type {
 			return JSONError(e, http.StatusConflict,
-				fmt.Sprintf("source %q already exists with type %q; pick a different source ID or use PATCH to change content",
+				fmt.Sprintf("source %q already exists with type %q; choose a different source ID",
 					sourceID, existing[0].GetString("type")))
 		}
 		if req.Type == "git" && req.URL != "" && req.URL != existing[0].GetString("url") {
 			return JSONError(e, http.StatusConflict,
-				fmt.Sprintf("source %q already exists pointing at %s; override the sourceID or use PATCH to change the URL",
+				fmt.Sprintf("source %q already exists pointing at %s; choose a different source ID, or remove it and register again to point at a new URL",
 					sourceID, existing[0].GetString("url")))
 		}
 		// Register-only re-walk: fetch fresh content (for git, re-clone; for
@@ -145,7 +144,7 @@ func CreateSource(e *core.RequestEvent) error {
 		if walkErr != nil {
 			return JSONError(e, http.StatusBadRequest, walkErr.Error())
 		}
-		catalog := ComputeSourceCatalog(e.App, existing[0], walked)
+		catalog := ComputeSourceCatalog(e, existing[0], walked)
 		return e.JSON(http.StatusOK, dto.RegisterSourceResponse{
 			SourceID: existing[0].GetString("sourceID"),
 			Catalog:  toCatalogDTO(catalog),
@@ -219,7 +218,7 @@ func CreateSource(e *core.RequestEvent) error {
 		_ = e.App.Delete(src)
 		return JSONError(e, http.StatusInternalServerError, saveErr.Error())
 	}
-	catalog := ComputeSourceCatalog(e.App, src, walked)
+	catalog := ComputeSourceCatalog(e, src, walked)
 	unlock()
 	return e.JSON(http.StatusOK, dto.RegisterSourceResponse{
 		SourceID: src.GetString("sourceID"),
@@ -445,12 +444,14 @@ func UpdateSource(e *core.RequestEvent) error {
 	// New archive bytes on an upload source: re-extract + re-register inline.
 	if uploadBytes != nil {
 		opts := SyncOptions{
-			GlobalRoles:     req.GlobalRoles,
-			Force:           req.Force,
-			Archive:         uploadBytes,
-			ArchiveFilename: uploadFilename,
+			GlobalRoles:              req.GlobalRoles,
+			Force:                    req.Force,
+			InitiatorIsAdmin:         user.IsAdmin(),
+			InitiatorProxmoxUsername: user.ProxmoxUsername(),
+			Archive:                  uploadBytes,
+			ArchiveFilename:          uploadFilename,
 		}
-		syncResult, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
+		syncResult, syncErr := runSourceInstall(context.Background(), e, e.App, src, opts)
 		if syncErr != nil {
 			return JSONError(e, http.StatusBadRequest, syncErr.Error())
 		}
@@ -460,12 +461,13 @@ func UpdateSource(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, sourceRecordToResponseWithKind(e.App, src))
 }
 
-// DeleteSource handles DELETE /sources/{sourceID}.
-// With purge=true: cascade-removes every template/local-role/galaxy-role
-// this source's source_artifacts rows claim, regardless of co-claims from
-// other sources. The response carries the sourceIDs of any other sources
-// that also claimed those names — those sources are now missing files and
-// can re-sync to restore them.
+// DeleteSource handles DELETE /sources/{sourceID}. Registration-only: it
+// drops the source record, which cascade-deletes the blueprints the source
+// provided and its source_artifacts rows. Installed templates, roles, and
+// collections are left on disk — templates live in each installer's per-user
+// packer dir, and roles/collections may be shared with ranges or other
+// blueprints. Remove those individually — `source remove`, or the Ansible /
+// Templates pages — when you actually want them gone.
 func DeleteSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
@@ -480,125 +482,32 @@ func DeleteSource(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "only the owner or an admin can delete a source")
 	}
 
-	var req dto.DeleteSourceRequest
-	_ = e.BindBody(&req) // body is optional
-
-	var purge PurgeResult
-	if req.Purge {
-		var pErr error
-		purge, pErr = purgeSourceArtifacts(e.App, src)
-		if pErr != nil {
-			return JSONError(e, http.StatusInternalServerError, pErr.Error())
-		}
-	}
-
 	_ = os.RemoveAll(SourceCheckoutDir(src.Id))
 
 	if err := e.App.Delete(src); err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-	resp := dto.DeleteSourceResponse{Status: "deleted"}
-	if len(purge.Failures) > 0 {
-		resp.Status = "deleted_with_errors"
-		resp.PurgeErrors = purge.Failures
-	}
-	resp.AffectedSources = purge.AffectedSources
-	return e.JSON(http.StatusOK, resp)
+	return e.JSON(http.StatusOK, dto.DeleteSourceResponse{Status: "deleted"})
 }
 
-// PurgeResult is what purgeSourceArtifacts hands back to the delete handler.
-// Failures are per-artifact errors during removal. AffectedSources are the
-// visible sourceIDs of OTHER sources that also claim any of the artifacts we
-// just removed — those sources are now missing on-disk files and will need
-// to re-sync. We deliberately do NOT skip purging on their behalf: the user
-// asked to purge, and we honor that.
-type PurgeResult struct {
-	Failures        []string
-	AffectedSources []string
-}
-
-// purgeSourceArtifacts removes every template/role this source's
-// source_artifacts rows claim — regardless of whether other sources also
-// claim the same name. Per-artifact failures are collected and returned so
-// the caller can include them in the response. The function only returns a
-// hard error when the artifact lookup itself fails.
-//
-// Collections are an exception: ansible-galaxy has no `collection remove`,
-// so the on-disk install is left in place. The row itself is dropped via
-// the cascade when the source record is deleted.
-func purgeSourceArtifacts(app core.App, src *core.Record) (PurgeResult, error) {
-	var res PurgeResult
-	affected := map[string]bool{}
-
-	artifacts, err := app.FindRecordsByFilter("source_artifacts",
-		"source = {:s}", "", 0, 0, map[string]any{"s": src.Id})
-	if err != nil {
-		return res, err
+func removeTemplateByName(name, proxmoxUsername string) error {
+	if proxmoxUsername == "" {
+		return nil
 	}
-	for _, art := range artifacts {
-		kind := art.GetString("kind")
-		name := art.GetString("name")
-
-		// Collect co-claimants for reporting — they keep their source_artifacts
-		// rows, but their on-disk files are about to go away.
-		others, _ := app.FindRecordsByFilter("source_artifacts",
-			"source != {:s} && kind = {:k} && name = {:n}", "", 0, 0,
-			map[string]any{"s": src.Id, "k": kind, "n": name})
-		for _, row := range others {
-			otherRecID := row.GetString("source")
-			if otherRecID == "" || affected[otherRecID] {
-				continue
-			}
-			affected[otherRecID] = true
-		}
-
-		var rmErr error
-		switch kind {
-		case "template":
-			rmErr = removeTemplateByName(app, name)
-			if rmErr == nil {
-				if rec, _ := app.FindFirstRecordByData("templates", "name", name); rec != nil {
-					_ = app.Delete(rec)
-				}
-			}
-		case "local_role":
-			rmErr = removeLocalRoleByName(app, name, src)
-		case "galaxy_role":
-			rmErr = removeGalaxyRoleByName(app, name, src)
-		case "collection":
-			// ansible-galaxy has no remove subcommand; the row drops via cascade.
-		}
-		if rmErr != nil {
-			res.Failures = append(res.Failures, fmt.Sprintf("%s %q: %v", kind, name, rmErr))
-		}
-	}
-
-	// Resolve affected source record ids to visible sourceIDs for the response.
-	for recID := range affected {
-		other, lookupErr := app.FindRecordById("sources", recID)
-		if lookupErr != nil {
-			continue
-		}
-		visible := other.GetString("sourceID")
-		if visible == "" {
-			visible = recID
-		}
-		res.AffectedSources = append(res.AffectedSources, visible)
-	}
-	sort.Strings(res.AffectedSources)
-	return res, nil
-}
-
-func removeTemplateByName(_ core.App, name string) error {
-	dir := filepath.Join(ludusInstallPath, "packer", name)
+	dir := filepath.Join(ludusInstallPath, "users", proxmoxUsername, "packer", name)
 	return os.RemoveAll(dir)
 }
 
-// removeLocalRoleByName removes a role from the global-roles dir or the
-// source owner's per-user roles dir. Idempotent: missing dirs are ignored.
-func removeLocalRoleByName(app core.App, name string, src *core.Record) error {
-	candidates := []string{
-		filepath.Join(ludusInstallPath, "resources", "global-roles", name),
+// removeLocalRoleByName removes a role from the source owner's per-user roles
+// dir, and — only when includeGlobal (admin-initiated) — the shared
+// global-roles dir. Idempotent: missing dirs are ignored.
+func removeLocalRoleByName(app core.App, name string, src *core.Record, includeGlobal bool) error {
+	var candidates []string
+	// The global-roles dir is a shared, admin-scoped path. Only an
+	// admin-initiated remove may delete from it; a non-admin's remove is
+	// confined to the source owner's own per-user roles dir below.
+	if includeGlobal {
+		candidates = append(candidates, filepath.Join(ludusInstallPath, "resources", "global-roles", name))
 	}
 	if owner, err := app.FindRecordById("users", src.GetString("owner")); err == nil {
 		if home := userRolesPath(owner.GetString("proxmoxUsername")); home != "" {
@@ -607,31 +516,6 @@ func removeLocalRoleByName(app core.App, name string, src *core.Record) error {
 	}
 	for _, base := range candidates {
 		_ = os.RemoveAll(base)
-	}
-	return nil
-}
-
-// removeGalaxyRoleByName removes a galaxy-installed role registered by the given
-// source. Source-add can install roles either to the global-roles dir (with
-// --global-roles) or to the source owner's per-user roles dir, so purge has to
-// check both. Errors from individual removals are aggregated; missing dirs are
-// not treated as an error.
-func removeGalaxyRoleByName(app core.App, name string, src *core.Record) error {
-	candidates := []string{
-		filepath.Join(ludusInstallPath, "resources", "global-roles", name),
-	}
-	if owner, err := app.FindRecordById("users", src.GetString("owner")); err == nil {
-		if home := userRolesPath(owner.GetString("proxmoxUsername")); home != "" {
-			candidates = append(candidates, filepath.Join(home, name))
-		}
-	}
-	for _, dir := range candidates {
-		if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
-			continue
-		}
-		if rmErr := os.RemoveAll(dir); rmErr != nil {
-			return rmErr
-		}
 	}
 	return nil
 }
@@ -753,12 +637,16 @@ func findSourceByVisibleID(e *core.RequestEvent, sourceID string) (*core.Record,
 	return records[0], nil
 }
 
-// SyncSource handles POST /sources/{sourceID}/sync. Owner-or-admin
-// only. For git sources, re-clones at the source's ref and reinstalls. For
-// upload sources, reinstalls from the existing on-disk checkout — the same
-// archive bytes that were stored when the source was created. To push a new
-// archive version for an upload source, PATCH the source with the archive
-// instead.
+// SyncSource handles POST /sources/{sourceID}/sync. Owner-or-admin only.
+// Refresh-only: for git sources, re-pulls the working tree at the source's
+// ref and updates the catalog view; for upload sources, just re-walks the
+// existing on-disk content. No artifact installs, removes, or DB writes for
+// blueprints/templates/roles happen here. To actually apply a change to
+// what's installed from a source, call POST /sources/{sourceID}/install.
+//
+// One-shot legacy migration: if the source row's installSelection is null
+// (pre-upgrade), refresh snapshots the current walk into installSelection
+// so the next install has a concrete starting point.
 func SyncSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
@@ -773,23 +661,15 @@ func SyncSource(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "only the owner or an admin can sync a source")
 	}
 
-	var req dto.SyncSourceRequest
-	_ = e.BindBody(&req)
-	if req.GlobalRoles && !user.IsAdmin() {
-		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
+	refresh, refreshErr := runSourceRefresh(e.App, src, SyncOptions{})
+	if refreshErr != nil {
+		return JSONError(e, http.StatusInternalServerError, refreshErr.Error())
 	}
-
-	opts := SyncOptions{
-		GlobalRoles: req.GlobalRoles,
-		Force:       req.Force,
-		Selection:   loadInstallSelection(src),
-	}
-
-	syncResult, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
-	if syncErr != nil {
-		return JSONError(e, http.StatusInternalServerError, syncErr.Error())
-	}
-	return e.JSON(http.StatusOK, sourceSyncResponse(src.GetString("sourceID"), syncResult))
+	// No install side-effects to report, but undeclared-dep warnings still
+	// matter — they tell the user what would be missing if they ran install.
+	return e.JSON(http.StatusOK, sourceSyncResponse(src.GetString("sourceID"), &SyncResult{
+		UndeclaredDependencies: refresh.UndeclaredDependencies,
+	}))
 }
 
 func ListSourceBlueprints(e *core.RequestEvent) error {
@@ -917,8 +797,8 @@ func ListSourceTemplates(e *core.RequestEvent) error {
 
 // ListSourceCollections handles GET /sources/{sourceID}/collections.
 // Returns Ansible collections this source's blueprints declared in their
-// requirements.yml. ansible-galaxy has no remove subcommand, so a source
-// purge leaves the on-disk install in place — the row here is a claim,
+// requirements.yml. ansible-galaxy has no remove subcommand, so removing a
+// source leaves the on-disk install in place — the row here is a claim,
 // not a lifecycle anchor.
 func ListSourceCollections(e *core.RequestEvent) error {
 	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
@@ -984,15 +864,22 @@ func GetSourceCatalog(e *core.RequestEvent) error {
 	if werr != nil {
 		return JSONError(e, http.StatusInternalServerError, werr.Error())
 	}
-	catalog := ComputeSourceCatalog(e.App, src, walked)
+	catalog := ComputeSourceCatalog(e, src, walked)
 	return e.JSON(http.StatusOK, toCatalogDTO(catalog))
 }
 
-// InstallSource handles POST /sources/{sourceID}/install. The caller picks
-// what to install via either an explicit Selection (blueprints / templates /
-// local-roles) or InstallAll=true for "everything walked". InstallAll leaves
-// the source's installSelection field unset so future syncs keep installing
-// every newly walked item — the pre-selection behavior.
+// InstallSource handles POST /sources/{sourceID}/install. Selection is
+// optional and presence-significant:
+//
+//   - absent → snapshot the current walk into installSelection (install
+//     everything upstream ships)
+//   - present, non-empty → use as-is; replaces any persisted selection
+//   - present, all-empty → "uninstall everything from this source": the
+//     selection is committed as empty and the prune logic clears every
+//     row/file the previous selection had carried
+//
+// Either way the source ends up with a concrete persisted selection, so
+// subsequent syncs are observation-only.
 func InstallSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
@@ -1013,30 +900,26 @@ func InstallSource(e *core.RequestEvent) error {
 	if req.GlobalRoles && !user.IsAdmin() {
 		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
 	}
-	hasSelection := !isEmptySelection(req.Selection)
-	if !req.InstallAll && !hasSelection {
-		return JSONError(e, http.StatusBadRequest,
-			"set installAll=true or provide a non-empty selection")
-	}
-	if req.InstallAll && hasSelection {
-		return JSONError(e, http.StatusBadRequest,
-			"installAll and selection are mutually exclusive")
-	}
 
 	opts := SyncOptions{
-		GlobalRoles: req.GlobalRoles,
-		Force:       req.Force,
+		GlobalRoles:              req.GlobalRoles,
+		Force:                    req.Force,
+		NoDeps:                   req.NoDeps,
+		InitiatorIsAdmin:         user.IsAdmin(),
+		InitiatorProxmoxUsername: user.ProxmoxUsername(),
 	}
-	if hasSelection {
+	if req.Selection != nil {
+		// Caller supplied selection (even if empty). Honor it verbatim;
+		// empty arrays are the explicit "uninstall everything" signal.
 		opts.Selection = &InstallSelection{
 			Blueprints: req.Selection.Blueprints,
 			Templates:  req.Selection.Templates,
 			LocalRoles: req.Selection.LocalRoles,
 		}
 	}
-	// installAll: opts.Selection stays nil, runSourceSync installs every
-	// walked item (and the source's installSelection field stays null).
-	result, syncErr := runSourceSync(context.Background(), e, e.App, src, opts)
+	// opts.Selection stays nil only when the caller omitted the selection
+	// field entirely. runSourceInstall interprets that as "snapshot the walk."
+	result, syncErr := runSourceInstall(context.Background(), e, e.App, src, opts)
 	if syncErr != nil {
 		return JSONError(e, http.StatusInternalServerError, syncErr.Error())
 	}
@@ -1068,6 +951,7 @@ func toCatalogDTO(c *SourceCatalog) dto.SourceCatalogDTO {
 		out.Blueprints = append(out.Blueprints, dto.CatalogBlueprintDTO{
 			ID:                        bp.ID,
 			Name:                      bp.Name,
+			Description:               bp.Description,
 			Version:                   bp.Version,
 			State:                     bp.State,
 			InstalledVersion:          bp.InstalledVersion,
@@ -1086,15 +970,31 @@ func toCatalogDTO(c *SourceCatalog) dto.SourceCatalogDTO {
 	return out
 }
 
+func scopeInstallsToDTO(installs []ScopeInstall) []dto.ScopeInstallDTO {
+	if len(installs) == 0 {
+		return nil
+	}
+	out := make([]dto.ScopeInstallDTO, len(installs))
+	for i, s := range installs {
+		out[i] = dto.ScopeInstallDTO{Scope: s.Scope, Version: s.Version, State: s.State}
+	}
+	return out
+}
+
 func catalogItemsToDTO(items []CatalogItem) []dto.CatalogItemDTO {
 	out := make([]dto.CatalogItemDTO, 0, len(items))
 	for _, it := range items {
 		out = append(out, dto.CatalogItemDTO{
 			Name:               it.Name,
+			Description:        it.Description,
 			Version:            it.Version,
 			State:              it.State,
 			InstalledVersion:   it.InstalledVersion,
-			ImpliedBy:          it.ImpliedBy,
+			Global:             it.Global,
+			Scopes:             scopeInstallsToDTO(it.Scopes),
+			Type:               it.Type,
+			Fqcn:               it.Fqcn,
+			RequiredBy:         it.RequiredBy,
 			VersionByBlueprint: it.VersionByBlueprint,
 		})
 	}
@@ -1116,5 +1016,3 @@ func undeclaredDepsToDTO(deps []UndeclaredDependency) []dto.UndeclaredDependency
 	}
 	return out
 }
-
-

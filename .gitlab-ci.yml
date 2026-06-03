@@ -223,26 +223,25 @@ stages:
   - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'
   - ludus range status | grep "${LUDUS_USER_ID}-router-debian11-x64" | grep 'On'
 
-.template-tests: &template-tests # Remove debian 10 if it exists (retry)
-  - ludus templates list --json | jq -r '.[] | select(.name == "debian-10-x64-server-template") | .name' | grep -q 'debian-10-x64-server-template' && ludus templates rm -n "debian-10-x64-server-template" || echo "No debian10 on the server"
-  - cd templates
+.template-tests: &template-tests # `templates add` CLI tests. The bundled template library moved to the ludus-source-bsl source; a throwaway fixture exercises add/force/ownership, and an embedded (server-included) template covers the build smoke-test.
+  - ludus templates list --json | jq -r '.[] | select(.name == "ci-add-test-template") | .name' | grep -q 'ci-add-test-template' && ludus templates rm -n "ci-add-test-template" || echo "No ci-add-test template on the server"
   - ludus templates list
-  - ludus templates add -d debian10
+  - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test
   - ludus templates list
   - set +o pipefail
-  - ludus templates add -d debian10 2>&1 | grep 'Template already exists, use --force to overwrite it'
+  - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test 2>&1 | grep 'Template already exists, use --force to overwrite it'
   - mkdir /tmp/test-template || true
-  - echo "debian-10-x64-server-template" > /tmp/test-template/test.pkr.hcl
+  - echo "ci-add-test-template" > /tmp/test-template/test.pkr.hcl
   - 'ludus templates add -d /tmp/test-template/test.pkr.hcl 2>&1 | grep "Error finding .pkr.hcl or .pkr.json template files: the provided path is not a directory"'
   - ludus templates add -d /tmp/test-template 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
-  - ludus templates add -d ../ludus-server/packer/kali 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
-  - ludus templates add -d ../ludus-server/packer/kali --force 2>&1 | grep "'kali-x64-desktop-template' is a template that does not belong to you"
+  - ludus templates add -d ludus-server/packer/kali 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
+  - ludus templates add -d ludus-server/packer/kali --force 2>&1 | grep "'kali-x64-desktop-template' is a template that does not belong to you"
   - set -o pipefail
-  - ludus templates add -d debian10 --force
-  - ludus templates list
-  - ludus templates build -n debian-10-x64-server-template
+  - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test --force
+  - ludus templates rm -n "ci-add-test-template"
+  - ludus templates build -n debian-12-x64-server-template
   - ludus templates status
-  - ludus templates status | grep debian-10-x64-server-template
+  - ludus templates status | grep debian-12-x64-server-template
   - ludus templates status | grep continuous-integration-
   # Wait for the template to build
   - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
@@ -252,8 +251,6 @@ stages:
   - ludus templates logs --history --json | jq -e 'length > 0'
   - export TEMPLATE_LOG_ID=$(ludus templates logs --history --json | jq -r '.[0].id')
   - ludus templates logs --history --id "$TEMPLATE_LOG_ID" | grep -q "=>"
-  - ludus templates rm -n debian-10-x64-server-template
-  - '! ludus templates list | grep "debian-10-x64-server-template"'
 
 .snapshot-tests: &snapshot-tests
   - ludus snapshots list
@@ -1380,7 +1377,6 @@ post-deploy blueprints-as-admin:
       - ludus-api/source_sync.go
       - ludus-api/source_walker.go
       - ludus-server/ci/fixtures/source-template/**
-      - ludus-server/ci/source-selection-test.sh
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1397,8 +1393,8 @@ post-deploy blueprints-as-admin:
     - ludus blueprint rm ci-bp-copy --no-prompt || true
     - ludus blueprint rm ci-bp-scratch --no-prompt || true
     - ludus blueprint rm ci-bp-roundtrip --no-prompt || true
-    - ludus source rm ci-src --no-prompt --purge || true
-    - ludus source rm ci-src2 --no-prompt --purge || true
+    - ludus source rm ci-src --no-prompt || true
+    - ludus source rm ci-src2 --no-prompt || true
     # Create, list, fetch config, copy, apply, and remove as admin
     - ludus blueprint create --id ci-bp-main --name "CI Blueprint Main" --description "created in CI" --from-range CIA
     - ludus blueprint list | grep ci-bp-main
@@ -1456,7 +1452,7 @@ post-deploy blueprints-as-admin:
     - 'ludus source list | grep -q "ci-src "'
     - 'ludus blueprint list | grep -q "ci-src/example"'
     - 'ludus blueprint list | grep -q "ci-src/secondary"' # both fixture blueprints installed via install-all default
-    - 'ludus templates list | grep -q "example-debian-12"'
+    - 'ludus templates list | grep -q "example-debian-12-template"'
     - 'ludus ansible role list | grep -q "say_hello"'
     - ludus blueprint info ci-src/example | tee /tmp/ci-src-example.info
     - 'grep -q "Authors:" /tmp/ci-src-example.info'
@@ -1465,39 +1461,85 @@ post-deploy blueprints-as-admin:
     - set +o pipefail
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ci-src --no-prompt 2>&1 | grep -qiE "not found|owner or an admin"'
     - set -o pipefail
-    # Honest purge: --purge uninstalls the source's artifacts from disk
-    # regardless of co-claims from other sources, and reports affected
-    # sources so the operator can re-sync them. Co-claimed roles come back
-    # after a sync; only when no live source still claims the role does
-    # it stay gone.
+    # Two distinct verbs, both exercised here:
+    #   `source rm`     — registration-only: drops the source + its blueprints,
+    #                     leaves installed templates/roles on disk.
+    #   `source remove` — the actual uninstall, with NO cross-source refcount:
+    #                     deletes the artifact even if another source still
+    #                     ships the same name (that source can reinstall).
+    # ci-src is still registered from the add above; ci-src2 ships the same
+    # say_hello role + example-debian-12-template template.
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src2 --force
-    - ludus source rm ci-src --no-prompt --purge 2>&1 | grep -q "ci-src2"  # affectedSources surfaced
-    - '! ludus ansible role list | grep -q geerlingguy.docker'              # purge removed the on-disk role
-    - ludus source sync ci-src2                                              # re-sync restores it
-    - ludus ansible role list | grep -q geerlingguy.docker
-    - ludus source rm ci-src2 --no-prompt --purge
-    - '! ludus ansible role list | grep -q geerlingguy.docker'
-    - '! ludus ansible role list | grep -q "say_hello"'
-    - '! ludus templates list | grep -q "example-debian-12"'
+    - ludus source sync ci-src2                                # catalog refresh only — sync never installs or prunes
+    - 'ludus blueprint list | grep -q "ci-src2/example"'
+    # `source remove` uninstalls ci-src's items while ci-src2 STILL claims them
+    # — no refcount, so they're deleted anyway. ci-src stays registered.
+    - ludus source remove ci-src --all
+    - 'ludus source list | grep -q "ci-src "'                  # remove ≠ rm: registration stays
+    - '! ludus blueprint list | grep -q "ci-src/example"'      # its blueprints dropped
+    - '! ludus ansible role list | grep -q "say_hello"'        # deleted despite ci-src2's live claim
+    - '! ludus templates list | grep -q "example-debian-12-template"'   # same for the shared template
+    # `source rm` is registration-only — drops ci-src2's record + blueprints.
+    - ludus source rm ci-src2 --no-prompt
+    - '! ludus source list | grep -q "ci-src2 "'
+    - ludus source rm ci-src --no-prompt
     # Scripted selective install: pick one blueprint + its template + the
     # bundled local role; secondary is intentionally left out.
-    - ludus source rm ci-src-pick --no-prompt --purge || true
-    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-pick --blueprints example --templates example-debian-12 --source-roles say_hello
+    - ludus source rm ci-src-pick --no-prompt || true
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-pick --blueprints example --templates example-debian-12-template --source-roles say_hello
     - 'ludus blueprint list | grep -q "ci-src-pick/example"'
     - '! ludus blueprint list | grep -q "ci-src-pick/secondary"'
     # Idempotent re-add: same sourceID + wider selection picks up the
     # previously skipped blueprint without disturbing already-installed ones.
-    - ludus source add ci-src-pick --blueprints example,secondary --templates example-debian-12 --source-roles say_hello
+    - ludus source add ci-src-pick --blueprints example,secondary --templates example-debian-12-template --source-roles say_hello
     - 'ludus blueprint list | grep -q "ci-src-pick/example"'
     - 'ludus blueprint list | grep -q "ci-src-pick/secondary"'
-    - ludus source rm ci-src-pick --no-prompt --purge
+    - ludus source rm ci-src-pick --no-prompt
     # --global-roles: admin install scope. Roles land in the instance-wide
     # global-roles dir, not the owner's per-user ansible roles dir.
-    - ludus source rm ci-src-global --no-prompt --purge || true
+    - ludus source rm ci-src-global --no-prompt || true
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-global --all --global-roles --force
     - test -d /opt/ludus/resources/global-roles/say_hello
-    - ludus source rm ci-src-global --no-prompt --purge
+    # The example blueprint pulls a galaxy role (geerlingguy.docker). Under
+    # --global-roles that install runs ansible-galaxy as the service against a
+    # read-only /home, so it only succeeds when the install is handed a
+    # writable ANSIBLE_HOME. Asserting the role landed guards the read-only
+    # filesystem regression.
+    - test -d /opt/ludus/resources/global-roles/geerlingguy.docker
+    # `source remove` prunes the source's local roles (checking both the global
+    # and per-user paths) but NOT galaxy roles — those are shared instance
+    # resources, removed via `ansible role rm`. So the bundled local role leaves
+    # global-roles; the galaxy role stays.
+    - ludus source remove ci-src-global --all
     - '! test -d /opt/ludus/resources/global-roles/say_hello'
+    - test -d /opt/ludus/resources/global-roles/geerlingguy.docker
+    - ludus source rm ci-src-global --no-prompt
+    # `source remove --all` drops every installed item through the shared
+    # install endpoint while leaving the source registered (unlike `source
+    # rm`). Guards the intent-aware summary — a regression reports "installed
+    # successfully" on a removal — and the empty-selection prune path.
+    - ludus source rm ci-src-remove --no-prompt || true
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-remove --all --force
+    - 'ludus blueprint list | grep -q "ci-src-remove/example"'
+    - ludus source remove ci-src-remove --all 2>&1 | tee /tmp/ci-src-remove.out
+    - 'grep -qi "removed successfully" /tmp/ci-src-remove.out'
+    - '! grep -qi "installed successfully" /tmp/ci-src-remove.out'
+    - 'ludus source list | grep -q "ci-src-remove "'
+    - '! ludus blueprint list | grep -q "ci-src-remove/example"'
+    - ludus source rm ci-src-remove --no-prompt
+    # Non-admin safety: a non-admin's `source remove` must never delete the
+    # SHARED global-roles dir — only files in the owner's own per-user scope.
+    # (Templates install per-user, so they're never gated.) Plant a global-roles
+    # entry that no source claims, then have non-admin CIU install + remove a
+    # source shipping the same-named local role: CIU's own copy goes, the shared
+    # global one stays. (Admins are unrestricted — see the ci-src-global block.)
+    - ludus source rm ci-src-ciu --no-prompt || true
+    - sudo mkdir -p /opt/ludus/resources/global-roles/say_hello
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-ciu --blueprints secondary --source-roles say_hello'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source remove ci-src-ciu --all'
+    - test -d /opt/ludus/resources/global-roles/say_hello   # non-admin remove left the shared global role intact
+    - ludus source rm ci-src-ciu --no-prompt
+    - sudo rm -rf /opt/ludus/resources/global-roles/say_hello
 
 post-deploy ranges-as-admin:
   stage: test

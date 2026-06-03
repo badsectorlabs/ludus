@@ -116,6 +116,47 @@ func ParseSourceManifest(data []byte) (*SourceManifest, error) {
 	return &s, nil
 }
 
+// TemplateManifest is the parsed shape of an optional template.yml in a
+// source's templates/<name>/ dir. Packer templates carry no native
+// description, so this manifest supplies one for the catalog. Only
+// description is meaningful today; manifest_version gates future schema.
+type TemplateManifest struct {
+	ManifestVersion int    `yaml:"manifest_version"`
+	Description     string `yaml:"description,omitempty"`
+}
+
+func ParseTemplateManifest(data []byte) (*TemplateManifest, error) {
+	var m TemplateManifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("template.yml is not valid YAML: %w", err)
+	}
+	if m.ManifestVersion == 0 {
+		return nil, fmt.Errorf("manifest_version is required in template.yml")
+	}
+	if m.ManifestVersion > SupportedManifestVersion {
+		return nil, fmt.Errorf("manifest_version %d is not supported by this Ludus (supports up to %d)", m.ManifestVersion, SupportedManifestVersion)
+	}
+	return &m, nil
+}
+
+// roleMetaMain is the partial shape of an Ansible role's meta/main.yml we read
+// for a human description (the standard galaxy_info.description field).
+type roleMetaMain struct {
+	GalaxyInfo struct {
+		Description string `yaml:"description"`
+	} `yaml:"galaxy_info"`
+}
+
+// roleDescriptionFromMeta extracts galaxy_info.description from a role's
+// meta/main.yml bytes. Best-effort: unparseable meta yields no description.
+func roleDescriptionFromMeta(data []byte) string {
+	var m roleMetaMain
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(m.GalaxyInfo.Description)
+}
+
 // rangeConfigVM is a partial type matching only the fields InferFromRangeConfig
 // needs. Roles entries can be bare scalars (`- my_role`) or mappings with a
 // `name` key, so we accept raw yaml.Node and resolve via roleNameFromNode.

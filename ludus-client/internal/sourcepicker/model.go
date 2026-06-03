@@ -56,10 +56,15 @@ type row struct {
 	section          section
 	id               string // blueprint ID or template/role name
 	label            string // primary label
+	description      string // optional one-line description (shown for the focused row)
 	version          string
 	state            string // not_installed / installed / upgrade_available
 	installedVersion string
-	impliedBy        []string // for read-only and implied-template rows
+	// scopes lists each installed copy of a role: scope, on-disk version, and
+	// per-scope state vs the pin. A role can occupy both global and user at
+	// different versions. Empty for non-role kinds and not-installed roles.
+	scopes     []dto.ScopeInstallDTO
+	requiredBy []string // for read-only and implied-template rows
 	// conflictingPins is true when two or more selected blueprints pinned
 	// this role/collection at different versions. The version string in that
 	// case is the joined "v1 / v2" rendering; the picker shows a △ so the
@@ -70,6 +75,7 @@ type row struct {
 // model is the Bubble Tea model backing the picker.
 type model struct {
 	catalog dto.SourceCatalogDTO
+	mode    Mode
 	adv     Advanced
 
 	// picked[section.key()] = set of IDs/names the user has explicitly checked.
@@ -94,8 +100,11 @@ type model struct {
 	aborted   bool
 }
 
-// newModel builds an initial model from the catalog and any prior selection.
-func newModel(catalog dto.SourceCatalogDTO, initial dto.InstallSelectionDTO, adv Advanced) model {
+// newModel builds an initial model from the catalog. The picker opens with
+// nothing checked in either mode: a checkbox expresses intent for the current
+// command (install this / drop this), not the current install state — which
+// the per-row indicator shows instead.
+func newModel(catalog dto.SourceCatalogDTO, mode Mode, adv Advanced) model {
 	ti := textinput.New()
 	ti.Placeholder = "filter..."
 	ti.Prompt = "/"
@@ -106,18 +115,10 @@ func newModel(catalog dto.SourceCatalogDTO, initial dto.InstallSelectionDTO, adv
 		sectionTemplates.key():  {},
 		sectionLocalRoles.key(): {},
 	}
-	for _, id := range initial.Blueprints {
-		picked[sectionBlueprints.key()][id] = struct{}{}
-	}
-	for _, n := range initial.Templates {
-		picked[sectionTemplates.key()][n] = struct{}{}
-	}
-	for _, n := range initial.LocalRoles {
-		picked[sectionLocalRoles.key()][n] = struct{}{}
-	}
 
 	return model{
 		catalog: catalog,
+		mode:    mode,
 		adv:     adv,
 		picked:  picked,
 		active:  sectionBlueprints,
@@ -128,4 +129,19 @@ func newModel(catalog dto.SourceCatalogDTO, initial dto.InstallSelectionDTO, adv
 		},
 		searchInput: ti,
 	}
+}
+
+// verb is the action word for the current mode, used in the title and footer.
+func (m model) verb() string {
+	if m.mode == ModeRemove {
+		return "remove"
+	}
+	return "install"
+}
+
+// isInstalledState reports whether a catalog state counts as "currently
+// installed" (an upgrade-available item is installed, just at an older
+// version). Remove mode only acts on installed items.
+func isInstalledState(state string) bool {
+	return state == "installed" || state == "upgrade_available"
 }

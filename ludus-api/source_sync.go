@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -50,20 +51,36 @@ type ArtifactResult struct {
 type SyncOptions struct {
 	GlobalRoles bool
 	Force       bool
+	// NoDeps skips the galaxy dependency install (installUnionedRoles): the
+	// selected blueprints register, but their role/collection deps are not
+	// fetched from ansible-galaxy — only what's already on disk is used.
+	NoDeps bool
+	// InitiatorIsAdmin gates deletion of the global-roles dir during a prune —
+	// the only instance-wide resource a source installs into. Templates are
+	// per-user, so a non-admin's remove only ever touches their own files and
+	// can't break what other users rely on. Set from the request user at the
+	// runSourceInstall call sites.
+	InitiatorIsAdmin bool
+	// InitiatorProxmoxUsername is the Proxmox username of the request user.
+	// Source templates install into this user's per-user packer dir, which
+	// survives server updates (the embedded global packer dir is wiped and
+	// re-extracted on every update). Set from the request user at the
+	// runSourceInstall call sites.
+	InitiatorProxmoxUsername string
 	// Archive: tarball bytes for upload-type sources. Empty means "use whatever
 	// is already on disk" — startup re-syncs of upload sources rely on that.
 	Archive         []byte
 	ArchiveFilename string
 
 	// Selection scopes which walked items get registered/installed. nil means
-	// "install everything walked" — set by the install handler when
-	// installAll=true, and the default for backfilled / pre-existing source
-	// rows. Future syncs honor whatever the source's stored installSelection
-	// is.
+	// "install everything walked" — set when the install handler's caller
+	// omits the selection field, and the default for backfilled / pre-existing
+	// source rows. Future syncs honor whatever the source's stored
+	// installSelection is.
 	Selection *InstallSelection
 }
 
-// sourceSyncLocks serialises runSourceSync per source record. Concurrent syncs on
+// sourceSyncLocks serialises runSourceInstall per source record. Concurrent syncs on
 // the same source would race the git checkout, the disk artifact copies, and
 // the blueprint upserts.
 var sourceSyncLocks sync.Map
@@ -78,7 +95,7 @@ func lockSourceSync(sourceRecordID string) func() {
 // fetchAndWalkSource brings the source's on-disk checkout to its declared
 // ref (git) or extracted archive bytes (upload), then walks the result. It's
 // the shared "make the working tree current and tell me what's there" step
-// for runSourceSync, the register-only branch of CreateSource, and the
+// for runSourceInstall, the register-only branch of CreateSource, and the
 // catalog/install-preview handlers. Caller must already hold the per-source
 // sync lock.
 func fetchAndWalkSource(app core.App, sourceRecord *core.Record, opts SyncOptions) (*WalkedSource, error) {
@@ -157,16 +174,69 @@ func fetchAndWalkSource(app core.App, sourceRecord *core.Record, opts SyncOption
 	return walked, nil
 }
 
-// runSourceSync fetches/extracts the source on disk, walks it, upserts
-// source-derived blueprints, registers shipped templates and local roles, and
-// runs the unioned role install. Used by both source-add (the heavy first run)
-// and source-sync (idempotent re-application). Synchronous.
-func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sourceRecord *core.Record, opts SyncOptions) (*SyncResult, error) {
+// RefreshResult is what a read-only refresh reports back. The walked source
+// is the live catalog view; UndeclaredDependencies surfaces blueprint role
+// references that aren't declared anywhere ansible-galaxy can resolve them.
+// No install side-effects happen on this path — apply a selection through
+// InstallSource to commit any state changes.
+type RefreshResult struct {
+	Walked                 *WalkedSource
+	UndeclaredDependencies []UndeclaredDependency
+}
+
+// runSourceRefresh refreshes the on-disk checkout and updates the source
+// record's manifest fields and sync metadata. NO artifact installs, removes,
+// or DB writes for blueprints/templates/roles. Used by POST /sources/{id}/sync
+// and SyncAllSourcesOnStartup so syncing is cheap and observation-only.
+//
+// One-shot legacy migration: when the source record's installSelection is
+// null (pre-upgrade rows that ran under the install-all regime), this path
+// snapshots the current walk into installSelection so the next install has
+// a concrete starting point. After the snapshot lands, every subsequent
+// refresh is fully read-only.
+func runSourceRefresh(app core.App, sourceRecord *core.Record, opts SyncOptions) (*RefreshResult, error) {
 	defer lockSourceSync(sourceRecord.Id)()
 
 	walked, err := fetchAndWalkSource(app, sourceRecord, opts)
 	if err != nil {
 		return nil, err
+	}
+
+	applySourceManifestToRecord(sourceRecord, walked.Source)
+	sourceRecord.Set("lastSyncedAt", time.Now().UTC().Format(time.RFC3339))
+	sourceRecord.Set("lastSyncStatus", "ok")
+	sourceRecord.Set("lastSyncError", "")
+
+	if loadInstallSelection(sourceRecord) == nil {
+		sourceRecord.Set("installSelection", snapshotWalkedAsSelection(walked))
+	}
+
+	if err := app.Save(sourceRecord); err != nil {
+		return nil, err
+	}
+	return &RefreshResult{
+		Walked:                 walked,
+		UndeclaredDependencies: findUndeclaredDependencies(walked),
+	}, nil
+}
+
+// runSourceInstall is the install path. It refreshes, applies the selection
+// (upserting blueprint rows, registering template/role files, pruning stale
+// claims, installing galaxy roles), and persists the result.
+//
+// When opts.Selection is nil the install behaves as "install everything
+// currently walked" — the walked set is snapshotted into installSelection
+// before the apply runs, so future syncs honor a concrete set.
+func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, sourceRecord *core.Record, opts SyncOptions) (*SyncResult, error) {
+	defer lockSourceSync(sourceRecord.Id)()
+
+	walked, err := fetchAndWalkSource(app, sourceRecord, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	if opts.Selection == nil {
+		opts.Selection = snapshotWalkedAsSelection(walked)
 	}
 
 	applySourceManifestToRecord(sourceRecord, walked.Source)
@@ -180,9 +250,12 @@ func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sour
 	}
 
 	res := &SyncResult{}
-	res.TemplateResults = registerTemplates(app, sourceRecord, walked, opts.Force, opts.Selection)
+	res.TemplateResults = registerTemplates(app, sourceRecord, walked, opts)
 	res.LocalRoleResults = registerLocalRoles(app, sourceRecord, walked, opts)
-	res.RoleResults = installUnionedRoles(e, app, sourceRecord, walked, opts)
+	pruneSourceArtifactClaims(app, sourceRecord, walked, opts.Selection, opts.InitiatorIsAdmin, opts.InitiatorProxmoxUsername)
+	if !opts.NoDeps {
+		res.RoleResults = installUnionedRoles(e, app, sourceRecord, walked, opts)
+	}
 	res.UndeclaredDependencies = findUndeclaredDependencies(walked)
 
 	sourceRecord.Set("lastSyncedAt", time.Now().UTC().Format(time.RFC3339))
@@ -194,13 +267,32 @@ func runSourceSync(ctx context.Context, e *core.RequestEvent, app core.App, sour
 		sourceRecord.Set("lastSyncStatus", "partial")
 		sourceRecord.Set("lastSyncError", truncateError(strings.Join(failures, "; "), 4000))
 	}
-	if opts.Selection != nil {
-		sourceRecord.Set("installSelection", opts.Selection)
-	}
+	sourceRecord.Set("installSelection", opts.Selection)
 	if err := app.Save(sourceRecord); err != nil {
 		return res, err
 	}
 	return res, nil
+}
+
+// snapshotWalkedAsSelection turns "everything in this walk" into an
+// InstallSelection. Used as the migration shim for legacy source rows that
+// pre-date the "selection always set" contract — first sync after upgrade
+// persists this snapshot, and subsequent syncs honor it.
+func snapshotWalkedAsSelection(walked *WalkedSource) *InstallSelection {
+	sel := &InstallSelection{}
+	for _, bp := range walked.Blueprints {
+		if bp.Manifest == nil {
+			continue
+		}
+		sel.Blueprints = append(sel.Blueprints, bp.Manifest.ID)
+	}
+	for _, dir := range walked.Templates {
+		sel.Templates = append(sel.Templates, templateNameForDir(dir))
+	}
+	for _, dir := range walked.LocalRoles {
+		sel.LocalRoles = append(sel.LocalRoles, filepath.Base(dir))
+	}
+	return sel
 }
 
 func collectSyncFailures(res *SyncResult) []string {
@@ -324,16 +416,132 @@ func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource
 		}
 	}
 
+	// Prune rows for blueprints the user no longer wants. A row is kept when
+	// either (a) it's still walked AND selected (the seen set), or (b) the
+	// persisted selection still names it — upstream may have removed the
+	// blueprint, but user intent wins over upstream churn. In install-all
+	// mode (selection == nil), the seen-only check applies and orphan rows
+	// for items removed upstream are pruned as before.
 	existing, err := app.FindRecordsByFilter("blueprints",
 		"source = {:src}", "", 0, 0, map[string]any{"src": src.Id})
 	if err == nil {
 		for _, rec := range existing {
-			if _, ok := seen[rec.GetString("sourceBlueprintID")]; !ok {
-				_ = app.Delete(rec)
+			sourceBPID := rec.GetString("sourceBlueprintID")
+			if _, walked := seen[sourceBPID]; walked {
+				continue
 			}
+			if selection != nil && slices.Contains(selection.Blueprints, sourceBPID) {
+				continue
+			}
+			_ = app.Delete(rec)
 		}
 	}
 	return nil
+}
+
+// pruneSourceArtifactClaims drops source_artifacts rows for template and
+// local_role names this source no longer wants — either because the user
+// de-selected them, or because upstream removed the directory AND the
+// persisted selection no longer names them. The on-disk files go too: there is
+// no cross-source refcount, so a de-selected name is uninstalled even if
+// another source ships the same name (that source can reinstall it).
+//
+// Galaxy roles and collections are not pruned here: their claims come from
+// blueprint requirements.yml, and installUnionedRoles already filters by
+// the selected blueprints, so a stale row would imply a blueprint-level
+// inconsistency rather than a template/role one. Left for a follow-up if
+// it becomes a real problem.
+func pruneSourceArtifactClaims(app core.App, src *core.Record, walked *WalkedSource, selection *InstallSelection, initiatorIsAdmin bool, initiatorProxmoxUsername string) {
+	keep := func(dirs []string, selected []string, nameFn func(string) string) map[string]struct{} {
+		out := map[string]struct{}{}
+		for _, dir := range dirs {
+			name := nameFn(dir)
+			if selection != nil && !slices.Contains(selected, name) {
+				continue
+			}
+			out[name] = struct{}{}
+		}
+		return out
+	}
+
+	// Templates are keyed by their *-template name (matching the catalog +
+	// ledger); local roles by directory basename.
+	keptTemplates := keep(walked.Templates, selectionTemplates(selection), templateNameForDir)
+	keptLocalRoles := keep(walked.LocalRoles, selectionLocalRoles(selection), filepath.Base)
+
+	dropStaleClaims(app, src, "template", keptTemplates, selectionTemplates(selection), selection != nil, initiatorIsAdmin, initiatorProxmoxUsername)
+	dropStaleClaims(app, src, "local_role", keptLocalRoles, selectionLocalRoles(selection), selection != nil, initiatorIsAdmin, initiatorProxmoxUsername)
+}
+
+func selectionTemplates(s *InstallSelection) []string {
+	if s == nil {
+		return nil
+	}
+	return s.Templates
+}
+
+func selectionLocalRoles(s *InstallSelection) []string {
+	if s == nil {
+		return nil
+	}
+	return s.LocalRoles
+}
+
+// dropStaleClaims removes (source, kind, name) rows whose name is neither
+// currently kept nor named in the persisted selection. When the source is
+// in install-all mode (haveSelection=false), the second guard is moot and
+// only the kept set decides.
+//
+// After dropping our row, the on-disk files are removed too. Templates live in
+// the initiator's own per-user packer dir, so removing one only affects that
+// user — no gate. The global-roles dir IS shared instance-wide, so deleting
+// from it stays admin-only (initiatorIsAdmin); a non-admin's role remove
+// touches only the source owner's own per-user roles. There is NO cross-source
+// refcount — uninstall means uninstall, so this deletes the artifact even if
+// another source also ships the same name (that source can reinstall it).
+// Failures from file removal are logged but not propagated — a stranded file
+// is annoying but not corrupting, and we never want a prune error to
+// short-circuit the rest of the sync.
+func dropStaleClaims(app core.App, src *core.Record, kind string, kept map[string]struct{}, selected []string, haveSelection, initiatorIsAdmin bool, initiatorProxmoxUsername string) {
+	existing, err := app.FindRecordsByFilter("source_artifacts",
+		"source = {:s} && kind = {:k}", "", 0, 0,
+		map[string]any{"s": src.Id, "k": kind})
+	if err != nil {
+		return
+	}
+	for _, rec := range existing {
+		name := rec.GetString("name")
+		if _, ok := kept[name]; ok {
+			continue
+		}
+		if haveSelection && slices.Contains(selected, name) {
+			continue
+		}
+		if err := app.Delete(rec); err != nil {
+			continue
+		}
+		switch kind {
+		case "template":
+			// Templates live in the initiator's own per-user packer dir, so a
+			// remove only ever deletes that user's copy — no admin gate. The
+			// templates-collection row is dropped too; if another user still
+			// has the same template, their next `templates list` disk-scan
+			// re-adds it.
+			if rmErr := removeTemplateByName(name, initiatorProxmoxUsername); rmErr != nil {
+				log.Printf("[blueprint-sources] sync prune: remove template %q: %v", name, rmErr)
+				continue
+			}
+			if tplRec, _ := app.FindFirstRecordByData("templates", "name", name); tplRec != nil {
+				_ = app.Delete(tplRec)
+			}
+		case "local_role":
+			// global-roles deletion is admin-only; a non-admin's remove is
+			// confined to the source owner's own per-user roles dir.
+			if rmErr := removeLocalRoleByName(app, name, src, initiatorIsAdmin); rmErr != nil {
+				log.Printf("[blueprint-sources] sync prune: remove local role %q: %v", name, rmErr)
+			}
+		}
+	}
 }
 
 func relativeToCheckout(checkoutDir, target string) string {
@@ -344,16 +552,72 @@ func relativeToCheckout(checkoutDir, target string) string {
 	return rel
 }
 
-// startupSyncConcurrency bounds the boot-time sync fan-out. We don't want N
-// simultaneous git fetches and ansible-galaxy installs racing for disk and
-// network on boot.
+// startupSyncConcurrency bounds the boot-time refresh fan-out. We don't
+// want N simultaneous git fetches racing for disk and network on boot.
 const startupSyncConcurrency = 4
 
-// SyncAllSourcesOnStartup refreshes every registered source asynchronously at
-// server start. Failures don't block startup. Disabled when the env var
-// LUDUS_SYNC_SOURCES_ON_STARTUP=false.
+// defaultSourceBSL is the Bad Sector Labs source that ships Ludus's templates,
+// blueprints, and roles. We auto-register it (owned by ROOT, so the sources
+// list rule `isAdmin || owner` surfaces it to every admin) on startup, so a
+// fresh instance can sync its catalog and install assets without anyone
+// hand-running `source add`. Register-only — the catalog is fetched by the
+// normal startup refresh (and on demand), keeping this offline-tolerant.
+const (
+	defaultSourceBSLID  = "ludus-source-bsl"
+	defaultSourceBSLURL = "https://github.com/badsectorlabs/ludus-source-bsl.git"
+)
+
+// seedDefaultSourceBSL registers the default BSL source if it isn't already
+// present. Idempotent (keyed on owner+sourceID); re-registers if an admin
+// removed it, so the default stays available. Opt out with
+// register_default_source: false in config.yml.
+func seedDefaultSourceBSL(app core.App) {
+	ConfigMu.RLock()
+	enabled := ServerConfiguration.RegisterDefaultSource
+	ConfigMu.RUnlock()
+	if !enabled {
+		return
+	}
+	// ROOT may not exist yet on the very first boot — skip and let a later
+	// boot register it.
+	root, err := app.FindFirstRecordByData("users", "userID", "ROOT")
+	if err != nil {
+		return
+	}
+	existing, _ := app.FindRecordsByFilter("sources",
+		"owner = {:o} && sourceID = {:s}", "", 1, 0,
+		map[string]any{"o": root.Id, "s": defaultSourceBSLID})
+	if len(existing) > 0 {
+		return
+	}
+	collection, err := app.FindCollectionByNameOrId("sources")
+	if err != nil {
+		return
+	}
+	src := core.NewRecord(collection)
+	src.Set("sourceID", defaultSourceBSLID)
+	src.Set("name", defaultSourceBSLID) // refresh overwrites from source.yml
+	src.Set("type", "git")
+	src.Set("owner", root.Id)
+	src.Set("url", defaultSourceBSLURL)
+	src.Set("lastSyncStatus", "")
+	src.Set("lastSyncError", "")
+	if err := app.Save(src); err != nil {
+		log.Printf("[blueprint-sources] seed default source %q: %v", defaultSourceBSLID, err)
+		return
+	}
+	log.Printf("[blueprint-sources] registered default source %q (%s)", defaultSourceBSLID, defaultSourceBSLURL)
+}
+
+// SyncAllSourcesOnStartup refreshes every registered source's catalog
+// asynchronously at server start. Refresh-only — no artifact installs,
+// removes, or DB writes for blueprints/templates/roles. Failures don't
+// block startup. Disabled with sync_sources_on_startup: false in config.yml.
 func SyncAllSourcesOnStartup(app core.App) {
-	if os.Getenv("LUDUS_SYNC_SOURCES_ON_STARTUP") == "false" {
+	ConfigMu.RLock()
+	enabled := ServerConfiguration.SyncSourcesOnStartup
+	ConfigMu.RUnlock()
+	if !enabled {
 		return
 	}
 	go func() {
@@ -366,8 +630,7 @@ func SyncAllSourcesOnStartup(app core.App) {
 			sem <- struct{}{}
 			go func(s *core.Record) {
 				defer func() { <-sem }()
-				opts := SyncOptions{Selection: loadInstallSelection(s)}
-				_, _ = runSourceSync(context.Background(), nil, app, s, opts)
+				_, _ = runSourceRefresh(app, s, SyncOptions{})
 			}(src)
 		}
 		for i := 0; i < cap(sem); i++ {
@@ -378,7 +641,7 @@ func SyncAllSourcesOnStartup(app core.App) {
 
 // loadInstallSelection reads the persisted picker selection off a source
 // record. nil means "no selection on file — install everything" (matches
-// the runSourceSync filter semantics).
+// the runSourceInstall filter semantics).
 func loadInstallSelection(src *core.Record) *InstallSelection {
 	return decodeInstallSelectionRaw(src.Get("installSelection"))
 }
@@ -418,4 +681,3 @@ func decodeInstallSelectionRaw(raw any) *InstallSelection {
 	}
 	return &sel
 }
-

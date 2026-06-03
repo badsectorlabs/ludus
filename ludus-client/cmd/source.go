@@ -12,6 +12,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/go-resty/resty/v2"
@@ -228,7 +229,7 @@ var (
 	sourceFlagRef         string
 	sourceFlagGlobalRoles bool
 	sourceFlagForce       bool
-	sourceFlagPurge       bool
+	sourceFlagNoDeps      bool
 	sourceFlagNoPrompt    bool
 
 	// Selection flags for `source add`. Picker is used when none are set
@@ -301,7 +302,7 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 	if flags.Directory == "" && detectSourceArg(arg) == sourceArgUnknown {
 		catalog, ok := tryFetchCatalog(client, arg)
 		if ok {
-			runExistingSourceFlow(client, arg, catalog, flags, mode)
+			runExistingSourceFlow(client, arg, catalog, flags, mode, sourcepicker.ModeInstall)
 			return
 		}
 		logger.Logger.Fatalf("could not interpret %q: expected a git URL, tarball/zip path, or existing sourceID (pass -d for a local directory)", arg)
@@ -317,15 +318,16 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 	}
 
 	if mode == modeInstallAll {
-		doInstallAll(client, registerResp.SourceID, sourcepicker.Advanced{
+		doInstallAll(client, registerResp.SourceID, registerResp.Catalog, sourcepicker.Advanced{
 			GlobalRoles: flags.GlobalRoles,
 			Force:       flags.Force,
 			IsAdmin:     clientIsAdmin(),
+			NoDeps:      flags.NoDeps,
 		})
 		return
 	}
 
-	selection, advanced, committed, err := chooseSelection(mode, flags, registerResp.Catalog)
+	selection, advanced, committed, proceed, err := chooseSelection(mode, sourcepicker.ModeInstall, flags, registerResp.Catalog)
 	if err != nil {
 		logger.Logger.Fatal(err)
 	}
@@ -333,19 +335,18 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 		logger.Logger.Infof("Aborted. Run `ludus source add %s` to resume.", registerResp.SourceID)
 		return
 	}
-	if isEmptySelection(selection) {
-		// Committing with nothing selected is a no-op; the server would 400
-		// such a request anyway. Skip the round-trip.
+	if !proceed {
+		// Nothing picked to install — skip the round-trip.
 		logger.Logger.Infof("Nothing selected. Run `ludus source add %s` to resume.", registerResp.SourceID)
 		return
 	}
 
-	doInstall(client, registerResp.SourceID, selection, advanced)
+	doInstall(client, registerResp.SourceID, selection, advanced, "installed")
 }
 
-// isEmptySelection reports whether the picker committed without ticking
-// anything. The server would 400 such a request; we short-circuit to keep
-// the CLI message clean.
+// isEmptySelection reports whether nothing was picked — the install path's
+// "nothing to do" gate. (Distinct from a present-but-empty selection sent to
+// the server, which is the prune-all signal.)
 func isEmptySelection(sel dto.InstallSelectionDTO) bool {
 	return len(sel.Blueprints)+len(sel.Templates)+len(sel.LocalRoles) == 0
 }
@@ -405,8 +406,8 @@ func renderCatalogTables(cat dto.SourceCatalogDTO) {
 	renderBlueprintsTable(cat.Blueprints)
 	renderItemsTable("Templates", cat.Templates, false)
 	renderItemsTable("Source roles", cat.LocalRoles, false)
-	renderItemsTable("Blueprint roles", cat.GalaxyRoles, true)
-	renderItemsTable("Blueprint collections", cat.GalaxyCollections, true)
+	renderItemsTable("Blueprint role requirements", cat.GalaxyRoles, true)
+	renderItemsTable("Blueprint collection requirements", cat.GalaxyCollections, true)
 	renderItemsTable("Subscription roles", cat.SubscriptionRoles, true)
 
 	if len(cat.UndeclaredDependencies) > 0 {
@@ -451,25 +452,25 @@ func renderBlueprintsTable(items []dto.CatalogBlueprintDTO) {
 	t.Render()
 }
 
-// renderItemsTable handles templates / roles / collections. `withImpliedBy`
+// renderItemsTable handles templates / roles / collections. `withRequiredBy`
 // adds a column for the blueprint(s) that pulled the item in (only useful
 // for galaxy/subscription/collection sections). Empty sections are
 // skipped entirely — user only sees what the source actually ships.
-func renderItemsTable(heading string, items []dto.CatalogItemDTO, withImpliedBy bool) {
+func renderItemsTable(heading string, items []dto.CatalogItemDTO, withRequiredBy bool) {
 	if len(items) == 0 {
 		return
 	}
 	fmt.Printf("\n%s (%d)\n", heading, len(items))
 	t := tablewriter.NewWriter(os.Stdout)
 	header := []string{"Name", "Version", "State"}
-	if withImpliedBy {
+	if withRequiredBy {
 		header = append(header, "Required by")
 	}
 	t.SetHeader(header)
 	for _, it := range items {
 		row := []string{it.Name, it.Version, prettyState(it.State, it.InstalledVersion)}
-		if withImpliedBy {
-			row = append(row, strings.Join(it.ImpliedBy, ", "))
+		if withRequiredBy {
+			row = append(row, strings.Join(it.RequiredBy, ", "))
 		}
 		t.Append(row)
 	}
@@ -514,17 +515,18 @@ func tryFetchCatalog(client *resty.Client, sourceID string) (dto.SourceCatalogDT
 // runExistingSourceFlow drives selection + install against an already-
 // registered source. Mirrors the post-register branch of runSourceAdd but
 // skips the upload/git work since the source content is already on disk.
-func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.SourceCatalogDTO, flags sourceFlags, mode installMode) {
+func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.SourceCatalogDTO, flags sourceFlags, mode installMode, intent sourcepicker.Mode) {
 	if mode == modeInstallAll {
-		doInstallAll(client, sourceID, sourcepicker.Advanced{
+		doInstallAll(client, sourceID, cat, sourcepicker.Advanced{
 			GlobalRoles: flags.GlobalRoles,
 			Force:       flags.Force,
 			IsAdmin:     clientIsAdmin(),
+			NoDeps:      flags.NoDeps,
 		})
 		return
 	}
 
-	selection, advanced, committed, err := chooseSelection(mode, flags, cat)
+	selection, advanced, committed, proceed, err := chooseSelection(mode, intent, flags, cat)
 	if err != nil {
 		logger.Logger.Fatal(err)
 	}
@@ -532,11 +534,15 @@ func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.Source
 		logger.Logger.Info("Aborted.")
 		return
 	}
-	if isEmptySelection(selection) {
-		logger.Logger.Info("Nothing selected; nothing to install.")
+	if !proceed {
+		if intent == sourcepicker.ModeRemove {
+			logger.Logger.Info("Nothing selected; nothing to remove.")
+		} else {
+			logger.Logger.Info("Nothing selected; nothing to install.")
+		}
 		return
 	}
-	doInstall(client, sourceID, selection, advanced)
+	doInstall(client, sourceID, selection, advanced, installVerbPast(intent))
 }
 
 // readSourceAddFlags snapshots the package-level flag vars wired onto
@@ -554,6 +560,7 @@ func readSourceAddFlags() sourceFlags {
 		LocalRoles:  []string(sourceFlagLocalRoles),
 		GlobalRoles: sourceFlagGlobalRoles,
 		Force:       sourceFlagForce,
+		NoDeps:      sourceFlagNoDeps,
 	}
 }
 
@@ -628,53 +635,118 @@ func postSourceRegister(client *resty.Client, arg string, flags sourceFlags) (dt
 	return resp, true, nil
 }
 
-func chooseSelection(mode installMode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, error) {
+// chooseSelection resolves the selection to POST. intent (install vs remove)
+// only matters for the interactive picker: it drives the picker's mode and
+// how the picked intent set folds against the current install state.
+//
+// Returns (selection, advanced, committed, proceed, err):
+//   - committed is false only when the user aborted the picker.
+//   - proceed is false when there is nothing to do (no items picked / scripted
+//     selection empty); the caller prints a "nothing selected" notice and
+//     skips the round-trip. A remove that drops every installed item still
+//     proceeds — its empty selection is the server's prune-all signal.
+func chooseSelection(mode installMode, intent sourcepicker.Mode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, bool, error) {
+	adv := sourcepicker.Advanced{
+		GlobalRoles: flags.GlobalRoles,
+		Force:       flags.Force,
+		IsAdmin:     clientIsAdmin(),
+		NoDeps:      flags.NoDeps,
+	}
 	switch mode {
 	case modeScripted:
-		return dto.InstallSelectionDTO{
-				Blueprints: flags.Blueprints,
-				Templates:  flags.Templates,
-				LocalRoles: flags.LocalRoles,
-			}, sourcepicker.Advanced{
-				GlobalRoles: flags.GlobalRoles,
-				Force:       flags.Force,
-				IsAdmin:     clientIsAdmin(),
-			}, true, nil
+		sel := dto.InstallSelectionDTO{
+			Blueprints: flags.Blueprints,
+			Templates:  flags.Templates,
+			LocalRoles: flags.LocalRoles,
+		}
+		return sel, adv, true, !isEmptySelection(sel), nil
 	case modeInteractive:
-		return sourcepicker.Run(cat, dto.InstallSelectionDTO{}, sourcepicker.Advanced{
-			GlobalRoles: flags.GlobalRoles,
-			Force:       flags.Force,
-			IsAdmin:     clientIsAdmin(),
-		})
+		// The picker opens with nothing checked and returns the user's intent
+		// set (items to install, or to drop). An empty intent means "nothing
+		// to do"; a non-empty intent folds against the current install state
+		// to build the wire selection.
+		picked, advOut, committed, err := sourcepicker.Run(cat, intent, adv)
+		if err != nil || !committed {
+			return dto.InstallSelectionDTO{}, advOut, committed, false, err
+		}
+		if isEmptySelection(picked) {
+			return dto.InstallSelectionDTO{}, advOut, true, false, nil
+		}
+		return composeInteractiveSelection(intent, cat, picked), advOut, true, true, nil
 	default:
-		return dto.InstallSelectionDTO{}, sourcepicker.Advanced{}, false, fmt.Errorf("unreachable: mode %v", mode)
+		return dto.InstallSelectionDTO{}, adv, false, false, fmt.Errorf("unreachable: mode %v", mode)
 	}
+}
+
+// deriveCurrentSelection rebuilds the source's installed-selection from
+// the catalog's per-item state. composeInteractiveSelection folds the
+// picker's intent set against it (install adds to it, remove subtracts from
+// it). Items in state "installed" or "upgrade_available" count as currently
+// installed; "not_installed" do not. Note: this can drift from the server's persisted installSelection
+// when upstream has removed an item the user previously selected — the
+// orphan won't appear in the catalog walk so we can't surface it here.
+// Acceptable: orphans aren't actionable from this UI anyway (the files
+// they reference no longer exist upstream).
+func deriveCurrentSelection(cat dto.SourceCatalogDTO) dto.InstallSelectionDTO {
+	out := dto.InstallSelectionDTO{}
+	for _, bp := range cat.Blueprints {
+		if bp.State == "installed" || bp.State == "upgrade_available" {
+			out.Blueprints = append(out.Blueprints, bp.ID)
+		}
+	}
+	for _, t := range cat.Templates {
+		if t.State == "installed" || t.State == "upgrade_available" {
+			out.Templates = append(out.Templates, t.Name)
+		}
+	}
+	for _, r := range cat.LocalRoles {
+		if r.State == "installed" || r.State == "upgrade_available" {
+			out.LocalRoles = append(out.LocalRoles, r.Name)
+		}
+	}
+	return out
 }
 
 // clientIsAdmin is currently a stub — the server already gates --global-roles
 // for non-admins, so this only affects the picker's display.
 func clientIsAdmin() bool { return true }
 
-func doInstall(client *resty.Client, sourceID string, sel dto.InstallSelectionDTO, adv sourcepicker.Advanced) {
-	postInstall(client, sourceID, dto.InstallRequest{
-		Selection:   sel,
-		GlobalRoles: adv.GlobalRoles,
-		Force:       adv.Force,
-	})
+// installVerbPast returns the past-tense verb for the result summary, so a
+// removal reports "removed successfully" rather than "installed". The /install
+// endpoint is intent-agnostic (it just reconciles the selection); the verb is
+// the client's view of what the user asked for.
+func installVerbPast(intent sourcepicker.Mode) string {
+	if intent == sourcepicker.ModeRemove {
+		return "removed"
+	}
+	return "installed"
 }
 
-// doInstallAll is the "install everything walked" shortcut used by --all
-// and non-TTY invocations. The server expands installAll=true into a sync
-// with no selection scope.
-func doInstallAll(client *resty.Client, sourceID string, adv sourcepicker.Advanced) {
+func doInstall(client *resty.Client, sourceID string, sel dto.InstallSelectionDTO, adv sourcepicker.Advanced, verbPast string) {
 	postInstall(client, sourceID, dto.InstallRequest{
-		InstallAll:  true,
+		Selection:   &sel,
 		GlobalRoles: adv.GlobalRoles,
 		Force:       adv.Force,
-	})
+		NoDeps:      adv.NoDeps,
+	}, verbPast)
 }
 
-func postInstall(client *resty.Client, sourceID string, body dto.InstallRequest) {
+// doInstallAll is the "install everything currently walked" shortcut used
+// by --all and non-TTY invocations. The server treats an omitted selection
+// as "snapshot the current walk into installSelection," so the persisted
+// state is a concrete list of names and future syncs don't drift with
+// upstream changes.
+func doInstallAll(client *resty.Client, sourceID string, _ dto.SourceCatalogDTO, adv sourcepicker.Advanced) {
+	// install-all is only ever an install path (remove builds an explicit
+	// selection), so the verb is fixed.
+	postInstall(client, sourceID, dto.InstallRequest{
+		GlobalRoles: adv.GlobalRoles,
+		Force:       adv.Force,
+		NoDeps:      adv.NoDeps,
+	}, "installed")
+}
+
+func postInstall(client *resty.Client, sourceID string, body dto.InstallRequest, verbPast string) {
 	resp, ok := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/install"), body)
 	if didFailOrWantJSON(ok, resp) {
 		return
@@ -684,7 +756,7 @@ func postInstall(client *resty.Client, sourceID string, body dto.InstallRequest)
 		logger.Logger.Info(string(resp))
 		return
 	}
-	printSyncFailures(fmt.Sprintf("Source '%s'", sourceID), "installed", sync)
+	printSyncFailures(fmt.Sprintf("Source '%s'", sourceID), verbPast, sync)
 }
 
 func isSourceURL(s string) bool {
@@ -768,9 +840,11 @@ var sourceListCmd = &cobra.Command{
 	},
 }
 
-// runSourceDetail prints metadata + per-artifact tables for one source.
-// Each sub-resource fetch is independent: a failure on one (e.g. perms) does
-// not suppress the rest. Empty sections render as "(none)".
+// runSourceDetail prints metadata followed by the source's catalog (what
+// upstream ships, joined with which items are currently installed). Sync
+// is read-only, so "installed" and "available" can drift between syncs —
+// the State column on each row tells the user which is which and whether
+// an upgrade is waiting.
 func runSourceDetail(client *resty.Client, sourceID string) {
 	srcJSON, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID))
 	if didFailOrWantJSON(ok, srcJSON) {
@@ -803,10 +877,12 @@ func runSourceDetail(client *resty.Client, sourceID string) {
 	}
 	fmt.Println()
 
-	printSourceBlueprints(client, sourceID)
-	printSourceTemplates(client, sourceID)
-	printSourceRoles(client, sourceID)
-	printSourceCollections(client, sourceID)
+	catalog, ok := tryFetchCatalog(client, sourceID)
+	if !ok {
+		logger.Logger.Warnf("Could not fetch catalog for %q; showing source metadata only.", sourceID)
+		return
+	}
+	renderCatalogTables(catalog)
 }
 
 func printField(label, value string) {
@@ -816,108 +892,16 @@ func printField(label, value string) {
 	fmt.Printf("  %-13s %s\n", label+":", value)
 }
 
-func printSourceBlueprints(client *resty.Client, sourceID string) {
-	body, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/blueprints"))
-	if !ok {
-		return
-	}
-	var items []dto.SourceBlueprintListItem
-	if err := json.Unmarshal(body, &items); err != nil {
-		return
-	}
-	fmt.Printf("Blueprints (%d)\n", len(items))
-	if len(items) == 0 {
-		fmt.Println("  (none)")
-		fmt.Println()
-		return
-	}
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Blueprint ID", "Name", "Version", "Tags"})
-	for _, b := range items {
-		table.Append([]string{b.SourceBlueprintID, b.Name, b.Version, strings.Join(b.Tags, ", ")})
-	}
-	table.Render()
-	fmt.Println()
-}
-
-func printSourceTemplates(client *resty.Client, sourceID string) {
-	body, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/templates"))
-	if !ok {
-		return
-	}
-	var items []dto.ListSourceTemplatesResponseItem
-	if err := json.Unmarshal(body, &items); err != nil {
-		return
-	}
-	fmt.Printf("Templates (%d)\n", len(items))
-	if len(items) == 0 {
-		fmt.Println("  (none)")
-		fmt.Println()
-		return
-	}
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Name", "Version"})
-	for _, t := range items {
-		table.Append([]string{t.Name, t.Version})
-	}
-	table.Render()
-	fmt.Println()
-}
-
-func printSourceRoles(client *resty.Client, sourceID string) {
-	body, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/roles"))
-	if !ok {
-		return
-	}
-	var items []dto.ListSourceRolesResponseItem
-	if err := json.Unmarshal(body, &items); err != nil {
-		return
-	}
-	fmt.Printf("Roles (%d)\n", len(items))
-	if len(items) == 0 {
-		fmt.Println("  (none)")
-		fmt.Println()
-		return
-	}
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Name", "Scope", "Version"})
-	for _, r := range items {
-		table.Append([]string{r.Name, r.Scope, r.Version})
-	}
-	table.Render()
-	fmt.Println()
-}
-
-func printSourceCollections(client *resty.Client, sourceID string) {
-	body, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/collections"))
-	if !ok {
-		return
-	}
-	var items []dto.ListSourceCollectionsResponseItem
-	if err := json.Unmarshal(body, &items); err != nil {
-		return
-	}
-	fmt.Printf("Collections (%d)\n", len(items))
-	if len(items) == 0 {
-		fmt.Println("  (none)")
-		fmt.Println()
-		return
-	}
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Name", "Version"})
-	for _, c := range items {
-		table.Append([]string{c.Name, c.Version})
-	}
-	table.Render()
-	fmt.Println()
-}
-
 var sourceSyncCmd = &cobra.Command{
 	Use:   "sync [<sourceID>]",
-	Short: "Re-pull a git source",
-	Long:  `Re-pull a git source and re-register its content. Upload sources don't sync — push a new tarball with 'ludus source update' instead.`,
-	Args:  cobra.MaximumNArgs(1),
-	Run:   runSourceSync,
+	Short: "Re-pull a git source and refresh its catalog",
+	Long: `Refresh the catalog view of a git source by re-pulling its working tree.
+Sync is read-only — it does NOT install, update, or remove any blueprints,
+templates, or roles. To apply upstream changes, re-run 'ludus source add
+<sourceID>' to commit a fresh selection. Upload sources don't sync — push
+a new tarball with 'ludus source update' instead.`,
+	Args: cobra.MaximumNArgs(1),
+	Run:  runSourceSync,
 }
 
 func runSourceSync(cmd *cobra.Command, args []string) {
@@ -1054,20 +1038,195 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 	logger.Logger.Infof("Source '%s' ref updated. Run `ludus source sync %s` to apply.", sid, sid)
 }
 
+var sourceRemoveCmd = &cobra.Command{
+	Use:     "remove <sourceID>",
+	Short:   "Remove items from an installed source (or open the picker to manage)",
+	Aliases: []string{"uninstall"},
+	Long: `Drop items from a source's installed selection. The source itself stays
+registered; only the named items get removed. Files unique to this source
+are deleted from disk; items still claimed by another source keep their
+files.
+
+  ludus source remove <id>                              # open the picker showing installed items; check what you want to drop
+  ludus source remove <id> --blueprints A,B             # scripted: drop blueprints A and B from the current selection
+  ludus source remove <id> --templates T1               # scripted: drop template T1
+  ludus source remove <id> --source-roles R1            # scripted: drop local role R1
+  ludus source remove <id> --all                        # scripted: drop every item (the source stays registered)
+
+To DELETE the source entirely (registration + every installed item),
+use 'ludus source rm <id>' instead.`,
+	Args: cobra.ExactArgs(1),
+	Run:  runSourceRemove,
+}
+
+func runSourceRemove(cmd *cobra.Command, args []string) {
+	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+	sid := args[0]
+
+	dropBlueprints := []string(sourceFlagBlueprints)
+	dropTemplates := []string(sourceFlagTemplates)
+	dropLocalRoles := []string(sourceFlagLocalRoles)
+	dropAll := sourceFlagAll
+
+	// No flags: open the picker against the existing source in remove mode.
+	// It shows only installed items, all unchecked; the user checks what to
+	// drop. The picked items are subtracted from the persisted selection.
+	if !dropAll && len(dropBlueprints)+len(dropTemplates)+len(dropLocalRoles) == 0 {
+		catalog, ok := tryFetchCatalog(client, sid)
+		if !ok {
+			logger.Logger.Fatalf("Could not fetch catalog for source %q", sid)
+		}
+		runExistingSourceFlow(client, sid, catalog, sourceFlags{
+			GlobalRoles: sourceFlagGlobalRoles,
+			Force:       sourceFlagForce,
+		}, modeInteractive, sourcepicker.ModeRemove)
+		return
+	}
+
+	var newSelection dto.InstallSelectionDTO
+	if dropAll {
+		// Explicit empty selection — server-side this is the "uninstall
+		// everything from this source" signal. The wrapping struct itself
+		// has to be present, just with empty arrays.
+		newSelection = dto.InstallSelectionDTO{
+			Blueprints: []string{},
+			Templates:  []string{},
+			LocalRoles: []string{},
+		}
+	} else {
+		// Derive the current installed selection from the catalog (state
+		// = installed or upgrade_available), then subtract the names the
+		// user wants to drop. The result is the post-uninstall selection.
+		catalog, ok := tryFetchCatalog(client, sid)
+		if !ok {
+			logger.Logger.Fatalf("Could not fetch catalog for source %q", sid)
+		}
+		newSelection = dto.InstallSelectionDTO{
+			Blueprints: subtractStrings(installedBlueprintIDs(catalog), dropBlueprints),
+			Templates:  subtractStrings(installedItemNames(catalog.Templates), dropTemplates),
+			LocalRoles: subtractStrings(installedItemNames(catalog.LocalRoles), dropLocalRoles),
+		}
+	}
+
+	postInstall(client, sid, dto.InstallRequest{
+		Selection:   &newSelection,
+		GlobalRoles: sourceFlagGlobalRoles,
+		Force:       sourceFlagForce,
+	}, "removed")
+}
+
+// installedBlueprintIDs returns the sourceBlueprintID of every catalog
+// blueprint currently installed (or in upgrade-available state).
+func installedBlueprintIDs(cat dto.SourceCatalogDTO) []string {
+	out := make([]string, 0, len(cat.Blueprints))
+	for _, bp := range cat.Blueprints {
+		if bp.State == "installed" || bp.State == "upgrade_available" {
+			out = append(out, bp.ID)
+		}
+	}
+	return out
+}
+
+// installedItemNames returns the name of every catalog item currently
+// installed (or in upgrade-available state).
+func installedItemNames(items []dto.CatalogItemDTO) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if it.State == "installed" || it.State == "upgrade_available" {
+			out = append(out, it.Name)
+		}
+	}
+	return out
+}
+
+// subtractStrings returns base with every element of remove dropped.
+// Order in base is preserved; duplicates in remove are tolerated.
+func subtractStrings(base, remove []string) []string {
+	if len(remove) == 0 {
+		return base
+	}
+	skip := make(map[string]struct{}, len(remove))
+	for _, r := range remove {
+		skip[r] = struct{}{}
+	}
+	out := make([]string, 0, len(base))
+	for _, b := range base {
+		if _, drop := skip[b]; drop {
+			continue
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+// unionStrings returns the sorted, de-duplicated union of a and b. Used to
+// fold freshly-picked install items into the set already installed so an
+// install never drops an item the user simply left unchecked.
+func unionStrings(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	for _, s := range b {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// composeInteractiveSelection turns the picker's intent set into the final
+// desired selection to POST, given the catalog's current install state.
+// The interactive picker no longer pre-checks installed items — checking a
+// box expresses intent for the current command, not the desired end-state —
+// so we reconstruct the end-state here:
+//
+//	Install: keep everything currently installed, ADD the picked items.
+//	Remove:  keep everything currently installed, DROP the picked items.
+//
+// Remove that drops every installed item yields an empty-but-present
+// selection (the server's prune-all signal); the caller's intent gate, not
+// this result's emptiness, guards the no-op case.
+func composeInteractiveSelection(mode sourcepicker.Mode, cat dto.SourceCatalogDTO, picked dto.InstallSelectionDTO) dto.InstallSelectionDTO {
+	current := deriveCurrentSelection(cat)
+	if mode == sourcepicker.ModeRemove {
+		return dto.InstallSelectionDTO{
+			Blueprints: subtractStrings(current.Blueprints, picked.Blueprints),
+			Templates:  subtractStrings(current.Templates, picked.Templates),
+			LocalRoles: subtractStrings(current.LocalRoles, picked.LocalRoles),
+		}
+	}
+	return dto.InstallSelectionDTO{
+		Blueprints: unionStrings(current.Blueprints, picked.Blueprints),
+		Templates:  unionStrings(current.Templates, picked.Templates),
+		LocalRoles: unionStrings(current.LocalRoles, picked.LocalRoles),
+	}
+}
+
 var sourceRmCmd = &cobra.Command{
 	Use:     "rm <sourceID>",
-	Short:   "Remove a source",
+	Short:   "Delete a source (its registration + blueprints; installed templates/roles stay)",
 	Aliases: []string{"delete", "del"},
-	Args:    cobra.ExactArgs(1),
+	Long: `Delete the source from Ludus. Drops the source record and the blueprints
+it provided.
+
+Installed templates, roles, and collections are left on disk — templates live
+in your per-user packer dir, and roles/collections may be shared with ranges
+or other blueprints. To uninstall those, use 'ludus source remove' for a
+source's items, or the ansible/templates commands for individual ones.`,
+	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 		// Skip the prompt automatically when stdin is piped/non-TTY (CI, scripts).
 		// Callers can also force-skip with --no-prompt.
 		if !sourceFlagNoPrompt && stdinIsTerminal() {
-			extra := ""
-			if sourceFlagPurge {
-				extra = " and uninstall its templates and roles"
-			}
-			fmt.Printf("Remove source '%s'%s? [y/N]: ", args[0], extra)
+			fmt.Printf("Remove source '%s' and its blueprints? Installed templates, roles, and collections stay on disk. [y/N]: ", args[0])
 			var resp string
 			_, _ = fmt.Scanln(&resp)
 			if !strings.EqualFold(strings.TrimSpace(resp), "y") {
@@ -1075,32 +1234,12 @@ var sourceRmCmd = &cobra.Command{
 				return
 			}
 		}
-		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 		path := fmt.Sprintf("/sources/%s", args[0])
-		body, _ := json.Marshal(dto.DeleteSourceRequest{Purge: sourceFlagPurge})
-		responseJSON, success := rest.GenericDeleteWithBody(client, buildURLWithRangeAndUserID(path), body)
+		responseJSON, success := rest.GenericDelete(client, buildURLWithRangeAndUserID(path))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		if !sourceFlagPurge {
-			logger.Logger.Infof("Source %q removed.", args[0])
-			return
-		}
-		var resp dto.DeleteSourceResponse
-		_ = json.Unmarshal(responseJSON, &resp)
-		logger.Logger.Infof("Source %q removed. Templates and roles registered only by this source were uninstalled. Collections remain installed.", args[0])
-		if len(resp.AffectedSources) > 0 {
-			logger.Logger.Warnf("Other sources also claimed some of these artifacts and will be missing files until re-synced:")
-			for _, s := range resp.AffectedSources {
-				logger.Logger.Warnf("  - %s", s)
-			}
-		}
-		if len(resp.PurgeErrors) > 0 {
-			logger.Logger.Warnf("%d artifact(s) could not be cleaned up:", len(resp.PurgeErrors))
-			for _, e := range resp.PurgeErrors {
-				logger.Logger.Warnf("  - %s", e)
-			}
-		}
+		logger.Logger.Infof("Source %q removed. Its blueprints are gone; installed templates, roles, and collections remain on disk.", args[0])
 	},
 }
 
@@ -1123,28 +1262,40 @@ func init() {
 	sourceAddCmd.Flags().BoolVar(&sourceFlagCatalog, "catalog", false, "walk the source and render its catalog (tables by default, JSON with --json); registers nothing")
 
 	sourceAddCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide")
-	sourceAddCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "overwrite already-installed templates and galaxy/local roles")
+	sourceAddCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "force install: re-extract templates and source roles, and rerun ansible-galaxy with -f for galaxy roles and collections")
+	sourceAddCmd.Flags().BoolVar(&sourceFlagNoDeps, "no-deps", false, "skip installing blueprint galaxy role/collection dependencies; use only what's already on disk")
 
 	// Sync flags (reuses sourceFlagRef, etc. from add).
 	sourceSyncCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide")
-	sourceSyncCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "overwrite already-installed templates and galaxy/local roles")
+	sourceSyncCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "force install: re-extract templates and source roles, and rerun ansible-galaxy with -f for galaxy roles and collections")
 
 	// Update flags.
 	sourceUpdateCmd.Flags().SortFlags = false
 	sourceUpdateCmd.Flags().StringVar(&sourceFlagRef, "ref", "", "new git branch/tag/commit (git sources)")
 	sourceUpdateCmd.Flags().StringVarP(&sourceFlagDirectory, "directory", "d", "", "tar a local directory and upload it as the new source content (upload sources)")
 	sourceUpdateCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide (upload only)")
-	sourceUpdateCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "overwrite already-installed templates and galaxy/local roles (upload only)")
+	sourceUpdateCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "force install when a new archive triggers an inline reinstall (upload only)")
 
 	// Rm flags.
-	sourceRmCmd.Flags().BoolVar(&sourceFlagPurge, "purge", false, "uninstall templates and roles registered only by this source (collections persist on disk)")
 	sourceRmCmd.Flags().BoolVar(&sourceFlagNoPrompt, "no-prompt", false, "skip confirmation prompt")
+
+	// Remove flags. Re-uses sourceFlag* declared above so the picker-style
+	// selection vocabulary is the same on both add and remove. No flags →
+	// opens the picker (managed via runSourceRemove).
+	sourceRemoveCmd.Flags().SortFlags = false
+	sourceRemoveCmd.Flags().Var(&sourceFlagBlueprints, "blueprints", "blueprint IDs to drop from the current selection (CSV or repeated)")
+	sourceRemoveCmd.Flags().Var(&sourceFlagTemplates, "templates", "template names to drop (CSV or repeated)")
+	sourceRemoveCmd.Flags().Var(&sourceFlagLocalRoles, "source-roles", "source role names to drop (CSV or repeated)")
+	sourceRemoveCmd.Flags().BoolVar(&sourceFlagAll, "all", false, "drop every item from this source (the source itself stays registered)")
+	sourceRemoveCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: also affect roles installed instance-wide")
+	sourceRemoveCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "no-op for remove; kept for symmetry with add")
 
 	sourceCmd.AddCommand(sourceAddCmd)
 	sourceCmd.AddCommand(
 		sourceListCmd,
 		sourceSyncCmd,
 		sourceUpdateCmd,
+		sourceRemoveCmd,
 		sourceRmCmd,
 	)
 	rootCmd.AddCommand(sourceCmd)

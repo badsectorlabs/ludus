@@ -118,6 +118,8 @@ func automatedConfigGenerator(writeToFile bool) {
 					f.WriteString("prevent_user_ansible_add: false\n")
 					f.WriteString("license_key: community\n")
 					f.WriteString("expose_admin_port: false\n")
+					f.WriteString("# register_default_source: true   # Set false to skip auto-registering the Bad Sector Labs source on startup\n")
+					f.WriteString("# sync_sources_on_startup: true    # Set false to skip re-syncing registered sources on each startup\n")
 					f.WriteString(fmt.Sprintf("port: %d\n", config.Port))
 					f.WriteString(fmt.Sprintf("admin_port: %d\n", config.AdminPort))
 					f.WriteString(fmt.Sprintf("data_directory: %s/db\n", ludusInstallPath))

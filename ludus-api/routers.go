@@ -292,7 +292,13 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	})
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		SyncAllSourcesOnStartup(app)
+		// Only the main (non-root) service manages sources on disk. The root
+		// admin service shares the same code path but would git-fetch as root,
+		// leaving root-owned files the main service cannot update on later syncs.
+		if os.Geteuid() != 0 {
+			seedDefaultSourceBSL(app)
+			SyncAllSourcesOnStartup(app)
+		}
 		return se.Next()
 	})
 

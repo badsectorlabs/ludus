@@ -98,7 +98,8 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // toggleAtCursor flips the picked state of the row under the active cursor.
-// Implied rows (no explicit pick, surfaced by ExpandImplied) are no-ops for v1.
+// Implied rows can't be toggled directly — you check the blueprint that pulls
+// them in, not the implied item itself.
 func (m *model) toggleAtCursor() {
 	rows := m.visibleToggleable(m.active)
 	if len(rows) == 0 {
@@ -239,6 +240,16 @@ func setToSortedSlice(s map[string]struct{}) []string {
 	return out
 }
 
+// visibleInMode reports whether a row should appear given the picker mode.
+// Remove mode hides anything not currently installed — you can't drop what
+// isn't there. Install mode shows the whole walked catalog.
+func (m model) visibleInMode(r row) bool {
+	if m.mode == ModeRemove {
+		return isInstalledState(r.state)
+	}
+	return true
+}
+
 // matchesFilter returns true if the row matches the current filter (or no
 // filter is set).
 func (m model) matchesFilter(r row) bool {
@@ -267,11 +278,12 @@ func (m model) visibleToggleable(sec section) []row {
 				section:          sec,
 				id:               bp.ID,
 				label:            bp.Name,
+				description:      bp.Description,
 				version:          bp.Version,
 				state:            bp.State,
 				installedVersion: bp.InstalledVersion,
 			}
-			if m.matchesFilter(r) {
+			if m.matchesFilter(r) && m.visibleInMode(r) {
 				out = append(out, r)
 			}
 		}
@@ -282,12 +294,13 @@ func (m model) visibleToggleable(sec section) []row {
 				section:          sec,
 				id:               t.Name,
 				label:            t.Name,
+				description:      t.Description,
 				version:          t.Version,
 				state:            t.State,
 				installedVersion: t.InstalledVersion,
-				impliedBy:        t.ImpliedBy,
+				requiredBy:       t.RequiredBy,
 			}
-			if m.matchesFilter(r) {
+			if m.matchesFilter(r) && m.visibleInMode(r) {
 				out = append(out, r)
 			}
 		}
@@ -298,12 +311,14 @@ func (m model) visibleToggleable(sec section) []row {
 				section:          sec,
 				id:               lr.Name,
 				label:            lr.Name,
+				description:      lr.Description,
 				version:          lr.Version,
 				state:            lr.State,
 				installedVersion: lr.InstalledVersion,
-				impliedBy:        lr.ImpliedBy,
+				scopes:           lr.Scopes,
+				requiredBy:       lr.RequiredBy,
 			}
-			if m.matchesFilter(r) {
+			if m.matchesFilter(r) && m.visibleInMode(r) {
 				out = append(out, r)
 			}
 		}
@@ -339,7 +354,7 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 	picked := m.picked[sectionBlueprints.key()]
 
 	// Map blueprint ID → display name so the trail says "by GOAD" not
-	// "by goad-light". impliedBy on a catalog item carries IDs.
+	// "by goad-light". requiredBy on a catalog item carries IDs.
 	nameByID := map[string]string{}
 	for _, bp := range m.catalog.Blueprints {
 		nameByID[bp.ID] = bp.Name
@@ -347,7 +362,7 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 
 	var out []row
 	for _, item := range src {
-		// Trim impliedBy to just the parents the user actually picked; if
+		// Trim requiredBy to just the parents the user actually picked; if
 		// none of them are picked, drop the row entirely.
 		var byPicked []string
 		// Collect the distinct version pins from the picked blueprints. When
@@ -360,7 +375,7 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 		// "use whatever ansible-galaxy resolves," not "use that other pin."
 		seenPins := map[string]bool{}
 		var distinctPins []string
-		for _, parent := range item.ImpliedBy {
+		for _, parent := range item.RequiredBy {
 			if _, ok := picked[parent]; !ok {
 				continue
 			}
@@ -400,7 +415,8 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 			label:           item.Name,
 			version:         version,
 			state:           item.State,
-			impliedBy:       byPicked,
+			scopes:          item.Scopes, // nil for collections → no scope shown
+			requiredBy:      byPicked,
 			conflictingPins: conflict,
 		}
 		if m.matchesFilter(r) {

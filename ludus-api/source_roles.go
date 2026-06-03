@@ -6,10 +6,42 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// collectionFQCNRe matches a 2-part ansible collection FQCN (namespace.name),
+// both segments lowercase alnum + underscore — the form ansible-galaxy
+// requires.
+var collectionFQCNRe = regexp.MustCompile(`^[a-z0-9_]+\.[a-z0-9_]+$`)
+
+// collectionFQCNFromGitURL recovers the installed collection FQCN
+// (namespace.name) from a git URL declared in requirements.yml. ansible
+// derives the real FQCN from the repo's galaxy.yml at install time, which
+// we don't have when reading requirements; we lean on the near-universal
+// convention that a collection repo is named "<namespace>.<name>". Returns
+// "" when the last path segment isn't a valid FQCN — the caller treats that
+// as "can't confirm on disk" rather than guessing.
+func collectionFQCNFromGitURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.TrimPrefix(s, "git+")
+	// Drop a #fragment (subdir/commit-ish selector) or ?query.
+	if i := strings.IndexAny(s, "#?"); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimRight(s, "/")
+	s = strings.TrimSuffix(s, ".git")
+	// Last path segment, handling both "/" (https) and ":" (scp-style ssh).
+	if i := strings.LastIndexAny(s, "/:"); i >= 0 {
+		s = s[i+1:]
+	}
+	if collectionFQCNRe.MatchString(s) {
+		return s
+	}
+	return ""
+}
 
 // RequirementsRole mirrors one entry of an ansible-galaxy requirements.yml roles list.
 type RequirementsRole struct {

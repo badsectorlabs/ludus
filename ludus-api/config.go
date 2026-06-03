@@ -37,6 +37,8 @@ type Configuration struct {
 	PreventUserAnsibleAdd     bool          `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
 	LicenseKey                string        `mapstructure:"license_key" yaml:"license_key"`
 	ExposeAdminPort           bool          `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
+	RegisterDefaultSource     bool          `mapstructure:"register_default_source" yaml:"register_default_source"`
+	SyncSourcesOnStartup      bool          `mapstructure:"sync_sources_on_startup" yaml:"sync_sources_on_startup"`
 	Port                      int           `mapstructure:"port" yaml:"port"`
 	AdminPort                 int           `mapstructure:"admin_port" yaml:"admin_port"`
 	ReservedRangeNumbers      []int32       `mapstructure:"reserved_range_numbers" yaml:"reserved_range_numbers"`
@@ -81,6 +83,8 @@ func (s *Server) ParseConfig() {
 	viper.SetDefault("proxmox_iso_storage_pool", "local")
 	viper.SetDefault("ludus_nat_interface", "vmbr1000")
 	viper.SetDefault("prevent_user_ansible_add", false)
+	viper.SetDefault("register_default_source", true)
+	viper.SetDefault("sync_sources_on_startup", true)
 	viper.SetDefault("data_directory", "/opt/ludus/db")
 	viper.SetDefault("database_encryption_key", "hZD6RwYxrcQ7CS4lRxjdKI7thWp3jg48")
 	viper.SetDefault("wireguard_port", 51820)

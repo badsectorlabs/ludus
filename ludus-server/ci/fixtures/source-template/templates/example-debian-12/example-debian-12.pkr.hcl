@@ -4,7 +4,7 @@
 
 variable "vm_name" {
   type    = string
-  default = "example-debian-12"
+  default = "example-debian-12-template"
 }
 
 variable "iso_url" {
@@ -22,6 +22,6 @@ source "null" "placeholder" {
 }
 
 build {
-  name    = "example-debian-12"
+  name    = "example-debian-12-template"
   sources = ["source.null.placeholder"]
 }

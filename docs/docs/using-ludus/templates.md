@@ -22,67 +22,39 @@ Ludus comes with 5 builtin templates:
 - win11-22h2-x64-enterprise
 - win2022-server-x64
 
-Users can add their own templates to the Ludus server with the Ludus CLI.
-Additional templates are provided in the `templates` directory in the root of the git project as examples and have been tested to work with Ludus.
-These templates include:
-
-- debian10
-- rocky-9-x64-server
-- ubuntu-20.04-x64-server
-- ubuntu-22.04-x64-server
-- win10-21h1-x64-enterprise
-- win11-23h2-x64-enterprise
-- win2012r2-server-x64
-- win2016-server-x64
-- win2019-server-x64
-- commando-vm (requires ansible role: badsectorlabs.ludus_commandovm)
-- flare-vm (requires ansible role: badsectorlabs.ludus_flarevm)
-- remnux (requires ansible role: badsectorlabs.ludus_remnux)
+Many more templates ship in the [Bad Sector Labs source](https://github.com/badsectorlabs/ludus-source-bsl/tree/main/templates), which Ludus auto-registers on startup — additional Debian, Ubuntu, Rocky, and Windows versions plus analyst VMs (Commando VM, FLARE-VM, REMnux). Browse the full list with `ludus source list ludus-source-bsl`. `commando-vm`, `flare-vm`, and `remnux` build on a base image and need their companion roles installed first (`badsectorlabs.ludus_commandovm`, `badsectorlabs.ludus_flarevm`, `badsectorlabs.ludus_remnux`).
 
 ## Adding Templates to Ludus
 
-To add a template to Ludus, use the Ludus CLI to upload the template directory to the server with `ludus templates add -d <template directory>`.
+Beyond the builtins, templates come from [sources](sources.md). Ludus auto-registers the Bad Sector Labs source on startup, so its templates are ready to install and build. Install a template's definition, then build the image:
 
 ```
-local:~$ git clone https://gitlab.com/badsectorlabs/ludus
-local:~$ cd ludus/templates
-local:~$ ls -1
-debian10
-manual-setup-required
-rocky-9-x64-server
-ubuntu-22.04-x64-server
-win10-21h1-x64-enterprise
-win11-23h2-x64-enterprise
-win2012r2-server-x64
-win2022-server-x64
-local:~$ ludus templates add -d debian10
-[INFO]  Successfully added template
+local:~$ ludus source add ludus-source-bsl --templates debian-10-x64-server-template
+[INFO]  Source 'ludus-source-bsl' installed successfully.
 local:~$ ludus templates list
-+----------------------------------------+-------+
-|                TEMPLATE                | BUILT |
-+----------------------------------------+-------+
-| debian-11-x64-server-template          | TRUE  |
-| debian-12-x64-server-template          | TRUE  |
-| kali-x64-desktop-template              | TRUE  |
-| win11-22h2-x64-enterprise-template     | TRUE  |
-| win2016-server-x64-template            | TRUE  |
-| win2019-server-x64-template            | TRUE  |
-| debian-10-x64-server-template          | FALSE |
-| debian-12-x64-server-ludus-ci-template | TRUE  |
-+----------------------------------------+-------+
++------------------------------------+-------+
+|              TEMPLATE              | BUILT |
++------------------------------------+-------+
+| debian-11-x64-server-template      | TRUE  |
+| debian-12-x64-server-template      | TRUE  |
+| kali-x64-desktop-template          | TRUE  |
+| win11-22h2-x64-enterprise-template | TRUE  |
+| win2022-server-x64-template        | TRUE  |
+| debian-10-x64-server-template      | FALSE |
++------------------------------------+-------+
 local:~$ ludus templates build -n debian-10-x64-server-template
 [INFO]  Template building started
 local:~$ ludus templates logs -f
 2024/01/17 18:19:11 [INFO] Packer version: 1.9.4 [go1.20.7 linux amd64]
-2024/01/17 18:19:11 [TRACE] discovering plugins in /opt/ludus/resources/packer/plugins
-2024/01/17 18:19:11 [INFO] Discovered potential plugin: ansible = /opt/ludus/resources/packer/plugins/github.com/hashicorp/ansible/packer-plugin-ansible_v1.1.1_x5.0_linux_amd64
 ...
 ```
+
+To add a template you maintain yourself, point `ludus templates add -d <directory>` at a local template directory.
 
 ## Creating Your Own Templates for Ludus
 
 Templates in Ludus must contain certain variables to function correctly.
-To create a new template, copy an [existing working template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates) and modify it as necessary.
+To create a new template, copy an [existing working template](https://github.com/badsectorlabs/ludus-source-bsl/tree/main/templates) and modify it as necessary.
 Templates for different Linux flavors and Windows are provided.
 While macOS VMs are supported by Ludus, their automated templating is not (see [Non-Automated OS Template Builds](#non-automated-os-template-builds)).
 

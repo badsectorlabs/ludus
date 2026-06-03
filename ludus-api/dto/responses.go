@@ -629,17 +629,15 @@ type AutoShutdownResponse struct {
 }
 
 type DeleteSourceResponse struct {
-	Status          string   `json:"status"`
-	PurgeErrors     []string `json:"purgeErrors,omitempty"`
-	AffectedSources []string `json:"affectedSources,omitempty"`
+	Status string `json:"status"`
 }
 
 // BlueprintCreatedResponse is the shape returned by CreateBlueprint,
 // CreateBlueprintFromRange, CopyBlueprint, and ImportBlueprint.
 type BlueprintCreatedResponse struct {
-	Result      string                              `json:"result,omitempty"`
-	BlueprintID string                              `json:"blueprintID"`
-	ID          string                              `json:"id,omitempty"` // record ID; emitted by ImportBlueprint
+	Result      string                               `json:"result,omitempty"`
+	BlueprintID string                               `json:"blueprintID"`
+	ID          string                               `json:"id,omitempty"` // record ID; emitted by ImportBlueprint
 	RoleResults []BlueprintCreatedResponseRoleResult `json:"roleResults,omitempty"`
 }
 
@@ -667,9 +665,10 @@ type SourceResponse struct {
 	LastSyncStatus string   `json:"lastSyncStatus,omitempty"`
 	LastSyncError  string   `json:"lastSyncError,omitempty"`
 }
+
 // RegisterSourceResponse is what POST /sources returns. Always a catalog —
-// installs are driven via POST /sources/{id}/install (with `installAll=true`
-// for the "install everything" shortcut).
+// installs are driven via POST /sources/{id}/install (an absent selection
+// installs everything the source ships).
 type RegisterSourceResponse struct {
 	SourceID string           `json:"sourceID"`
 	Catalog  SourceCatalogDTO `json:"catalog"`
@@ -691,6 +690,7 @@ type SourceCatalogDTO struct {
 type CatalogBlueprintDTO struct {
 	ID                        string   `json:"id"`
 	Name                      string   `json:"name"`
+	Description               string   `json:"description,omitempty"`
 	Version                   string   `json:"version"`
 	State                     string   `json:"state"`
 	InstalledVersion          string   `json:"installedVersion,omitempty"`
@@ -702,11 +702,26 @@ type CatalogBlueprintDTO struct {
 
 type CatalogItemDTO struct {
 	Name               string            `json:"name"`
+	Description        string            `json:"description,omitempty"`
 	Version            string            `json:"version,omitempty"`
 	State              string            `json:"state"`
 	InstalledVersion   string            `json:"installedVersion,omitempty"`
-	ImpliedBy          []string          `json:"impliedBy,omitempty"`
+	Global             bool              `json:"global,omitempty"`
+	Scopes             []ScopeInstallDTO `json:"scopes,omitempty"`
+	Type               string            `json:"type,omitempty"`
+	Fqcn               string            `json:"fqcn,omitempty"`
+	RequiredBy         []string          `json:"requiredBy,omitempty"`
 	VersionByBlueprint map[string]string `json:"versionByBlueprint,omitempty"`
+}
+
+// ScopeInstallDTO is one installed copy of a role: the scope it lives in
+// ("global"/"user"), the on-disk version there, and its state against the
+// required pin ("installed" / "upgrade_available"). A role can have entries
+// for both scopes, at different versions.
+type ScopeInstallDTO struct {
+	Scope   string `json:"scope"`
+	Version string `json:"version,omitempty"`
+	State   string `json:"state,omitempty"`
 }
 
 // UndeclaredDependencyDTO mirrors the internal UndeclaredDependency.

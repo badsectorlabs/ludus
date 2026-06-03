@@ -1622,14 +1622,13 @@ Flags:
 
 ### Source RM
 
-Remove a source. Use `--purge` to also delete templates and roles claimed only by this source — meaning no other source registered them. Ludus does **not** check whether your ranges or blueprints (outside sources) still reference them, so purge with care.
+Remove a source's registration and its blueprints. Installed templates and roles stay on disk.
 
 ```
 Usage:
   ludus source rm <sourceID> [flags]
 
 Flags:
-    --purge       delete templates/roles claimed only by this source (no cross-check against ranges or blueprints)
     --no-prompt   skip confirmation prompt
 ```
 

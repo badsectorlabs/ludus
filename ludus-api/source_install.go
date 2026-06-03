@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -15,14 +16,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func registerTemplates(app core.App, src *core.Record, walked *WalkedSource, force bool, selection *InstallSelection) []ArtifactResult {
+func registerTemplates(app core.App, src *core.Record, walked *WalkedSource, opts SyncOptions) []ArtifactResult {
 	var results []ArtifactResult
 	for _, dir := range walked.Templates {
-		name := filepath.Base(dir)
-		if selection != nil && !slices.Contains(selection.Templates, name) {
+		name := templateNameForDir(dir)
+		if opts.Selection != nil && !slices.Contains(opts.Selection.Templates, name) {
 			continue
 		}
-		if err := addTemplateFromDirectory(app, dir, force); err != nil {
+		if err := installTemplateDir(dir, opts.InitiatorProxmoxUsername, opts.Force, true); err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
 		}
@@ -68,18 +69,19 @@ func ensureTemplateRow(app core.App, name, srcDir string) error {
 
 func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, opts SyncOptions) []ArtifactResult {
 	var results []ArtifactResult
-	ownerProxmoxUsername := ""
+	// Install into the requesting user's per-user roles dir (or global). Where
+	// artifacts land is never a function of the source owner — every user
+	// installs into their own home, matching the catalog's viewer-relative read.
+	installProxmoxUsername := ""
 	if !opts.GlobalRoles {
-		if owner, err := app.FindRecordById("users", src.GetString("owner")); err == nil {
-			ownerProxmoxUsername = owner.GetString("proxmoxUsername")
-		}
+		installProxmoxUsername = opts.InitiatorProxmoxUsername
 	}
 	for _, dir := range walked.LocalRoles {
 		name := filepath.Base(dir)
 		if opts.Selection != nil && !slices.Contains(opts.Selection.LocalRoles, name) {
 			continue
 		}
-		if err := addLocalRoleFromDirectory(app, dir, ownerProxmoxUsername, opts.GlobalRoles, opts.Force); err != nil {
+		if err := addLocalRoleFromDirectory(app, dir, installProxmoxUsername, opts.GlobalRoles, opts.Force); err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
 		}
@@ -95,9 +97,8 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 // not produce duplicate rows.
 //
 // Multiple sources sharing the same role/template name is allowed; the
-// (source, kind, name) tuple is per-source so cross-source claims live as
-// distinct rows. The frontend can join across source_artifacts to surface
-// co-claims when relevant.
+// (source, kind, name) tuple is per-source, so cross-source claims live as
+// distinct rows.
 func insertSourceArtifact(app core.App, sourceID, kind, name, version string) {
 	collection, err := app.FindCollectionByNameOrId("source_artifacts")
 	if err != nil {
@@ -122,44 +123,124 @@ func insertSourceArtifact(app core.App, sourceID, kind, name, version string) {
 	_ = app.Save(r)
 }
 
-// addTemplateFromDirectory copies a packer template into the global packer
-// dir. Requires exactly one *.pkr.hcl or *.pkr.json. force=true overwrites.
-// When the destination already exists and force=false, the existing on-disk
-// template is preserved and we return nil so the caller can still record
-// the source's claim — multiple sources owning the same name is allowed.
-func addTemplateFromDirectory(_ core.App, dir string, force bool) error {
-	name := filepath.Base(dir)
-	destDir := filepath.Join(ludusInstallPath, "packer", name)
+// installTemplateDir validates the packer template in srcDir and copies it into
+// the given user's per-user packer dir, which survives server updates (the
+// embedded global packer dir is backed up and re-extracted on every update).
+// srcDir's basename becomes the packer subdir. Requires exactly one *.pkr.hcl
+// or *.pkr.json. A name matching a built-in/global template is rejected — it
+// would shadow the built-in and show up twice in the merged template list.
+// When the user already has this template: overwrite if force; a no-op if
+// idempotent (source re-sync, so re-installing an unchanged template is fine);
+// otherwise an error (one-shot CLI add). Shared by source install and
+// PutTemplateTar so both paths apply the same validation + guard.
+func installTemplateDir(srcDir, proxmoxUsername string, force, idempotent bool) error {
+	if proxmoxUsername == "" {
+		return fmt.Errorf("no initiating user for template install")
+	}
 
-	packerFiles, err := findFiles(dir, "pkr.hcl", "pkr.json")
+	packerFiles, err := findFiles(srcDir, "pkr.hcl", "pkr.json")
 	if err != nil {
-		return fmt.Errorf("scanning template directory %s: %w", dir, err)
+		return fmt.Errorf("scanning template directory %s: %w", srcDir, err)
 	}
 	switch len(packerFiles) {
 	case 0:
-		return fmt.Errorf("no *.pkr.hcl or *.pkr.json found in %s", dir)
+		return fmt.Errorf("no *.pkr.hcl or *.pkr.json found in %s", srcDir)
 	case 1:
 		// proceed
 	default:
-		return fmt.Errorf("more than one packer file found in %s: %v", dir, packerFiles)
+		return fmt.Errorf("more than one packer file found in %s: %v", srcDir, packerFiles)
 	}
 
-	if _, err := os.Stat(destDir); err == nil {
+	// Identify the template by its *-template name (the same name the templates
+	// API reports) so the install folder, catalog, and ledger all agree.
+	name := templateNameForDir(srcDir)
+	// A name matching a built-in would shadow it and appear twice in the merged
+	// (global + user) template list. Reject instead.
+	if templateNameInGlobalPacker(name) {
+		return fmt.Errorf("template %q matches a built-in template name and cannot be installed from a source", name)
+	}
+
+	// Duplicate guard keyed on the template NAME, not the destination folder: a
+	// copy may already exist under a different folder (e.g. an older basename
+	// folder, or a CLI upload whose tar root differs from the *-template name).
+	// Checking the name keeps us from installing the same template twice.
+	if userPackerTemplateNames(proxmoxUsername)[name] {
 		if !force {
-			return nil
-		}
-		if err := os.RemoveAll(destDir); err != nil {
-			return fmt.Errorf("removing existing template directory %s: %w", destDir, err)
+			if idempotent {
+				return nil
+			}
+			return fmt.Errorf("template %q already exists, use force to overwrite", name)
 		}
 	}
 
+	destDir := filepath.Join(ludusInstallPath, "users", proxmoxUsername, "packer", name)
+	if err := os.RemoveAll(destDir); err != nil {
+		return fmt.Errorf("removing existing template directory %s: %w", destDir, err)
+	}
 	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
 		return fmt.Errorf("creating packer directory: %w", err)
 	}
-	if err := copyDir(dir, destDir); err != nil {
-		return fmt.Errorf("copying template %s to %s: %w", dir, destDir, err)
+	if err := copyDir(srcDir, destDir); err != nil {
+		return fmt.Errorf("copying template %s to %s: %w", srcDir, destDir, err)
 	}
 	return nil
+}
+
+// userPackerTemplateNames returns the set of *-template names present in the
+// given user's packer dir — every template that user's `templates list` would
+// show from their own scope. Keyed on the template name (not folder) so callers
+// detect a template regardless of the folder it was installed under.
+func userPackerTemplateNames(proxmoxUsername string) map[string]bool {
+	out := map[string]bool{}
+	if proxmoxUsername == "" {
+		return out
+	}
+	files, err := findFiles(filepath.Join(ludusInstallPath, "users", proxmoxUsername, "packer"), "pkr.hcl", "pkr.json")
+	if err != nil {
+		return out
+	}
+	re := regexp.MustCompile(templateRegex)
+	for _, f := range files {
+		if n := extractTemplateNameFromHCL(f, re); n != "" {
+			out[n] = true
+		}
+	}
+	return out
+}
+
+// templateNameForDir returns the *-template name declared in the single packer
+// file under dir — the same identity the templates API reports — falling back
+// to the directory basename when the file has no *-template name. Used so the
+// source catalog, selection, ledger, and install folder all key on one name.
+func templateNameForDir(dir string) string {
+	files, err := findFiles(dir, "pkr.hcl", "pkr.json")
+	if err != nil || len(files) == 0 {
+		return filepath.Base(dir)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		return filepath.Base(dir)
+	}
+	if name := regexp.MustCompile(templateRegex).FindString(string(data)); name != "" {
+		return name
+	}
+	return filepath.Base(dir)
+}
+
+// templateNameInGlobalPacker reports whether hclName matches the *-template name
+// of any built-in template shipped in the global packer dir.
+func templateNameInGlobalPacker(hclName string) bool {
+	files, err := findFiles(filepath.Join(ludusInstallPath, "packer"), "pkr.hcl", "pkr.json")
+	if err != nil {
+		return false
+	}
+	re := regexp.MustCompile(templateRegex)
+	for _, f := range files {
+		if extractTemplateNameFromHCL(f, re) == hclName {
+			return true
+		}
+	}
+	return false
 }
 
 // addLocalRoleFromDirectory copies a role dir into either the global-roles
@@ -250,13 +331,9 @@ func synthesizeRoleMetaIfMissing(roleDir, name string) (bool, error) {
 // the source-root local artifacts; this only deals with galaxy + subscription
 // roles declared in each blueprint's requirements.yml.
 func installUnionedRoles(e *core.RequestEvent, app core.App, src *core.Record, walked *WalkedSource, opts SyncOptions) []RoleInstallResult {
-	ownerProxmoxUser := ""
-	ownerID := src.GetString("owner")
-	if ownerID != "" {
-		if user, err := app.FindRecordById("users", ownerID); err == nil {
-			ownerProxmoxUser = user.GetString("proxmoxUsername")
-		}
-	}
+	// Deps install into the requesting user's home — the same user the catalog
+	// reads install-state for — never the source owner's.
+	installProxmoxUser := opts.InitiatorProxmoxUsername
 
 	selectedBP := func(bpID string) bool {
 		if opts.Selection == nil {
@@ -271,11 +348,11 @@ func installUnionedRoles(e *core.RequestEvent, app core.App, src *core.Record, w
 			continue
 		}
 		results := installRolesForBlueprint(e, app, bp, ResolverOpts{
-			ForceRoles:       opts.Force,
-			GlobalRoles:      opts.GlobalRoles,
-			OwnerProxmoxUser: ownerProxmoxUser,
-			AnsibleHome:      ansibleHomeForSourceOwner(app, src, opts.GlobalRoles),
-			SourceRecordID:   src.Id,
+			ForceRoles:     opts.Force,
+			GlobalRoles:    opts.GlobalRoles,
+			ProxmoxUser:    installProxmoxUser,
+			AnsibleHome:    userAnsibleHome(installProxmoxUser),
+			SourceRecordID: src.Id,
 		})
 		out = append(out, results...)
 	}
@@ -289,19 +366,6 @@ func hasRequirementsRoles(reqYAML []byte) bool {
 	var doc RequirementsDoc
 	_ = yaml.Unmarshal(reqYAML, &doc)
 	return len(doc.Roles) > 0
-}
-
-
-func pickRolesPathForSourceOwner(app core.App, src *core.Record, global bool) string {
-	if global {
-		return globalRolesPath()
-	}
-	ownerID := src.GetString("owner")
-	user, err := app.FindRecordById("users", ownerID)
-	if err != nil {
-		return ""
-	}
-	return userRolesPath(user.GetString("proxmoxUsername"))
 }
 
 func globalRolesPath() string {
@@ -323,17 +387,6 @@ func userAnsibleHome(proxmoxUsername string) string {
 		return ""
 	}
 	return filepath.Join(ludusInstallPath, "users", proxmoxUsername, ".ansible")
-}
-
-func ansibleHomeForSourceOwner(app core.App, src *core.Record, global bool) string {
-	if global {
-		return ""
-	}
-	user, err := app.FindRecordById("users", src.GetString("owner"))
-	if err != nil {
-		return ""
-	}
-	return userAnsibleHome(user.GetString("proxmoxUsername"))
 }
 
 // getSubscriptionCatalogNames returns nil for unlicensed (community)

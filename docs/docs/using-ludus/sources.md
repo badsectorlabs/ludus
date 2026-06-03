@@ -146,18 +146,26 @@ Caveats:
 
 ### Packer templates
 
-Each `templates/<n>/` directory is a standard Ludus Packer template, the same shape as the [templates bundled with Ludus](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates):
+Each `templates/<n>/` directory is a standard Ludus Packer template, the same shape as the [templates in the Bad Sector Labs source](https://github.com/badsectorlabs/ludus-source-bsl/tree/main/templates):
 
 ```
 templates/my-debian-base/
 ├── my-debian-base.pkr.hcl   # the Packer build config
+├── template.yml             # optional: human description for the catalog/picker
 ├── http/                    # Linux: preseed.cfg / kickstart served at install time
 └── Autounattend.xml         # Windows only: unattended install answer file
 ```
 
-Templates register to a global, single-namespace pool. If two sources both register a template named `my-debian-base`, the second `source add` will conflict. Prefix shared template names with your source slug to avoid collisions.
+A Packer config carries no human description, so add an optional `template.yml` to give the template a one-line description in the catalog and picker:
 
-After `ludus source add`, run `ludus templates build` to produce the VM image. Build is a separate step.
+```yaml
+manifest_version: 1
+description: "Debian 12 minimal base image."
+```
+
+Templates install per-user and persist across server updates. Each is keyed by the `*-template` name in its `.pkr.hcl` — the name `ludus templates list` reports — so re-installing a name you already have is a no-op, and a name that collides with a built-in template is rejected.
+
+Run `ludus templates build` to produce the VM image — a separate step after `source add`. Built images are shared instance-wide by name, so one build makes a template usable by every range.
 
 ### Ansible roles
 
@@ -168,8 +176,10 @@ roles/my_helper/
 ├── tasks/main.yml           # the role's tasks
 ├── defaults/main.yml        # default variables
 ├── handlers/main.yml        # handlers
-└── meta/main.yml            # role metadata, dependencies
+└── meta/main.yml            # role metadata; galaxy_info.description shows in the catalog
 ```
+
+Ludus reads each role's `meta/main.yml` `galaxy_info.description` and shows it as the role's description in the catalog and picker.
 
 Reference roles by directory name (`my_helper`) under `roles:` in any blueprint's `range-config.yml`. If a local role shares a name with a galaxy role, Ludus skips the galaxy install and uses the local role.
 
@@ -185,7 +195,7 @@ Each `blueprints/<id>/` directory holds one blueprint. Two files are required wh
 manifest_version: 1
 id: my-lab
 name: "My Lab"
-description: "Short tagline"
+description: "Short tagline"               # shown in the catalog and picker
 version: 1.0.0
 tags: [ad, workshop]
 min_ludus_version: 2.1.2
@@ -284,7 +294,7 @@ If you already have a source registered under the auto-derived ID, pass `--id` t
 
 Sources are personal — only the user who ran `source add` sees them in `source list`. To make a source's contents available to others, share each piece individually.
 
-Templates registered by a source are global. Every user sees them automatically; nothing to share.
+Templates install per-user. The built VM image is shared instance-wide by name, so building a template once makes it usable by every range; another user installs it from the source only to rebuild it.
 
 Roles install per-user. An admin can install them instance-wide by passing `--global-roles` to `source add`, which makes them available to every user on the instance.
 
@@ -301,6 +311,17 @@ ludus blueprint share group <sourceID>/lab-1 students
 ludus blueprint share group <sourceID>/lab-2 students
 ```
 
+## Startup behavior
+
+On startup the Ludus server auto-registers the [Bad Sector Labs source](https://github.com/badsectorlabs/ludus-source-bsl) — owned by ROOT, visible to every admin — and re-syncs every registered source's catalog. Both run by default; disable either in `/opt/ludus/config.yml`:
+
+```yaml
+register_default_source: false   # don't auto-register the Bad Sector Labs source
+sync_sources_on_startup: false   # don't re-sync registered sources on each startup
+```
+
+A source removed with `ludus source rm` is re-registered on the next restart unless `register_default_source: false` is set.
+
 ## CLI Reference
 
 ### Source Management
@@ -312,7 +333,7 @@ ludus blueprint share group <sourceID>/lab-2 students
 | `ludus source sync [<sourceID>]` | Re-pull a git source and re-apply its persisted selection (no-op for upload sources, and a benign no-op for sources that were registered without an install committed) |
 | `ludus source update <sourceID> --ref <ref>` | Change a git source's tracked ref |
 | `ludus source update <sourceID> <tarball>` (or `-d <dir>`) | Push new content to an upload source |
-| `ludus source rm <sourceID>` | Remove a source (`--purge` also removes templates/roles registered only by this source) |
+| `ludus source rm <sourceID>` | Remove a source's registration and blueprints (installed templates and roles stay on disk) |
 
 ### Blueprint Commands (Extended for Sources)
 
@@ -334,6 +355,5 @@ ludus blueprint share group <sourceID>/lab-2 students
 | `--global-roles` | `source add`, `source sync`, `source update`, `blueprint install` | Admin only. Install roles instance-wide instead of user-scoped |
 | `--force` | `source add`, `source sync`, `source update` | Overwrite already-installed templates and galaxy/local roles |
 | `--force-roles` | `blueprint install` | Overwrite already-installed galaxy/local roles |
-| `--purge` | `source rm` | Also remove templates/roles registered only by this source |
 | `--id <sourceID>` | `source add` | Override the auto-derived sourceID |
 | `--ref <ref>` | `source add`, `source update` | Git branch, tag, or commit to track |

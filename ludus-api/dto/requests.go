@@ -56,9 +56,13 @@ type DeployRangeRequest struct {
 	Limit     string   `json:"limit,omitempty"`
 }
 type InstallCollectionRequest struct {
+	// Collection is a galaxy FQCN (namespace.name) or a git source URL —
+	// the server infers git from the string's shape (no separate flag).
 	Collection string `json:"collection,omitempty"`
-	Version    string `json:"version,omitempty"`
-	Force      bool   `json:"force,omitempty"`
+	// Version is a galaxy version pin or, for a git source, any commit-ish
+	// (branch / tag / commit).
+	Version string `json:"version,omitempty"`
+	Force   bool   `json:"force,omitempty"`
 }
 type InstallRoleRequest struct {
 	Role    string `json:"role,omitempty"`
@@ -155,6 +159,7 @@ type CreateBlueprintFromRangeRequest struct {
 	Description string `json:"description,omitempty"`
 	RangeID     string `json:"rangeID,omitempty"`
 }
+
 // CreateBlueprintRequest is the body for POST /blueprints — creating a
 // blueprint from scratch (empty or seeded range-config). For other create
 // modes use POST /blueprints/from-range, /blueprints/{id}/copy, or
@@ -214,6 +219,7 @@ type SetGroupQuotaRequest struct {
 type AutoShutdownRequest struct {
 	AutoShutdownTimeout string `json:"autoShutdownTimeout"`
 }
+
 // CreateSourceRequest is the body for POST /sources. Register-only: the
 // source row is created, the repo is fetched and walked, and a catalog is
 // returned. Callers drive the install via POST /sources/{id}/install.
@@ -226,15 +232,32 @@ type CreateSourceRequest struct {
 	Force       bool   `json:"force,omitempty" form:"force"`
 }
 
-// InstallRequest is the body for POST /sources/{sourceID}/install. Exactly
-// one of Selection (non-empty) or InstallAll=true must be set. InstallAll
-// is the "everything walked" shortcut for CI/scripted callers and is
-// equivalent to passing the full catalog as the selection.
+// InstallRequest is the body for POST /sources/{sourceID}/install.
+//
+// Selection semantics depend on whether the field is present in the JSON
+// body:
+//   - absent (or JSON null)              → server snapshots the current
+//     walk into installSelection (the
+//     "install everything" shortcut)
+//   - present with non-empty arrays      → used as-is; replaces any
+//     previously persisted selection
+//   - present with all-empty arrays      → uninstall everything from this
+//     source; selection commits as
+//     empty and the prune logic
+//     removes all rows/files
+//
+// The pointer here is what lets us tell "absent" apart from "present and
+// empty" — Go's json package gives us nil for the former and a non-nil
+// pointer to a zero-value struct for the latter.
 type InstallRequest struct {
-	Selection   InstallSelectionDTO `json:"selection,omitempty"`
-	InstallAll  bool                `json:"installAll,omitempty"`
-	GlobalRoles bool                `json:"globalRoles,omitempty"`
-	Force       bool                `json:"force,omitempty"`
+	Selection   *InstallSelectionDTO `json:"selection,omitempty"`
+	GlobalRoles bool                 `json:"globalRoles,omitempty"`
+	Force       bool                 `json:"force,omitempty"`
+	// NoDeps skips installing the selected blueprints' galaxy role/collection
+	// dependencies — no reaching out to ansible-galaxy; only what's already on
+	// disk is used. Default false: deps install, since a blueprint needs them
+	// to deploy.
+	NoDeps bool `json:"noDeps,omitempty"`
 }
 
 type InstallSelectionDTO struct {
@@ -250,9 +273,6 @@ type UpdateSourceRequest struct {
 type SyncSourceRequest struct {
 	GlobalRoles bool `json:"globalRoles,omitempty" form:"globalRoles"`
 	Force       bool `json:"force,omitempty" form:"force"`
-}
-type DeleteSourceRequest struct {
-	Purge bool `json:"purge,omitempty"`
 }
 type InstallBlueprintDepsRequest struct {
 	GlobalRoles bool `json:"globalRoles,omitempty"`

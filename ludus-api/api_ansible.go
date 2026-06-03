@@ -385,6 +385,35 @@ func reflectRoleVersionToGalaxyInfo(roleDir string) (string, error) {
 	return version, nil
 }
 
+// isGitCollectionSource reports whether a collection identifier names a git
+// source rather than a galaxy FQCN — true for any URL (has "://"), an
+// scp-style ssh ref (git@…), or an explicit git+ prefix.
+func isGitCollectionSource(c string) bool {
+	return strings.Contains(c, "://") || strings.HasPrefix(c, "git@") || strings.HasPrefix(c, "git+")
+}
+
+// buildCollectionInstallArg renders the positional argument for
+// `ansible-galaxy collection install`. Galaxy collections use the pin form
+// (name:==version); git sources use git+<url>,<ref>. Bare https URLs get a
+// git+ prefix since ansible-galaxy rejects them otherwise; git@ / already-
+// git+ strings are passed through unchanged.
+func buildCollectionInstallArg(collection, version string) string {
+	if isGitCollectionSource(collection) {
+		src := collection
+		if strings.Contains(src, "://") && !strings.HasPrefix(src, "git+") {
+			src = "git+" + src
+		}
+		if version != "" {
+			return src + "," + version
+		}
+		return src
+	}
+	if version != "" {
+		return fmt.Sprintf("%s:==%s", collection, version)
+	}
+	return collection
+}
+
 // ActionCollectionFromInternet - installs an ansible collection from ansible galaxy or publicly available source control
 func ActionCollectionFromInternet(e *core.RequestEvent) error {
 	var collectionBody dto.InstallCollectionRequest
@@ -395,10 +424,10 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not authorized to perform this ansible action")
 	}
 
-	var collectionString = collectionBody.Collection
-	if collectionBody.Version != "" {
-		collectionString = fmt.Sprintf("%s:==%s", collectionBody.Collection, collectionBody.Version)
-	}
+	// Pass the source string straight to ansible-galaxy, the same way the
+	// role endpoint does — a git URL installs from git, an FQCN installs
+	// from galaxy. No separate type flag: the string's shape is the signal.
+	collectionString := buildCollectionInstallArg(collectionBody.Collection, collectionBody.Version)
 
 	// Make sure the collection string is escaped
 	collectionString = shellescape.Quote(collectionString)

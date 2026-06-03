@@ -90,18 +90,27 @@ func pickRolesPathForUser(_ core.App, user *models.User, global bool) string {
 	return userRolesPath(user.ProxmoxUsername())
 }
 
-func ansibleHomeForUser(user *models.User, global bool) string {
-	if global || user == nil {
+// ansibleHomeForUser returns the writable ANSIBLE_HOME for a galaxy install.
+// ANSIBLE_HOME must stay on a writable /opt/ludus path regardless of install
+// scope: global vs per-user only selects the roles install --path (via
+// ResolverOpts.GlobalRoles), never the home. Returning "" would leave
+// ANSIBLE_HOME unset, so ansible-galaxy's local_tmp falls back to
+// $HOME/.ansible/tmp — read-only under the service's ProtectHome=read-only
+// sandbox — and the install fails.
+func ansibleHomeForUser(user *models.User) string {
+	if user == nil {
 		return ""
 	}
 	return userAnsibleHome(user.ProxmoxUsername())
 }
 
 type ResolverOpts struct {
-	ForceRoles       bool
-	GlobalRoles      bool
-	OwnerProxmoxUser string
-	AnsibleHome      string
+	ForceRoles  bool
+	GlobalRoles bool
+	// ProxmoxUser is the user whose per-user roles dir non-global installs land
+	// in — always the requesting user, never the source owner.
+	ProxmoxUser string
+	AnsibleHome string
 	// SourceRecordID: when set, registered artifacts are tracked in
 	// source_artifacts; empty for local blueprints.
 	SourceRecordID string
@@ -138,8 +147,8 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 		rolesPath := ""
 		if opts.GlobalRoles {
 			rolesPath = globalRolesPath()
-		} else if opts.OwnerProxmoxUser != "" {
-			rolesPath = userRolesPath(opts.OwnerProxmoxUser)
+		} else if opts.ProxmoxUser != "" {
+			rolesPath = userRolesPath(opts.ProxmoxUser)
 		}
 		results, err := InstallRolesFromRequirementsWithHome(walked.RequirementsYAML, rolesPath, opts.AnsibleHome, opts.ForceRoles)
 		if err != nil && len(results) == 0 {
@@ -161,10 +170,11 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 	// requirements YAML is reused; the role and collection subcommands ignore
 	// each other's sections.
 	//
-	// Collection rows are recorded in source_artifacts for display, but source
-	// purge only deletes the rows — ansible-galaxy has no `collection remove`
-	// subcommand, so the on-disk install is left in place. The row is a claim
-	// ("this source declared this collection"), not a lifecycle anchor.
+	// Collection rows are recorded in source_artifacts for display/provenance.
+	// ansible-galaxy has no `collection remove` subcommand, so removing a
+	// source or de-selecting a collection only drops the row — the on-disk
+	// install is left in place. The row is a claim ("this source declared this
+	// collection"), not a lifecycle anchor.
 	if hasRequirementsCollections(walked.RequirementsYAML) {
 		colResults, err := InstallCollectionsFromRequirementsWithHome(walked.RequirementsYAML, opts.AnsibleHome, opts.ForceRoles)
 		if err != nil && len(colResults) == 0 {
@@ -178,10 +188,11 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 		out = append(out, colResults...)
 	}
 
-	// Subscription roles via the licensed-pipeline helper. NOT tracked in
-	// source_artifacts — they're licensed-pipeline globals shared across all
-	// users and sources. Recording them would cause `source rm --purge` to
-	// try deleting the global install (incorrect, and would fail on perms).
+	// Subscription roles via the licensed-pipeline helper. Tracked in
+	// source_artifacts with kind="subscription_role" so this source's claim
+	// shows up in provenance listings. Like galaxy roles, subscription roles
+	// aren't swept by source-level removal (pruneSourceArtifactClaims covers
+	// templates and local roles only); their on-disk install is left in place.
 	//
 	// We install every declared name. A declared name absent from the live
 	// catalog will fail at download time and surface as a per-role error;
@@ -192,6 +203,9 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 			out = append(out, RoleInstallResult{Name: name, OK: false, Error: err.Error()})
 		} else {
 			out = append(out, RoleInstallResult{Name: name, OK: true})
+			if opts.SourceRecordID != "" {
+				insertSourceArtifact(app, opts.SourceRecordID, "subscription_role", name, "")
+			}
 		}
 	}
 

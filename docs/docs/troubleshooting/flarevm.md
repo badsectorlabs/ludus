@@ -15,11 +15,7 @@ If you encounter the issue when following this tutorial https://docs.ludus.cloud
 
 ```bash
 #terminal-command-local
-git clone https://gitlab.com/badsectorlabs/ludus.git
-#terminal-command-local
-cd ludus/templates
-#terminal-command-local
-ludus templates add -d flare-vm
+ludus source add ludus-source-bsl --templates flare-vm-template
 #terminal-command-local
 ludus templates build
 # Wait for the template to successfully build

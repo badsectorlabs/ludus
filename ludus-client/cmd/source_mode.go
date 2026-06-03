@@ -41,6 +41,7 @@ type sourceFlags struct {
 
 	GlobalRoles bool
 	Force       bool
+	NoDeps      bool
 }
 
 // selectInstallMode classifies the invocation. --all and --no-prompt force

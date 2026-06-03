@@ -606,8 +606,8 @@ func CreateBlueprint(e *core.RequestEvent) error {
 	walked, werr := WalkBlueprintDir(blueprintDir)
 	if werr == nil && walked != nil {
 		roles := installRolesForBlueprint(e, e.App, *walked, ResolverOpts{
-			OwnerProxmoxUser: user.ProxmoxUsername(),
-			AnsibleHome:      ansibleHomeForUser(user, false),
+			ProxmoxUser: user.ProxmoxUsername(),
+			AnsibleHome: ansibleHomeForUser(user),
 		})
 		applyRoleResultsToStatus(e.App, bp, roles)
 		resp.RoleResults = roleResultsToDTO(roles)
@@ -690,8 +690,8 @@ func CreateBlueprintFromRange(e *core.RequestEvent) error {
 	walked, werr := WalkBlueprintDir(blueprintDir)
 	if werr == nil && walked != nil {
 		roles := installRolesForBlueprint(e, e.App, *walked, ResolverOpts{
-			OwnerProxmoxUser: user.ProxmoxUsername(),
-			AnsibleHome:      ansibleHomeForUser(user, false),
+			ProxmoxUser: user.ProxmoxUsername(),
+			AnsibleHome: ansibleHomeForUser(user),
 		})
 		applyRoleResultsToStatus(e.App, blueprintRecord, roles)
 		resp.RoleResults = roleResultsToDTO(roles)
@@ -1573,11 +1573,11 @@ func InstallBlueprintDeps(e *core.RequestEvent) error {
 		Dir:              blueprintDirPath(bpRec),
 	}
 	results := installRolesForBlueprint(e, e.App, walked, ResolverOpts{
-		ForceRoles:       req.ForceRoles,
-		GlobalRoles:      req.GlobalRoles,
-		OwnerProxmoxUser: user.ProxmoxUsername(),
-		AnsibleHome:      ansibleHomeForUser(user, req.GlobalRoles),
-		SourceRecordID:   sourceRecordID,
+		ForceRoles:     req.ForceRoles,
+		GlobalRoles:    req.GlobalRoles,
+		ProxmoxUser:    user.ProxmoxUsername(),
+		AnsibleHome:    ansibleHomeForUser(user),
+		SourceRecordID: sourceRecordID,
 	})
 
 	failures := collectArtifactFailures(nil, nil, results)
@@ -1804,8 +1804,8 @@ func ImportBlueprint(e *core.RequestEvent) error {
 	walked2, _ := WalkBlueprintDir(finalDir)
 	if walked2 != nil {
 		roles := installRolesForBlueprint(e, e.App, *walked2, ResolverOpts{
-			OwnerProxmoxUser: user.ProxmoxUsername(),
-			AnsibleHome:      ansibleHomeForUser(user, false),
+			ProxmoxUser: user.ProxmoxUsername(),
+			AnsibleHome: ansibleHomeForUser(user),
 		})
 		applyRoleResultsToStatus(e.App, bp, roles)
 		resp.RoleResults = roleResultsToDTO(roles)
