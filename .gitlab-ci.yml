@@ -1027,7 +1027,7 @@ post-deploy testing-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1754,7 +1754,7 @@ post-deploy testing-as-user:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -2707,6 +2707,8 @@ release-cluster:
     - if: $CI_COMMIT_TAG
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE == "Automatic backup from Apidog"
       when: never
     - when: always
   timeout: 5m

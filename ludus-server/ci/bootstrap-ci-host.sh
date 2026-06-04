@@ -18,13 +18,14 @@ if [[ $(id -u) -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/../.." >/dev/null 2>&1 && pwd)}"
+REPO_DIR="${REPO_DIR:-"$SCRIPT_DIR/../../ludus-source"}"
 LUDUS_DIR="${LUDUS_DIR:-/opt/ludus}"
 CI_DIR="$LUDUS_DIR/ci"
 CONFIG_FILE="${LUDUS_CONFIG_FILE:-$LUDUS_DIR/config.yml}"
 
 PROXMOX_HOSTNAME="${PROXMOX_HOSTNAME:-127.0.0.1}"
-GITLAB_RUNNER_CONCURRENT="${GITLAB_RUNNER_CONCURRENT:-12}"
+GITLAB_RUNNER_CONCURRENT="${GITLAB_RUNNER_CONCURRENT:-4}"
+GITLAB_URL="${GITLAB_URL:-https://gitlab.com}"
 CI_RECREATE="${CI_RECREATE:-0}"
 CI_RECREATE_TEMPLATE="${CI_RECREATE_TEMPLATE:-0}"
 CI_BUILD_BINARIES="${CI_BUILD_BINARIES:-1}"
@@ -140,6 +141,13 @@ build_seed_binaries() {
     local bin_dir="$CI_DIR/binaries"
     local hash version
 
+    # If the ludus source directory is not present, clone it
+    if [[ ! -d "$REPO_DIR" ]]; then
+        git clone https://gitlab.com/badsectorlabs/ludus.git "$REPO_DIR"
+    else
+        git -C "$REPO_DIR" fetch origin
+    fi
+
     hash="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo local)"
     version="${VERSION:-ci-bootstrap}"
 
@@ -195,6 +203,9 @@ run_ci_template_setup() {
         --arg ludus_install_path "$LUDUS_DIR" \
         --arg proxmox_vm_storage_pool "$PROXMOX_VM_STORAGE_POOL" \
         --arg ci_vm_disk_size "$CI_VM_DISK_SIZE" \
+        --arg gitlab_registration_token "$GITLAB_RUNNER_TOKEN" \
+        --arg gitlab_url "$GITLAB_URL" \
+        --arg gitlab_runner_concurrent "$GITLAB_RUNNER_CONCURRENT" \
         '{
             api_user: $api_user,
             api_password: $api_password,
@@ -203,8 +214,11 @@ run_ci_template_setup() {
             ludus_install_path: $ludus_install_path,
             proxmox_vm_storage_pool: $proxmox_vm_storage_pool,
             ci_vm_disk_size: $ci_vm_disk_size,
-            gitlab_runner_register: false,
-            gitlab_runner_configure: false
+            gitlab_runner_register: true,
+            gitlab_runner_configure: true,
+            gitlab_registration_token: $gitlab_registration_token,
+            gitlab_url: $gitlab_url,
+            gitlab_runner_concurrent: $gitlab_runner_concurrent
         }' > "$extra_vars_file"
 
     ansible-galaxy collection install community.general ansible.utils ansible.posix >/dev/null
@@ -225,8 +239,14 @@ run_seed_setup() {
     local runner_password_file="$CI_DIR/.gitlab-runner-password"
     local runner_password extra_vars_file
     if [[ ! -f "$runner_password_file" ]]; then
-        echo "Error: $runner_password_file was not created" >&2
-        exit 1
+        echo "$runner_password_file does not exist, creating it..." >&2
+        # set a random password
+        runner_password="$(openssl rand -hex 16)"
+        echo "$runner_password" > "$runner_password_file"
+        chmod 600 "$runner_password_file"
+        # set the password for the gitlab-runner user in linux with passwd
+        echo "gitlab-runner:$runner_password" | chpasswd
+        echo "Password set for gitlab-runner user"
     fi
     runner_password="$(cat "$runner_password_file")"
 
@@ -266,6 +286,7 @@ run_seed_setup() {
     ansible-galaxy collection install community.general ansible.utils ansible.posix >/dev/null
 
     set +e
+    ANSIBLE_ALLOW_BROKEN_CONDITIONALS="${ANSIBLE_ALLOW_BROKEN_CONDITIONALS:-true}" \
     ansible-playbook "$CI_DIR/ci-vm-setup.yml" \
         --extra-vars "@$extra_vars_file"
     local rc=$?
@@ -312,8 +333,6 @@ if [[ "$CI_SETUP_TEMPLATE" == "1" ]]; then
 else
     echo "Skipping CI base template setup; debian-13-x64-server-ludus-ci-template already exists."
 fi
-
-GITLAB_RUNNER_CONCURRENT="$GITLAB_RUNNER_CONCURRENT" "$CI_DIR/configure-runner-custom-executor.sh"
 
 if [[ "$CI_SETUP_SEEDS" == "1" ]]; then
     run_seed_setup

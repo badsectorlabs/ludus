@@ -166,7 +166,7 @@ Runner-host settings in `base.sh`:
 
 | Variable           | Default | Purpose                                      |
 |--------------------|---------|----------------------------------------------|
-| `CI_CLONE_FULL`    | `1`     | Full clone by default; set `0` for linked clones where supported |
+| `CI_CLONE_FULL`    | `0`     | Linked clones by default; set `1` for full clones |
 | `CI_CLONE_STORAGE` | empty   | Optional target storage, for example `zfs`   |
 | `CI_CLONE_IP_PREFIX` | `203.0.113` | CI control network prefix for dynamic clones |
 | `CI_CLONE_IP_START` | `10`    | First host octet for dynamic clone control IPs |
@@ -179,11 +179,11 @@ After editing scripts in this directory, deploy them to the runner host:
 
 ```sh
 scp ludus-server/ci/{base,claim-cluster,release-cluster,release-vm,prepare,prepare-cluster,run,cleanup,check-install-status}.sh \
-    openmetal-demo:/opt/ludus/ci/
+    your-ludus-host:/opt/ludus/ci/
 scp ludus-server/ci/{bootstrap-ci-host,configure-runner-custom-executor}.sh \
-    openmetal-demo:/opt/ludus/ci/
-scp ludus-server/ci/{ci-setup,ci-vm-setup}.yml openmetal-demo:/opt/ludus/ci/
-ssh openmetal-demo 'chmod +x /opt/ludus/ci/*.sh'
+    your-ludus-host:/opt/ludus/ci/
+scp ludus-server/ci/{ci-setup,ci-vm-setup}.yml your-ludus-host:/opt/ludus/ci/
+ssh your-ludus-host 'chmod +x /opt/ludus/ci/*.sh'
 ```
 
 `.gitlab-ci.yml` is read by GitLab from the repo on each pipeline run; no manual
@@ -193,13 +193,13 @@ deployment is needed for YAML changes.
 
 ```sh
 glab ci status
-ssh openmetal-demo 'ls -la /opt/ludus/ci/vm-assignments/'
-ssh openmetal-demo 'qm list | grep -E "ci-[0-9]+-"'
-ssh openmetal-demo 'qm terminal <vmid>'
+ssh your-ludus-host 'ls -la /opt/ludus/ci/vm-assignments/'
+ssh your-ludus-host 'qm list | grep -E "ci-[0-9]+-"'
+ssh your-ludus-host 'qm terminal <vmid>'
 ```
 
 To remove a successful clone manually:
 
 ```sh
-ssh openmetal-demo 'CUSTOM_ENV_CI_PIPELINE_ID=<pipeline-id> CUSTOM_ENV_LUDUS_CI_SERIES=<series> /opt/ludus/ci/release-vm.sh'
+ssh your-ludus-host 'CUSTOM_ENV_CI_PIPELINE_ID=<pipeline-id> CUSTOM_ENV_LUDUS_CI_SERIES=<series> /opt/ludus/ci/release-vm.sh'
 ```

@@ -242,6 +242,34 @@
         last_deployed_ip: "{{ nodecheck.stdout | trim }}"
       when: clone_vm is changed
 
+    - name: Ensure Debian SSH user exists in CI template VM
+      ansible.builtin.shell: |
+        set -euo pipefail
+        read -r -d '' SCRIPT <<'REMOTE' || true
+        set -euo pipefail
+        if ! command -v sudo >/dev/null 2>&1; then
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
+        fi
+        getent group sudo >/dev/null 2>&1 || groupadd sudo
+        if ! id debian >/dev/null 2>&1; then
+          useradd -m -s /bin/bash debian
+        fi
+        echo 'debian:debian' | chpasswd
+        usermod -aG sudo debian
+        install -d -m 0755 /etc/sudoers.d
+        echo 'debian ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-ludus-ci-debian
+        chmod 0440 /etc/sudoers.d/99-ludus-ci-debian
+        install -d -m 0755 /etc/ssh/sshd_config.d
+        printf '%s\n' 'PasswordAuthentication yes' > /etc/ssh/sshd_config.d/99-ludus-ci-password.conf
+        systemctl restart ssh || systemctl restart sshd || true
+        REMOTE
+        qm guest exec {{ vm_id }} -- /bin/bash -lc "$SCRIPT" | jq -e '.exitcode == 0'
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: clone_vm is changed
+
     - name: Add CI template VM to in-memory inventory
       ansible.builtin.add_host:
         name: debian-13-x64-server-ludus-ci
@@ -250,13 +278,12 @@
         ansible_user: debian
         ansible_ssh_pass: debian
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-        become_method: sudo
+        ansible_become_method: sudo
         ansible_sudo_pass: debian
       when: clone_vm is changed
 
     - name: Wait for the host's control interface (SSH) to come up
-      action:
-        module: wait_for
+      ansible.builtin.wait_for:
         host: "{{ last_deployed_ip }}"
         port: 22
         delay: 3
@@ -267,11 +294,11 @@
 - name: Install Gitlab runner prerequisites
   hosts: debian-13-x64-server-ludus-ci
   vars:
-    - ansible_connection: ssh
-    - ansible_user: debian
-    - ansible_ssh_pass: debian
-    - become_method: sudo
-    - ansible_sudo_pass: debian
+    ansible_connection: ssh
+    ansible_user: debian
+    ansible_ssh_pass: debian
+    ansible_become_method: sudo
+    ansible_sudo_pass: debian
   tasks:
     - name: Grow root partition to fill the CI disk
       ansible.builtin.shell: |
@@ -358,6 +385,9 @@
           - htop
           - jq
           - python3-debian
+          - curl
+          - unzip
+          - ca-certificates
         state: present
         update_cache: true
       become: true
@@ -401,11 +431,11 @@
 - name: Install Go # Must come after the tasks or ca certificates may not exist
   hosts: debian-13-x64-server-ludus-ci
   vars:
-    - ansible_connection: ssh
-    - ansible_user: debian
-    - ansible_ssh_pass: debian
-    - become_method: sudo
-    - ansible_sudo_pass: debian
+    ansible_connection: ssh
+    ansible_user: debian
+    ansible_ssh_pass: debian
+    ansible_become_method: sudo
+    ansible_sudo_pass: debian
   tasks:
     - name: Set Go version
       ansible.builtin.set_fact:
@@ -450,8 +480,15 @@
       ansible.builtin.shell: npm install --global yarn
       become: true
       
-    - name: Install bun
-      ansible.builtin.shell: npm install --global bun
+    - name: Install bun as the gitlab-runner user
+      ansible.builtin.shell: su gitlab-runner -c "curl -fsSL https://bun.sh/install | bash"
+      become: true
+
+    - name: Enable bun in the gitlab-runner user's PATH
+      ansible.builtin.lineinfile:
+        path: /home/gitlab-runner/.profile
+        line: 'export PATH=$PATH:/home/gitlab-runner/.bun/bin'
+        create: true
       become: true
       
 - name: Add gitlab-runner to proxmox and convert the VM to a template
@@ -464,7 +501,7 @@
 
     - name: Ensure gitlab-runner Proxmox user exists
       ansible.builtin.shell: |
-        if pveum user list | awk '{print $1}' | grep -qx 'gitlab-runner@pam'; then
+        if pveum user list --output-format json | jq -e '.[] | select(.userid == "gitlab-runner@pam")' >/dev/null; then
           printf '%s\n%s\n' "$RUNNER_PVE_PASSWORD" "$RUNNER_PVE_PASSWORD" | pveum passwd gitlab-runner@pam
         else
           pveum user add gitlab-runner@pam --password "$RUNNER_PVE_PASSWORD"
@@ -473,12 +510,19 @@
         RUNNER_PVE_PASSWORD: "{{ runner_pve_password }}"
       no_log: true
 
+    - name: Ensure required CI Proxmox groups exist
+      ansible.builtin.shell: |
+        if ! pveum group list --output-format json | jq -e '.[] | select(.groupid == "ludus_admins")' >/dev/null; then
+          pveum group add ludus_admins
+        fi
+      changed_when: false
+
     - name: Ensure gitlab-runner Proxmox ACLs exist
       ansible.builtin.command: "pveum aclmod {{ item.path }} {{ item.principal_type }} {{ item.principal }} -role {{ item.role }}"
       loop:
         - { path: "/pool/CICD", principal_type: "-user", principal: "gitlab-runner@pam", role: "PVEAdmin" }
         - { path: "/pool/CICD", principal_type: "-group", principal: "ludus_admins", role: "PVEAdmin" }
-        - { path: "/storage/{{ proxmox_vm_storage_pool }}", principal_type: "-user", principal: "gitlab-runner@pam", role: "DatastoreUser" }
+        - { path: "/storage/{{ proxmox_vm_storage_pool }}", principal_type: "-user", principal: "gitlab-runner@pam", role: "PVEDatastoreAdmin" }
         - { path: "/sdn/zones/localnetwork/ludusci", principal_type: "-user", principal: "gitlab-runner@pam", role: "PVESDNUser" }
 
     - name: Change name

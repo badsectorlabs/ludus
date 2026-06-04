@@ -47,7 +47,7 @@ export CI_SEED_INTEGRATION_VMID=${CI_SEED_INTEGRATION_VMID:-1007}
 # safest default across Proxmox storage backends; linked clones can be enabled
 # with CI_CLONE_FULL=0 where supported.
 export CI_CLONE_STORAGE=${CI_CLONE_STORAGE:-}
-export CI_CLONE_FULL=${CI_CLONE_FULL:-1}
+export CI_CLONE_FULL=${CI_CLONE_FULL:-0}
 
 # Shared VMs (not dynamically cloned yet)
 export CLUSTER_NODE1_VMID=1005
@@ -285,7 +285,7 @@ configure_ci_control_ip() {
 set -e
 cp /etc/network/interfaces /etc/network/interfaces.ludus-ci.bak 2>/dev/null || true
 awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" -v dns="${CI_CLONE_DNS_SERVERS}" '
-    /^iface ens18 inet static$/ {
+    /^iface ens18 inet / {
         in_ens18=1
         saw_address=0
         saw_gateway=0
@@ -344,9 +344,7 @@ if [ -d /etc/resolvconf/resolv.conf.d ]; then
     cp /tmp/resolv.conf.ludus-ci /etc/resolvconf/resolv.conf.d/head
     resolvconf -u || true
 fi
-if ! grep -qE '^nameserver[[:space:]]+' /etc/resolv.conf 2>/dev/null; then
-    cp /tmp/resolv.conf.ludus-ci /etc/resolv.conf
-fi
+cp /tmp/resolv.conf.ludus-ci /etc/resolv.conf
 rm -f /tmp/resolv.conf.ludus-ci
 
 PROXMOX_NODE_NAME=\$(awk -F': *' '\$1 == "proxmox_node" { print \$2; exit }' /opt/ludus/config.yml 2>/dev/null || true)
