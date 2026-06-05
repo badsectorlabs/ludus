@@ -12,6 +12,7 @@ variable "vm_name" {
 
 source "null" "placeholder" {
   communicator = "none"
+  vm_name = "${var.vm_name}"
 }
 
 build {

@@ -108,7 +108,7 @@ variable "ludus_nat_interface" {
 
 These variables are to be used in the packer configuration to ensure that the template is built correctly depending on how the Ludus server is configured (i.e. with a custom ZFS storage pool).
 
-The template name displayed by Ludus is extracted with the following regex: `(?m)[^"]*?-template`. Therefore, be sure to have a string in your packer file that includes `-template` that will be used as the template name. Typically this is the `vm_name` variable.
+The template name displayed by Ludus is extracted from the `vm_name` in the `source`. Ludus will resolve the `vm_name` if there is a variable reference.
 
 It is the Ludus convention to use `localuser:password` as the user account for templates unless there is a reason not to (i.e. kali).
 

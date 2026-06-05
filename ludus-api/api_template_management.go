@@ -23,7 +23,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/zclconf/go-cty/cty"
 )
 
 // LudusOS represents the operating system category for a template.
@@ -44,9 +47,6 @@ type TemplateStatus struct {
 	FilePath string  `json:"-"`
 }
 
-const templateRegex string = `(?m)[^"]*?-template`
-
-var templateStringRegex = regexp.MustCompile(templateRegex)
 var templateLogSafeCharRegex = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 var templateProgressStore sync.Map
@@ -68,19 +68,134 @@ func getAvailableTemplates(user *models.User) ([]string, error) {
 	return allTemplates, nil
 }
 
-func extractTemplateNameFromHCL(hclFile string, templateRegex *regexp.Regexp) string {
-	// This should use the hcl package for golang and parse the files, but this will work for now
+func extractTemplateNameFromHCL(hclFile string) (string, error) {
 	fileBytes, err := os.ReadFile(hclFile)
 	if err != nil {
-		return "error reading file: " + hclFile
+		return "", fmt.Errorf("error reading file: %w", err)
 	}
-	fileString := string(fileBytes)
-	templateName := templateRegex.FindString(fileString)
-	if templateName != "" {
-		return templateName
+
+	templateName, err := extractPackerTemplateName(hclFile, fileBytes)
+	if err == nil && templateName != "" {
+		return templateName, nil
+	}
+	return "", fmt.Errorf("could not find template name in %s", hclFile)
+}
+
+func extractPackerTemplateName(filename string, src []byte) (string, error) {
+	parser := hclparse.NewParser()
+	var file *hcl.File
+	var diags hcl.Diagnostics
+	if strings.HasSuffix(filename, ".json") {
+		file, diags = parser.ParseJSON(src, filename)
 	} else {
-		return "could not find template name in " + hclFile
+		file, diags = parser.ParseHCL(src, filename)
 	}
+	if diags.HasErrors() {
+		return "", fmt.Errorf("parse packer template: %s", diags.Error())
+	}
+
+	content, _, diags := file.Body.PartialContent(&hcl.BodySchema{
+		Blocks: []hcl.BlockHeaderSchema{
+			{Type: "variable", LabelNames: []string{"name"}},
+			{Type: "locals"},
+			{Type: "source", LabelNames: []string{"type", "name"}},
+		},
+	})
+	if diags.HasErrors() {
+		return "", fmt.Errorf("read packer template blocks: %s", diags.Error())
+	}
+
+	evalCtx, variables := packerTemplateEvalContext(content.Blocks)
+	for _, block := range content.Blocks.OfType("source") {
+		sourceContent, _, diags := block.Body.PartialContent(&hcl.BodySchema{
+			Attributes: []hcl.AttributeSchema{{Name: "vm_name"}},
+		})
+		if diags.HasErrors() {
+			continue
+		}
+		attr, ok := sourceContent.Attributes["vm_name"]
+		if !ok {
+			continue
+		}
+		if name := hclStringValue(attr.Expr, evalCtx); name != "" {
+			return name, nil
+		}
+	}
+
+	if variable, ok := variables["vm_name"]; ok {
+		if name := ctyValueString(variable); name != "" {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
+func packerTemplateEvalContext(blocks hcl.Blocks) (*hcl.EvalContext, map[string]cty.Value) {
+	evalCtx := &hcl.EvalContext{Variables: map[string]cty.Value{}}
+	variables := map[string]cty.Value{}
+	for _, block := range blocks.OfType("variable") {
+		if len(block.Labels) != 1 {
+			continue
+		}
+		variableContent, _, diags := block.Body.PartialContent(&hcl.BodySchema{
+			Attributes: []hcl.AttributeSchema{{Name: "default"}},
+		})
+		if diags.HasErrors() {
+			continue
+		}
+		attr, ok := variableContent.Attributes["default"]
+		if !ok {
+			continue
+		}
+		value, diags := attr.Expr.Value(evalCtx)
+		if diags.HasErrors() || !value.IsWhollyKnown() || value.IsNull() {
+			continue
+		}
+		variables[block.Labels[0]] = value
+	}
+	evalCtx.Variables["var"] = cty.ObjectVal(variables)
+
+	locals := map[string]cty.Value{}
+	for _, block := range blocks.OfType("locals") {
+		attrs, diags := block.Body.JustAttributes()
+		if diags.HasErrors() {
+			continue
+		}
+		for name, attr := range attrs {
+			value, diags := attr.Expr.Value(evalCtx)
+			if diags.HasErrors() || !value.IsWhollyKnown() || value.IsNull() {
+				continue
+			}
+			locals[name] = value
+		}
+	}
+	if len(locals) > 0 {
+		evalCtx.Variables["local"] = cty.ObjectVal(locals)
+	}
+
+	return evalCtx, variables
+}
+
+func hclStringValue(expr hcl.Expression, evalCtx *hcl.EvalContext) string {
+	value, diags := expr.Value(evalCtx)
+	if diags.HasErrors() {
+		return ""
+	}
+	return ctyValueString(value)
+}
+
+func ctyValueString(value cty.Value) string {
+	if !value.IsWhollyKnown() || value.IsNull() || value.Type() != cty.String {
+		return ""
+	}
+	return strings.TrimSpace(value.AsString())
+}
+
+func isExtractedTemplateName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" &&
+		!strings.HasPrefix(name, "error reading file:") &&
+		!strings.HasPrefix(name, "could not find template name in ")
 }
 
 // proxmoxOSToLudusOS maps a Proxmox guest OS type code to a Ludus OS category.
@@ -431,13 +546,16 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 	}
 
 	// Check all the .hcl files
-	templateStringRegex, _ := regexp.Compile(templateRegex)
 	var templateStatusArray []TemplateStatus
 	var templateHCLNames []string
 	for _, templateFile := range allTemplates {
 		// Create a template status, fill out the details, and save it to the templateStatusArray
 		var thisTemplateStatus TemplateStatus
-		thisTemplateName := extractTemplateNameFromHCL(templateFile, templateStringRegex)
+		thisTemplateName, err := extractTemplateNameFromHCL(templateFile)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Unable to extract template name from %s: %v", templateFile, err))
+			continue
+		}
 		// Save this name for later comparison with template VM names
 		templateHCLNames = append(templateHCLNames, thisTemplateName)
 		// Fill out the template status details
@@ -539,15 +657,12 @@ func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus)
 }
 
 func discoverTemplateStatusesForStartup(app core.App) ([]TemplateStatus, error) {
-	templateRegexCompiled, err := regexp.Compile(templateRegex)
-	if err != nil {
-		return nil, fmt.Errorf("unable to compile template regex: %w", err)
-	}
 
 	templateStatusByName := make(map[string]TemplateStatus)
 	addTemplateFromFile := func(templateFile string) {
-		templateName := strings.TrimSpace(extractTemplateNameFromHCL(templateFile, templateRegexCompiled))
-		if templateName == "" || strings.HasPrefix(templateName, "error reading file:") || strings.HasPrefix(templateName, "could not find template name in ") {
+		templateName, err := extractTemplateNameFromHCL(templateFile)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Unable to extract template name from %s: %v", templateFile, err))
 			return
 		}
 		if _, exists := templateStatusByName[templateName]; exists {
@@ -850,9 +965,11 @@ func PutTemplateTar(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar: %v", uploadedTemplatePackerFiles))
 	} else {
 		// Check the name of this template to see if it is already on the server - templates must have unique names
-		templateStringRegex, _ := regexp.Compile(templateRegex)
 		// The if else chain above has validated we only have one entry in the uploadedTemplatePackerFiles slice
-		thisTemplateName := extractTemplateNameFromHCL(uploadedTemplatePackerFiles[0], templateStringRegex)
+		thisTemplateName, err := extractTemplateNameFromHCL(uploadedTemplatePackerFiles[0])
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error extracting template name from %s: %v", uploadedTemplatePackerFiles[0], err))
+		}
 		if slices.Contains(currentTemplateNames, thisTemplateName) {
 			// The uploaded template exists on the server, but this could be a `--force` override of a template in the user's packer dir
 			if force {

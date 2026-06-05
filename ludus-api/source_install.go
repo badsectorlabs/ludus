@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -199,11 +198,13 @@ func userPackerTemplateNames(proxmoxUsername string) map[string]bool {
 	if err != nil {
 		return out
 	}
-	re := regexp.MustCompile(templateRegex)
 	for _, f := range files {
-		if n := extractTemplateNameFromHCL(f, re); n != "" {
-			out[n] = true
+		n, err := extractTemplateNameFromHCL(f)
+		if err != nil {
+			continue
 		}
+		out[n] = true
+
 	}
 	return out
 }
@@ -217,14 +218,11 @@ func templateNameForDir(dir string) string {
 	if err != nil || len(files) == 0 {
 		return filepath.Base(dir)
 	}
-	data, err := os.ReadFile(files[0])
-	if err != nil {
+	name, err := extractTemplateNameFromHCL(files[0])
+	if err != nil || name == "" {
 		return filepath.Base(dir)
 	}
-	if name := regexp.MustCompile(templateRegex).FindString(string(data)); name != "" {
-		return name
-	}
-	return filepath.Base(dir)
+	return name
 }
 
 // templateNameInGlobalPacker reports whether hclName matches the *-template name
@@ -234,9 +232,12 @@ func templateNameInGlobalPacker(hclName string) bool {
 	if err != nil {
 		return false
 	}
-	re := regexp.MustCompile(templateRegex)
 	for _, f := range files {
-		if extractTemplateNameFromHCL(f, re) == hclName {
+		parsedName, err := extractTemplateNameFromHCL(f)
+		if err != nil {
+			return false
+		}
+		if parsedName == hclName {
 			return true
 		}
 	}
