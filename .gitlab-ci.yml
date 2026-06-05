@@ -911,7 +911,7 @@ range deploy-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: templates_built
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 5m
+  timeout: 2h
   retry:
     max: 2
     when:
@@ -1750,7 +1750,7 @@ range deploy-user:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 5m
+  timeout: 2h
   retry:
     max: 2
     when: script_failure
