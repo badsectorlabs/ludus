@@ -69,7 +69,7 @@ stages:
       WIN11VMID=$(sudo qm list | grep running | grep -i win11 | head -1 | awk '{print $1}' || true)
       if [[ -n "$WIN11VMID" ]]; then
         echo "Waiting for QEMU guest agent on Win11 VM $WIN11VMID..."
-        timeout 300 bash -c "until sudo qm guest ping $WIN11VMID >/dev/null 2>&1; do sleep 5; done" \
+        timeout 300 bash -c "until sudo qm agent $WIN11VMID ping >/dev/null 2>&1; do sleep 5; done" \
           || echo "WARNING: Win11 guest agent did not respond within 300s — downstream qm guest exec may fail"
       fi
     fi
@@ -921,63 +921,7 @@ range deploy-admin:
     - *ci-setup-admin
     - ludus range config get
     - ludus range deploy
-
-range check-admin:
-  stage: test
-  tags:
-    - ludus-proxmox-runner-parallel
-  needs:
-    - range deploy-admin
-  dependencies: [] # Prevent download of build artifacts, use local cache
-  rules:
-    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
-      when: never
-    - changes:
-        - ludus-server/ansible/range-management/**/*
-  variables:
-    LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: templates_built
-    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 3h
-  retry:
-    max: 2
-    when: script_failure
-  script:
-    - *ci-setup-admin
-    - |
-      while true; do
-        range_state="$(ludus range list --json | jq -r '.rangeState')"
-        echo "Current range state: ${range_state}"
-
-        if [ "${range_state}" = "SUCCESS" ]; then
-          break
-        fi
-
-        if [ "${range_state}" = "ERROR" ]; then
-          echo "Range deployment failed. Exiting."
-          ludus range errors
-          exit 1
-        fi
-
-        ludus range logs --tail 20 || true
-        sleep 60
-      done
+    - *wait-for-range-success
     - ludus range logs
     - ludus range list
     # Check to make sure the IPs were set correctly
@@ -1811,48 +1755,9 @@ range deploy-user:
     max: 2
     when: script_failure
   script:
-    - *ci-setup-admin
-    - ludus power off -n all # Shut down the admin range to save resources
     - *ci-setup-user
     - ludus range config get
     - ludus range deploy
-
-range check-user:
-  stage: test
-  tags:
-    - ludus-proxmox-runner-parallel
-  needs:
-    - range deploy-user
-  dependencies: [] # Prevent download of build artifacts, use local cache
-  rules:
-    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
-      when: never
-    - changes:
-        - ludus-server/ansible/range-management/**/*
-  variables:
-    LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_user
-    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 3h
-  retry:
-    max: 2
-    when: script_failure
-  script:
-    - *ci-setup-user
     - *wait-for-range-success
     - ludus range logs
     - ludus range list
