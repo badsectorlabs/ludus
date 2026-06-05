@@ -1175,7 +1175,7 @@ post-deploy groups-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
