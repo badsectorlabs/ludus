@@ -44,7 +44,7 @@ and installs it if available.`,
 			Channel:        "stable",
 			PublicKey:      licensePublicKey,
 			Filename:       "{{.version}}%2Fludus-client_{{if eq .platform \"darwin\"}}macOS{{else}}{{.platform}}{{end}}-{{.arch}}{{if .ext}}.{{.ext}}{{end}}",
-			Constraint:     "1.0",
+			Constraint:     "2.0",
 		}
 
 		// Check for an upgrade

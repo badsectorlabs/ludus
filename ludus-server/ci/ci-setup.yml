@@ -250,13 +250,12 @@
         ansible_user: debian
         ansible_ssh_pass: debian
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-        become_method: sudo
+        ansible_become_method: sudo
         ansible_sudo_pass: debian
       when: clone_vm is changed
 
     - name: Wait for the host's control interface (SSH) to come up
-      action:
-        module: wait_for
+      ansible.builtin.wait_for:
         host: "{{ last_deployed_ip }}"
         port: 22
         delay: 3
@@ -267,11 +266,11 @@
 - name: Install Gitlab runner prerequisites
   hosts: debian-13-x64-server-ludus-ci
   vars:
-    - ansible_connection: ssh
-    - ansible_user: debian
-    - ansible_ssh_pass: debian
-    - become_method: sudo
-    - ansible_sudo_pass: debian
+    ansible_connection: ssh
+    ansible_user: debian
+    ansible_ssh_pass: debian
+    ansible_become_method: sudo
+    ansible_sudo_pass: debian
   tasks:
     - name: Grow root partition to fill the CI disk
       ansible.builtin.shell: |
@@ -331,6 +330,26 @@
         state: absent
       become: true
 
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name:
+          - gitlab-runner
+          - git
+          - git-lfs
+          - build-essential # for CGO
+          - vim # to help with debugging edits
+          - tmux
+          - htop
+          - jq
+          - python3-debian
+          - curl
+          - unzip
+          - ca-certificates
+          - sudo
+        state: present
+        update_cache: true
+      become: true
+
     - name: Allow 'gitlab-runner' user to have passwordless sudo
       lineinfile:
         dest: /etc/sudoers
@@ -344,22 +363,6 @@
       authorized_key:
         user: gitlab-runner
         key: "{{ lookup('file', '/home/gitlab-runner/.ssh/id_rsa.pub') }}"
-      become: true
-
-    - name: Install prerequisites
-      ansible.builtin.apt:
-        name:
-          - gitlab-runner
-          - git
-          - git-lfs
-          - build-essential # for CGO
-          - vim # to help with debugging edits
-          - tmux
-          - htop
-          - jq
-          - python3-debian
-        state: present
-        update_cache: true
       become: true
 
     # ll needs to be a thing everywhere
@@ -401,11 +404,11 @@
 - name: Install Go # Must come after the tasks or ca certificates may not exist
   hosts: debian-13-x64-server-ludus-ci
   vars:
-    - ansible_connection: ssh
-    - ansible_user: debian
-    - ansible_ssh_pass: debian
-    - become_method: sudo
-    - ansible_sudo_pass: debian
+    ansible_connection: ssh
+    ansible_user: debian
+    ansible_ssh_pass: debian
+    ansible_become_method: sudo
+    ansible_sudo_pass: debian
   tasks:
     - name: Set Go version
       ansible.builtin.set_fact:
@@ -450,8 +453,15 @@
       ansible.builtin.shell: npm install --global yarn
       become: true
       
-    - name: Install bun
-      ansible.builtin.shell: npm install --global bun
+    - name: Install bun as the gitlab-runner user
+      ansible.builtin.shell: su gitlab-runner -c "curl -fsSL https://bun.sh/install | bash"
+      become: true
+
+    - name: Enable bun in the gitlab-runner user's PATH
+      ansible.builtin.lineinfile:
+        path: /home/gitlab-runner/.profile
+        line: 'export PATH=$PATH:/home/gitlab-runner/.bun/bin'
+        create: true
       become: true
       
 - name: Add gitlab-runner to proxmox and convert the VM to a template
@@ -464,7 +474,7 @@
 
     - name: Ensure gitlab-runner Proxmox user exists
       ansible.builtin.shell: |
-        if pveum user list | awk '{print $1}' | grep -qx 'gitlab-runner@pam'; then
+        if pveum user list --output-format json | jq -e '.[] | select(.userid == "gitlab-runner@pam")' >/dev/null; then
           printf '%s\n%s\n' "$RUNNER_PVE_PASSWORD" "$RUNNER_PVE_PASSWORD" | pveum passwd gitlab-runner@pam
         else
           pveum user add gitlab-runner@pam --password "$RUNNER_PVE_PASSWORD"
@@ -473,12 +483,19 @@
         RUNNER_PVE_PASSWORD: "{{ runner_pve_password }}"
       no_log: true
 
+    - name: Ensure required CI Proxmox groups exist
+      ansible.builtin.shell: |
+        if ! pveum group list --output-format json | jq -e '.[] | select(.groupid == "ludus_admins")' >/dev/null; then
+          pveum group add ludus_admins
+        fi
+      changed_when: false
+
     - name: Ensure gitlab-runner Proxmox ACLs exist
       ansible.builtin.command: "pveum aclmod {{ item.path }} {{ item.principal_type }} {{ item.principal }} -role {{ item.role }}"
       loop:
         - { path: "/pool/CICD", principal_type: "-user", principal: "gitlab-runner@pam", role: "PVEAdmin" }
         - { path: "/pool/CICD", principal_type: "-group", principal: "ludus_admins", role: "PVEAdmin" }
-        - { path: "/storage/{{ proxmox_vm_storage_pool }}", principal_type: "-user", principal: "gitlab-runner@pam", role: "DatastoreUser" }
+        - { path: "/storage/{{ proxmox_vm_storage_pool }}", principal_type: "-user", principal: "gitlab-runner@pam", role: "PVEDatastoreAdmin" }
         - { path: "/sdn/zones/localnetwork/ludusci", principal_type: "-user", principal: "gitlab-runner@pam", role: "PVESDNUser" }
 
     - name: Change name
@@ -542,7 +559,7 @@
       ansible.builtin.replace:
         path: "/etc/gitlab-runner/config.toml"
         regexp: "concurrent *= *\\d+"
-        replace: "concurrent = 12"
+        replace: "concurrent = {{ gitlab_runner_concurrent }}"
       when: gitlab_runner_configure | default(true) | bool
 
     - name: Restart GitLab runner

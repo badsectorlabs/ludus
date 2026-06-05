@@ -15,7 +15,7 @@ Going more than 1 layer deep of nested virtualization is not supported.
 
 To set up a CI/CD runner for Ludus development you must meet the following requirements:
 
-1. A functional, fast, Ludus server with at least 32GB of free RAM, 250GB of free disk space, and 8 cores available (can over-provision cores if necessary)
+1. A functional, fast, Ludus server with at least 128GB of free RAM, 1TB of free disk space, and as many fast cores as you can get
 2. The `debian-13-x64-server-template` must be built
 3. Root access to the Ludus server
 4. A Gitlab account with the ability to create a runner token (gitlab.com or self-hosted)
@@ -27,18 +27,18 @@ To setup the CI/CD runner and template follow these steps:
 
 1. Build the `debian-13-x64-server-template` Ludus template.
 
-2. Install and register a GitLab Runner on the Ludus host with the tag `ludus-proxmox-runner-parallel`. Do not check `Run untagged jobs`.
+2. Create a GitLab Runner with the tag `ludus-proxmox-runner-parallel`. Do not check `Run untagged jobs`. Provide the runner token as an env variable to the bootstrap-ci-host.sh script
 
 3. Clone the Ludus repository on the Ludus host and run the CI bootstrap as root:
 
 ```shell-session
-LUDUS_ADMIN_API_KEY=JD... ./ludus-server/ci/bootstrap-ci-host.sh
+LUDUS_ADMIN_API_KEY=JD... GITLAB_RUNNER_TOKEN=... ./ludus-server/ci/bootstrap-ci-host.sh
 ```
 
-You can also provide Proxmox credentials directly:
+You can also provide Proxmox credentials directly, and modify other settings via ENV variables to match your environment:
 
 ```shell-session
-PROXMOX_USERNAME=erik-hunstad@pam PROXMOX_PASSWORD='...' ./ludus-server/ci/bootstrap-ci-host.sh
+PROXMOX_USERNAME=root@pam PROXMOX_PASSWORD='...' PROXMOX_VM_STORAGE_POOL='<storage pool>' PROXMOX_VM_STORAGE_FORMAT=raw NER_TOKEN=... ./ludus-server/ci/bootstrap-ci-host.sh
 ```
 
 When the bootstrap finishes, you will see `debian-13-x64-server-ludus-ci-template`, the protected `ci-seed-*` templates, the cluster VMs, and the build VM in the Proxmox web UI. The existing GitLab Runner will be configured to use the Ludus custom executor scripts in `/opt/ludus/ci`. CI VMs default to 250GB root disks; set `CI_VM_DISK_SIZE=300G` or another `G` value before running the bootstrap if your template/range workload needs more space.

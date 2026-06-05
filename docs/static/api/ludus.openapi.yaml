@@ -541,6 +541,99 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /ansible/collection:
+    post:
+      summary: Install an Ansible collection
+      deprecated: false
+      description: >
+        Install an ansible collection by name or URL.
+
+        Admins can pass a userID parameter to install a collection for other
+        users.
+
+        Ansible collections can only be removed by rm-ing their directories.
+        This is not supported via Ludus due to potential edge cases in naming
+        depending on how the collection was installed.
+      operationId: InstallCollection
+      tags:
+        - Ansible Management
+      parameters:
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to install for.
+
+            Defaults to the user's range (admins can interact with other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                collection:
+                  type: string
+                  description: >-
+                    Collection FQCN (namespace.name) for a galaxy install, or a
+                    git source URL (https/ssh, optionally git+ prefixed) to
+                    install from git. The server infers git from the string's
+                    shape.
+                  example: maxhoesel.smallstep
+                version:
+                  type: string
+                  description: >-
+                    Version pin for a galaxy collection, or any commit-ish
+                    (branch / tag / commit) for a git source.
+                  example: 0.23.1
+                force:
+                  type: boolean
+                  example: true
+              type: object
+      responses:
+        '201':
+          description: collection installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: 'Successfully installed: maxhoesel.smallstep'
+          headers: {}
+        '409':
+          description: Collection already installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Collection already installed. Collections from
+                      https://docs.ansible.com/ansible/latest/collections/index.html
+                      are installed globally. If you want to reinstall it,
+                      consider using `--force`.
+          headers: {}
+        '500':
+          description: Error installing collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Unable to install the ansible collection:
+                      maxhoesel.smallstep
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /ansible:
     get:
       summary: Retrieve available Ansible roles and collections
@@ -6313,6 +6406,43 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+    delete:
+      summary: Delete source
+      deprecated: false
+      description: >
+        Deletes a source. Registration-only: removes the source and the
+        blueprints it provided. Templates, roles, and collections it installed
+        are shared instance resources and remain on disk — remove those
+        individually (the Ansible / Templates pages, or `source remove`) if you
+        want them gone.
+      operationId: deleteSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
     get:
       summary: Get source
       deprecated: false
@@ -6339,8 +6469,9 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-    delete:
-      summary: Delete source
+  /sources/{sourceID}/sync:
+    post:
+      summary: Sync source
       deprecated: false
       description: >
         Deletes a source. Registration-only: removes the source and the
@@ -6361,17 +6492,14 @@ paths:
             type: string
       responses:
         '200':
-          description: Source deleted
+          description: Sync result.
           content:
             application/json:
               schema:
-                type: object
-                required:
-                  - status
-                properties:
-                  status:
-                    type: string
-                    example: deleted
+                $ref: '#/components/schemas/SyncResultResponse'
+          headers: {}
+        '400':
+          description: Source is upload-type; sync is git-only.
           headers: {}
       security:
         - JWT: []
@@ -8118,6 +8246,9 @@ components:
           type: string
     DeleteSourceResponse:
       description: >-
+        Returned by `deleteSource`. Registration-only delete, so `status` is
+        always "deleted" — the source and its blueprints are dropped while
+        installed templates/roles/collections remain on disk.
         Returned by `deleteSource`. Registration-only delete, so `status` is
         always "deleted" — the source and its blueprints are dropped while
         installed templates/roles/collections remain on disk.
