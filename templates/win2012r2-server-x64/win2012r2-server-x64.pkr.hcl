@@ -100,7 +100,7 @@ source "proxmox-iso" "win2012r2-server-x64" {
   additional_iso_files {
     device           = "sata4"
     iso_checksum     = "sha256:8da37d153be6c12fdc25205517c3727fec7799d1060ac38111f404b274478344"
-    iso_url          = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.173-2/virtio-win-0.1.173.iso" // Purposefully old to get past signature issues
+    iso_url          = "https://virtio-win.ludus.cloud/archive-virtio/virtio-win-0.1.173-2/virtio-win-0.1.173.iso" // Purposefully old to get past signature issues
     iso_storage_pool = "${var.iso_storage_pool}"
     unmount          = true
   }

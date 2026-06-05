@@ -100,7 +100,7 @@ source "proxmox-iso" "win10-22h2-x64-enterprise" {
   additional_iso_files {
     device           = "sata4"
     iso_checksum     = "sha256:c88a0dde34605eaee6cf889f3e2a0c2af3caeb91b5df45a125ca4f701acbbbe0"
-    iso_url          = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.229-1/virtio-win-0.1.229.iso"
+    iso_url          = "https://virtio-win.ludus.cloud/archive-virtio/virtio-win-0.1.229-1/virtio-win-0.1.229.iso"
     iso_storage_pool = "${var.iso_storage_pool}"
     unmount          = true
   }
