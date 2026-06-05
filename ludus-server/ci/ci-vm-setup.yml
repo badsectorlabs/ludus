@@ -314,6 +314,7 @@
           }
           in_ens18 && /^[[:space:]]*gateway[[:space:]]+/ {
             print "\tgateway " gw
+            print "\tdns-nameservers 1.1.1.1"
             saw_gateway=1
             next
           }
@@ -342,6 +343,7 @@
         ip link set ens18 up
         ip addr add "{{ item.ip }}/24" dev ens18
         ip route replace default via 203.0.113.254 dev ens18
+        echo "nameserver 1.1.1.1" > /etc/resolv.conf
         REMOTE
         qm guest exec {{ item.vmid }} -- /bin/bash -lc "$SCRIPT" | jq -e '.exitcode == 0'
       args:
@@ -404,6 +406,7 @@
     pve_ceph_mgr_group: ci_pve_cluster
     pve_ceph_mds_group: ci_pve_cluster
     pve_ceph_osds: []
+    pve_ceph_default_version: tentacle
     pve_ceph_pools:
       - name: ceph
         storage: true
@@ -489,6 +492,32 @@
       ansible.builtin.set_fact:
         pve_ceph_osds:
           - device: "{{ ci_ceph_osd_device.stdout | trim }}"
+
+    - name: Show discovered CI Ceph OSD device
+      ansible.builtin.debug:
+        var: ci_ceph_osd_device.stdout
+
+    - name: Check if ceph config is present on cluster
+      ansible.builtin.stat:
+        path: /usr/sbin/ceph-volume
+      register: __ceph_installed
+
+    - name: Check if pveceph is available
+      ansible.builtin.stat:
+        path: /usr/bin/pveceph
+      register: __pveceph
+
+    - name: Install ceph
+      ansible.builtin.command:
+        argv:
+          - "pveceph"
+          - "install"
+          - "--repository"
+          - "no-subscription"
+        stdin: 'Y\nY\n'
+      when: not __ceph_installed.stat.exists and __pveceph.stat.exists
+      changed_when: true
+
   roles:
     - role: lae.proxmox
   post_tasks:
@@ -556,14 +585,27 @@
         executable: /bin/bash
       throttle: 1
 
-    - name: Wait for Ceph health to settle
-      ansible.builtin.command: ceph health
-      register: ci_ceph_health
-      changed_when: false
-      until: ci_ceph_health.stdout.startswith('HEALTH_OK')
-      retries: 30
-      delay: 10
-      run_once: true
+    - name: Wait for Ceph health to be HEALTH_OK
+      block:
+        - name: Wait for Ceph health to settle
+          ansible.builtin.command: ceph health
+          register: ci_ceph_health
+          changed_when: false
+          until: ci_ceph_health.stdout is defined and ci_ceph_health.stdout.startswith('HEALTH_OK')
+          retries: 20
+          delay: 10
+          run_once: true
+      rescue:
+        - name: Require tentacle
+          ansible.builtin.command: ceph osd require-osd-release tentacle
+        - name: Wait for Ceph health to settle
+          ansible.builtin.command: ceph health
+          register: ci_ceph_health
+          changed_when: false
+          until: ci_ceph_health.stdout is defined and ci_ceph_health.stdout.startswith('HEALTH_OK')
+          retries: 20
+          delay: 10
+          run_once: true
 
     - name: Ensure Ludus VXLAN SDN zone exists for cluster CI
       ansible.builtin.shell: |

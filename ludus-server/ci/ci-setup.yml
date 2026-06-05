@@ -242,34 +242,6 @@
         last_deployed_ip: "{{ nodecheck.stdout | trim }}"
       when: clone_vm is changed
 
-    - name: Ensure Debian SSH user exists in CI template VM
-      ansible.builtin.shell: |
-        set -euo pipefail
-        read -r -d '' SCRIPT <<'REMOTE' || true
-        set -euo pipefail
-        if ! command -v sudo >/dev/null 2>&1; then
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
-        fi
-        getent group sudo >/dev/null 2>&1 || groupadd sudo
-        if ! id debian >/dev/null 2>&1; then
-          useradd -m -s /bin/bash debian
-        fi
-        echo 'debian:debian' | chpasswd
-        usermod -aG sudo debian
-        install -d -m 0755 /etc/sudoers.d
-        echo 'debian ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-ludus-ci-debian
-        chmod 0440 /etc/sudoers.d/99-ludus-ci-debian
-        install -d -m 0755 /etc/ssh/sshd_config.d
-        printf '%s\n' 'PasswordAuthentication yes' > /etc/ssh/sshd_config.d/99-ludus-ci-password.conf
-        systemctl restart ssh || systemctl restart sshd || true
-        REMOTE
-        qm guest exec {{ vm_id }} -- /bin/bash -lc "$SCRIPT" | jq -e '.exitcode == 0'
-      args:
-        executable: /bin/bash
-      changed_when: true
-      when: clone_vm is changed
-
     - name: Add CI template VM to in-memory inventory
       ansible.builtin.add_host:
         name: debian-13-x64-server-ludus-ci
@@ -358,21 +330,6 @@
         state: absent
       become: true
 
-    - name: Allow 'gitlab-runner' user to have passwordless sudo
-      lineinfile:
-        dest: /etc/sudoers
-        state: present
-        regexp: '^gitlab-runner'
-        line: 'gitlab-runner ALL=(ALL) NOPASSWD: ALL'
-        validate: 'visudo -cf %s'
-      become: true
-
-    - name: Copy ssh key for gitlab-runner with owner and permissions
-      authorized_key:
-        user: gitlab-runner
-        key: "{{ lookup('file', '/home/gitlab-runner/.ssh/id_rsa.pub') }}"
-      become: true
-
     - name: Install prerequisites
       ansible.builtin.apt:
         name:
@@ -388,8 +345,24 @@
           - curl
           - unzip
           - ca-certificates
+          - sudo
         state: present
         update_cache: true
+      become: true
+
+    - name: Allow 'gitlab-runner' user to have passwordless sudo
+      lineinfile:
+        dest: /etc/sudoers
+        state: present
+        regexp: '^gitlab-runner'
+        line: 'gitlab-runner ALL=(ALL) NOPASSWD: ALL'
+        validate: 'visudo -cf %s'
+      become: true
+
+    - name: Copy ssh key for gitlab-runner with owner and permissions
+      authorized_key:
+        user: gitlab-runner
+        key: "{{ lookup('file', '/home/gitlab-runner/.ssh/id_rsa.pub') }}"
       become: true
 
     # ll needs to be a thing everywhere
@@ -586,7 +559,7 @@
       ansible.builtin.replace:
         path: "/etc/gitlab-runner/config.toml"
         regexp: "concurrent *= *\\d+"
-        replace: "concurrent = 12"
+        replace: "concurrent = {{ gitlab_runner_concurrent }}"
       when: gitlab_runner_configure | default(true) | bool
 
     - name: Restart GitLab runner

@@ -2,7 +2,6 @@
 
 # Bootstrap a Ludus CI host after:
 #   1. debian-13-x64-server-template has been built by Ludus
-#   2. gitlab-runner has been installed and registered with GitLab
 #
 # Run from a Ludus repository checkout as root on the Proxmox/Ludus host:
 #   LUDUS_ADMIN_API_KEY=EH... ./ludus-server/ci/bootstrap-ci-host.sh
@@ -58,6 +57,15 @@ if [[ -z "${PROXMOX_USERNAME:-}" || -z "${PROXMOX_PASSWORD:-}" ]]; then
     PROXMOX_PASSWORD="$(jq -r '.result.proxmoxPassword' <<<"$CREDS_JSON")"
 fi
 
+if [[ -z "${GITLAB_RUNNER_TOKEN:-}" ]]; then
+    echo "GITLAB_RUNNER_TOKEN is not set, assuming the GitLab Runner is already installed and registered with GitLab" >&2
+    GITLAB_RUNNER_CONFIGURE=false
+    GITLAB_RUNNER_REGISTER=false
+else
+    GITLAB_RUNNER_CONFIGURE=true
+    GITLAB_RUNNER_REGISTER=true
+fi
+
 require_command() {
     command -v "$1" >/dev/null 2>&1 || {
         echo "Error: required command '$1' not found" >&2
@@ -67,7 +75,6 @@ require_command() {
 
 require_command ansible-playbook
 require_command ansible-galaxy
-require_command gitlab-runner
 require_command go
 require_command jq
 require_command qm
@@ -179,7 +186,6 @@ build_seed_binaries() {
             -o "$bin_dir/ludus-client_linux-amd64"
     )
 
-    chown -R gitlab-runner:gitlab-runner "$bin_dir"
 }
 
 run_ci_template_setup() {
@@ -206,6 +212,8 @@ run_ci_template_setup() {
         --arg gitlab_registration_token "$GITLAB_RUNNER_TOKEN" \
         --arg gitlab_url "$GITLAB_URL" \
         --arg gitlab_runner_concurrent "$GITLAB_RUNNER_CONCURRENT" \
+        --argjson gitlab_runner_configure "$GITLAB_RUNNER_CONFIGURE" \
+        --argjson gitlab_runner_register "$GITLAB_RUNNER_REGISTER" \
         '{
             api_user: $api_user,
             api_password: $api_password,
@@ -214,8 +222,8 @@ run_ci_template_setup() {
             ludus_install_path: $ludus_install_path,
             proxmox_vm_storage_pool: $proxmox_vm_storage_pool,
             ci_vm_disk_size: $ci_vm_disk_size,
-            gitlab_runner_register: true,
-            gitlab_runner_configure: true,
+            gitlab_runner_register: $gitlab_runner_register,
+            gitlab_runner_configure: $gitlab_runner_configure,
             gitlab_registration_token: $gitlab_registration_token,
             gitlab_url: $gitlab_url,
             gitlab_runner_concurrent: $gitlab_runner_concurrent
@@ -301,7 +309,6 @@ if ! template_exists debian-13-x64-server-template; then
     exit 1
 fi
 
-sync_ci_files
 ensure_host_packages
 ensure_bootstrap_acls
 
@@ -337,5 +344,7 @@ fi
 if [[ "$CI_SETUP_SEEDS" == "1" ]]; then
     run_seed_setup
 fi
+
+sync_ci_files
 
 echo "Ludus CI host bootstrap complete."
