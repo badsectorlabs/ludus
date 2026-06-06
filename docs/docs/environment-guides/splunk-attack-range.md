@@ -21,12 +21,8 @@ ludus ansible roles add p4t12ick.ludus_ar_linux
 
 ```bash
 #terminal-command-local
-git clone https://gitlab.com/badsectorlabs/ludus
-#terminal-command-local
-cd ludus/templates
-#terminal-command-local
-ludus templates add -d ubuntu-22.04-x64-server
-[INFO]  Successfully added template
+ludus source add ludus-source-bsl --templates ubuntu-22.04-x64-server-template
+[INFO]  Source 'ludus-source-bsl' installed successfully.
 #terminal-command-local
 ludus templates build
 [INFO]  Template building started - this will take a while. Building 1 template(s) at a time.

@@ -1,1 +1,0 @@
-This template requires Ludus >= 1.9.7

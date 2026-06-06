@@ -326,67 +326,92 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 
 }
 
-// Parse the version.yml file in the meta directory for this role, and set the value in meta/.galaxy_install_info
 func parseRoleVersion(roleName string, user *models.User, global bool) (string, error) {
-	var roleMetaPath string
-	var galaxyInstallInfoPath string
-	if !global {
-		roleMetaPath = fmt.Sprintf("%s/users/%s/.ansible/roles/%s/meta", ludusInstallPath, user.ProxmoxUsername(), roleName)
-		galaxyInstallInfoPath = fmt.Sprintf("%s/users/%s/.ansible/roles/%s/meta/.galaxy_install_info", ludusInstallPath, user.ProxmoxUsername(), roleName)
-	} else {
-		roleMetaPath = fmt.Sprintf("%s/resources/global-roles/%s/meta", ludusInstallPath, roleName)
-		galaxyInstallInfoPath = fmt.Sprintf("%s/resources/global-roles/%s/meta/.galaxy_install_info", ludusInstallPath, roleName)
+	roleDir := filepath.Join(ludusInstallPath, "users", user.ProxmoxUsername(), ".ansible", "roles", roleName)
+	if global {
+		roleDir = filepath.Join(ludusInstallPath, "resources", "global-roles", roleName)
 	}
-	versionYmlPath := fmt.Sprintf("%s/version.yml", roleMetaPath)
-	if _, err := os.Stat(versionYmlPath); err == nil {
-		versionYmlContents, err := os.ReadFile(versionYmlPath)
-		if err != nil {
-			return "", fmt.Errorf("Unable to read version.yml in the role meta directory: %s", roleMetaPath)
-		}
-		// Parse the version.yml file
-		var versionYml map[string]string
-		err = yaml.Unmarshal(versionYmlContents, &versionYml)
-		if err != nil {
-			return "", fmt.Errorf("Unable to parse version.yml in the role meta directory: %s", roleMetaPath)
-		}
-		// Write the version to the .galaxy_install_info file
-		fileContents, err := os.ReadFile(galaxyInstallInfoPath)
-		if err != nil {
-			return "", fmt.Errorf("Unable to read .galaxy_install_info: %s", err)
-		}
+	return reflectRoleVersionToGalaxyInfo(roleDir)
+}
 
-		// Convert the contents to a string and split into lines
-		contents := string(fileContents)
-		lines := strings.Split(contents, "\n")
-
-		// Flag to check if version line exists
-		versionExists := false
-		for i, line := range lines {
-			if strings.HasPrefix(line, "version:") {
-				// Update the version line
-				lines[i] = fmt.Sprintf("version: %s", versionYml["version"])
-				versionExists = true
-				break
-			}
-		}
-
-		// If version line does not exist, append it
-		if !versionExists {
-			lines = append(lines, fmt.Sprintf("version: %s", versionYml["version"]))
-		}
-
-		// Join the lines back together
-		updatedContents := strings.Join(lines, "\n")
-
-		// Write the updated contents back to the file
-		err = os.WriteFile(galaxyInstallInfoPath, []byte(updatedContents), 0660)
-		if err != nil {
-			return "", fmt.Errorf("Unable to write to .galaxy_install_info in the role meta directory: %s", roleMetaPath)
-		}
-
-		return versionYml["version"], nil
+// reflectRoleVersionToGalaxyInfo upserts version.yml's version into
+// .galaxy_install_info so the role shows up in `ansible-galaxy role list`.
+// Preserves install_date when the file exists (galaxy install) and
+// synthesizes a fresh one when it doesn't (manual role copy).
+func reflectRoleVersionToGalaxyInfo(roleDir string) (string, error) {
+	metaDir := filepath.Join(roleDir, "meta")
+	versionYmlPath := filepath.Join(metaDir, "version.yml")
+	if _, err := os.Stat(versionYmlPath); err != nil {
+		return "", nil
 	}
-	return "", nil
+	versionYmlContents, err := os.ReadFile(versionYmlPath)
+	if err != nil {
+		return "", fmt.Errorf("read version.yml in %s: %w", metaDir, err)
+	}
+	var versionYml map[string]string
+	if err := yaml.Unmarshal(versionYmlContents, &versionYml); err != nil {
+		return "", fmt.Errorf("parse version.yml in %s: %w", metaDir, err)
+	}
+	version := strings.TrimSpace(versionYml["version"])
+	if version == "" {
+		return "", nil
+	}
+
+	infoPath := filepath.Join(metaDir, ".galaxy_install_info")
+	existing, readErr := os.ReadFile(infoPath)
+	if readErr != nil {
+		content := fmt.Sprintf("install_date: \"\"\nversion: %s\n", version)
+		if err := os.WriteFile(infoPath, []byte(content), 0660); err != nil {
+			return "", fmt.Errorf("write .galaxy_install_info in %s: %w", metaDir, err)
+		}
+		return version, nil
+	}
+
+	lines := strings.Split(string(existing), "\n")
+	versionExists := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "version:") {
+			lines[i] = fmt.Sprintf("version: %s", version)
+			versionExists = true
+			break
+		}
+	}
+	if !versionExists {
+		lines = append(lines, fmt.Sprintf("version: %s", version))
+	}
+	if err := os.WriteFile(infoPath, []byte(strings.Join(lines, "\n")), 0660); err != nil {
+		return "", fmt.Errorf("write .galaxy_install_info in %s: %w", metaDir, err)
+	}
+	return version, nil
+}
+
+// isGitCollectionSource reports whether a collection identifier names a git
+// source rather than a galaxy FQCN — true for any URL (has "://"), an
+// scp-style ssh ref (git@…), or an explicit git+ prefix.
+func isGitCollectionSource(c string) bool {
+	return strings.Contains(c, "://") || strings.HasPrefix(c, "git@") || strings.HasPrefix(c, "git+")
+}
+
+// buildCollectionInstallArg renders the positional argument for
+// `ansible-galaxy collection install`. Galaxy collections use the pin form
+// (name:==version); git sources use git+<url>,<ref>. Bare https URLs get a
+// git+ prefix since ansible-galaxy rejects them otherwise; git@ / already-
+// git+ strings are passed through unchanged.
+func buildCollectionInstallArg(collection, version string) string {
+	if isGitCollectionSource(collection) {
+		src := collection
+		if strings.Contains(src, "://") && !strings.HasPrefix(src, "git+") {
+			src = "git+" + src
+		}
+		if version != "" {
+			return src + "," + version
+		}
+		return src
+	}
+	if version != "" {
+		return fmt.Sprintf("%s:==%s", collection, version)
+	}
+	return collection
 }
 
 // ActionCollectionFromInternet - installs an ansible collection from ansible galaxy or publicly available source control
@@ -399,10 +424,10 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not authorized to perform this ansible action")
 	}
 
-	var collectionString = collectionBody.Collection
-	if collectionBody.Version != "" {
-		collectionString = fmt.Sprintf("%s:==%s", collectionBody.Collection, collectionBody.Version)
-	}
+	// Pass the source string straight to ansible-galaxy, the same way the
+	// role endpoint does — a git URL installs from git, an FQCN installs
+	// from galaxy. No separate type flag: the string's shape is the signal.
+	collectionString := buildCollectionInstallArg(collectionBody.Collection, collectionBody.Version)
 
 	// Make sure the collection string is escaped
 	collectionString = shellescape.Quote(collectionString)
@@ -604,11 +629,16 @@ func GetRoleVars(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, response)
 }
 
-// copyDir recursively copies a directory from src to dst
+// copyDir recursively copies a directory from src to dst. Symlinks are
+// rejected outright as a defense-in-depth measure.
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to copy symlink %q: blueprint dirs and role/template dirs must contain only regular files and directories", path)
 		}
 
 		relPath, err := filepath.Rel(src, path)
@@ -619,6 +649,9 @@ func copyDir(src, dst string) error {
 
 		if info.IsDir() {
 			return os.MkdirAll(dstPath, info.Mode())
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to copy non-regular file %q", path)
 		}
 
 		srcFile, err := os.Open(path)

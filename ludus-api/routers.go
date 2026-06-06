@@ -291,6 +291,17 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		return se.Next()
 	})
 
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		// Only the main (non-root) service manages sources on disk. The root
+		// admin service shares the same code path but would git-fetch as root,
+		// leaving root-owned files the main service cannot update on later syncs.
+		if os.Geteuid() != 0 {
+			seedDefaultSourceBSL(app)
+			SyncAllSourcesOnStartup(app)
+		}
+		return se.Next()
+	})
+
 	return &app
 }
 
@@ -820,6 +831,20 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"GetBlueprintDetail",
+		http.MethodGet,
+		"/blueprints/{blueprintID}",
+		GetBlueprintDetail,
+	},
+
+	{
+		"CreateBlueprint",
+		http.MethodPost,
+		"/blueprints",
+		CreateBlueprint,
+	},
+
+	{
 		"CreateBlueprintFromRange",
 		http.MethodPost,
 		"/blueprints/from-range",
@@ -838,6 +863,20 @@ var routes = PocketBaseRoutes{
 		http.MethodPost,
 		"/blueprints/{blueprintID}/copy",
 		CopyBlueprint,
+	},
+
+	{
+		"ExportBlueprint",
+		http.MethodGet,
+		"/blueprints/{blueprintID}/export",
+		ExportBlueprint,
+	},
+
+	{
+		"ImportBlueprint",
+		http.MethodPost,
+		"/blueprints/import",
+		ImportBlueprint,
 	},
 
 	{
@@ -901,6 +940,112 @@ var routes = PocketBaseRoutes{
 		http.MethodDelete,
 		"/blueprints/{blueprintID}/share/users",
 		UnshareBlueprintWithUsers,
+	},
+
+	{
+		"InstallBlueprintDeps",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/install",
+		InstallBlueprintDeps,
+	},
+
+	// Source routes
+	{
+		"CreateSource",
+		http.MethodPost,
+		"/sources",
+		CreateSource,
+	},
+
+	{
+		"ListSources",
+		http.MethodGet,
+		"/sources",
+		ListSources,
+	},
+
+	{
+		"GetSource",
+		http.MethodGet,
+		"/sources/{sourceID}",
+		GetSource,
+	},
+
+	{
+		"UpdateSource",
+		http.MethodPatch,
+		"/sources/{sourceID}",
+		UpdateSource,
+	},
+
+	{
+		"DeleteSource",
+		http.MethodDelete,
+		"/sources/{sourceID}",
+		DeleteSource,
+	},
+
+	{
+		"SyncSource",
+		http.MethodPost,
+		"/sources/{sourceID}/sync",
+		SyncSource,
+	},
+
+	{
+		"GetSourceCatalog",
+		http.MethodGet,
+		"/sources/{sourceID}/catalog",
+		GetSourceCatalog,
+	},
+
+	{
+		"InstallSource",
+		http.MethodPost,
+		"/sources/{sourceID}/install",
+		InstallSource,
+	},
+
+	{
+		"ListSourceBlueprints",
+		http.MethodGet,
+		"/sources/{sourceID}/blueprints",
+		ListSourceBlueprints,
+	},
+
+	{
+		"ListSourceTemplates",
+		http.MethodGet,
+		"/sources/{sourceID}/templates",
+		ListSourceTemplates,
+	},
+
+	{
+		"ListSourceRoles",
+		http.MethodGet,
+		"/sources/{sourceID}/roles",
+		ListSourceRoles,
+	},
+
+	{
+		"ListSourceCollections",
+		http.MethodGet,
+		"/sources/{sourceID}/collections",
+		ListSourceCollections,
+	},
+
+	{
+		"ListAllSourceBlueprints",
+		http.MethodGet,
+		"/sources/blueprints",
+		ListAllSourceBlueprints,
+	},
+
+	{
+		"GetSourceBlueprintManifest",
+		http.MethodGet,
+		"/sources/blueprints/{id}/manifest",
+		GetSourceBlueprintManifest,
 	},
 
 	// Migration routes
@@ -981,5 +1126,4 @@ var routes = PocketBaseRoutes{
 		"/ansible/role/scope",
 		MoveRoleScope,
 	},
-
 }

@@ -951,6 +951,100 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /ansible/collection:
+    post:
+      summary: Install an Ansible collection
+      deprecated: false
+      description: >
+        Install an ansible collection by name or URL.
+
+        Admins can pass a userID parameter to install a collection for other
+        users.
+
+        Ansible collections can only be removed by rm-ing their directories.
+        This is not supported via Ludus due to potential edge cases in naming
+        depending on how the collection was installed.
+      operationId: InstallCollection
+      tags:
+        - Ansible Management
+      parameters:
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to install for.
+
+            Defaults to the user's range (admins can interact with other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                collection:
+                  type: string
+                  description: >-
+                    Collection FQCN (namespace.name) for a galaxy install,
+                    or a git source URL (https/ssh, optionally git+ prefixed)
+                    to install from git. The server infers git from the
+                    string's shape.
+                  example: maxhoesel.smallstep
+                version:
+                  type: string
+                  description: >-
+                    Version pin for a galaxy collection, or any commit-ish
+                    (branch / tag / commit) for a git source.
+                  example: 0.23.1
+                force:
+                  type: boolean
+                  example: true
+              type: object
+            examples: {}
+      responses:
+        '201':
+          description: collection installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: 'Successfully installed: maxhoesel.smallstep'
+          headers: {}
+        '409':
+          description: Collection already installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Collection already installed. Collections from
+                      https://docs.ansible.com/ansible/latest/collections/index.html
+                      are installed globally. If you want to reinstall it,
+                      consider using `--force`.
+          headers: {}
+        '500':
+          description: Error installing collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Unable to install the ansible collection:
+                      maxhoesel.smallstep
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /whoami:
     get:
       summary: whoami
@@ -6380,13 +6474,12 @@ paths:
       summary: Sync source
       deprecated: false
       description: >
-        Refresh-only: re-pull a git-backed source's working tree and update the
-        catalog view. No artifact installs, removes, or DB writes for
-        blueprints/templates/roles happen here. To apply upstream changes,
-        commit a fresh selection via POST /sources/{sourceID}/install. Returns
-        400 for upload-type sources; push new content via PATCH
-        /sources/{sourceID} instead.
-      operationId: syncSource
+        Deletes a source. Registration-only: removes the source and the
+        blueprints it provided. Templates, roles, and collections it
+        installed are shared instance resources and remain on disk —
+        remove those individually (the Ansible / Templates pages, or
+        `source remove`) if you want them gone.
+      operationId: deleteSource
       tags:
         - Sources
       parameters:
@@ -6397,11 +6490,6 @@ paths:
           example: ''
           schema:
             type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SyncSourceRequest'
       responses:
         '200':
           description: Sync result.
@@ -6504,6 +6592,47 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /sources/{sourceID}/sync:
+    post:
+      summary: Sync source
+      deprecated: false
+      description: >
+        Refresh-only: re-pull a git-backed source's working tree and update
+        the catalog view. No artifact installs, removes, or DB writes for
+        blueprints/templates/roles happen here. To apply upstream changes,
+        commit a fresh selection via POST /sources/{sourceID}/install.
+        Returns 400 for upload-type sources; push new content via PATCH
+        /sources/{sourceID} instead.
+      operationId: syncSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncSourceRequest'
+      responses:
+        '200':
+          description: Sync result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResultResponse'
+          headers: {}
+        '400':
+          description: Source is upload-type; sync is git-only.
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /sources/{sourceID}/catalog:
     get:
       summary: Get source catalog
@@ -6580,8 +6709,8 @@ paths:
       deprecated: false
       description: >-
         Lists Ansible collections declared by this source's blueprints.
-        ansible-galaxy has no `collection remove` subcommand, so source purge
-        leaves the on-disk install in place — the row is a claim, not a
+        ansible-galaxy has no `collection remove` subcommand, so removing a
+        source leaves the on-disk install in place — the row is a claim, not a
         lifecycle anchor.
       operationId: listSourceCollections
       tags:
@@ -6965,21 +7094,13 @@ components:
           type: boolean
         force:
           type: boolean
-    DeleteSourceRequest:
-      type: object
-      properties:
-        purge:
-          type: boolean
-          description: >-
-            If true, also remove templates and local roles registered by this
-            source.
     SyncSourceRequest:
       type: object
       description: >-
-        Body for POST /sources/{sourceID}/sync. No fields are required — sync is
-        read-only and accepts an empty body. The legacy globalRoles, force, and
-        dryRun fields are ignored (kept here for client compatibility; they had
-        install-side semantics that no longer apply).
+        Body for POST /sources/{sourceID}/sync. No fields are required —
+        sync is read-only and accepts an empty body. The legacy globalRoles,
+        force, and dryRun fields are ignored (kept here for client
+        compatibility; they had install-side semantics that no longer apply).
       properties:
         globalRoles:
           type: boolean
@@ -6993,6 +7114,285 @@ components:
           type: boolean
           deprecated: true
           description: Ignored — sync is always read-only.
+    InstallSelection:
+      type: object
+      description: >-
+        Persisted picker selection on a source record — the concrete set of
+        names that every future sync honors. Always set after the first
+        successful install: callers either supplied a non-empty selection
+        directly, or the server snapshotted the walk at install-time. Items
+        added upstream later do NOT auto-extend this set; the user has to
+        re-install to widen the selection.
+      properties:
+        blueprints:
+          type: array
+          description: sourceBlueprintID values to install.
+          items:
+            type: string
+        templates:
+          type: array
+          description: Template names to install.
+          items:
+            type: string
+        localRoles:
+          type: array
+          description: Source-bundled role names to install.
+          items:
+            type: string
+    InstallRequest:
+      type: object
+      description: >-
+        Body for POST /sources/{sourceID}/install. `selection` is optional —
+        when omitted or empty, the server snapshots the current walk and
+        persists it as the source's installSelection. A non-empty selection
+        is used as-is and replaces any previously persisted selection.
+      properties:
+        selection:
+          $ref: '#/components/schemas/InstallSelection'
+        globalRoles:
+          type: boolean
+          description: Admin only. Install roles instance-wide.
+        force:
+          type: boolean
+          description: >-
+            Force install: rm-and-recopy templates and source-bundled
+            local roles; pass `-f` to ansible-galaxy for galaxy roles and
+            galaxy collections so already-installed artifacts of the same
+            name are overwritten. Does NOT alter the selection or pull in
+            dependencies the caller didn't already select.
+        noDeps:
+          type: boolean
+          description: >-
+            Skip installing the selected blueprints' galaxy role and
+            collection dependencies — no reaching out to ansible-galaxy;
+            only deps already present on disk are used. Default false: deps
+            install, since a blueprint needs them to deploy.
+    RegisterSourceResponse:
+      type: object
+      description: >-
+        Returned by POST /sources. The source is registered and walked but
+        no install has been committed. Callers drive the picker against the
+        included catalog and follow up with POST /sources/{sourceID}/install
+        — omit `selection` to have the server snapshot the current walk.
+      required:
+        - sourceID
+        - catalog
+      properties:
+        sourceID:
+          type: string
+        catalog:
+          $ref: '#/components/schemas/SourceCatalog'
+    SourceCatalog:
+      type: object
+      description: >-
+        Picker-facing view of a registered source: every artifact the source
+        ships, joined with the install state for this source row. Driven by
+        GET /sources/{sourceID}/catalog and the body of
+        RegisterSourceResponse.
+      required:
+        - sourceID
+        - sourceName
+        - blueprints
+        - templates
+        - localRoles
+        - galaxyRoles
+        - galaxyCollections
+        - subscriptionRoles
+      properties:
+        sourceID:
+          type: string
+        sourceName:
+          type: string
+        blueprints:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogBlueprint'
+        templates:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        localRoles:
+          type: array
+          description: Source-bundled Ansible roles (the source's roles/ dir).
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        galaxyRoles:
+          type: array
+          description: Galaxy roles declared by any blueprint's requirements.yml.
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        galaxyCollections:
+          type: array
+          description: Galaxy collections declared by any blueprint's requirements.yml.
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        subscriptionRoles:
+          type: array
+          description: >-
+            Ludus subscription roles declared by any blueprint's
+            requirements.yml (license-gated install pipeline).
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        undeclaredDependencies:
+          type: array
+          description: >-
+            Range-config role references the picker found but couldn't
+            cover via requirements.yml or a source-bundled local role.
+          items:
+            $ref: '#/components/schemas/UndeclaredDependency'
+    CatalogBlueprint:
+      type: object
+      description: >-
+        A blueprint shipped by a source, with its install state for this
+        source row and the artifacts it would pull in if selected.
+      required:
+        - id
+        - name
+        - version
+        - state
+      properties:
+        id:
+          type: string
+          description: sourceBlueprintID — unique within the source.
+        name:
+          type: string
+        description:
+          type: string
+          description: Human description from the blueprint manifest (blueprint.yml). Optional.
+        version:
+          type: string
+        state:
+          type: string
+          enum:
+            - not_installed
+            - installed
+            - upgrade_available
+        installedVersion:
+          type: string
+          description: Set when state is installed or upgrade_available.
+        requiredTemplates:
+          type: array
+          items:
+            type: string
+        requiredLocalRoles:
+          type: array
+          items:
+            type: string
+        requiredGalaxyRoles:
+          type: array
+          items:
+            type: string
+        requiredGalaxyCollections:
+          type: array
+          items:
+            type: string
+    CatalogItem:
+      type: object
+      description: >-
+        One template / role / collection in a SourceCatalog. `requiredBy`
+        lists the parent blueprint IDs that pulled it in.
+        `versionByBlueprint` carries per-blueprint version pins for galaxy
+        roles/collections so consumers can detect divergent pins across
+        selected blueprints.
+      required:
+        - name
+        - state
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          description: >-
+            Human description for source-bundled items — packer template.yml
+            or a role's meta/main.yml galaxy_info. Optional; absent for
+            galaxy/subscription items.
+        version:
+          type: string
+        state:
+          type: string
+          enum:
+            - not_installed
+            - installed
+            - upgrade_available
+        installedVersion:
+          type: string
+        global:
+          type: boolean
+          description: >-
+            For an installed role, whether it lives in the system-wide
+            global-roles path (true) or the owner's per-user roles path
+            (false). Drives the role-remove flow. Always false/absent for
+            templates and collections.
+        scopes:
+          type: array
+          description: >-
+            Every installed copy of a role: the scope it lives in
+            ("global"/"user"), the on-disk version there, and its state
+            against the required pin. A role can have entries for both scopes
+            at different versions. Absent for non-role kinds and not-installed
+            roles.
+          items:
+            type: object
+            properties:
+              scope:
+                type: string
+              version:
+                type: string
+              state:
+                type: string
+                enum:
+                  - installed
+                  - upgrade_available
+        type:
+          type: string
+          description: >-
+            Install type for a collection. "git" when sourced from a git
+            repo (in which case `name` holds the repo URL); absent for a
+            normal galaxy collection.
+        fqcn:
+          type: string
+          description: >-
+            Resolved namespace.name for a git collection (whose `name`
+            holds the repo URL). Absent when not a git collection or the
+            FQCN can't be inferred from the URL.
+        requiredBy:
+          type: array
+          description: Blueprint IDs that require this item.
+          items:
+            type: string
+        versionByBlueprint:
+          type: object
+          description: >-
+            Per-blueprint pinned version for galaxy roles/collections,
+            keyed by blueprint ID. Empty when no blueprint pins a version.
+          additionalProperties:
+            type: string
+    UndeclaredDependency:
+      type: object
+      description: >-
+        A range-config role reference that isn't covered by the
+        blueprint's requirements.yml or a source-bundled local role. The
+        picker surfaces these so the user can declare them before deploy.
+      required:
+        - blueprintID
+        - role
+        - kind
+      properties:
+        blueprintID:
+          type: string
+        role:
+          type: string
+        kind:
+          type: string
+          enum:
+            - missing_role
+            - missing_collection
+        parentCollection:
+          type: string
+          description: >-
+            Populated when kind is missing_collection. The collection
+            parent of an FQCN role reference whose parent collection
+            isn't declared in requirements.yml.
     SyncResult:
       type: object
       properties:
@@ -7849,6 +8249,9 @@ components:
         Returned by `deleteSource`. Registration-only delete, so `status` is
         always "deleted" — the source and its blueprints are dropped while
         installed templates/roles/collections remain on disk.
+        Returned by `deleteSource`. Registration-only delete, so `status` is
+        always "deleted" — the source and its blueprints are dropped while
+        installed templates/roles/collections remain on disk.
       type: object
       required:
         - status
@@ -7857,286 +8260,6 @@ components:
           type: string
           enum:
             - deleted
-    InstallSelection:
-      type: object
-      description: >-
-        Persisted picker selection on a source record — the concrete set of
-        names that every future sync honors. Always set after the first
-        successful install: callers either supplied a non-empty selection
-        directly, or the server snapshotted the walk at install-time. Items
-        added upstream later do NOT auto-extend this set; the user has to
-        re-install to widen the selection.
-      properties:
-        blueprints:
-          type: array
-          description: sourceBlueprintID values to install.
-          items:
-            type: string
-        templates:
-          type: array
-          description: Template names to install.
-          items:
-            type: string
-        localRoles:
-          type: array
-          description: Source-bundled role names to install.
-          items:
-            type: string
-    InstallRequest:
-      type: object
-      description: >-
-        Body for POST /sources/{sourceID}/install. `selection` is optional —
-        when omitted or empty, the server snapshots the current walk and
-        persists it as the source's installSelection. A non-empty selection is
-        used as-is and replaces any previously persisted selection.
-      properties:
-        selection:
-          $ref: '#/components/schemas/InstallSelection'
-        globalRoles:
-          type: boolean
-          description: Admin only. Install roles instance-wide.
-        force:
-          type: boolean
-          description: >-
-            Force install: rm-and-recopy templates and source-bundled local
-            roles; pass `-f` to ansible-galaxy for galaxy roles and galaxy
-            collections so already-installed artifacts of the same name are
-            overwritten. Does NOT alter the selection or pull in dependencies
-            the caller didn't already select.
-        noDeps:
-          type: boolean
-          description: >-
-            Skip installing the selected blueprints' galaxy role and collection
-            dependencies — no reaching out to ansible-galaxy; only deps already
-            present on disk are used. Default false: deps install, since a
-            blueprint needs them to deploy.
-    RegisterSourceResponse:
-      type: object
-      description: >-
-        Returned by POST /sources. The source is registered and walked but no
-        install has been committed. Callers drive the picker against the
-        included catalog and follow up with POST /sources/{sourceID}/install —
-        omit `selection` to have the server snapshot the current walk.
-      required:
-        - sourceID
-        - catalog
-      properties:
-        sourceID:
-          type: string
-        catalog:
-          $ref: '#/components/schemas/SourceCatalog'
-    SourceCatalog:
-      type: object
-      description: >-
-        Picker-facing view of a registered source: every artifact the source
-        ships, joined with the install state for this source row. Driven by GET
-        /sources/{sourceID}/catalog and the body of RegisterSourceResponse.
-      required:
-        - sourceID
-        - sourceName
-        - blueprints
-        - templates
-        - localRoles
-        - galaxyRoles
-        - galaxyCollections
-        - subscriptionRoles
-      properties:
-        sourceID:
-          type: string
-        sourceName:
-          type: string
-        blueprints:
-          type: array
-          items:
-            $ref: '#/components/schemas/CatalogBlueprint'
-        templates:
-          type: array
-          items:
-            $ref: '#/components/schemas/CatalogItem'
-        localRoles:
-          type: array
-          description: Source-bundled Ansible roles (the source's roles/ dir).
-          items:
-            $ref: '#/components/schemas/CatalogItem'
-        galaxyRoles:
-          type: array
-          description: Galaxy roles declared by any blueprint's requirements.yml.
-          items:
-            $ref: '#/components/schemas/CatalogItem'
-        galaxyCollections:
-          type: array
-          description: Galaxy collections declared by any blueprint's requirements.yml.
-          items:
-            $ref: '#/components/schemas/CatalogItem'
-        subscriptionRoles:
-          type: array
-          description: >-
-            Ludus subscription roles declared by any blueprint's
-            requirements.yml (license-gated install pipeline).
-          items:
-            $ref: '#/components/schemas/CatalogItem'
-        undeclaredDependencies:
-          type: array
-          description: >-
-            Range-config role references the picker found but couldn't cover via
-            requirements.yml or a source-bundled local role.
-          items:
-            $ref: '#/components/schemas/UndeclaredDependency'
-    CatalogBlueprint:
-      type: object
-      description: >-
-        A blueprint shipped by a source, with its install state for this source
-        row and the artifacts it would pull in if selected.
-      required:
-        - id
-        - name
-        - version
-        - state
-      properties:
-        id:
-          type: string
-          description: sourceBlueprintID — unique within the source.
-        name:
-          type: string
-        description:
-          type: string
-          description: >-
-            Human description from the blueprint manifest (blueprint.yml).
-            Optional.
-        version:
-          type: string
-        state:
-          type: string
-          enum:
-            - not_installed
-            - installed
-            - upgrade_available
-        installedVersion:
-          type: string
-          description: Set when state is installed or upgrade_available.
-        requiredTemplates:
-          type: array
-          items:
-            type: string
-        requiredLocalRoles:
-          type: array
-          items:
-            type: string
-        requiredGalaxyRoles:
-          type: array
-          items:
-            type: string
-        requiredGalaxyCollections:
-          type: array
-          items:
-            type: string
-    CatalogItem:
-      type: object
-      description: >-
-        One template / role / collection in a SourceCatalog. `requiredBy` lists
-        the parent blueprint IDs that pulled it in. `versionByBlueprint` carries
-        per-blueprint version pins for galaxy roles/collections so consumers can
-        detect divergent pins across selected blueprints.
-      required:
-        - name
-        - state
-      properties:
-        name:
-          type: string
-        description:
-          type: string
-          description: >-
-            Human description for source-bundled items — packer template.yml or
-            a role's meta/main.yml galaxy_info. Optional; absent for
-            galaxy/subscription items.
-        version:
-          type: string
-        state:
-          type: string
-          enum:
-            - not_installed
-            - installed
-            - upgrade_available
-        installedVersion:
-          type: string
-        global:
-          type: boolean
-          description: >-
-            For an installed role, whether it lives in the system-wide
-            global-roles path (true) or the owner's per-user roles path (false).
-            Drives the role-remove flow. Always false/absent for templates and
-            collections.
-        scopes:
-          type: array
-          description: >-
-            Every installed copy of a role: the scope it lives in
-            ("global"/"user"), the on-disk version there, and its state against
-            the required pin. A role can have entries for both scopes at
-            different versions. Absent for non-role kinds and not-installed
-            roles.
-          items:
-            type: object
-            properties:
-              scope:
-                type: string
-              version:
-                type: string
-              state:
-                type: string
-                enum:
-                  - installed
-                  - upgrade_available
-        type:
-          type: string
-          description: >-
-            Install type for a collection. "git" when sourced from a git repo
-            (in which case `name` holds the repo URL); absent for a normal
-            galaxy collection.
-        fqcn:
-          type: string
-          description: >-
-            Resolved namespace.name for a git collection (whose `name` holds the
-            repo URL). Absent when not a git collection or the FQCN can't be
-            inferred from the URL.
-        requiredBy:
-          type: array
-          description: Blueprint IDs that require this item.
-          items:
-            type: string
-        versionByBlueprint:
-          type: object
-          description: >-
-            Per-blueprint pinned version for galaxy roles/collections, keyed by
-            blueprint ID. Empty when no blueprint pins a version.
-          additionalProperties:
-            type: string
-          properties: {}
-    UndeclaredDependency:
-      type: object
-      description: >-
-        A range-config role reference that isn't covered by the blueprint's
-        requirements.yml or a source-bundled local role. The picker surfaces
-        these so the user can declare them before deploy.
-      required:
-        - blueprintID
-        - role
-        - kind
-      properties:
-        blueprintID:
-          type: string
-        role:
-          type: string
-        kind:
-          type: string
-          enum:
-            - missing_role
-            - missing_collection
-        parentCollection:
-          type: string
-          description: >-
-            Populated when kind is missing_collection. The collection parent of
-            an FQCN role reference whose parent collection isn't declared in
-            requirements.yml.
   responses: {}
   securitySchemes:
     ApiKeyAuth:

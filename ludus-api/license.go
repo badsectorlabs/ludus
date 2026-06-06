@@ -226,9 +226,11 @@ func (s *Server) checkLicense() {
 func GetSubscriptionRolesMetadata(e *core.RequestEvent) ([]dto.GetSubscriptionRolesResponseItem, error) {
 
 	// Check the request cache first
-	subscriptionRolesFromCache := e.Get("rolesJSON")
-	if subscriptionRolesFromCache != nil {
-		return subscriptionRolesFromCache.([]dto.GetSubscriptionRolesResponseItem), nil
+	if e != nil {
+		subscriptionRolesFromCache := e.Get("rolesJSON")
+		if subscriptionRolesFromCache != nil {
+			return subscriptionRolesFromCache.([]dto.GetSubscriptionRolesResponseItem), nil
+		}
 	}
 
 	// First get the version of the role from latest
@@ -246,7 +248,9 @@ func GetSubscriptionRolesMetadata(e *core.RequestEvent) ([]dto.GetSubscriptionRo
 	if err != nil {
 		return nil, err
 	}
-	e.Set("rolesJSON", subscriptionRoles)
+	if e != nil {
+		e.Set("rolesJSON", subscriptionRoles)
+	}
 	return subscriptionRoles, nil
 }
 

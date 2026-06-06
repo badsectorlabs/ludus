@@ -290,7 +290,7 @@ awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" -v dns="${CI_CLONE_DNS_SERVERS}
         saw_address=0
         saw_gateway=0
         saw_dns=0
-        print
+        print "iface ens18 inet static"
         next
     }
     /^(auto|allow-|iface) / && in_ens18 {
@@ -320,6 +320,9 @@ awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" -v dns="${CI_CLONE_DNS_SERVERS}
         saw_dns=1
         next
     }
+    in_ens18 && /^[[:space:]]*(dhcp-|dns-|pre-up|post-up|post-down|metric)[[:space:]]*/ {
+        next
+    }
     { print }
     END {
         if (in_ens18) {
@@ -336,6 +339,12 @@ awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" -v dns="${CI_CLONE_DNS_SERVERS}
     }
 ' /etc/network/interfaces > /tmp/interfaces.ludus-ci
 mv /tmp/interfaces.ludus-ci /etc/network/interfaces
+
+if command -v dhcpcd >/dev/null 2>&1; then
+    dhcpcd -k ens18 >/dev/null 2>&1 || true
+fi
+pkill -x dhcpcd >/dev/null 2>&1 || true
+pkill -x dhclient >/dev/null 2>&1 || true
 
 for dns_server in ${CI_CLONE_DNS_SERVERS}; do
     printf 'nameserver %s\n' "\$dns_server"
@@ -384,6 +393,7 @@ fi
 ip addr flush dev ens18
 ip link set ens18 up
 ip addr add "${IP}/24" dev ens18
+ip route flush dev ens18 proto dhcp 2>/dev/null || true
 ip route replace default via "${CI_CLONE_GATEWAY}" dev ens18
 EOF
 )

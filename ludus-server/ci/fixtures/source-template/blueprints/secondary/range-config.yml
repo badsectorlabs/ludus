@@ -1,0 +1,11 @@
+ludus:
+  - vm_name: "{{ range_id }}-secondary"
+    hostname: "secondary"
+    template: debian-12-x64-server-template
+    vlan: 20
+    ip_last_octet: 20
+    ram_gb: 1
+    cpus: 1
+    linux: true
+    roles:
+      - say_hello
