@@ -229,15 +229,23 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 		return err
 	}
 
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
+	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
+
 	// Validate range-level target_node if specified
 	if config.Router != nil {
 		if config.Router.VMName != "" {
-			if err := validateVMName("router.vm_name", config.Router.VMName); err != nil {
+			resolvedVMName := rangeIDTemplateRegex.ReplaceAllString(config.Router.VMName, targetRange.RangeId())
+			if err := validateVMName("router.vm_name", resolvedVMName); err != nil {
 				return err
 			}
 		}
 		if config.Router.TargetNode != "" {
-			if err := validateTargetNode(e, config.Router.TargetNode); err != nil {
+			resolvedTargetNode := rangeIDTemplateRegex.ReplaceAllString(config.Router.TargetNode, targetRange.RangeId())
+			if err := validateTargetNode(e, resolvedTargetNode); err != nil {
 				return fmt.Errorf("router target_node error: %w", err)
 			}
 		}
@@ -255,10 +263,6 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 		return err
 	}
 
-	targetRange, err := GetRange(e)
-	if err != nil {
-		return err
-	}
 	// Check for duplicate vlan and ip_last_octet combinations
 	seenVLANAndIP := make(map[string]bool)
 	// Check that all vm_names and hostnames are unique
@@ -266,7 +270,6 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 	seenHostnames := make(map[string]bool)
 	// Check that NETBIOS are unique per domain
 	seenNETBIOSnames := make(map[string]string)
-	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
 
 	var NETBIOSnameKey string
 	for _, vm := range config.Ludus {
