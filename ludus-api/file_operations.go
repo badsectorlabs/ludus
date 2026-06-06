@@ -101,8 +101,11 @@ func modifiedTimeLessThan(filePath string, recent time.Duration) bool {
 // Updates the access and modification time of a file
 // Will create the file if it does not exist
 func touch(filePath string) error {
-	_, err := os.OpenFile(filePath, os.O_CREATE, 0644)
+	file, err := os.OpenFile(filePath, os.O_CREATE, 0644)
 	if err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
 		return err
 	}
 	currentTime := time.Now().Local()
