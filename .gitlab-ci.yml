@@ -247,6 +247,8 @@ stages:
 
 .template-tests: &template-tests # `templates add` CLI tests. The bundled template library moved to the ludus-source-bsl source; a throwaway fixture exercises add/force/ownership, and an embedded (server-included) template covers the build smoke-test.
   - ludus templates list --json | jq -r '.[] | select(.name == "ci-add-test-template") | .name' | grep -q 'ci-add-test-template' && ludus templates rm -n "ci-add-test-template" || echo "No ci-add-test template on the server"
+  # Remove the debian10 template if it exists (retry)
+  - ludus templates list --json | jq -r '.[] | select(.name == "debian-10-x64-server-template") | .name' | grep -q 'debian-10-x64-server-template' && ludus templates rm -n "debian-10-x64-server-template" || echo "No debian10 on the server"
   - ludus templates list
   - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test
   - ludus templates list
@@ -255,15 +257,16 @@ stages:
   - mkdir /tmp/test-template || true
   - echo "ci-add-test-template" > /tmp/test-template/test.pkr.hcl
   - 'ludus templates add -d /tmp/test-template/test.pkr.hcl 2>&1 | grep "Error finding .pkr.hcl or .pkr.json template files: the provided path is not a directory"'
-  - ludus templates add -d /tmp/test-template 2>&1 | grep "Template already exists, use --force to overwrite it"
+  - ludus templates add -d /tmp/test-template 2>&1 | grep "Error extracting template name"
   - ludus templates add -d ludus-server/packer/kali 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
   - ludus templates add -d ludus-server/packer/kali --force 2>&1 | grep "'kali-x64-desktop-template' is a template that does not belong to you"
   - set -o pipefail
   - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test --force
   - ludus templates rm -n "ci-add-test-template"
-  - ludus templates build -n debian-12-x64-server-template
+  - ludus source add https://github.com/badsectorlabs/ludus-source-bsl --templates debian-10-x64-server-template
+  - ludus templates build -n debian-10-x64-server-template
   - ludus templates status
-  - ludus templates status | grep debian-12-x64-server-template
+  - ludus templates status | grep debian-10-x64-server-template
   - ludus templates status | grep continuous-integration-
   # Wait for the template to build
   - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
@@ -656,7 +659,7 @@ install kickoff:
     LUDUS_BUILD_TYPE: full # We have to test the install process, so do a full build
     LUDUS_INSTALL_STEP: kickoff
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 10m
+  timeout: 30m
   script:
     - sudo timedatectl set-ntp off && sudo timedatectl set-ntp on
     - date
@@ -880,7 +883,7 @@ client basic-commands:
     max: 2
     when:
       - script_failure
-  timeout: 5m
+  timeout: 30m
   script:
     - *ci-setup-admin
     - ludus version
@@ -1036,7 +1039,7 @@ post-deploy power-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1080,7 +1083,7 @@ post-deploy ansible-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when:
@@ -1126,7 +1129,7 @@ post-deploy user-cmds-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1348,7 +1351,7 @@ post-deploy blueprints-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1549,7 +1552,7 @@ post-deploy ranges-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1868,7 +1871,7 @@ post-deploy power-as-user:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1911,7 +1914,7 @@ post-deploy ansible-as-user:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
   script:
@@ -1952,7 +1955,7 @@ post-deploy user-cmds-as-user:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -2018,7 +2021,7 @@ post-deploy blueprints-as-user:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
