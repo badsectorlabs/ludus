@@ -209,6 +209,12 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/migrate/")) {
+
+		// Explicit block for proxying the SSO provision request
+		if strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/provision-oauth2") {
+			return JSONError(e, http.StatusForbidden, "This endpoint is only available on the admin API")
+		}
+
 		// First clear all the headers to prevent sending 2x of each header
 		for k := range e.Response.Header() {
 			e.Response.Header().Del(k)
