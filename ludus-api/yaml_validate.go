@@ -201,6 +201,20 @@ type LudusConfig struct {
 	Defaults *Defaults `json:"defaults,omitempty"`
 }
 
+// vmNameRE constrains user-supplied vm_name / hostname values. These flow into ansible
+// shell/command tasks (router lookup, ansible-inventory --host) and into filesystem paths,
+// so the charset must exclude shell/jq/path metacharacters. DNS-label-ish: alnum, dot, dash;
+// must start alnum; max 63. The literal "{{ range_id }}" placeholder is permitted and is
+// substituted before this regex is applied.
+var vmNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$`)
+
+func validateVMName(field, value string) error {
+	if !vmNameRE.MatchString(value) {
+		return fmt.Errorf("%s %q is invalid: must be 1-63 chars of letters, digits, '.' or '-' and start with a letter or digit", field, value)
+	}
+	return nil
+}
+
 // validateRangeYAML runs the full set of structural + dep-existence checks
 // on a range config: target_node validity, duplicate vlan+ip_last_octet,
 // duplicate vm_name / hostname, NETBIOS uniqueness per domain, every
@@ -216,9 +230,16 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 	}
 
 	// Validate range-level target_node if specified
-	if config.Defaults != nil && config.Defaults.TargetNode != "" {
-		if err := validateTargetNode(e, config.Defaults.TargetNode); err != nil {
-			return fmt.Errorf("range-level target_node error: %w", err)
+	if config.Router != nil {
+		if config.Router.VMName != "" {
+			if err := validateVMName("router.vm_name", config.Router.VMName); err != nil {
+				return err
+			}
+		}
+		if config.Router.TargetNode != "" {
+			if err := validateTargetNode(e, config.Router.TargetNode); err != nil {
+				return fmt.Errorf("router target_node error: %w", err)
+			}
 		}
 	}
 
@@ -249,6 +270,16 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 
 	var NETBIOSnameKey string
 	for _, vm := range config.Ludus {
+		resolvedVMName := rangeIDTemplateRegex.ReplaceAllString(vm.VMName, targetRange.RangeId())
+		if err := validateVMName("vm_name", resolvedVMName); err != nil {
+			return err
+		}
+		if vm.Hostname != "" {
+			resolvedHostname := rangeIDTemplateRegex.ReplaceAllString(vm.Hostname, targetRange.RangeId())
+			if err := validateVMName("hostname", resolvedHostname); err != nil {
+				return err
+			}
+		}
 		vlanIPKey := fmt.Sprintf("vlan: %d, ip_last_octet: %d", vm.VLAN, vm.IPLastOctet)
 		vmNameKey := vm.VMName
 		vmHostnameKey := vm.Hostname
