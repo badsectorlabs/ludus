@@ -12,10 +12,32 @@ stages:
 # YAML ANCHORS #
 ################
 
+.qm-guest-exec-retry: &qm-guest-exec-retry |
+  qm_guest_exec_retry() {
+    local vmid="$1"
+    shift
+    local attempt exit_code
+
+    for attempt in 1 2 3; do
+      if sudo qm guest exec "$vmid" -- "$@"; then
+        return 0
+      fi
+
+      exit_code=$?
+      if [[ "$attempt" -eq 3 ]]; then
+        return "$exit_code"
+      fi
+
+      echo "qm guest exec failed for VM ${vmid} on attempt ${attempt}/3; retrying in 15 seconds..." >&2
+      sleep 15
+    done
+  }
+
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key
 .common-setup: &common-setup # Sync time in the event this test is being run after a snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
+  - *qm-guest-exec-retry
   - |
     if [ -d binaries ]; then
       cd binaries
@@ -148,44 +170,44 @@ stages:
   - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
   - ludus testing status
   # Validate that WIN10 can reach the internet
-  - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-  - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
+  - "qm_guest_exec_retry \"$WIN11VMID\" ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
   - ludus testing start
   - ludus testing status
   - ludus range list
   # Validate that WIN10 cannot reach the internet
-  - sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
+  - qm_guest_exec_retry "$WIN11VMID" ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
   # Sometimes the DNS lookup is cached from the test above, so test for a DNS failure or a connect failure
-  - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
   - ludus testing allow -i 8.8.8.8
   - ludus testing status
   # Validate that 8.8.8.8 is in the allowedIPs list
   - 'ludus testing status --json | jq -e ''.allowedIPs | index("8.8.8.8")'''
   # Validate that WIN10 can get to 8.8.8.8 but not 1.1.1.1
-  - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-  - sudo qm guest exec $WIN11VMID -- ping -n 1 1.1.1.1 | egrep 'Request timed out.|Destination port unreachable.'
+  - "qm_guest_exec_retry \"$WIN11VMID\" ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+  - qm_guest_exec_retry "$WIN11VMID" ping -n 1 1.1.1.1 | egrep 'Request timed out.|Destination port unreachable.'
   # Allow google.com and check that google is allowed but example isn't
   - ludus testing allow -d google.com
   - ludus testing status
   # Validate that google.com is in the allowedDomains list
   - 'ludus testing status --json | jq -e ''.allowedDomains | any(startswith("google.com"))'''
   # This sometimes takes a few seconds - try 3 times 5 seconds apart
-  - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML') && break || sleep 5; done
-  - sudo qm guest exec $WIN11VMID -- curl https://example.com/ | egrep 'Could not resolve host|Failed to connect to example.com'
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
+  - qm_guest_exec_retry "$WIN11VMID" curl https://example.com/ | egrep 'Could not resolve host|Failed to connect to example.com'
   # Deny google.com and 8.8.8.8 and check that they are not reachable
   - ludus testing deny -d google.com
   - ludus testing deny -i 8.8.8.8
   # Validate that google.com and 8.8.8.8 are no longer in the allowed lists
   - 'ludus testing status --json | jq -e ''(.allowedDomains | any(startswith("google.com")) | not) and (.allowedIPs | index("8.8.8.8") | not)'''
-  - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com') && break || sleep 5; done
-  - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.') && break || sleep 5; done
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
+  - qm_guest_exec_retry "$WIN11VMID" ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
   - ludus testing stop
   - ludus testing status
   # Validate that testing is disabled and allowed lists are empty
   - 'ludus testing status --json | jq -e ''.testingEnabled == false and (.allowedIPs | length == 0) and (.allowedDomains | length == 0)'''
   # Now that testing has stopped, check the VM can reach the internet
-  - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-  - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
+  - "qm_guest_exec_retry \"$WIN11VMID\" ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
 
 .power-tests: &power-tests # Power on/off tests - single VM
   - ludus power off -n ${LUDUS_USER_ID}-kali
@@ -233,7 +255,7 @@ stages:
   - mkdir /tmp/test-template || true
   - echo "ci-add-test-template" > /tmp/test-template/test.pkr.hcl
   - 'ludus templates add -d /tmp/test-template/test.pkr.hcl 2>&1 | grep "Error finding .pkr.hcl or .pkr.json template files: the provided path is not a directory"'
-  - ludus templates add -d /tmp/test-template 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
+  - ludus templates add -d /tmp/test-template 2>&1 | grep "Template already exists, use --force to overwrite it"
   - ludus templates add -d ludus-server/packer/kali 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
   - ludus templates add -d ludus-server/packer/kali --force 2>&1 | grep "'kali-x64-desktop-template' is a template that does not belong to you"
   - set -o pipefail
@@ -350,6 +372,7 @@ stages:
   # Sync time after snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
+  - *qm-guest-exec-retry
   # Update server binary if available
   - |
     if [ -f binaries/ludus-server ]; then
@@ -2233,43 +2256,43 @@ test-everything:
     - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
     # Check for docker on the redirector
     - export REDIRECTOR_VMID=$(sudo qm list | grep running | grep redirector | head -1 | awk '{print $1}')
-    - sudo qm guest exec $REDIRECTOR_VMID -- docker --version | grep 'Docker version'
+    - qm_guest_exec_retry "$REDIRECTOR_VMID" docker --version | grep 'Docker version'
     # Check that local user is in the docker group (was set in extra vars)
-    - sudo qm guest exec $REDIRECTOR_VMID -- groups localuser | grep docker
+    - qm_guest_exec_retry "$REDIRECTOR_VMID" groups localuser | grep docker
     # Check for VSCodium (installed via chocolatey) on the Win 11 box
     - export WIN11_VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}')
-    - sudo qm guest exec $WIN11_VMID -- where /R "C:\Program Files" VSCodium.exe | grep VSCodium
+    - qm_guest_exec_retry "$WIN11_VMID" where /R "C:\Program Files" VSCodium.exe | grep VSCodium
     # Check for Word (installed via office_version) on the Win 11 box
-    - sudo qm guest exec $WIN11_VMID -- where /R "C:\Program Files" WINWORD.exe | grep WINWORD
+    - qm_guest_exec_retry "$WIN11_VMID" where /R "C:\Program Files" WINWORD.exe | grep WINWORD
     # Check the domain is ludus.domain
-    - sudo qm guest exec $WIN11_VMID -- cmd /c "echo %userdomain%" | grep ludus
-    - sudo qm guest exec $WIN11_VMID -- ipconfig /all | grep ludus.domain
+    - qm_guest_exec_retry "$WIN11_VMID" cmd /c "echo %userdomain%" | grep ludus
+    - qm_guest_exec_retry "$WIN11_VMID" ipconfig /all | grep ludus.domain
     # Check the dns_rewrites
-    - sudo qm guest exec $WIN11_VMID -- ping -n 1 example.com | egrep 'example.com \[10.[1-9].20.1\]'
-    - sudo qm guest exec $WIN11_VMID -- ping -n 1 abc123.example.com | egrep 'abc123.example.com \[10.[1-9].20.1\]'
+    - qm_guest_exec_retry "$WIN11_VMID" ping -n 1 example.com | egrep 'example.com \[10.[1-9].20.1\]'
+    - qm_guest_exec_retry "$WIN11_VMID" ping -n 1 abc123.example.com | egrep 'abc123.example.com \[10.[1-9].20.1\]'
     # Check the custom ansible groups
     - ludus range inventory | grep -A 2 customgroup1 | grep redirector
     - ludus range inventory | grep -A 2 customgroup2 | grep redirector
     # Check the FW rules
     - export ROUTER_VMID=$(sudo qm list | grep running | grep router | head -1 | awk '{print $1}')
-    - sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g'
+    - qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g'
     - |
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].20.0/24         tcp dpt:22 \/\* User Rule: Block SSH from VLAN 10 to VLAN 20 \*\/ reject-with icmp-port-unreachable'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].20.0/24         tcp dpts:1:80 /\* User Rule: Allow TCP ports 1 to 80 from VLAN 10 to VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:9000 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:8090 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:4433 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpts:5000:6000 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 source IP range 10.[1-9].10.11-10.[1-9].10.22 destination IP range 10.[1-9].20.1-10.[1-9].20.2 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 and .2 on VLAN 20 using TCP port 443 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            10.[1-9].20.1            tcp dpt:80 source IP range 10.[1-9].10.11-10.[1-9].10.22 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 on VLAN 20 using TCP port 80 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].20.1            10.[1-9].10.21           tcp dpt:445 /\* User Rule: Only allow the .1 on VLAN 20 to hit port 445 of the .21 on VLAN 10 using TCP \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].99.0/24         10.[1-9].10.0/24         /\* User Rule: Allow kali to all windows \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:8080 /\* User Rule: Only allow windows to kali on 8080 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:80 /\* User Rule: Only allow windows to kali on 80 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:443 /\* User Rule: Only allow windows to kali on 443 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     all  --  \*      \*       10.[1-9].0.0/16          10.[1-9].0.0/16          /\* User Default: Inter-VLAN Rule \*/ reject-with icmp-port-unreachable'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.[1-9].0.0/16          /\* User Default: External Rule \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | grep "This is a custom iptables command"
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].20.0/24         tcp dpt:22 \/\* User Rule: Block SSH from VLAN 10 to VLAN 20 \*\/ reject-with icmp-port-unreachable'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].20.0/24         tcp dpts:1:80 /\* User Rule: Allow TCP ports 1 to 80 from VLAN 10 to VLAN 20 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:9000 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:8090 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:4433 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpts:5000:6000 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 source IP range 10.[1-9].10.11-10.[1-9].10.22 destination IP range 10.[1-9].20.1-10.[1-9].20.2 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 and .2 on VLAN 20 using TCP port 443 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            10.[1-9].20.1            tcp dpt:80 source IP range 10.[1-9].10.11-10.[1-9].10.22 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 on VLAN 20 using TCP port 80 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].20.1            10.[1-9].10.21           tcp dpt:445 /\* User Rule: Only allow the .1 on VLAN 20 to hit port 445 of the .21 on VLAN 10 using TCP \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].99.0/24         10.[1-9].10.0/24         /\* User Rule: Allow kali to all windows \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:8080 /\* User Rule: Only allow windows to kali on 8080 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:80 /\* User Rule: Only allow windows to kali on 80 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:443 /\* User Rule: Only allow windows to kali on 443 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     all  --  \*      \*       10.[1-9].0.0/16          10.[1-9].0.0/16          /\* User Default: Inter-VLAN Rule \*/ reject-with icmp-port-unreachable'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.[1-9].0.0/16          /\* User Default: External Rule \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | grep "This is a custom iptables command"
     # Check the custom DNS servers
 
 ###########
@@ -2289,7 +2312,7 @@ cluster install kickoff:
     LUDUS_BUILD_TYPE: clean-cluster
     LUDUS_INSTALL_STEP: kickoff
     GIT_STRATEGY: none
-  timeout: 20m
+  timeout: 60m
   script:
     - sudo timedatectl set-ntp off && sudo timedatectl set-ntp on
     - date
@@ -2505,7 +2528,7 @@ cluster-verify-vxlan:
       fi
       echo "Testing cross-node connectivity from VMID $DEB1_VMID"
       # Ping the gateway to verify VXLAN connectivity (router is on the other node)
-      sudo qm guest exec $DEB1_VMID -- ping -c 3 -w 5 $(ludus -r CCIA range list --json | jq '.rangeNumber' | awk '{printf "10.%d.10.254", $0}')
+      qm_guest_exec_retry "$DEB1_VMID" ping -c 3 -w 5 $(ludus -r CCIA range list --json | jq '.rangeNumber' | awk '{printf "10.%d.10.254", $0}')
 
 cluster-test-range-default:
   stage: test
