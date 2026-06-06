@@ -942,26 +942,25 @@ func PutTemplateTar(e *core.RequestEvent) error {
 	}
 	os.Remove(templateTarPath)
 
+	// Register a defer to clean up the untar'd template dir if we exit early, skip cleanup if all checks pass
+	shouldCleanup := true
+	defer func() {
+		if shouldCleanup {
+			removeErr := os.RemoveAll(templateDirPath)
+			if removeErr != nil {
+				logger.Error(fmt.Sprintf("Error removing untar'd template dir '%s' during cleanup: %v", templateDirPath, removeErr))
+			}
+		}
+	}()
+
 	// Check the uploaded folder for a packer file
 	uploadedTemplatePackerFiles, err := findFiles(templateDirPath, "pkr.hcl", "pkr.json")
 	if err != nil {
-		removeErr := os.RemoveAll(templateDirPath)
-		if removeErr != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding *.pkr.hcl or *.pkr.json files in tar AND Error removing '%s': %v", templateDirPath, removeErr))
-		}
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding *.pkr.hcl or *.pkr.json files: %v", err))
 	}
 	if len(uploadedTemplatePackerFiles) == 0 {
-		removeErr := os.RemoveAll(templateDirPath)
-		if removeErr != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("No packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr))
-		}
 		return JSONError(e, http.StatusInternalServerError, "No packer file (*.pkr.hcl or *.pkr.json) found in the tar!")
 	} else if len(uploadedTemplatePackerFiles) > 1 {
-		removeErr := os.RemoveAll(templateDirPath)
-		if removeErr != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr))
-		}
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar: %v", uploadedTemplatePackerFiles))
 	} else {
 		// Check the name of this template to see if it is already on the server - templates must have unique names
@@ -988,25 +987,19 @@ func PutTemplateTar(e *core.RequestEvent) error {
 					} else {
 						errorString = fmt.Sprintf("'%s' is a template that does not belong to you", thisTemplateName)
 					}
-					// We need to remove the untar'd template dir now since the template name is either another user's or built-in
-					removeErr := os.RemoveAll(templateDirPath)
-					if removeErr != nil {
-						errorString = fmt.Sprintf("'%s' is a template that does not belong to you AND Error removing '%s': %v", thisTemplateName, templateDirPath, removeErr)
-					}
 					return JSONError(e, http.StatusBadRequest, errorString)
 				} else {
 					return JSONResult(e, http.StatusOK, "Successfully added template")
 				}
 			} else {
 				// The template name exists on the server and it isn't a template this user previously had (would have hit the 'already exists' error above) so remove it from the file system
-				removeErr := os.RemoveAll(templateDirPath)
-				if removeErr != nil {
-					return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("The uploaded template name is already present on the server. Template names must be unique. AND Error removing '%s': %v", templateDirPath, removeErr))
-				}
 				return JSONError(e, http.StatusInternalServerError, "The uploaded template name is already present on the server. Template names must be unique.")
 			}
 		}
 	}
+
+	// If we get here, all checks passed and the template was added successfully
+	shouldCleanup = false
 
 	return JSONResult(e, http.StatusOK, "Successfully added template")
 }
