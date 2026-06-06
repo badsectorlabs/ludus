@@ -248,7 +248,13 @@
     # The 'until' is a way to fail if the VM has a self-assigned 169.254.0.0/16 or a Docker 172.17.0.0/16 IP
     # We accept any IP that starts with 10.
     - name: Wait for VMs to acquire an IP address
-      ansible.builtin.command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host {{ item }}
+      ansible.builtin.command:
+        argv:
+          - ansible-inventory
+          - -i
+          - "{{ ludus_install_path }}/ansible/range-management/proxmox.py"
+          - --host
+          - "{{ item }}"
       register: nodecheck
       changed_when: false
       until: >

@@ -161,7 +161,13 @@
 # If the user has specified force_ip, the inventory will return the config IP if the VM is still booting and hasn't DHCP'd yet
 - name: Wait for VM to acquire an IP address
   delegate_to: localhost
-  ansible.builtin.command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host {{ vm_name }}
+  ansible.builtin.command:
+    argv:
+      - ansible-inventory
+      - -i
+      - "{{ ludus_install_path }}/ansible/range-management/proxmox.py"
+      - --host
+      - "{{ vm_name }}"
   register: nodecheck
   changed_when: false
   until: >
