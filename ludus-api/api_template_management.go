@@ -988,8 +988,6 @@ func PutTemplateTar(e *core.RequestEvent) error {
 						errorString = fmt.Sprintf("'%s' is a template that does not belong to you", thisTemplateName)
 					}
 					return JSONError(e, http.StatusBadRequest, errorString)
-				} else {
-					return JSONResult(e, http.StatusOK, "Successfully added template")
 				}
 			} else {
 				// The template name exists on the server and it isn't a template this user previously had (would have hit the 'already exists' error above) so remove it from the file system
