@@ -150,18 +150,27 @@ Each `templates/<n>/` directory is a standard Ludus Packer template, the same sh
 
 ```
 templates/my-debian-base/
-├── my-debian-base.pkr.hcl   # the Packer build config
-├── template.yml             # optional: human description for the catalog/picker
+├── my-debian-base.pkr.hcl   # the Packer build config (incl. description + icon_path vars)
+├── icon.png                 # optional: the catalog icon referenced by the icon_path variable
 ├── http/                    # Linux: preseed.cfg / kickstart served at install time
 └── Autounattend.xml         # Windows only: unattended install answer file
 ```
 
-A Packer config carries no human description, so add an optional `template.yml` to give the template a one-line description in the catalog and picker:
+Give the template a catalog description and icon with two static variables in the `.pkr.hcl`, so all of a template's metadata lives in one file:
 
-```yaml
-manifest_version: 1
-description: "Debian 12 minimal base image."
+```hcl
+variable "description" {
+  type    = string
+  default = "Debian 12 minimal base image."
+}
+
+variable "icon_path" {
+  type    = string
+  default = "icon.png"
+}
 ```
+
+`description` is the one-line summary shown when browsing the source (`ludus source list` and the GUI picker). `icon_path` is a relative path to an image bundled in the template dir — a square, transparent PNG (256×256 works well) — shown on the template's card, with an OS glyph as the fallback. Packer requires a variable's `default` to be a literal, so both stay static strings.
 
 Templates install per-user and persist across server updates. Each is keyed by the `*-template` name in its `.pkr.hcl` — the name `ludus templates list` reports — so re-installing a name you already have is a no-op, and a name that collides with a built-in template is rejected.
 

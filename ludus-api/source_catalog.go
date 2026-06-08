@@ -1,7 +1,6 @@
 package ludusapi
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -168,21 +167,10 @@ func appendUnique(slice []string, s string) []string {
 	return append(slice, s)
 }
 
-// templateDescription reads the optional template.yml in a source's
-// templates/<name>/ dir for a human description. Best-effort: a missing file
-// means no description; a malformed one is logged and treated as none, never
-// failing the catalog (descriptions are optional metadata).
+// templateDescription reads a template's human description from the static
+// `description` variable in its packer file. Returns "" when unset.
 func templateDescription(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, "template.yml"))
-	if err != nil {
-		return ""
-	}
-	m, err := ParseTemplateManifest(data)
-	if err != nil {
-		log.Printf("[blueprint-sources] ignoring malformed template.yml in %s: %v", dir, err)
-		return ""
-	}
-	return strings.TrimSpace(m.Description)
+	return packerVarFromDir(dir, "description")
 }
 
 // localRoleDescription reads a source-bundled role's meta/main.yml (or

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/filesystem"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,7 +27,7 @@ func registerTemplates(app core.App, src *core.Record, walked *WalkedSource, opt
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
 		}
-		if err := ensureTemplateRow(app, name, dir); err != nil {
+		if err := ensureTemplateRow(app, name, dir, templateIconPath(dir), opts.Force); err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
 		}
@@ -39,8 +40,10 @@ func registerTemplates(app core.App, src *core.Record, walked *WalkedSource, opt
 // ensureTemplateRow creates a templates collection row for a registered
 // template if one doesn't already exist. Provenance lives in source_artifacts,
 // so the row carries no source claim — multiple sources can claim the same
-// template without colliding here.
-func ensureTemplateRow(app core.App, name, srcDir string) error {
+// template without colliding here. When iconPath is non-empty the bundled
+// image is applied: on new rows unconditionally, on existing rows only when the
+// row has no icon yet (bundle-defaults), or when force is true.
+func ensureTemplateRow(app core.App, name, srcDir, iconPath string, force bool) error {
 	collection, err := app.FindCollectionByNameOrId("templates")
 	if err != nil {
 		return err
@@ -50,6 +53,15 @@ func ensureTemplateRow(app core.App, name, srcDir string) error {
 		return err
 	}
 	if rec != nil {
+		// Existing row: apply the bundled icon only when the row has none
+		// (bundle-defaults), or unconditionally on --force. A hand-edited
+		// icon otherwise sticks.
+		if iconPath != "" && (force || rec.GetString("icon") == "") {
+			if file, ferr := filesystem.NewFileFromPath(iconPath); ferr == nil {
+				rec.Set("icon", file)
+				return app.Save(rec)
+			}
+		}
 		return nil
 	}
 	rec = core.NewRecord(collection)
@@ -63,6 +75,11 @@ func ensureTemplateRow(app core.App, name, srcDir string) error {
 	}
 	rec.Set("os", os)
 	rec.Set("shared", true)
+	if iconPath != "" {
+		if file, ferr := filesystem.NewFileFromPath(iconPath); ferr == nil {
+			rec.Set("icon", file)
+		}
+	}
 	return app.Save(rec)
 }
 
@@ -207,6 +224,26 @@ func userPackerTemplateNames(proxmoxUsername string) map[string]bool {
 
 	}
 	return out
+}
+
+// templateIconPath resolves a template's bundled icon to an absolute,
+// existing path from the static `icon_path` variable in its packer file.
+// Returns "" when the variable is unset or the file is missing. The value is
+// validated as a relative, in-dir path (the packer variable carries no schema
+// check of its own, so we validate here).
+func templateIconPath(dir string) string {
+	thumb := packerVarFromDir(dir, "icon_path")
+	if thumb == "" {
+		return ""
+	}
+	if err := validateRelativePath("icon", thumb); err != nil {
+		return ""
+	}
+	p := filepath.Join(dir, thumb)
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
 }
 
 // templateNameForDir returns the *-template name declared in the single packer

@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -237,6 +238,8 @@ func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, s
 
 	if opts.Selection == nil {
 		opts.Selection = snapshotWalkedAsSelection(walked)
+	} else if err := validateSelectionAgainstWalk(opts.Selection, walked); err != nil {
+		return nil, err
 	}
 
 	applySourceManifestToRecord(sourceRecord, walked.Source)
@@ -293,6 +296,40 @@ func snapshotWalkedAsSelection(walked *WalkedSource) *InstallSelection {
 		sel.LocalRoles = append(sel.LocalRoles, filepath.Base(dir))
 	}
 	return sel
+}
+
+// errSelectionNotAvailable marks an install whose requested selection names an
+// item the source doesn't provide — a user input error (HTTP 400), distinct
+// from a genuine sync failure.
+var errSelectionNotAvailable = errors.New("requested items are not available in this source")
+
+// validateSelectionAgainstWalk rejects an install that requests an item the
+// walk doesn't provide, so a mistyped or stale name (the dir "debian10" vs the
+// template "debian-10-x64-server-template") fails loudly instead of silently
+// installing nothing and reporting success. Empty lists (uninstall-everything)
+// validate trivially.
+func validateSelectionAgainstWalk(sel *InstallSelection, walked *WalkedSource) error {
+	available := snapshotWalkedAsSelection(walked)
+	var missing []string
+	for _, name := range sel.Templates {
+		if !slices.Contains(available.Templates, name) {
+			missing = append(missing, fmt.Sprintf("template %q", name))
+		}
+	}
+	for _, name := range sel.Blueprints {
+		if !slices.Contains(available.Blueprints, name) {
+			missing = append(missing, fmt.Sprintf("blueprint %q", name))
+		}
+	}
+	for _, name := range sel.LocalRoles {
+		if !slices.Contains(available.LocalRoles, name) {
+			missing = append(missing, fmt.Sprintf("role %q", name))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%w: %s", errSelectionNotAvailable, strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func collectSyncFailures(res *SyncResult) []string {

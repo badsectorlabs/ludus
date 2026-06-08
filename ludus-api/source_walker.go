@@ -15,8 +15,8 @@ import (
 const maxBlueprintDepth = 2
 
 type WalkedSource struct {
-	Source           *SourceManifest   // nil if source.yml absent
-	Blueprints       []WalkedBlueprint // sorted by Manifest.ID
+	Source     *SourceManifest   // nil if source.yml absent
+	Blueprints []WalkedBlueprint // sorted by Manifest.ID
 	Templates  []string          // <repo>/templates/<name>/ absolute paths
 	LocalRoles []string          // <repo>/roles/<name>/ absolute paths
 }
@@ -140,8 +140,8 @@ func walkBlueprint(bpDir string) (*WalkedBlueprint, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if m.Thumbnail != "" {
-		thumbPath := filepath.Join(bpDir, m.Thumbnail)
+	if m.ThumbnailPath != "" {
+		thumbPath := filepath.Join(bpDir, m.ThumbnailPath)
 		if _, err := os.Stat(thumbPath); err == nil {
 			bp.ThumbnailPath = thumbPath
 		}

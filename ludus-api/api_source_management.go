@@ -2,6 +2,7 @@ package ludusapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"ludusapi/dto"
@@ -921,6 +922,9 @@ func InstallSource(e *core.RequestEvent) error {
 	// field entirely. runSourceInstall interprets that as "snapshot the walk."
 	result, syncErr := runSourceInstall(context.Background(), e, e.App, src, opts)
 	if syncErr != nil {
+		if errors.Is(syncErr, errSelectionNotAvailable) {
+			return JSONError(e, http.StatusBadRequest, syncErr.Error())
+		}
 		return JSONError(e, http.StatusInternalServerError, syncErr.Error())
 	}
 	return e.JSON(http.StatusOK, sourceSyncResponse(src.GetString("sourceID"), result))

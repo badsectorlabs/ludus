@@ -1777,13 +1777,13 @@ func ImportBlueprint(e *core.RequestEvent) error {
 	committedTmp = true
 
 	bp.Set("blueprintDirPath", finalDir)
-	if walked.Manifest.Thumbnail != "" {
+	if walked.Manifest.ThumbnailPath != "" {
 		// Resolve against finalDir and confirm the result stays inside it.
 		// The extractor already rejects unsafe tarball entries, but the
-		// manifest's `thumbnail:` field is just a string we trusted — a
+		// manifest's `thumbnail_path:` field is just a string we trusted — a
 		// malicious blueprint.yml could point at /etc/passwd or use
 		// ../../ traversal to escape the blueprint dir.
-		thumbPath, pErr := filepath.Abs(filepath.Join(finalDir, walked.Manifest.Thumbnail))
+		thumbPath, pErr := filepath.Abs(filepath.Join(finalDir, walked.Manifest.ThumbnailPath))
 		absFinal, aErr := filepath.Abs(finalDir)
 		if pErr == nil && aErr == nil && strings.HasPrefix(thumbPath, absFinal+string(filepath.Separator)) {
 			if file, ferr := filesystem.NewFileFromPath(thumbPath); ferr == nil {
@@ -1899,7 +1899,7 @@ func ExportBlueprint(e *core.RequestEvent) error {
 			}
 		}
 		if thumbnailWritten != "" {
-			manifest.Thumbnail = thumbnailWritten
+			manifest.ThumbnailPath = thumbnailWritten
 		}
 	}
 

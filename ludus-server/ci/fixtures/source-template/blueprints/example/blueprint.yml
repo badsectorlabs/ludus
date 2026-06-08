@@ -8,5 +8,5 @@ version: 0.1.0                                                               # r
 config: range-config.yml                                                     # required: path to the range config, relative to this file
 
 tags: [example]                                                              # optional: filter via `ludus blueprint list --tag <tag>`
-# thumbnail: thumbnail.png                                                   # optional: relative path
+# thumbnail_path: thumbnail.png                                              # optional: relative path
 # min_ludus_version: 2.1.2                                                   # optional: hard install gate
