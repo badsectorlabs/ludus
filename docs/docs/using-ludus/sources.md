@@ -1,26 +1,26 @@
 ---
 sidebar_position: 3
 title: "📦 Sources"
-description: "Register Packer templates, Ansible roles, and blueprints from a git repo, tarball, or local directory"
-keywords: [sources, sharing, blueprints, ansible, packer, git]
+description: "Register Packer templates, Ansible roles and collections, and blueprints from a git repo, tarball, or local directory"
+keywords: [sources, sharing, blueprints, ansible, collections, packer, git]
 ---
 
 # 📦 Sources
 
-A source is a versioned bundle of Packer templates, Ansible roles, and blueprints, served from a git repo, tarball, or local directory. `ludus source add` registers it and opens an interactive picker for what to install.
+A source is a versioned bundle of Packer templates, Ansible roles and collections, and blueprints, served from a git repo, tarball, or local directory. `ludus source add` registers it and opens an interactive picker for what to install.
 
 ```bash
 # Register and pick what to install (interactive)
-ludus source add https://github.com/badsectorlabs/ludus-blueprints
+ludus source add https://github.com/badsectorlabs/ludus-source-bsl
 
 # Or install everything from the source non-interactively
-ludus source add https://github.com/badsectorlabs/ludus-blueprints --all
+ludus source add https://github.com/badsectorlabs/ludus-source-bsl --all
 
 # Build any required templates that aren't built yet
 ludus templates build
 
 # Apply one of the source's blueprints to your range
-ludus blueprint apply badsectorlabs-ludus-blueprints/goad
+ludus blueprint apply badsectorlabs-ludus-source-bsl/goad
 
 # Deploy
 ludus range deploy
@@ -28,13 +28,13 @@ ludus range deploy
 
 :::tip Publishing your own
 
-Fork the [Ludus Source Template](https://gitlab.com/badsectorlabs/ludus-source-template) to start your own.
+Fork the [Ludus Source Template](https://github.com/badsectorlabs/ludus-source-template) to start your own.
 
 :::
 
 ## What's in a Source Repo
 
-A source can include Packer templates, Ansible roles, and blueprints — any combination, as long as it ships at least one.
+A source can include Packer templates, Ansible roles and collections, and blueprints — any combination, as long as it ships at least one.
 
 ```
 my-source-repo/
@@ -76,17 +76,17 @@ without credentials.
 
 ```bash
 # terminal-command-local
-ludus source add https://github.com/badsectorlabs/ludus-blueprints
+ludus source add https://github.com/badsectorlabs/ludus-source-bsl
 ludus templates build
-ludus blueprint apply badsectorlabs-ludus-blueprints/goad
+ludus blueprint apply badsectorlabs-ludus-source-bsl/goad
 ludus range deploy
 ```
 
-By default `source add` runs in two phases: it registers the source (clone or extract + walk), then opens an interactive picker for which blueprints, templates, and source-bundled roles to install. The picker also lists the galaxy roles a selected blueprint will pull in. Pass `--all` to skip the picker, or pass `--blueprints`/`--templates`/`--source-roles` to script the selection. In a non-TTY context (CI, piped stdin) `add` defaults to `--all`.
+By default `source add` runs in two phases: it registers the source (clone or extract + walk), then opens an interactive picker for which blueprints, templates, and source-bundled roles and collections to install. The picker also lists the galaxy roles and collections a selected blueprint will pull in. Pass `--all` to skip the picker, or pass `--blueprints`/`--templates`/`--source-roles`/`--source-collections` to script the selection. In a non-TTY context (CI, piped stdin) `add` defaults to `--all`.
 
 Templates are registered but not built; run `ludus templates build` separately.
 
-Slug-prefixed IDs (`badsectorlabs-ludus-blueprints/goad`) keep blueprints from different sources separate. If two sources both ship `goad`, they appear as `badsectorlabs-ludus-blueprints/goad` and `secteam-workshop-labs/goad`. Apply by full prefix.
+Slug-prefixed IDs (`badsectorlabs-ludus-source-bsl/goad`) keep blueprints from different sources separate. If two sources both ship `goad`, they appear as `badsectorlabs-ludus-source-bsl/goad` and `secteam-workshop-labs/goad`. Apply by full prefix.
 
 ### Fork to Edit
 
@@ -94,7 +94,7 @@ Slug-prefixed IDs (`badsectorlabs-ludus-blueprints/goad`) keep blueprints from d
 
 ```bash
 # terminal-command-local
-ludus blueprint apply badsectorlabs-ludus-blueprints/goad
+ludus blueprint apply badsectorlabs-ludus-source-bsl/goad
 # ... edit via ludus range config get/set ...
 ludus blueprint create --id my-goad --from-range <rangeID>
 ludus blueprint apply my-goad
@@ -119,9 +119,9 @@ Run `source add <existing-sourceID>` to open the picker against a source you alr
 
 ```bash
 # terminal-command-local
-ludus source add badsectorlabs-ludus-blueprints                 # opens picker
-ludus source add badsectorlabs-ludus-blueprints --blueprints goad  # scripted
-ludus source add badsectorlabs-ludus-blueprints --all              # install everything in the catalog
+ludus source add badsectorlabs-ludus-source-bsl                 # opens picker
+ludus source add badsectorlabs-ludus-source-bsl --blueprints goad  # scripted
+ludus source add badsectorlabs-ludus-source-bsl --all              # install everything in the catalog
 ```
 
 Re-adding the same git URL is idempotent — Ludus re-pulls and refreshes the catalog without touching what's already installed. Re-adding the same sourceID with a different URL returns `409`; override the sourceID or use `ludus source update --ref` to change the tracked ref.
@@ -132,7 +132,7 @@ If `source add` fails partway, retry just one blueprint's deps:
 
 ```bash
 # terminal-command-local
-ludus blueprint install badsectorlabs-ludus-blueprints/goad
+ludus blueprint install badsectorlabs-ludus-source-bsl/goad
 ```
 
 Works on any blueprint you can see, whether it's local or from a source.
@@ -211,6 +211,22 @@ Ludus reads each role's `meta/main.yml` `galaxy_info.description` and shows it a
 Reference roles by directory name (`my_helper`) under `roles:` in any blueprint's `range-config.yml`. If a local role shares a name with a galaxy role, Ludus skips the galaxy install and uses the local role.
 
 Roles install per-user by default; admins can use `--global` on `source add` to install instance-wide.
+
+### Ansible collections
+
+Each `ansible/collections/<dir>/` directory is a standard [Ansible collection](https://docs.ansible.com/ansible/latest/dev_guide/developing_collections_structure.html) — any directory with a `galaxy.yml` at its root:
+
+```
+ansible/collections/my_namespace.my_collection/
+├── galaxy.yml              # namespace, name, version, description
+├── roles/                  # collection roles
+├── plugins/                # modules, filters, lookups, etc.
+└── playbooks/
+```
+
+The collection's identity is the `namespace.name` from its `galaxy.yml` — not the directory name. Ludus reads `galaxy.yml` for the version and `description` (shown in the catalog and picker) and installs it under the namespaced collections path, where a blueprint references its content by fully-qualified name (`my_namespace.my_collection.some_module`).
+
+Like roles, collections install per-user by default; an admin can pass `--global` on `source add` to install them instance-wide.
 
 ### Blueprints
 
@@ -301,8 +317,8 @@ Every source gets a `sourceID` auto-derived from the URL or path when you run `s
 
 | Input | Derived sourceID |
 |-------|-----------------|
-| `https://github.com/badsectorlabs/ludus-blueprints` | `badsectorlabs-ludus-blueprints` |
-| `https://github.com/badsectorlabs/ludus-blueprints.git` | `badsectorlabs-ludus-blueprints` |
+| `https://github.com/badsectorlabs/ludus-source-bsl` | `badsectorlabs-ludus-source-bsl` |
+| `https://github.com/badsectorlabs/ludus-source-bsl.git` | `badsectorlabs-ludus-source-bsl` |
 | `git@gitlab.com:secteam/workshop-labs.git` | `secteam-workshop-labs` |
 | `/tmp/my-source.tar.gz` | `my-source` |
 | `/home/user/my-workshop-lab` (directory) | `my-workshop-lab` |
@@ -311,7 +327,7 @@ Override it with `--id` for a shorter alias:
 
 ```bash
 # terminal-command-local
-ludus source add https://github.com/badsectorlabs/ludus-blueprints --id bsl
+ludus source add https://github.com/badsectorlabs/ludus-source-bsl --id bsl
 ludus blueprint apply bsl/goad
 ```
 
@@ -323,7 +339,7 @@ Sources are personal — only the user who ran `source add` sees them in `source
 
 Templates install per-user. The built VM image is shared instance-wide by name, so building a template once makes it usable by every range; another user installs it from the source only to rebuild it.
 
-Roles install per-user. An admin can install them instance-wide by passing `--global` to `source add`, which makes them available to every user on the instance.
+Roles and collections install per-user. An admin can install them instance-wide by passing `--global` to `source add`, which makes them available to every user on the instance.
 
 Blueprints share per-blueprint with `ludus blueprint share user <sourceID>/<bpID> <userID>` (or `share group`).
 
@@ -379,6 +395,7 @@ A source removed with `ludus source rm` is re-registered on the next restart unl
 | `--blueprints <ids>` | `source add` | Scripted selection: blueprint IDs to install (CSV or repeated) |
 | `--templates <names>` | `source add` | Scripted selection: template names to install (CSV or repeated) |
 | `--source-roles <names>` | `source add` | Scripted selection: source-bundled role names to install (CSV or repeated) |
+| `--source-collections <fqcns>` | `source add` | Scripted selection: source-bundled collection FQCNs to install (CSV or repeated) |
 | `--global` | `source add`, `source sync`, `source update`, `blueprint install` | Admin only. Install the source's roles and collections instance-wide instead of user-scoped |
 | `--force` | `source add`, `source sync`, `source update` | Overwrite already-installed templates and galaxy/local roles |
 | `--force-roles` | `blueprint install` | Overwrite already-installed galaxy/local roles |

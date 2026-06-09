@@ -63,6 +63,34 @@ ludus:
 
 You can define any variables that will be passed to the role with `role_vars` as seen above. Note that all variable in `role_vars` will be passed to all roles.
 
+## Ansible Collections
+
+Ansible collections bundle modules, roles, and plugins under a namespaced name (`namespace.name`). Like roles, collections install per-user, and any collection on [Ansible Galaxy](https://galaxy.ansible.com/ui/standalone/collections/) works with Ludus.
+
+Manage them with `ludus ansible collection` (alias `collections`):
+
+```bash
+# Add from Ansible Galaxy (pin a version with --version)
+#terminal-command-local
+ludus ansible collection add community.windows
+
+# Add from a .tar.gz collection artifact URL
+#terminal-command-local
+ludus ansible collection add https://example.com/my_namespace-my_collection-1.0.0.tar.gz
+
+# List your installed collections
+#terminal-command-local
+ludus ansible collection list
+
+# Remove a collection by its FQCN (namespace.name). ansible-galaxy has no
+# "collection remove", so Ludus deletes the collection's directory. Admins can
+# add --global to remove an instance-wide copy.
+#terminal-command-local
+ludus ansible collection rm community.windows
+```
+
+Roles bundled in a collection can be used in a range config — reference them in the `roles:` key by their fully-qualified name (e.g. `badsectorlabs.ludus_windows_utils.ludus_ad_password_policy`).
+
 ## Ludus Specific Roles
 
 While most existing ansible roles will work with Ludus, this page contains a table of roles specifically designed for Ludus.
