@@ -6,6 +6,7 @@ import (
 	"ludus/logger"
 	"ludus/rest"
 	"ludusapi/dto"
+	neturl "net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -16,23 +17,24 @@ import (
 )
 
 var (
-	configFilePath  string
-	tags            string
-	force           bool
-	rangeVerbose    bool
-	outputPath      string
-	noPrompt        bool
-	onlyRoles       string
-	limit           string
-	allRanges       bool
-	rangeID         string
-	description     string
-	purpose         string
-	userIDsForRange string
-	rangeNumber     int
-	history         bool
-	historyID       string
-	rangeDetails    bool
+	configFilePath     string
+	tags               string
+	force              bool
+	rangeVerbose       bool
+	outputPath         string
+	noPrompt           bool
+	onlyRoles          string
+	limit              string
+	allRanges          bool
+	rangeID            string
+	description        string
+	purpose            string
+	userIDsForRange    string
+	rangeNumber        int
+	history            bool
+	historyID          string
+	rangeDetails       bool
+	rangeFromBlueprint string
 )
 
 var rangeCmd = &cobra.Command{
@@ -113,6 +115,59 @@ func formatRangeResponse(data RangeObject, withVMs bool, withDetails bool) {
 
 		vmTable.Render()
 	}
+}
+
+var (
+	rangeUpdateName        string
+	rangeUpdateDescription string
+	rangeUpdatePurpose     string
+)
+
+var rangeUpdateCmd = &cobra.Command{
+	Use:   "update <rangeID>",
+	Short: "Update label fields on a range (name, description, purpose)",
+	Long: `Update label fields on a range. Lifecycle-related fields (testing
+allowlists, autoshutdown, etc.) have their own dedicated commands and are
+not editable here.
+
+At least one of --name, --description, --purpose must be provided. Pass an
+empty string to clear a field.`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		body := map[string]string{}
+		if cmd.Flags().Changed("name") {
+			body["name"] = rangeUpdateName
+		}
+		if cmd.Flags().Changed("description") {
+			body["description"] = rangeUpdateDescription
+		}
+		if cmd.Flags().Changed("purpose") {
+			body["purpose"] = rangeUpdatePurpose
+		}
+		if len(body) == 0 {
+			logger.Logger.Fatal("at least one of --name, --description, --purpose is required")
+		}
+
+		recordID, err := rest.PBLookupRecordID(client, "ranges", "rangeID", args[0])
+		if err != nil {
+			logger.Logger.Fatal(err.Error())
+		}
+		jsonBody, _ := json.Marshal(body)
+		path := fmt.Sprintf("/api/collections/ranges/records/%s", neturl.PathEscape(recordID))
+		responseJSON, success := rest.GenericJSONPatch(client, path, string(jsonBody))
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+		logger.Logger.Infof("Range '%s' updated", args[0])
+	},
+}
+
+func setupRangeUpdateCmd(command *cobra.Command) {
+	command.Flags().StringVar(&rangeUpdateName, "name", "", "range name")
+	command.Flags().StringVar(&rangeUpdateDescription, "description", "", "range description")
+	command.Flags().StringVar(&rangeUpdatePurpose, "purpose", "", "range purpose")
 }
 
 var rangeListCmd = &cobra.Command{
@@ -694,7 +749,9 @@ one for the domainadmin user, and another for the domainuser user`,
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
-		rest.FileGet(client, buildURLWithRangeAndUserID("/range/rdpconfigs"), outputPath)
+		if _, success := rest.FileGet(client, buildURLWithRangeAndUserID("/range/rdpconfigs"), outputPath); success {
+			logger.Logger.Infof("File downloaded and saved as %s", outputPath)
+		}
 	},
 }
 
@@ -763,8 +820,12 @@ type RangeCreatePayload struct {
 var rangeCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new range",
-	Long:  `Create a new range with a name and pool name. Description, purpose, and userID are optional.`,
-	Args:  cobra.ExactArgs(0),
+	Long: `Create a new range with a name and pool name. Description, purpose, and userID are optional.
+
+Pass --from-blueprint <id> to seed the new range from an existing blueprint
+(local id or source-prefixed, e.g. 'bsl/goad'). Ludus checks access and
+subscription roles before creating the range. Then run 'ludus range deploy'.`,
+	Args: cobra.ExactArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
@@ -803,6 +864,7 @@ var rangeCreateCmd = &cobra.Command{
 			Purpose:     purpose,
 			UserID:      userIDs,
 			RangeNumber: rangeNumber,
+			BlueprintID: strings.TrimSpace(rangeFromBlueprint),
 		}
 
 		var responseJSON []byte
@@ -841,6 +903,7 @@ func setupRangeCreateCmd(command *cobra.Command) {
 	command.Flags().StringVarP(&purpose, "purpose", "o", "", "Purpose of the range")
 	command.Flags().StringVar(&userIDsForRange, "users", "", "Comma-separated list of User IDs to assign the range to (optional). By default the current user is assigned. To assign no users to the range, use --users 'none'")
 	command.Flags().IntVar(&rangeNumber, "range-number", 0, "Specific range number to assign (optional)")
+	command.Flags().StringVar(&rangeFromBlueprint, "from-blueprint", "", "blueprintID to apply to the new range (e.g. 'my-lab' or 'bsl/goad')")
 }
 
 var rangeAssignCmd = &cobra.Command{
@@ -989,6 +1052,8 @@ func init() {
 	rangeCmd.AddCommand(rangeErrorsCmd)
 	rangeListCmd.Flags().BoolVar(&rangeDetails, "details", false, "show additional VM details: OS version, license status (Windows), and last update (Windows)")
 	rangeCmd.AddCommand(rangeListCmd)
+	setupRangeUpdateCmd(rangeUpdateCmd)
+	rangeCmd.AddCommand(rangeUpdateCmd)
 	setupDeleteCmd(rangeDeleteCmd)
 	rangeCmd.AddCommand(rangeDeleteCmd)
 	setupDestroyVmsCmd(rangeDestroyVmsCmd)

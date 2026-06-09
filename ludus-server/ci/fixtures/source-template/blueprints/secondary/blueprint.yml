@@ -1,0 +1,8 @@
+manifest_version: 1
+id: secondary
+name: "Secondary Example"
+description: "Second blueprint to exercise selective install."
+version: 0.1.0
+config: range-config.yml
+
+tags: [example, selection]

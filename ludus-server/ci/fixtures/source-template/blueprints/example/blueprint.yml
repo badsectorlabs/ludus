@@ -1,0 +1,12 @@
+# blueprint.yml: display metadata for one blueprint.
+
+manifest_version: 1                                                          # required: schema version, leave as 1
+id: example                                                                  # required: unique within this source; lowercase, dashes
+name: "Example"                                                              # required: display name
+description: "Single Debian VM with Docker installed via geerlingguy.docker." # required
+version: 0.1.0                                                               # required: your semver; bump on every release
+config: range-config.yml                                                     # required: path to the range config, relative to this file
+
+tags: [example]                                                              # optional: filter via `ludus blueprint list --tag <tag>`
+# thumbnail: thumbnail.png                                                   # optional: relative path
+# min_ludus_version: 2.1.2                                                   # optional: hard install gate

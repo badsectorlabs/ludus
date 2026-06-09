@@ -52,6 +52,33 @@ iso_file = "${var.iso_file}"
 
 *Assuming your iso is stored in the `local` pool.*
 
+## Ludus cannot find the template name
+
+Ludus reads the template name from the Packer HCL/JSON directly. Comments and unrelated strings are ignored.
+
+The preferred source of truth is the `vm_name` value inside a Packer `source` block:
+
+```hcl
+source "proxmox-iso" "example" {
+  vm_name = "example-template"
+}
+```
+
+If `vm_name` references a variable, Ludus resolves it from that variable's default value:
+
+```hcl
+variable "vm_name" {
+  type    = string
+  default = "example-template"
+}
+
+source "proxmox-iso" "example" {
+  vm_name = var.vm_name
+}
+```
+
+If no `source` block has a resolvable `vm_name`, Ludus falls back to the default value of `variable "vm_name"`. To avoid discovery issues, make sure the resolved value is a plain string and ends with `-template`.
+
 ## ISO downloads fail - Download with packer instead of PVE
 
 Some templates are configured to download the ISOs directly to PVE instead of downloading via packer to a cache and then uploading.

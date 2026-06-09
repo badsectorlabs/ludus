@@ -1,7 +1,27 @@
-﻿# Hide the window
-$t = '[DllImport("user32.dll")] public static extern bool ShowWindow(int handle, int state);'
-add-type -name win -member $t -namespace native
-[native.win]::ShowWindow(([System.Diagnostics.Process]::GetCurrentProcess() | Get-Process).MainWindowHandle, 0)
+﻿# Hide the window (this hack adapted from https://stackoverflow.com/a/78577080/3006990)
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32 {
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+"@
+$hwnd = [Win32]::GetConsoleWindow()
+$handle = [Win32]::SetForegroundWindow($hwnd)
+$foreground = [Win32]::GetForegroundWindow()
+if ($foreground -ne [IntPtr]::Zero) {
+    [Win32]::ShowWindow($foreground, 0) | Out-Null
+}
 
 gwmi win32_quickfixengineering | sort InstalledOn -desc | Select -first 1 | foreach {$_.InstalledOn.toString("yyy-MM-dd")} | Out-File -FilePath C:\ludus\background\lastupdate.txt
 

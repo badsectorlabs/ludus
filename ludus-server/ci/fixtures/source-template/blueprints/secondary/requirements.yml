@@ -1,0 +1,4 @@
+# Secondary uses only the source-bundled local role say_hello — no galaxy
+# or subscription dependencies. Selecting this blueprint alone should not
+# trigger any galaxy install.
+roles: []

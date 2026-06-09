@@ -583,29 +583,14 @@ func PutConfig(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, "Configuration error: "+err.Error())
 	}
 
-	// Check the roles and dependencies
-	rangeHasRoles := e.Get("rangeHasRoles")
-	logger.Debug(fmt.Sprintf("Range has roles: %v", rangeHasRoles))
-	if rangeHasRoles != nil && rangeHasRoles.(bool) {
-		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), "Resolving dependencies for user-defined roles..\n", false)
-		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(e, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
-		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), rolesOutput, true)
-		if err != nil {
-			targetRange.SetRangeState(LudusRangeStateError)
-			err = e.App.Save(targetRange)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
-			}
-			// Find the 'ERROR' line in the output and return it to the user
-			errorLine := regexp.MustCompile(`ERROR[^"]*`)
-			errorMatch := errorLine.FindString(rolesOutput)
-			if errorMatch != "" {
-				return JSONError(e, http.StatusBadRequest, "Configuration error: "+errorMatch)
-			} else {
-				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("Error generating ordered roles: %s %s", rolesOutput, err))
-
-			}
-		}
+	// Resolve user-defined role dependencies (or drop a stale playbook if
+	// the new config has no roles). Same helper drives blueprint apply.
+	configBytes, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to re-read validated config: "+readErr.Error())
+	}
+	if status, prepErr := prepareUserDefinedRolesPlaybook(e, targetRange, configBytes); prepErr != nil {
+		return JSONError(e, status, prepErr.Error())
 	}
 
 	// The file is valid, so let's move it to the range-config
@@ -736,6 +721,21 @@ func CreateRange(e *core.RequestEvent) error {
 	var payload dto.CreateRangeRequest
 	if err := e.BindBody(&payload); err != nil {
 		return JSONError(e, http.StatusBadRequest, "Invalid request body: "+err.Error())
+	}
+
+	// Pre-flight blueprint resolve so access/subscription failures hit before
+	// we provision any range resources.
+	var blueprintConfigBytes []byte
+	if payload.BlueprintID != "" {
+		user, ok := e.Get("user").(*models.User)
+		if !ok || user == nil {
+			return JSONError(e, http.StatusUnauthorized, "Authenticated user required to apply a blueprint")
+		}
+		var resolveErr error
+		blueprintConfigBytes, resolveErr = resolveBlueprintConfigForApply(e, user, normalizeBlueprintID(payload.BlueprintID))
+		if resolveErr != nil {
+			return resolveErr
+		}
 	}
 
 	// If UserID array is provided, verify the users exist
@@ -883,6 +883,19 @@ func CreateRange(e *core.RequestEvent) error {
 
 	if len(errorArray) > 0 {
 		return e.JSON(http.StatusInternalServerError, dto.CreateRangeResponseError{Errors: errorArray})
+	}
+
+	// Apply the blueprint config to the just-created range. On failure the
+	// range is already provisioned; we surface a retry hint rather than roll
+	// back so the user can fix and re-apply.
+	if payload.BlueprintID != "" {
+		if status, err := writeRangeConfig(e, rangeRecord, blueprintConfigBytes, false); err != nil {
+			_ = status
+			return JSONError(e, http.StatusInternalServerError,
+				fmt.Sprintf("Range %s was created but applying blueprint %q failed: %v. Run 'ludus blueprint apply %s --target-range %s' to retry.",
+					payload.RangeID, payload.BlueprintID, err, payload.BlueprintID, payload.RangeID))
+		}
+		return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s created and blueprint %s applied", payload.RangeID, payload.BlueprintID))
 	}
 
 	return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s created successfully", payload.RangeID))

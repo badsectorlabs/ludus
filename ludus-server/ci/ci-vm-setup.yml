@@ -36,17 +36,17 @@
     ci_cluster_ceph_osd_disk_size: "100G"
     ci_cluster_ceph_pg_num: 32
     ci_seed_vms:
-      - { vmid: 1000, name: "ci-seed-base",            role: base,        memory: 32768, cores: 8 }
-      - { vmid: 1001, name: "ci-seed-clean-install",   role: installed,   memory: 32768, cores: 8 }
-      - { vmid: 1002, name: "ci-seed-templates-built", role: templates,   memory: 32768, cores: 8 }
+      - { vmid: 1000, name: "ci-seed-base",            role: base,        memory: 8192, cores: 4 }
+      - { vmid: 1001, name: "ci-seed-clean-install",   role: installed,   memory: 12288, cores: 4 }
+      - { vmid: 1002, name: "ci-seed-templates-built", role: templates,   memory: 24576, cores: 8 }
       - { vmid: 1003, name: "ci-seed-range-admin",     role: range-admin, memory: 32768, cores: 8 }
       - { vmid: 1004, name: "ci-seed-range-user",      role: range-user,  memory: 32768, cores: 8 }
       - { vmid: 1007, name: "ci-seed-integration",     role: integration, memory: 32768, cores: 8 }
     ci_cluster_vms:
-      - { vmid: 1005, name: "ci-cluster-node1",         role: cluster,     memory: 32768, cores: 8, hostname: "ludus",  ip: "{{ ci_cluster_node1_ip | default('203.0.113.184') }}" }
-      - { vmid: 1006, name: "ci-cluster-node2",         role: cluster,     memory: 32768, cores: 8, hostname: "ludus2", ip: "{{ ci_cluster_node2_ip | default('203.0.113.185') }}" }
+      - { vmid: 1005, name: "ci-cluster-node1",         role: cluster,     memory: 8192, cores: 4, hostname: "ludus",  ip: "{{ ci_cluster_node1_ip | default('203.0.113.184') }}" }
+      - { vmid: 1006, name: "ci-cluster-node2",         role: cluster,     memory: 8192, cores: 4, hostname: "ludus2", ip: "{{ ci_cluster_node2_ip | default('203.0.113.185') }}" }
     ci_build_vms:
-      - { vmid: 1012, name: "ci-build-machine",         role: build,       memory: 32768, cores: 8 }
+      - { vmid: 1012, name: "ci-build-machine",         role: build,       memory: 8192, cores: 8 }
     ci_runtime_vms: "{{ ci_cluster_vms + ci_build_vms }}"
     ci_vms: "{{ ci_seed_vms + ci_runtime_vms }}"
 
@@ -314,6 +314,7 @@
           }
           in_ens18 && /^[[:space:]]*gateway[[:space:]]+/ {
             print "\tgateway " gw
+            print "\tdns-nameservers 1.1.1.1"
             saw_gateway=1
             next
           }
@@ -342,6 +343,7 @@
         ip link set ens18 up
         ip addr add "{{ item.ip }}/24" dev ens18
         ip route replace default via 203.0.113.254 dev ens18
+        echo "nameserver 1.1.1.1" > /etc/resolv.conf
         REMOTE
         qm guest exec {{ item.vmid }} -- /bin/bash -lc "$SCRIPT" | jq -e '.exitcode == 0'
       args:
@@ -403,8 +405,8 @@
     pve_ceph_mon_group: ci_pve_cluster
     pve_ceph_mgr_group: ci_pve_cluster
     pve_ceph_mds_group: ci_pve_cluster
-    pve_ceph_osds:
-      - device: /dev/vdb
+    pve_ceph_osds: []
+    pve_ceph_default_version: tentacle
     pve_ceph_pools:
       - name: ceph
         storage: true
@@ -435,6 +437,87 @@
     pve_run_proxmox_upgrades: false
     pve_reboot_on_kernel_update: true
     pve_reboot_on_kernel_update_delay: 15
+  pre_tasks:
+    - name: Ensure sudo can resolve root-only Proxmox and Ceph commands
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers
+        regexp: '^Defaults\s+secure_path='
+        insertafter: '^Defaults'
+        owner: root
+        group: root
+        mode: "0440"
+        line: 'Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+        validate: "/usr/sbin/visudo -cf %s"
+
+    - name: Discover CI Ceph OSD block device
+      ansible.builtin.shell: |
+        set -euo pipefail
+        desired="{{ ci_cluster_ceph_osd_disk_size | default('100G') }}"
+        case "$desired" in
+          *[Gg]) desired_bytes=$((${desired%[Gg]} * 1024 * 1024 * 1024)) ;;
+          *[Mm]) desired_bytes=$((${desired%[Mm]} * 1024 * 1024)) ;;
+          *) desired_bytes="$desired" ;;
+        esac
+
+        root_source=$(readlink -f "$(findmnt -n -o SOURCE /)")
+        root_parent=$(lsblk -no PKNAME "$root_source" | head -n1 || true)
+        if [ -n "$root_parent" ]; then
+          root_disk="/dev/$root_parent"
+        else
+          root_disk="$root_source"
+        fi
+
+        for candidate in /dev/disk/by-path/virtio-pci-* /dev/vd? /dev/sd?; do
+          [ -e "$candidate" ] || continue
+          device=$(readlink -f "$candidate")
+          [ -b "$device" ] || continue
+          [ "$device" != "$root_disk" ] || continue
+          [ "$(lsblk -dn -o TYPE "$device")" = "disk" ] || continue
+          size=$(lsblk -bdn -o SIZE "$device")
+          if [ "$size" = "$desired_bytes" ]; then
+            echo "$device"
+            exit 0
+          fi
+        done
+
+        echo "No non-root block device matching $desired ($desired_bytes bytes)" >&2
+        lsblk -o NAME,PATH,TYPE,SIZE,MOUNTPOINT >&2
+        exit 1
+      args:
+        executable: /bin/bash
+      register: ci_ceph_osd_device
+      changed_when: false
+
+    - name: Configure discovered CI Ceph OSD device
+      ansible.builtin.set_fact:
+        pve_ceph_osds:
+          - device: "{{ ci_ceph_osd_device.stdout | trim }}"
+
+    - name: Show discovered CI Ceph OSD device
+      ansible.builtin.debug:
+        var: ci_ceph_osd_device.stdout
+
+    - name: Check if ceph config is present on cluster
+      ansible.builtin.stat:
+        path: /usr/sbin/ceph-volume
+      register: __ceph_installed
+
+    - name: Check if pveceph is available
+      ansible.builtin.stat:
+        path: /usr/bin/pveceph
+      register: __pveceph
+
+    - name: Install ceph
+      ansible.builtin.command:
+        argv:
+          - "pveceph"
+          - "install"
+          - "--repository"
+          - "no-subscription"
+        stdin: 'Y\nY\n'
+      when: not __ceph_installed.stat.exists and __pveceph.stat.exists
+      changed_when: true
+
   roles:
     - role: lae.proxmox
   post_tasks:
@@ -502,14 +585,27 @@
         executable: /bin/bash
       throttle: 1
 
-    - name: Wait for Ceph health to settle
-      ansible.builtin.command: ceph health
-      register: ci_ceph_health
-      changed_when: false
-      until: ci_ceph_health.stdout.startswith('HEALTH_OK')
-      retries: 30
-      delay: 10
-      run_once: true
+    - name: Wait for Ceph health to be HEALTH_OK
+      block:
+        - name: Wait for Ceph health to settle
+          ansible.builtin.command: ceph health
+          register: ci_ceph_health
+          changed_when: false
+          until: ci_ceph_health.stdout is defined and ci_ceph_health.stdout.startswith('HEALTH_OK')
+          retries: 20
+          delay: 10
+          run_once: true
+      rescue:
+        - name: Require tentacle
+          ansible.builtin.command: ceph osd require-osd-release tentacle
+        - name: Wait for Ceph health to settle
+          ansible.builtin.command: ceph health
+          register: ci_ceph_health
+          changed_when: false
+          until: ci_ceph_health.stdout is defined and ci_ceph_health.stdout.startswith('HEALTH_OK')
+          retries: 20
+          delay: 10
+          run_once: true
 
     - name: Ensure Ludus VXLAN SDN zone exists for cluster CI
       ansible.builtin.shell: |
@@ -831,29 +927,55 @@
       - { vmid: 1004, name: "ci-seed-range-user" }
       - { vmid: 1007, name: "ci-seed-integration" }
   tasks:
-    - name: Stop seed VMs before template conversion
-      community.general.proxmox_kvm:
-        api_user: "{{ api_user }}"
-        api_password: "{{ api_password }}"
-        api_host: "{{ api_host }}"
-        node: "{{ node_name }}"
-        vmid: "{{ item.vmid }}"
-        state: stopped
-        update: true
+    - name: Request graceful shutdown for seed VMs before template conversion
+      ansible.builtin.command: qm shutdown {{ item.vmid }} --timeout 180
+      register: seed_shutdowns
+      changed_when: seed_shutdowns.rc == 0
+      failed_when: false
+      loop: "{{ ci_seed_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
+    - name: Check seed VM power state after shutdown request
+      ansible.builtin.command: qm status {{ item.vmid }}
+      register: seed_vm_power_state
+      changed_when: false
+      loop: "{{ ci_seed_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
+    - name: Force stop seed VMs that did not shut down gracefully
+      ansible.builtin.command: qm stop {{ item.item.vmid }}
+      when: "'status: running' in item.stdout"
+      loop: "{{ seed_vm_power_state.results }}"
+      loop_control:
+        label: "{{ item.item.vmid }} ({{ item.item.name }})"
+
+    - name: Verify seed VMs are stopped before template conversion
+      ansible.builtin.command: qm status {{ item.vmid }}
+      register: seed_vm_stopped_state
+      changed_when: false
+      failed_when: "'status: stopped' not in seed_vm_stopped_state.stdout"
       loop: "{{ ci_seed_vms }}"
       loop_control:
         label: "{{ item.vmid }} ({{ item.name }})"
 
     - name: Convert seed VMs to templates
-      community.general.proxmox_kvm:
-        api_user: "{{ api_user }}"
-        api_password: "{{ api_password }}"
-        api_host: "{{ api_host }}"
-        node: "{{ node_name }}"
-        vmid: "{{ item.vmid }}"
-        state: present
-        template: true
-        update: true
+      ansible.builtin.shell: |
+        set -euo pipefail
+        CONFIG="$(qm config {{ item.vmid }})"
+        if printf '%s\n' "$CONFIG" | grep -q '^template: 1'; then
+          if printf '%s\n' "$CONFIG" | grep -Eq '^(scsi|virtio|sata|ide)[0-9]+: [^:]+:base-[0-9]+-disk-'; then
+            echo "already a storage-backed template"
+            exit 0
+          fi
+          qm set {{ item.vmid }} --delete template
+        fi
+        qm template {{ item.vmid }}
+      args:
+        executable: /bin/bash
+      register: seed_template_conversion
+      changed_when: "'already a storage-backed template' not in seed_template_conversion.stdout"
       loop: "{{ ci_seed_vms }}"
       loop_control:
         label: "{{ item.vmid }} ({{ item.name }})"

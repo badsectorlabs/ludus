@@ -541,6 +541,99 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /ansible/collection:
+    post:
+      summary: Install an Ansible collection
+      deprecated: false
+      description: >
+        Install an ansible collection by name or URL.
+
+        Admins can pass a userID parameter to install a collection for other
+        users.
+
+        Ansible collections can only be removed by rm-ing their directories.
+        This is not supported via Ludus due to potential edge cases in naming
+        depending on how the collection was installed.
+      operationId: InstallCollection
+      tags:
+        - Ansible Management
+      parameters:
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to install for.
+
+            Defaults to the user's range (admins can interact with other users'
+            ranges)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                collection:
+                  type: string
+                  description: >-
+                    Collection FQCN (namespace.name) for a galaxy install, or a
+                    git source URL (https/ssh, optionally git+ prefixed) to
+                    install from git. The server infers git from the string's
+                    shape.
+                  example: maxhoesel.smallstep
+                version:
+                  type: string
+                  description: >-
+                    Version pin for a galaxy collection, or any commit-ish
+                    (branch / tag / commit) for a git source.
+                  example: 0.23.1
+                force:
+                  type: boolean
+                  example: true
+              type: object
+      responses:
+        '201':
+          description: collection installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: 'Successfully installed: maxhoesel.smallstep'
+          headers: {}
+        '409':
+          description: Collection already installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Collection already installed. Collections from
+                      https://docs.ansible.com/ansible/latest/collections/index.html
+                      are installed globally. If you want to reinstall it,
+                      consider using `--force`.
+          headers: {}
+        '500':
+          description: Error installing collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Unable to install the ansible collection:
+                      maxhoesel.smallstep
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /ansible:
     get:
       summary: Retrieve available Ansible roles and collections
@@ -854,92 +947,6 @@ paths:
                   error:
                     type: string
                     example: 'Unable to install the ansible role: <error>'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /ansible/collection:
-    post:
-      summary: Install an Ansible collection
-      deprecated: false
-      description: >
-        Install an ansible collection by name or URL.
-
-        Admins can pass a userID parameter to install a collection for other
-        users.
-
-        Ansible collections can only be removed by rm-ing their directories.
-        This is not supported via Ludus due to potential edge cases in naming
-        depending on how the collection was installed.
-      operationId: InstallCollection
-      tags:
-        - Ansible Management
-      parameters:
-        - name: userID
-          in: query
-          description: >
-            pass an optional userID to install for.
-
-            Defaults to the user's range (admins can interact with other users'
-            ranges)
-          required: false
-          schema:
-            $ref: '#/components/schemas/userID'
-      requestBody:
-        content:
-          application/json:
-            schema:
-              properties:
-                collection:
-                  type: string
-                  example: maxhoesel.smallstep
-                version:
-                  type: string
-                  example: 0.23.1
-                force:
-                  type: boolean
-                  example: true
-              type: object
-            examples: {}
-      responses:
-        '201':
-          description: collection installed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: string
-                    example: 'Successfully installed: maxhoesel.smallstep'
-          headers: {}
-        '409':
-          description: Collection already installed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: >-
-                      Collection already installed. Collections from
-                      https://docs.ansible.com/ansible/latest/collections/index.html
-                      are installed globally. If you want to reinstall it,
-                      consider using `--force`.
-          headers: {}
-        '500':
-          description: Error installing collection
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: >-
-                      Unable to install the ansible collection:
-                      maxhoesel.smallstep
           headers: {}
       security:
         - JWT: []
@@ -6305,6 +6312,43 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+    delete:
+      summary: Delete source
+      deprecated: false
+      description: >
+        Deletes a source. Registration-only: removes the source and the
+        blueprints it provided. Templates, roles, and collections it installed
+        are shared instance resources and remain on disk — remove those
+        individually (the Ansible / Templates pages, or `source remove`) if you
+        want them gone.
+      operationId: deleteSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
     get:
       summary: Get source
       deprecated: false
@@ -6331,13 +6375,18 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-    delete:
-      summary: Delete source
+  /sources/{sourceID}/sync:
+    post:
+      summary: Sync source
       deprecated: false
       description: >
-        Deletes a source. Pass {"purge": true} to also remove templates and
-        local roles registered by this source.
-      operationId: deleteSource
+        Refresh-only: re-pull a git-backed source's working tree and update the
+        catalog view. No artifact installs, removes, or DB writes for
+        blueprints/templates/roles happen here. To apply upstream changes,
+        commit a fresh selection via POST /sources/{sourceID}/install. Returns
+        400 for upload-type sources; push new content via PATCH
+        /sources/{sourceID} instead.
+      operationId: syncSource
       tags:
         - Sources
       parameters:
@@ -6352,20 +6401,17 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeleteSourceRequest'
+              $ref: '#/components/schemas/SyncSourceRequest'
       responses:
         '200':
-          description: Source deleted
+          description: Sync result.
           content:
             application/json:
               schema:
-                type: object
-                required:
-                  - status
-                properties:
-                  status:
-                    type: string
-                    example: deleted
+                $ref: '#/components/schemas/SyncResultResponse'
+          headers: {}
+        '400':
+          description: Source is upload-type; sync is git-only.
           headers: {}
       security:
         - JWT: []
@@ -6454,43 +6500,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JobAcceptedResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /sources/{sourceID}/sync:
-    post:
-      summary: Sync source
-      deprecated: false
-      description: >
-        Re-pull and re-register a git-backed source. Returns 400 for upload-type
-        sources; push new content via PATCH /sources/{sourceID} instead.
-      operationId: syncSource
-      tags:
-        - Sources
-      parameters:
-        - name: sourceID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SyncSourceRequest'
-      responses:
-        '200':
-          description: Sync result.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SyncResultResponse'
-          headers: {}
-        '400':
-          description: Source is upload-type; sync is git-only.
           headers: {}
       security:
         - JWT: []
@@ -6966,13 +6975,24 @@ components:
             source.
     SyncSourceRequest:
       type: object
+      description: >-
+        Body for POST /sources/{sourceID}/sync. No fields are required — sync is
+        read-only and accepts an empty body. The legacy globalRoles, force, and
+        dryRun fields are ignored (kept here for client compatibility; they had
+        install-side semantics that no longer apply).
       properties:
         globalRoles:
           type: boolean
+          deprecated: true
+          description: Ignored — sync no longer installs anything.
         force:
           type: boolean
+          deprecated: true
+          description: Ignored — sync no longer installs anything.
         dryRun:
           type: boolean
+          deprecated: true
+          description: Ignored — sync is always read-only.
     SyncResult:
       type: object
       properties:
@@ -7826,11 +7846,9 @@ components:
           type: string
     DeleteSourceResponse:
       description: >-
-        Returned by `deleteSource`. `status` is "deleted" on a clean rm or
-        "deleted_with_errors" when --purge was set and one or more artifact
-        removals failed. `affectedSources` lists co-claimants whose on-disk
-        files were also removed; they need to re-sync to restore. `purgeErrors`
-        carries per-artifact failure messages.
+        Returned by `deleteSource`. Registration-only delete, so `status` is
+        always "deleted" — the source and its blueprints are dropped while
+        installed templates/roles/collections remain on disk.
       type: object
       required:
         - status
@@ -7839,23 +7857,15 @@ components:
           type: string
           enum:
             - deleted
-            - deleted_with_errors
-        purgeErrors:
-          type: array
-          items:
-            type: string
-        affectedSources:
-          type: array
-          items:
-            type: string
     InstallSelection:
       type: object
       description: >-
-        User's persisted picker selection. `null`/absent on a source record
-        means "install everything walked on sync" — set automatically when the
-        caller invokes `/install` with `installAll=true`, and the default for
-        pre-existing rows. Empty arrays are rejected by the install endpoint
-        when `installAll` is also false.
+        Persisted picker selection on a source record — the concrete set of
+        names that every future sync honors. Always set after the first
+        successful install: callers either supplied a non-empty selection
+        directly, or the server snapshotted the walk at install-time. Items
+        added upstream later do NOT auto-extend this set; the user has to
+        re-install to widen the selection.
       properties:
         blueprints:
           type: array
@@ -7875,29 +7885,38 @@ components:
     InstallRequest:
       type: object
       description: >-
-        Body for POST /sources/{sourceID}/install. Exactly one of `selection`
-        (non-empty) or `installAll=true` must be set.
+        Body for POST /sources/{sourceID}/install. `selection` is optional —
+        when omitted or empty, the server snapshots the current walk and
+        persists it as the source's installSelection. A non-empty selection is
+        used as-is and replaces any previously persisted selection.
       properties:
         selection:
           $ref: '#/components/schemas/InstallSelection'
-        installAll:
-          type: boolean
-          description: >-
-            Install everything walked from the source, equivalent to passing the
-            full catalog as the selection. Mutually exclusive with `selection`.
         globalRoles:
           type: boolean
           description: Admin only. Install roles instance-wide.
         force:
           type: boolean
-          description: Overwrite already-installed templates and galaxy/local roles.
+          description: >-
+            Force install: rm-and-recopy templates and source-bundled local
+            roles; pass `-f` to ansible-galaxy for galaxy roles and galaxy
+            collections so already-installed artifacts of the same name are
+            overwritten. Does NOT alter the selection or pull in dependencies
+            the caller didn't already select.
+        noDeps:
+          type: boolean
+          description: >-
+            Skip installing the selected blueprints' galaxy role and collection
+            dependencies — no reaching out to ansible-galaxy; only deps already
+            present on disk are used. Default false: deps install, since a
+            blueprint needs them to deploy.
     RegisterSourceResponse:
       type: object
       description: >-
         Returned by POST /sources. The source is registered and walked but no
         install has been committed. Callers drive the picker against the
-        included catalog and follow up with POST /sources/{sourceID}/install
-        (use `installAll=true` for the "install everything" shortcut).
+        included catalog and follow up with POST /sources/{sourceID}/install —
+        omit `selection` to have the server snapshot the current walk.
       required:
         - sourceID
         - catalog
@@ -7979,6 +7998,11 @@ components:
           description: sourceBlueprintID — unique within the source.
         name:
           type: string
+        description:
+          type: string
+          description: >-
+            Human description from the blueprint manifest (blueprint.yml).
+            Optional.
         version:
           type: string
         state:
@@ -8009,7 +8033,7 @@ components:
     CatalogItem:
       type: object
       description: >-
-        One template / role / collection in a SourceCatalog. `impliedBy` lists
+        One template / role / collection in a SourceCatalog. `requiredBy` lists
         the parent blueprint IDs that pulled it in. `versionByBlueprint` carries
         per-blueprint version pins for galaxy roles/collections so consumers can
         detect divergent pins across selected blueprints.
@@ -8019,6 +8043,12 @@ components:
       properties:
         name:
           type: string
+        description:
+          type: string
+          description: >-
+            Human description for source-bundled items — packer template.yml or
+            a role's meta/main.yml galaxy_info. Optional; absent for
+            galaxy/subscription items.
         version:
           type: string
         state:
@@ -8029,7 +8059,46 @@ components:
             - upgrade_available
         installedVersion:
           type: string
-        impliedBy:
+        global:
+          type: boolean
+          description: >-
+            For an installed role, whether it lives in the system-wide
+            global-roles path (true) or the owner's per-user roles path (false).
+            Drives the role-remove flow. Always false/absent for templates and
+            collections.
+        scopes:
+          type: array
+          description: >-
+            Every installed copy of a role: the scope it lives in
+            ("global"/"user"), the on-disk version there, and its state against
+            the required pin. A role can have entries for both scopes at
+            different versions. Absent for non-role kinds and not-installed
+            roles.
+          items:
+            type: object
+            properties:
+              scope:
+                type: string
+              version:
+                type: string
+              state:
+                type: string
+                enum:
+                  - installed
+                  - upgrade_available
+        type:
+          type: string
+          description: >-
+            Install type for a collection. "git" when sourced from a git repo
+            (in which case `name` holds the repo URL); absent for a normal
+            galaxy collection.
+        fqcn:
+          type: string
+          description: >-
+            Resolved namespace.name for a git collection (whose `name` holds the
+            repo URL). Absent when not a git collection or the FQCN can't be
+            inferred from the URL.
+        requiredBy:
           type: array
           description: Blueprint IDs that require this item.
           items:

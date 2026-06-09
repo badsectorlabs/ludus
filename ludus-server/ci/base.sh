@@ -47,7 +47,7 @@ export CI_SEED_INTEGRATION_VMID=${CI_SEED_INTEGRATION_VMID:-1007}
 # safest default across Proxmox storage backends; linked clones can be enabled
 # with CI_CLONE_FULL=0 where supported.
 export CI_CLONE_STORAGE=${CI_CLONE_STORAGE:-}
-export CI_CLONE_FULL=${CI_CLONE_FULL:-1}
+export CI_CLONE_FULL=${CI_CLONE_FULL:-0}
 
 # Shared VMs (not dynamically cloned yet)
 export CLUSTER_NODE1_VMID=1005
@@ -285,12 +285,12 @@ configure_ci_control_ip() {
 set -e
 cp /etc/network/interfaces /etc/network/interfaces.ludus-ci.bak 2>/dev/null || true
 awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" -v dns="${CI_CLONE_DNS_SERVERS}" '
-    /^iface ens18 inet static$/ {
+    /^iface ens18 inet / {
         in_ens18=1
         saw_address=0
         saw_gateway=0
         saw_dns=0
-        print
+        print "iface ens18 inet static"
         next
     }
     /^(auto|allow-|iface) / && in_ens18 {
@@ -320,6 +320,9 @@ awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" -v dns="${CI_CLONE_DNS_SERVERS}
         saw_dns=1
         next
     }
+    in_ens18 && /^[[:space:]]*(dhcp-|dns-|pre-up|post-up|post-down|metric)[[:space:]]*/ {
+        next
+    }
     { print }
     END {
         if (in_ens18) {
@@ -337,6 +340,12 @@ awk -v ip="${IP}/24" -v gw="${CI_CLONE_GATEWAY}" -v dns="${CI_CLONE_DNS_SERVERS}
 ' /etc/network/interfaces > /tmp/interfaces.ludus-ci
 mv /tmp/interfaces.ludus-ci /etc/network/interfaces
 
+if command -v dhcpcd >/dev/null 2>&1; then
+    dhcpcd -k ens18 >/dev/null 2>&1 || true
+fi
+pkill -x dhcpcd >/dev/null 2>&1 || true
+pkill -x dhclient >/dev/null 2>&1 || true
+
 for dns_server in ${CI_CLONE_DNS_SERVERS}; do
     printf 'nameserver %s\n' "\$dns_server"
 done > /tmp/resolv.conf.ludus-ci
@@ -344,9 +353,7 @@ if [ -d /etc/resolvconf/resolv.conf.d ]; then
     cp /tmp/resolv.conf.ludus-ci /etc/resolvconf/resolv.conf.d/head
     resolvconf -u || true
 fi
-if ! grep -qE '^nameserver[[:space:]]+' /etc/resolv.conf 2>/dev/null; then
-    cp /tmp/resolv.conf.ludus-ci /etc/resolv.conf
-fi
+cp /tmp/resolv.conf.ludus-ci /etc/resolv.conf
 rm -f /tmp/resolv.conf.ludus-ci
 
 PROXMOX_NODE_NAME=\$(awk -F': *' '\$1 == "proxmox_node" { print \$2; exit }' /opt/ludus/config.yml 2>/dev/null || true)
@@ -386,6 +393,7 @@ fi
 ip addr flush dev ens18
 ip link set ens18 up
 ip addr add "${IP}/24" dev ens18
+ip route flush dev ens18 proto dhcp 2>/dev/null || true
 ip route replace default via "${CI_CLONE_GATEWAY}" dev ens18
 EOF
 )

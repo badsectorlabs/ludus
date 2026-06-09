@@ -1,0 +1,10 @@
+# source.yml: repo-level metadata. The whole file is optional.
+# When absent, Ludus derives name from the URL and homepage from the git remote.
+
+manifest_version: 1                                # required: schema version, leave as 1
+name: "My Ludus Source"                            # optional: display name in `ludus source list`
+description: "Short tagline"                       # optional
+authors:                                           # optional: applies to every blueprint in this source
+  - "Your Name <you@example.com>"
+homepage: https://github.com/you/repo              # optional: falls back to the git URL
+license: MIT                                       # optional: SPDX identifier

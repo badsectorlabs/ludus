@@ -40,12 +40,8 @@ The Gallic camp was attacked by the Romans and it seems that a traitor made this
 
 ```bash
 #terminal-command-local
-git clone https://gitlab.com/badsectorlabs/ludus
-#terminal-command-local
-cd ludus/templates
-#terminal-command-local
-ludus templates add -d win2019-server-x64
-[INFO]  Successfully added template
+ludus source add ludus-source-bsl --templates win2019-server-x64-template
+[INFO]  Source 'ludus-source-bsl' installed successfully.
 #terminal-command-local
 ludus templates build
 [INFO]  Template building started - this will take a while. Building 1 template(s) at a time.

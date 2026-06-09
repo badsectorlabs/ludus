@@ -1,0 +1,15 @@
+# Galaxy roles, collections, and subscription roles this blueprint needs.
+# Every role referenced under `roles:` in range-config.yml must appear here
+# (or as a directory under the source's top-level roles/), otherwise the
+# sync surfaces an undeclared-dependency warning.
+
+roles:
+  - name: geerlingguy.docker
+    version: 7.4.4
+
+# collections:
+#   - name: community.crypto
+#     version: 2.16.0
+
+# subscription_roles:
+#   - ludus_ghosts_client

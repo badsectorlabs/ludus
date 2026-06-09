@@ -1,0 +1,4 @@
+---
+- name: Say hello from the say_hello role
+  ansible.builtin.debug:
+    msg: "Hello from the source-template fixture's local role."

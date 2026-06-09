@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +21,11 @@ type ErrorStruct struct {
 }
 
 const APIBasePath = "/api/v2"
+
+// apiPrefix matches both APIBasePath and PocketBase's /api/collections/* —
+// helpers below treat any "/api/" path as already-rooted and only prepend
+// APIBasePath when callers pass a relative path.
+const apiPrefix = "/api/"
 
 var user string
 
@@ -120,6 +126,33 @@ func prettyPrintPocketBaseError(errorBytes []byte) error {
 	return nil
 }
 
+// PBLookupRecordID resolves a PocketBase record's internal ID by querying the
+// list endpoint with a filter on a unique user-facing field (e.g. blueprintID,
+// rangeID). Returns the first matching record's id. The collection's ListRule
+// must permit the caller for this to return a hit.
+func PBLookupRecordID(client *resty.Client, collection, field, value string) (string, error) {
+	filter := fmt.Sprintf(`%s = "%s"`, field, strings.ReplaceAll(value, `"`, `\"`))
+	path := fmt.Sprintf("/api/collections/%s/records?perPage=1&filter=%s",
+		collection,
+		strings.ReplaceAll(filter, " ", "%20"))
+	body, ok := GenericGet(client, path)
+	if !ok {
+		return "", fmt.Errorf("error looking up %s record by %s=%q", collection, field, value)
+	}
+	var listResp struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &listResp); err != nil {
+		return "", fmt.Errorf("decode %s lookup response: %w", collection, err)
+	}
+	if len(listResp.Items) == 0 {
+		return "", fmt.Errorf("%s %q not found", collection, value)
+	}
+	return listResp.Items[0].ID, nil
+}
+
 func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 
 	var result []byte
@@ -177,7 +210,7 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 }
 
 func GenericGet(client *resty.Client, apiPath string) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 
@@ -193,7 +226,7 @@ func GenericGet(client *resty.Client, apiPath string) ([]byte, bool) {
 }
 
 func GenericJSONPost(client *resty.Client, apiPath string, data any) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -212,7 +245,7 @@ func GenericJSONPost(client *resty.Client, apiPath string, data any) ([]byte, bo
 }
 
 func GenericDelete(client *resty.Client, apiPath string) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -228,7 +261,7 @@ func GenericDelete(client *resty.Client, apiPath string) ([]byte, bool) {
 }
 
 func GenericDeleteWithBody(client *resty.Client, apiPath string, data any) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -245,66 +278,60 @@ func GenericDeleteWithBody(client *resty.Client, apiPath string, data any) ([]by
 	return processRESTResult(resp, err)
 }
 
-func GenericPutFile(client *resty.Client, apiPath string, data []byte) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+// FileUpload performs a multipart upload (POST or PUT) with `data` attached as
+// `fileField`/`filename` and any additional string `fields` set as form data.
+// All file-uploading helpers in this package are thin wrappers around this one.
+func FileUpload(client *resty.Client, method, apiPath, fileField, filename string, data []byte, fields map[string]string) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
+	defer s.Stop()
 
-	resp, err := client.R().
-		SetFileReader("file", "file", bytes.NewReader(data)).
-		Put(apiPath)
+	req := client.R().SetFileReader(fileField, filename, bytes.NewReader(data))
+	if len(fields) > 0 {
+		req = req.SetFormData(fields)
+	}
 
-	s.Stop()
-
+	var (
+		resp *resty.Response
+		err  error
+	)
+	switch strings.ToUpper(method) {
+	case "POST":
+		resp, err = req.Post(apiPath)
+	case "PUT":
+		resp, err = req.Put(apiPath)
+	case "PATCH":
+		resp, err = req.Patch(apiPath)
+	default:
+		logger.Logger.Fatalf("FileUpload: unsupported method %q", method)
+		return nil, false
+	}
 	return processRESTResult(resp, err)
+}
+
+func GenericPutFile(client *resty.Client, apiPath string, data []byte) ([]byte, bool) {
+	return FileUpload(client, "PUT", apiPath, "file", "file", data, nil)
 }
 
 func PostFileAndForce(client *resty.Client, apiPath string, data []byte, filename string, force bool) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
-		apiPath = APIBasePath + apiPath
-	}
-	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
-	s.Suffix = " Waiting for server..."
-	s.Start()
-
-	resp, err := client.R().
-		SetFileReader("file", filename, bytes.NewReader(data)).
-		SetFormData(map[string]string{
-			"force": fmt.Sprintf("%t", force),
-		}).
-		Put(apiPath)
-
-	s.Stop()
-
-	return processRESTResult(resp, err)
+	return FileUpload(client, "PUT", apiPath, "file", filename, data, map[string]string{
+		"force": fmt.Sprintf("%t", force),
+	})
 }
 
-func PostFileAndForceAndGlobal(client *resty.Client, apiPath string, data []byte, filename string, force bool, ansibleGlobal bool) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
-		apiPath = APIBasePath + apiPath
-	}
-	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
-	s.Suffix = " Waiting for server..."
-	s.Start()
-
-	resp, err := client.R().
-		SetFileReader("file", filename, bytes.NewReader(data)).
-		SetFormData(map[string]string{
-			"force":  fmt.Sprintf("%t", force),
-			"global": fmt.Sprintf("%t", ansibleGlobal),
-		}).
-		Put(apiPath)
-
-	s.Stop()
-
-	return processRESTResult(resp, err)
+func PostFileAndForceAndGlobal(client *resty.Client, apiPath string, data []byte, filename string, force, ansibleGlobal bool) ([]byte, bool) {
+	return FileUpload(client, "PUT", apiPath, "file", filename, data, map[string]string{
+		"force":  fmt.Sprintf("%t", force),
+		"global": fmt.Sprintf("%t", ansibleGlobal),
+	})
 }
 
 func GenericJSONPut(client *resty.Client, apiPath string, data string) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -323,7 +350,7 @@ func GenericJSONPut(client *resty.Client, apiPath string, data string) ([]byte, 
 }
 
 func GenericJSONPatch(client *resty.Client, apiPath string, data string) ([]byte, bool) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
@@ -341,30 +368,41 @@ func GenericJSONPatch(client *resty.Client, apiPath string, data string) ([]byte
 
 }
 
-func FileGet(client *resty.Client, apiPath string, outputPath string) {
-	if !strings.HasPrefix(apiPath, APIBasePath) {
+// FileGet streams a GET response body to dst on success. The transfer goes to
+// a sibling temp file first; on a non-2xx status the temp is deleted so the
+// user's chosen path is never overwritten with an error body. Returns
+// (errorBody, false) on failure, (nil, true) on success.
+func FileGet(client *resty.Client, apiPath, dst string) ([]byte, bool) {
+	if !strings.HasPrefix(apiPath, apiPrefix) {
 		apiPath = APIBasePath + apiPath
 	}
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " Waiting for server..."
 	s.Start()
+	defer s.Stop()
 
-	resp, err := client.R().Get(apiPath)
-
-	s.Stop()
-
+	dstDir := filepath.Dir(dst)
+	if dstDir == "" {
+		dstDir = "."
+	}
+	tmp, err := os.CreateTemp(dstDir, filepath.Base(dst)+".part-*")
 	if err != nil {
-		logger.Logger.Fatal(err)
+		return processRESTResult(nil, err)
 	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
 
-	if resp.StatusCode() == 200 {
-		err := os.WriteFile(outputPath, resp.Body(), 0644)
-		if err != nil {
-			logger.Logger.Fatalf("Failed to write file: %v", err)
-		}
-		logger.Logger.Infof("File downloaded and saved as %s", outputPath)
-	} else {
-		fmt.Printf("Received non-200 status code: %d\n", resp.StatusCode())
-		fmt.Printf("Error: %s\n", string(resp.Body()))
+	resp, err := client.R().SetOutput(tmpPath).Get(apiPath)
+	if err != nil {
+		return processRESTResult(resp, err)
 	}
+	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
+		body, _ := os.ReadFile(tmpPath)
+		return processRESTResult(resp, fmt.Errorf("%s", string(body)))
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		return processRESTResult(resp, err)
+	}
+	return nil, true
 }
