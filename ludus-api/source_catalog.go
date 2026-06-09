@@ -17,9 +17,10 @@ import (
 // source record as JSON. nil/missing means "install everything" — preserves
 // backward-compatible sync behavior for pre-existing rows.
 type InstallSelection struct {
-	Blueprints []string `json:"blueprints"`
-	Templates  []string `json:"templates"`
-	LocalRoles []string `json:"localRoles"`
+	Blueprints       []string `json:"blueprints"`
+	Templates        []string `json:"templates"`
+	LocalRoles       []string `json:"localRoles"`
+	LocalCollections []string `json:"localCollections"`
 }
 
 // SourceCatalog is the picker-facing view of a registered source: what the
@@ -31,6 +32,7 @@ type SourceCatalog struct {
 	Blueprints             []CatalogBlueprint     `json:"blueprints"`
 	Templates              []CatalogItem          `json:"templates"`
 	LocalRoles             []CatalogItem          `json:"localRoles"`
+	LocalCollections       []CatalogItem          `json:"localCollections"`
 	GalaxyRoles            []CatalogItem          `json:"galaxyRoles"`
 	GalaxyCollections      []CatalogItem          `json:"galaxyCollections"`
 	SubscriptionRoles      []CatalogItem          `json:"subscriptionRoles"`
@@ -187,17 +189,33 @@ func localRoleDescription(dir string) string {
 	return roleDescriptionFromMeta(data)
 }
 
+// localCollectionDescription reads a source-bundled collection's galaxy.yml
+// for its description. Best-effort — a collection whose galaxy.yml is missing
+// or has no description carries none. Mirrors localRoleDescription.
+func localCollectionDescription(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+	if err != nil {
+		return ""
+	}
+	gm, err := ParseGalaxyManifest(data)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(gm.Description)
+}
+
 // ComputeSourceCatalog joins a walked source with installed-artifact state to
 // produce the picker-facing catalog view. State is read from the live system
 // (filesystem + Proxmox), not from the source_artifacts ledger — see
 // loadInstalledArtifacts for the rationale. No writes.
 func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *WalkedSource) *SourceCatalog {
 	c := &SourceCatalog{
-		SourceID:   src.GetString("sourceID"),
-		SourceName: src.GetString("name"),
-		Blueprints: []CatalogBlueprint{},
-		Templates:  []CatalogItem{},
-		LocalRoles: []CatalogItem{},
+		SourceID:         src.GetString("sourceID"),
+		SourceName:       src.GetString("name"),
+		Blueprints:       []CatalogBlueprint{},
+		Templates:        []CatalogItem{},
+		LocalRoles:       []CatalogItem{},
+		LocalCollections: []CatalogItem{},
 	}
 	if walked == nil {
 		return c
@@ -281,6 +299,30 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 		})
 	}
 
+	// Local collections — one CatalogItem per source-root ansible/collections/
+	// dir. The item's identity is the FQCN (<namespace>.<name>) read from
+	// galaxy.yml, NOT the dir basename, so it matches the source_artifacts claim
+	// and the local_collection/<FQCN> install-state key. A dir whose galaxy.yml
+	// is missing/invalid carries no resolvable identity and is skipped.
+	for _, dir := range walked.LocalCollections {
+		data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+		if err != nil {
+			continue
+		}
+		gm, perr := ParseGalaxyManifest(data)
+		if perr != nil || gm.Namespace == "" || gm.Name == "" {
+			continue
+		}
+		fqcn := gm.Namespace + "." + gm.Name
+		state, installedVer := artifactState(installed, "local_collection", fqcn, "")
+		c.LocalCollections = append(c.LocalCollections, CatalogItem{
+			Name:             fqcn,
+			Description:      localCollectionDescription(dir),
+			State:            state,
+			InstalledVersion: installedVer,
+		})
+	}
+
 	// Galaxy roles, galaxy collections, and subscription roles — unioned
 	// across all blueprints' requirements.yml files.
 	c.GalaxyRoles = collectImpliedRoles(walked, "galaxy_role", installed)
@@ -346,6 +388,12 @@ func loadInstalledArtifacts(e *core.RequestEvent, walked *WalkedSource) map[stri
 	// into a helper that doesn't depend on Proxmox or PocketBase.
 	for k, v := range loadInstalledFromDisk(walked, rolePaths, subRolePaths, ansibleHomes, globalRolesPath()) {
 		out[k] = v
+	}
+
+	// Local collections — install state from ansible_collections/<ns>/<name>/MANIFEST.json.
+	// Check both per-user/subscription homes and the global collections base.
+	for k := range localCollectionDiskState(walked, ansibleHomes, globalCollectionsPath()) {
+		out[k] = installedArtifact{}
 	}
 
 	// A template counts as installed (for this viewer) when its *-template name
@@ -452,6 +500,60 @@ func loadInstalledFromDisk(walked *WalkedSource, rolePaths, subRolePaths, ansibl
 		}
 	}
 
+	return out
+}
+
+// localCollectionDiskState reports, per source-bundled collection, whether its
+// installed copy exists under any of the given ansible homes or the global
+// collections base. A collection is "installed" when
+// ansible_collections/<ns>/<name>/MANIFEST.json is present.
+//
+// ansibleHomes are per-user (or subscription) roots where the MANIFEST lives
+// at <home>/collections/ansible_collections/<ns>/<name>/MANIFEST.json —
+// readGalaxyInstalledCollectionVersion handles that "collections/" prefix.
+//
+// globalCollectionBase is the system-wide base (globalCollectionsPath()). Its
+// MANIFEST lives at <globalCollectionBase>/ansible_collections/<ns>/<name>/
+// MANIFEST.json with NO additional "collections/" prefix, so we stat it
+// directly rather than routing through readGalaxyInstalledCollectionVersion.
+//
+// The FQCN (<namespace>.<name>) is read from the source dir's galaxy.yml and
+// is the canonical identity: the map is keyed "local_collection/<FQCN>" so it
+// lines up with the catalog item's Name and the artifactState lookup (NOT the
+// on-disk dir basename). Split out so the disk check is testable without a
+// request event.
+func localCollectionDiskState(walked *WalkedSource, ansibleHomes []string, globalCollectionBase string) map[string]bool {
+	out := map[string]bool{}
+	if walked == nil {
+		return out
+	}
+	for _, dir := range walked.LocalCollections {
+		data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+		if err != nil {
+			continue
+		}
+		gm, perr := ParseGalaxyManifest(data)
+		if perr != nil || gm.Namespace == "" || gm.Name == "" {
+			continue
+		}
+		fqcn := gm.Namespace + "." + gm.Name
+		installed := false
+		for _, home := range ansibleHomes {
+			if readGalaxyInstalledCollectionVersion(home, fqcn) != "" {
+				installed = true
+				break
+			}
+		}
+		if !installed && globalCollectionBase != "" {
+			manifest := filepath.Join(globalCollectionBase, "ansible_collections", gm.Namespace, gm.Name, "MANIFEST.json")
+			if _, serr := os.Stat(manifest); serr == nil {
+				installed = true
+			}
+		}
+		if installed {
+			out["local_collection/"+fqcn] = true
+		}
+	}
 	return out
 }
 
@@ -775,6 +877,7 @@ func sortCatalog(c *SourceCatalog) {
 	sort.Slice(c.Blueprints, func(i, j int) bool { return c.Blueprints[i].ID < c.Blueprints[j].ID })
 	sort.Slice(c.Templates, func(i, j int) bool { return c.Templates[i].Name < c.Templates[j].Name })
 	sort.Slice(c.LocalRoles, func(i, j int) bool { return c.LocalRoles[i].Name < c.LocalRoles[j].Name })
+	sort.Slice(c.LocalCollections, func(i, j int) bool { return c.LocalCollections[i].Name < c.LocalCollections[j].Name })
 	sort.Slice(c.GalaxyRoles, func(i, j int) bool { return c.GalaxyRoles[i].Name < c.GalaxyRoles[j].Name })
 	sort.Slice(c.GalaxyCollections, func(i, j int) bool { return c.GalaxyCollections[i].Name < c.GalaxyCollections[j].Name })
 	sort.Slice(c.SubscriptionRoles, func(i, j int) bool { return c.SubscriptionRoles[i].Name < c.SubscriptionRoles[j].Name })

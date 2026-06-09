@@ -107,6 +107,50 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 	return results
 }
 
+// registerLocalCollections installs each source-bundled collection under
+// ansible/collections/ into the requesting user's per-user collections path
+// (or the global path with --global-roles), recording a "local_collection"
+// claim per collection. Mirrors registerLocalRoles: selection-gated, force/
+// idempotent via addLocalCollectionFromDirectory, viewer-relative install.
+//
+// A collection's identity is its FQCN (<namespace>.<name>) read from galaxy.yml,
+// NOT the on-disk directory basename. The selection is expressed in FQCNs (the
+// snapshot records FQCNs too), and the source_artifacts name is the FQCN.
+func registerLocalCollections(app core.App, src *core.Record, walked *WalkedSource, opts SyncOptions) []ArtifactResult {
+	var results []ArtifactResult
+	base := globalCollectionsPath()
+	if !opts.GlobalRoles {
+		base = userCollectionsPath(opts.InitiatorProxmoxUsername)
+	}
+	for _, dir := range walked.LocalCollections {
+		data, rerr := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+		if rerr != nil {
+			results = append(results, ArtifactResult{Name: filepath.Base(dir), OK: false, Message: fmt.Sprintf("reading galaxy.yml: %v", rerr)})
+			continue
+		}
+		gm, perr := ParseGalaxyManifest(data)
+		if perr != nil || gm.Namespace == "" || gm.Name == "" {
+			results = append(results, ArtifactResult{Name: filepath.Base(dir), OK: false, Message: "galaxy.yml must define both namespace and name"})
+			continue
+		}
+		fqcn := gm.Namespace + "." + gm.Name
+		if opts.Selection != nil && !slices.Contains(opts.Selection.LocalCollections, fqcn) {
+			continue
+		}
+		if base == "" {
+			results = append(results, ArtifactResult{Name: fqcn, OK: false, Message: "no initiating user for collection install"})
+			continue
+		}
+		if _, err := addLocalCollectionFromDirectory(app, dir, base, opts.Force); err != nil {
+			results = append(results, ArtifactResult{Name: fqcn, OK: false, Message: err.Error()})
+			continue
+		}
+		insertSourceArtifact(app, src.Id, "local_collection", fqcn, "")
+		results = append(results, ArtifactResult{Name: fqcn, OK: true})
+	}
+	return results
+}
+
 // insertSourceArtifact upserts the (source, kind, name) claim. If a row
 // already exists for the same source claiming the same name, its version is
 // updated in place — re-syncing a source with a bumped role version must
@@ -380,17 +424,36 @@ func installUnionedRoles(e *core.RequestEvent, app core.App, src *core.Record, w
 		return slices.Contains(opts.Selection.Blueprints, bpID)
 	}
 
+	// Names this source vendors locally win over the same names in any
+	// blueprint's requirements.yml — strip them from the galaxy resolution so
+	// the pinned local copy is authoritative. Roles key on directory basename;
+	// collections key on FQCN (<namespace>.<name>) read from galaxy.yml.
+	vendoredRoles := map[string]bool{}
+	for _, dir := range walked.LocalRoles {
+		vendoredRoles[filepath.Base(dir)] = true
+	}
+	vendoredCollections := map[string]bool{}
+	for _, dir := range walked.LocalCollections {
+		if data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml")); err == nil {
+			if gm, perr := ParseGalaxyManifest(data); perr == nil && gm.Namespace != "" && gm.Name != "" {
+				vendoredCollections[gm.Namespace+"."+gm.Name] = true
+			}
+		}
+	}
+
 	var out []RoleInstallResult
 	for _, bp := range walked.Blueprints {
 		if bp.Manifest == nil || !selectedBP(bp.Manifest.ID) {
 			continue
 		}
 		results := installRolesForBlueprint(e, app, bp, ResolverOpts{
-			ForceRoles:     opts.Force,
-			GlobalRoles:    opts.GlobalRoles,
-			ProxmoxUser:    installProxmoxUser,
-			AnsibleHome:    userAnsibleHome(installProxmoxUser),
-			SourceRecordID: src.Id,
+			ForceRoles:              opts.Force,
+			GlobalRoles:             opts.GlobalRoles,
+			ProxmoxUser:             installProxmoxUser,
+			AnsibleHome:             userAnsibleHome(installProxmoxUser),
+			SourceRecordID:          src.Id,
+			VendoredRoleNames:       vendoredRoles,
+			VendoredCollectionFQCNs: vendoredCollections,
 		})
 		out = append(out, results...)
 	}
@@ -425,6 +488,74 @@ func userAnsibleHome(proxmoxUsername string) string {
 		return ""
 	}
 	return filepath.Join(ludusInstallPath, "users", proxmoxUsername, ".ansible")
+}
+
+// globalCollectionsPath is the instance-wide collections base, mirroring
+// globalRolesPath. The ansible_collections/<ns>/<name>/ tree lives under it,
+// and it is added to ANSIBLE_COLLECTIONS_PATH alongside the per-user path.
+func globalCollectionsPath() string {
+	return filepath.Join(ludusInstallPath, "resources", "global-collections")
+}
+
+// userCollectionsPath returns the per-user ansible collections base keyed by
+// proxmoxUsername. Empty username yields "" so callers fall back to
+// ansible-galaxy's default. Mirrors userRolesPath but points at the collections
+// subtree of the user's ansible home.
+func userCollectionsPath(proxmoxUsername string) string {
+	if proxmoxUsername == "" {
+		return ""
+	}
+	return filepath.Join(userAnsibleHome(proxmoxUsername), "collections")
+}
+
+// addLocalCollectionFromDirectory copies a source-bundled collection dir into
+// baseCollectionsPath/ansible_collections/<namespace>/<name>/, reading the
+// namespace+name from the dir's galaxy.yml. It returns the collection's FQCN
+// (<namespace>.<name>) — the canonical identity, which the caller records as the
+// source_artifacts name (the on-disk dir basename is NOT the identity).
+// baseCollectionsPath is the resolved collections base (globalCollectionsPath()
+// or userCollectionsPath(user)) and is passed in so the destination is testable
+// without writing to ludusInstallPath. force=true overwrites an existing install;
+// otherwise an existing dir is preserved and we return the FQCN with a nil error
+// so the caller can still record the source's claim — multiple sources owning the
+// same FQCN is allowed, matching addLocalRoleFromDirectory's idempotency contract.
+func addLocalCollectionFromDirectory(_ core.App, dir, baseCollectionsPath string, force bool) (string, error) {
+	if baseCollectionsPath == "" {
+		return "", fmt.Errorf("baseCollectionsPath is required to install collection from %q", dir)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+	if err != nil {
+		return "", fmt.Errorf("reading galaxy.yml for collection %s: %w", dir, err)
+	}
+	gm, err := ParseGalaxyManifest(data)
+	if err != nil {
+		return "", fmt.Errorf("parsing galaxy.yml for collection %s: %w", dir, err)
+	}
+	if gm.Namespace == "" || gm.Name == "" {
+		return "", fmt.Errorf("galaxy.yml in %s must define both namespace and name", dir)
+	}
+	fqcn := gm.Namespace + "." + gm.Name
+
+	destDir := filepath.Join(baseCollectionsPath, "ansible_collections", gm.Namespace, gm.Name)
+
+	existedAlready := false
+	if _, err := os.Stat(destDir); err == nil {
+		if !force {
+			existedAlready = true
+		} else if err := os.RemoveAll(destDir); err != nil {
+			return "", fmt.Errorf("removing existing collection directory %s: %w", destDir, err)
+		}
+	}
+
+	if !existedAlready {
+		if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
+			return "", fmt.Errorf("creating collections directory: %w", err)
+		}
+		if err := copyDir(dir, destDir); err != nil {
+			return "", fmt.Errorf("copying collection %s to %s: %w", dir, destDir, err)
+		}
+	}
+	return fqcn, nil
 }
 
 // getSubscriptionCatalogNames returns nil for unlicensed (community)

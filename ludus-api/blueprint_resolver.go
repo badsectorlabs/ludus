@@ -10,6 +10,7 @@ import (
 	"ludusapi/models"
 
 	"github.com/pocketbase/pocketbase/core"
+	"gopkg.in/yaml.v3"
 )
 
 type TemplateStatusEntry struct {
@@ -114,6 +115,12 @@ type ResolverOpts struct {
 	// SourceRecordID: when set, registered artifacts are tracked in
 	// source_artifacts; empty for local blueprints.
 	SourceRecordID string
+	// VendoredRoleNames / VendoredCollectionFQCNs name the roles and collections
+	// this source ships locally (ansible/roles, ansible/collections). Their
+	// pinned local copies win, so they are stripped from the requirements.yml
+	// before the Galaxy install so a fetch doesn't overwrite the pin.
+	VendoredRoleNames       map[string]bool
+	VendoredCollectionFQCNs map[string]bool
 }
 
 // installRolesForBlueprint installs every dependency declared in the
@@ -123,6 +130,15 @@ type ResolverOpts struct {
 func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedBlueprint, opts ResolverOpts) []RoleInstallResult {
 	declaredSub := subscriptionRolesFromRequirements(walked.RequirementsYAML)
 	catalog := getSubscriptionCatalogNames(e)
+
+	// A dep this source vendors locally installs from its pinned copy
+	// (registerLocalRoles / registerLocalCollections) and must not be re-fetched
+	// from Galaxy. Strip those names from the requirements used for the galaxy
+	// installs; subscription roles are read from the original YAML above.
+	galaxyRequirements := walked.RequirementsYAML
+	if filtered, ferr := filterRequirements(walked.RequirementsYAML, opts.VendoredRoleNames, opts.VendoredCollectionFQCNs); ferr == nil {
+		galaxyRequirements = filtered
+	}
 
 	var out []RoleInstallResult
 
@@ -143,21 +159,21 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 		}
 	}
 
-	if hasRequirementsRoles(walked.RequirementsYAML) {
+	if hasRequirementsRoles(galaxyRequirements) {
 		rolesPath := ""
 		if opts.GlobalRoles {
 			rolesPath = globalRolesPath()
 		} else if opts.ProxmoxUser != "" {
 			rolesPath = userRolesPath(opts.ProxmoxUser)
 		}
-		results, err := InstallRolesFromRequirementsWithHome(walked.RequirementsYAML, rolesPath, opts.AnsibleHome, opts.ForceRoles)
+		results, err := InstallRolesFromRequirementsWithHome(galaxyRequirements, rolesPath, opts.AnsibleHome, opts.ForceRoles)
 		if err != nil && len(results) == 0 {
 			out = append(out, RoleInstallResult{OK: false, Error: err.Error()})
 		}
 		// galaxy reports "already installed" as OK regardless of version. A
 		// version pin mismatch is a real failure for our purposes — surface it
 		// so the user knows their deps are stale.
-		results = detectGalaxyVersionMismatches(results, walked.RequirementsYAML, rolesPath)
+		results = detectGalaxyVersionMismatches(results, galaxyRequirements, rolesPath)
 		for _, r := range results {
 			if r.OK && opts.SourceRecordID != "" {
 				insertSourceArtifact(app, opts.SourceRecordID, "galaxy_role", r.Name, r.Version)
@@ -171,12 +187,13 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 	// each other's sections.
 	//
 	// Collection rows are recorded in source_artifacts for display/provenance.
-	// ansible-galaxy has no `collection remove` subcommand, so removing a
-	// source or de-selecting a collection only drops the row — the on-disk
-	// install is left in place. The row is a claim ("this source declared this
-	// collection"), not a lifecycle anchor.
-	if hasRequirementsCollections(walked.RequirementsYAML) {
-		colResults, err := InstallCollectionsFromRequirementsWithHome(walked.RequirementsYAML, opts.AnsibleHome, opts.ForceRoles)
+	// galaxy-declared collections (this branch) are still claim-only rows.
+	// Collections VENDORED by a source (kind="local_collection") are now
+	// lifecycle-managed: ansible-galaxy has no `collection remove`, so Ludus
+	// deletes their directory itself on de-select (see dropStaleClaims +
+	// removeLocalCollectionByName), bringing them to parity with vendored roles.
+	if hasRequirementsCollections(galaxyRequirements) {
+		colResults, err := InstallCollectionsFromRequirementsWithHome(galaxyRequirements, opts.AnsibleHome, opts.ForceRoles)
 		if err != nil && len(colResults) == 0 {
 			out = append(out, RoleInstallResult{OK: false, Error: err.Error()})
 		}
@@ -215,6 +232,64 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 func applyRoleResultsToStatus(app core.App, rec *core.Record, roles []RoleInstallResult) {
 	failures := collectArtifactFailures(nil, nil, roles)
 	markInstallStatusFromFailures(app, rec, failures)
+}
+
+// filterRequirements re-emits a requirements.yml with any role whose name is in
+// vendoredRoles, and any collection whose name (FQCN) is in vendoredCollections,
+// removed. Used so a dep this source already vendors locally (ansible/roles or
+// ansible/collections) installs from its pinned local copy and is NOT re-fetched
+// from Galaxy, which would overwrite the pin. Non-vendored roles/collections and
+// any subscription_roles are preserved.
+//
+// Role dedup matches by install-dir basename (Ansible's role-resolution model),
+// so a namespaced role name in requirements.yml (e.g. "author.rolename") will
+// NOT dedup against a vendored dir named "rolename" — this is intentional.
+// Collections dedup by FQCN (namespace.name), so no such ambiguity exists there.
+//
+// The input bytes are returned VERBATIM whenever nothing is actually removed —
+// both sets empty, unparseable YAML, or no name matching a vendored entry. The
+// re-marshal (which normalizes formatting and drops comments / unmodeled keys)
+// only happens when at least one entry was stripped, keeping the common
+// no-match case byte-for-byte identical to today's behavior.
+func filterRequirements(requirementsYAML []byte, vendoredRoles, vendoredCollections map[string]bool) ([]byte, error) {
+	if len(requirementsYAML) == 0 || (len(vendoredRoles) == 0 && len(vendoredCollections) == 0) {
+		return requirementsYAML, nil
+	}
+	var doc RequirementsDoc
+	if err := yaml.Unmarshal(requirementsYAML, &doc); err != nil {
+		// Unparseable requirements: leave it to the galaxy call to error loudly
+		// rather than silently dropping content here.
+		return requirementsYAML, nil
+	}
+	removed := false
+	filteredRoles := doc.Roles[:0:0]
+	for _, r := range doc.Roles {
+		if vendoredRoles[r.Name] {
+			removed = true
+			continue
+		}
+		filteredRoles = append(filteredRoles, r)
+	}
+	filteredCollections := doc.Collections[:0:0]
+	for _, c := range doc.Collections {
+		if vendoredCollections[c.Name] {
+			removed = true
+			continue
+		}
+		filteredCollections = append(filteredCollections, c)
+	}
+	if !removed {
+		// Nothing vendored actually appears in this requirements.yml — return the
+		// original bytes (comments/formatting/subscription_roles untouched).
+		return requirementsYAML, nil
+	}
+	doc.Roles = filteredRoles
+	doc.Collections = filteredCollections
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return nil, fmt.Errorf("re-marshal filtered requirements: %w", err)
+	}
+	return out, nil
 }
 
 func roleResultsToDTO(in []RoleInstallResult) []dto.BlueprintCreatedResponseRoleResult {

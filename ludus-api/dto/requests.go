@@ -63,6 +63,13 @@ type InstallCollectionRequest struct {
 	// (branch / tag / commit).
 	Version string `json:"version,omitempty"`
 	Force   bool   `json:"force,omitempty"`
+	// Action is "install" (default when empty) or "remove". ansible-galaxy has
+	// no `collection remove`, so a remove deletes the on-disk collection dir.
+	Action string `json:"action,omitempty"`
+	// Global selects the shared global-collections path for a remove; otherwise
+	// the caller's per-user collections path. Ignored for install (galaxy
+	// installs land per the ANSIBLE_HOME env).
+	Global bool `json:"global,omitempty"`
 }
 type InstallRoleRequest struct {
 	Role    string `json:"role,omitempty"`

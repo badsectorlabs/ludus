@@ -15,10 +15,11 @@ import (
 const maxBlueprintDepth = 2
 
 type WalkedSource struct {
-	Source     *SourceManifest   // nil if source.yml absent
-	Blueprints []WalkedBlueprint // sorted by Manifest.ID
-	Templates  []string          // <repo>/templates/<name>/ absolute paths
-	LocalRoles []string          // <repo>/roles/<name>/ absolute paths
+	Source           *SourceManifest   // nil if source.yml absent
+	Blueprints       []WalkedBlueprint // sorted by Manifest.ID
+	Templates        []string          // <repo>/templates/<name>/ absolute paths
+	LocalRoles       []string          // <repo>/ansible/roles/<name>/ absolute paths
+	LocalCollections []string          // <repo>/ansible/collections/<name>/ absolute paths
 }
 
 type WalkedBlueprint struct {
@@ -52,7 +53,8 @@ func WalkSourceRepo(rootDir string) (*WalkedSource, error) {
 	w.Blueprints = bps
 
 	w.Templates = walkSubdirs(filepath.Join(rootDir, "templates"))
-	w.LocalRoles = walkSubdirs(filepath.Join(rootDir, "roles"))
+	w.LocalRoles = walkSubdirs(filepath.Join(rootDir, "ansible", "roles"))
+	w.LocalCollections = walkSubdirs(filepath.Join(rootDir, "ansible", "collections"))
 
 	sort.Slice(w.Blueprints, func(i, j int) bool {
 		return w.Blueprints[i].Manifest.ID < w.Blueprints[j].Manifest.ID

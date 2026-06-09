@@ -42,8 +42,11 @@ my-source-repo/
 ├── source.yml                       # repo-level metadata
 ├── templates/                       # Packer template configs
 │   └── win-server-2025/
-├── roles/                           # local Ansible roles
-│   └── shared_role/
+├── ansible/
+│   ├── roles/                       # local Ansible roles
+│   │   └── shared_role/
+│   └── collections/                 # local Ansible collections
+│       └── my_namespace.my_collection/
 └── blueprints/                      # one directory per blueprint
     └── goad/
         ├── blueprint.yml            # display metadata
@@ -51,6 +54,20 @@ my-source-repo/
         ├── requirements.yml         # galaxy roles, collections, subscription_roles
         └── thumbnail.png
 ```
+
+Local roles live under `ansible/roles/` and local collections under `ansible/collections/`; a collection directory is any dir with a `galaxy.yml`.
+
+## Submodules
+
+Any asset subdirectory — a blueprint, template, role (`ansible/roles/<name>/`) or
+collection (`ansible/collections/<dir>/`) — can be a **git submodule**. When you
+register or sync a git-backed source, Ludus clones it with `--recurse-submodules`,
+so submodules are pulled (and refreshed on re-sync) automatically. This lets a
+source aggregate content that lives in its own repository while keeping that repo
+independent for issues and development.
+
+Use **relative** submodule URLs (e.g. `../ludus_adcs.git`) in `.gitmodules` so the
+source resolves submodules against whatever host it was cloned from.
 
 ## Common Workflows
 
@@ -178,10 +195,10 @@ Run `ludus templates build` to produce the VM image — a separate step after `s
 
 ### Ansible roles
 
-Each `roles/<n>/` directory is a standard [Ansible role](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html):
+Each `ansible/roles/<name>/` directory is a standard [Ansible role](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html):
 
 ```
-roles/my_helper/
+ansible/roles/my_helper/
 ├── tasks/main.yml           # the role's tasks
 ├── defaults/main.yml        # default variables
 ├── handlers/main.yml        # handlers
@@ -213,7 +230,7 @@ config: range-config.yml
 
 `range-config.yml` is a standard Ludus range config, the same format `ludus range config get` returns. See [Range Config](configuration.mdx).
 
-`requirements.yml` is the manifest for the ansible roles and collections a blueprint depends on. Every role referenced under `roles:` in `range-config.yml` must appear here (or as a directory under the source's top-level `roles/`).
+`requirements.yml` is the manifest for the ansible roles and collections a blueprint depends on. Every role referenced under `roles:` in `range-config.yml` must appear here (or as a directory under the source's `ansible/roles/`).
 
 ```yaml
 roles:

@@ -31,6 +31,28 @@ type AnsibleItem struct {
 
 var coreAnsibleRoles = []string{"lae.proxmox", "geerlingguy.packer", "ansible-thoteam.nexus3-oss"}
 
+// coreAnsibleCollections is the collection analogue of coreAnsibleRoles:
+// collections Ludus relies on and refuses to remove. Empty today (no shipped
+// collection is load-bearing yet) but enforced by ActionCollectionFromInternet
+// so a future core collection is protected the moment it is added here.
+var coreAnsibleCollections = []string{}
+
+// isCoreCollection reports whether the FQCN names a protected core collection.
+func isCoreCollection(fqcn string) bool {
+	return slices.Contains(coreAnsibleCollections, fqcn)
+}
+
+// validateCollectionAction accepts the empty string (defaults to install),
+// "install", or "remove" — mirroring the role endpoint's action vocabulary.
+func validateCollectionAction(action string) error {
+	switch action {
+	case "", "install", "remove":
+		return nil
+	default:
+		return fmt.Errorf("action must be one of 'install' or 'remove'")
+	}
+}
+
 // GetRolesAndCollections - retrieves the available Ansible roles and collections for the user
 func GetRolesAndCollections(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
@@ -38,6 +60,7 @@ func GetRolesAndCollections(e *core.RequestEvent) error {
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_ROLES_PATH=%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_COLLECTIONS_PATH=%s/users/%s/.ansible/collections:%s/resources/global-collections", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath))
 
 	var stdoutBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
@@ -414,19 +437,48 @@ func buildCollectionInstallArg(collection, version string) string {
 	return collection
 }
 
-// ActionCollectionFromInternet - installs an ansible collection from ansible galaxy or publicly available source control
+// ActionCollectionFromInternet - installs an ansible collection from ansible
+// galaxy / source control, or removes one from disk. ansible-galaxy has no
+// `collection remove` subcommand, so a remove deletes the on-disk collection
+// directory directly (ansible/ansible#67759). Mirrors ActionRoleFromInternet's
+// install/remove dispatch, core-item guard, and global admin gate.
 func ActionCollectionFromInternet(e *core.RequestEvent) error {
 	var collectionBody dto.InstallCollectionRequest
 	e.BindBody(&collectionBody)
 
 	user := e.Get("user").(*models.User)
+	if user.ProxmoxUsername() == "root" {
+		return JSONError(e, http.StatusForbidden, "Don't use the ROOT API key for ansible actions, use a user API key instead.")
+	}
 	if !user.IsAdmin() && ServerConfiguration.PreventUserAnsibleAdd {
 		return JSONError(e, http.StatusForbidden, "You are not authorized to perform this ansible action")
 	}
 
-	// Pass the source string straight to ansible-galaxy, the same way the
-	// role endpoint does — a git URL installs from git, an FQCN installs
-	// from galaxy. No separate type flag: the string's shape is the signal.
+	if err := validateCollectionAction(collectionBody.Action); err != nil {
+		return JSONError(e, http.StatusBadRequest, err.Error())
+	}
+
+	if collectionBody.Action == "remove" {
+		if collectionBody.Global && !user.IsAdmin() {
+			return JSONError(e, http.StatusForbidden, "Only administrators can remove globally-installed collections")
+		}
+		if isCoreCollection(collectionBody.Collection) {
+			return JSONError(e, http.StatusBadRequest, "You cannot remove this core Ludus collection as it is required for Ludus to function")
+		}
+		owner := ""
+		if !collectionBody.Global {
+			owner = user.ProxmoxUsername()
+		}
+		if err := removeLocalCollectionByName(collectionBody.Collection, owner, collectionBody.Global); err != nil {
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to remove the ansible collection %s: %s", collectionBody.Collection, err.Error()))
+		}
+		return JSONResult(e, http.StatusCreated, "Successfully removed: "+collectionBody.Collection)
+	}
+
+	// action == "" or "install": pass the source string straight to
+	// ansible-galaxy, the same way the role endpoint does — a git URL installs
+	// from git, an FQCN installs from galaxy. No separate type flag: the
+	// string's shape is the signal.
 	collectionString := buildCollectionInstallArg(collectionBody.Collection, collectionBody.Version)
 
 	// Make sure the collection string is escaped
@@ -451,7 +503,6 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusConflict, "Collection already installed. Collections from https://docs.ansible.com/ansible/latest/collections/index.html are installed globally. If you want to reinstall it, consider using `--force`.")
 	}
 	return JSONResult(e, http.StatusCreated, "Successfully installed: "+collectionString)
-
 }
 
 func GetSubscriptionRoles(e *core.RequestEvent) error {

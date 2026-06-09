@@ -521,6 +521,27 @@ func removeLocalRoleByName(app core.App, name string, src *core.Record, includeG
 	return nil
 }
 
+// removeLocalCollectionForSource removes a vendored collection from the source
+// owner's per-user collections dir, and — only when includeGlobal
+// (admin-initiated) — the shared global-collections dir. fqcn is the FQCN
+// (namespace.name) recorded on the local_collection artifact. Both deletes go
+// through removeLocalCollectionByName, the one removal helper in this leg.
+// Idempotent. Mirrors removeLocalRoleByName: both scopes are attempted
+// independently so a global-remove error never suppresses the per-user remove.
+func removeLocalCollectionForSource(app core.App, fqcn string, src *core.Record, includeGlobal bool) error {
+	// global-collections is shared/admin-scoped; only an admin-initiated remove
+	// may delete from it.
+	if includeGlobal {
+		_ = removeLocalCollectionByName(fqcn, "", true)
+	}
+	if owner, err := app.FindRecordById("users", src.GetString("owner")); err == nil {
+		if username := owner.GetString("proxmoxUsername"); username != "" {
+			_ = removeLocalCollectionByName(fqcn, username, false)
+		}
+	}
+	return nil
+}
+
 // sourceRecordToResponse converts a sources PocketBase record to the wire DTO.
 // Kind is left as the zero value; use sourceRecordToResponseWithKind when the
 // caller can pay the extra DB queries.
@@ -798,9 +819,10 @@ func ListSourceTemplates(e *core.RequestEvent) error {
 
 // ListSourceCollections handles GET /sources/{sourceID}/collections.
 // Returns Ansible collections this source's blueprints declared in their
-// requirements.yml. ansible-galaxy has no remove subcommand, so removing a
-// source leaves the on-disk install in place — the row here is a claim,
-// not a lifecycle anchor.
+// requirements.yml. galaxy-declared collections are claim-only rows; a source
+// that VENDORS a collection (local_collection) has it cleaned up on de-select
+// like a vendored role (ansible-galaxy has no remove subcommand, so Ludus rm's
+// the directory directly).
 func ListSourceCollections(e *core.RequestEvent) error {
 	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
 	if err != nil {

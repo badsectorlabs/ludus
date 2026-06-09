@@ -21,6 +21,7 @@ import (
 type SyncResult struct {
 	TemplateResults        []ArtifactResult       `json:"templateResults"`
 	LocalRoleResults       []ArtifactResult       `json:"localRoleResults"`
+	LocalCollectionResults []ArtifactResult       `json:"localCollectionResults"`
 	RoleResults            []RoleInstallResult    `json:"roleResults"`
 	UndeclaredDependencies []UndeclaredDependency `json:"undeclaredDependencies,omitempty"`
 }
@@ -255,6 +256,7 @@ func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, s
 	res := &SyncResult{}
 	res.TemplateResults = registerTemplates(app, sourceRecord, walked, opts)
 	res.LocalRoleResults = registerLocalRoles(app, sourceRecord, walked, opts)
+	res.LocalCollectionResults = registerLocalCollections(app, sourceRecord, walked, opts)
 	pruneSourceArtifactClaims(app, sourceRecord, walked, opts.Selection, opts.InitiatorIsAdmin, opts.InitiatorProxmoxUsername)
 	if !opts.NoDeps {
 		res.RoleResults = installUnionedRoles(e, app, sourceRecord, walked, opts)
@@ -295,6 +297,17 @@ func snapshotWalkedAsSelection(walked *WalkedSource) *InstallSelection {
 	for _, dir := range walked.LocalRoles {
 		sel.LocalRoles = append(sel.LocalRoles, filepath.Base(dir))
 	}
+	for _, dir := range walked.LocalCollections {
+		data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+		if err != nil {
+			continue
+		}
+		gm, perr := ParseGalaxyManifest(data)
+		if perr != nil || gm.Namespace == "" || gm.Name == "" {
+			continue
+		}
+		sel.LocalCollections = append(sel.LocalCollections, gm.Namespace+"."+gm.Name)
+	}
 	return sel
 }
 
@@ -326,6 +339,11 @@ func validateSelectionAgainstWalk(sel *InstallSelection, walked *WalkedSource) e
 			missing = append(missing, fmt.Sprintf("role %q", name))
 		}
 	}
+	for _, name := range sel.LocalCollections {
+		if !slices.Contains(available.LocalCollections, name) {
+			missing = append(missing, fmt.Sprintf("collection %q", name))
+		}
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("%w: %s", errSelectionNotAvailable, strings.Join(missing, ", "))
 	}
@@ -333,7 +351,13 @@ func validateSelectionAgainstWalk(sel *InstallSelection, walked *WalkedSource) e
 }
 
 func collectSyncFailures(res *SyncResult) []string {
-	return collectArtifactFailures(res.TemplateResults, res.LocalRoleResults, res.RoleResults)
+	failures := collectArtifactFailures(res.TemplateResults, res.LocalRoleResults, res.RoleResults)
+	for _, r := range res.LocalCollectionResults {
+		if !r.OK {
+			failures = append(failures, fmt.Sprintf("local_collection %s: %s", r.Name, r.Message))
+		}
+	}
+	return failures
 }
 
 func markSyncFailed(app core.App, src *core.Record, err error) {
@@ -488,6 +512,27 @@ func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource
 // the selected blueprints, so a stale row would imply a blueprint-level
 // inconsistency rather than a template/role one. Left for a follow-up if
 // it becomes a real problem.
+// buildKeptLocalCollections computes the kept-set of collection FQCNs for
+// pruning and reports whether any walked dir had an unreadable galaxy.yml.
+// When hadError is true the caller must NOT prune local_collection rows —
+// a transient read failure must never be treated as a de-selection.
+func buildKeptLocalCollections(walked *WalkedSource, selection *InstallSelection) (kept map[string]struct{}, hadError bool) {
+	kept = map[string]struct{}{}
+	selected := selectionLocalCollections(selection)
+	for _, dir := range walked.LocalCollections {
+		fqcn, err := collectionFQCNForDir(dir)
+		if err != nil {
+			hadError = true
+			continue
+		}
+		if selection != nil && !slices.Contains(selected, fqcn) {
+			continue
+		}
+		kept[fqcn] = struct{}{}
+	}
+	return kept, hadError
+}
+
 func pruneSourceArtifactClaims(app core.App, src *core.Record, walked *WalkedSource, selection *InstallSelection, initiatorIsAdmin bool, initiatorProxmoxUsername string) {
 	keep := func(dirs []string, selected []string, nameFn func(string) string) map[string]struct{} {
 		out := map[string]struct{}{}
@@ -502,12 +547,24 @@ func pruneSourceArtifactClaims(app core.App, src *core.Record, walked *WalkedSou
 	}
 
 	// Templates are keyed by their *-template name (matching the catalog +
-	// ledger); local roles by directory basename.
+	// ledger); local roles by directory basename; local collections by FQCN
+	// (namespace.name) — the same key Leg E records on the source_artifacts row.
 	keptTemplates := keep(walked.Templates, selectionTemplates(selection), templateNameForDir)
 	keptLocalRoles := keep(walked.LocalRoles, selectionLocalRoles(selection), filepath.Base)
 
+	// For local collections, a transient galaxy.yml read error must abort the
+	// prune rather than silently treating the collection as stale and deleting
+	// it. buildKeptLocalCollections signals this via hadError.
+	keptLocalCollections, collectionError := buildKeptLocalCollections(walked, selection)
+	if collectionError {
+		log.Printf("[blueprint-sources] sync prune: skipping local_collection prune — one or more collection dirs returned an error reading galaxy.yml")
+	}
+
 	dropStaleClaims(app, src, "template", keptTemplates, selectionTemplates(selection), selection != nil, initiatorIsAdmin, initiatorProxmoxUsername)
 	dropStaleClaims(app, src, "local_role", keptLocalRoles, selectionLocalRoles(selection), selection != nil, initiatorIsAdmin, initiatorProxmoxUsername)
+	if !collectionError {
+		dropStaleClaims(app, src, "local_collection", keptLocalCollections, selectionLocalCollections(selection), selection != nil, initiatorIsAdmin, initiatorProxmoxUsername)
+	}
 }
 
 func selectionTemplates(s *InstallSelection) []string {
@@ -522,6 +579,13 @@ func selectionLocalRoles(s *InstallSelection) []string {
 		return nil
 	}
 	return s.LocalRoles
+}
+
+func selectionLocalCollections(s *InstallSelection) []string {
+	if s == nil {
+		return nil
+	}
+	return s.LocalCollections
 }
 
 // dropStaleClaims removes (source, kind, name) rows whose name is neither
@@ -576,6 +640,15 @@ func dropStaleClaims(app core.App, src *core.Record, kind string, kept map[strin
 			// confined to the source owner's own per-user roles dir.
 			if rmErr := removeLocalRoleByName(app, name, src, initiatorIsAdmin); rmErr != nil {
 				log.Printf("[blueprint-sources] sync prune: remove local role %q: %v", name, rmErr)
+			}
+		case "local_collection":
+			// global-collections deletion is admin-only; a non-admin's remove is
+			// confined to the source owner's own per-user collections dir. The
+			// artifact row's name IS the FQCN (namespace.name) recorded by Leg E's
+			// registerLocalCollections, so it is forwarded straight to the single
+			// removeLocalCollectionByName wrapper (via the source-scoped helper).
+			if rmErr := removeLocalCollectionForSource(app, name, src, initiatorIsAdmin); rmErr != nil {
+				log.Printf("[blueprint-sources] sync prune: remove local collection %q: %v", name, rmErr)
 			}
 		}
 	}

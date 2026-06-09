@@ -1218,8 +1218,9 @@ it provided.
 
 Installed templates, roles, and collections are left on disk — templates live
 in your per-user packer dir, and roles/collections may be shared with ranges
-or other blueprints. To uninstall those, use 'ludus source remove' for a
-source's items, or the ansible/templates commands for individual ones.`,
+or other blueprints. To uninstall those, use 'ludus source remove' (de-select),
+which now cleans up source roles AND collections, or remove individual items
+with the ansible/templates commands (e.g. 'ludus ansible collection rm').`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)

@@ -246,6 +246,34 @@ func setupCollectionAddCmd(command *cobra.Command) {
 	command.Flags().StringVar(&ansibleVersion, "version", "", "the collection version to install")
 }
 
+var collectionRemoveCmd = &cobra.Command{
+	Use:     "rm <collection>",
+	Short:   "Remove an ansible collection from the ludus host",
+	Long:    `Specify a collection FQCN (namespace.name) to remove from the ludus host. ansible-galaxy has no collection remove, so Ludus deletes the collection's directory.`,
+	Args:    cobra.ExactArgs(1),
+	Aliases: []string{"remove", "del"},
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		requestBody := fmt.Sprintf(`{
+				"collection": "%s",
+				"action": "remove",
+				"global": %s
+			  }`, args[0], strconv.FormatBool(ansibleGlobal))
+
+		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/ansible/collection"), requestBody)
+
+		if didFailOrWantJSON(success, responseJSON) {
+			return
+		}
+		handleGenericResult(responseJSON)
+	},
+}
+
+func setupCollectionRemoveCmd(command *cobra.Command) {
+	command.Flags().BoolVarP(&ansibleGlobal, "global", "g", false, "remove the collection installed for all users (admin only)")
+}
+
 var collectionsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available user Ansible collections on the Ludus host",
@@ -453,6 +481,8 @@ func init() {
 	collectionCmd.AddCommand(collectionsListCmd)
 	setupCollectionAddCmd(collectionAddCmd)
 	collectionCmd.AddCommand(collectionAddCmd)
+	setupCollectionRemoveCmd(collectionRemoveCmd)
+	collectionCmd.AddCommand(collectionRemoveCmd)
 	roleCmd.AddCommand(rolesListCmd)
 	setupRoleCmd(roleAddCmd)
 	setupRoleCmd(roleRmCmd)

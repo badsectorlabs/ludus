@@ -2,6 +2,7 @@ package ludusapi
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -134,6 +135,50 @@ func roleDescriptionFromMeta(data []byte) string {
 		return ""
 	}
 	return strings.TrimSpace(m.GalaxyInfo.Description)
+}
+
+// GalaxyManifest is the partial shape of an Ansible collection's galaxy.yml we
+// read to derive its FQCN (<namespace>.<name>), version, and a human
+// description for the catalog. Mirrors roleMetaMain/roleDescriptionFromMeta
+// for collections.
+type GalaxyManifest struct {
+	Namespace   string `yaml:"namespace"`
+	Name        string `yaml:"name"`
+	Version     string `yaml:"version"`
+	Description string `yaml:"description"`
+}
+
+// ParseGalaxyManifest unmarshals a collection's galaxy.yml. Returns an error
+// only on malformed YAML — missing fields are left empty for the caller to
+// validate (addLocalCollectionFromDirectory rejects an empty namespace/name).
+func ParseGalaxyManifest(data []byte) (*GalaxyManifest, error) {
+	var m GalaxyManifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("galaxy.yml is not valid YAML: %w", err)
+	}
+	return &m, nil
+}
+
+// collectionFQCNForDir reads <dir>/galaxy.yml and returns the canonical
+// "<namespace>.<name>" FQCN for the collection. It is the single resolver for
+// deriving a collection's identity from its on-disk directory — later tasks
+// and install code call this instead of inlining galaxy.yml reads.
+func collectionFQCNForDir(dir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+	if err != nil {
+		return "", fmt.Errorf("galaxy.yml: %w", err)
+	}
+	gm, err := ParseGalaxyManifest(data)
+	if err != nil {
+		return "", err
+	}
+	if gm.Namespace == "" {
+		return "", fmt.Errorf("galaxy.yml: namespace is required")
+	}
+	if gm.Name == "" {
+		return "", fmt.Errorf("galaxy.yml: name is required")
+	}
+	return gm.Namespace + "." + gm.Name, nil
 }
 
 // rangeConfigVM is a partial type matching only the fields InferFromRangeConfig
