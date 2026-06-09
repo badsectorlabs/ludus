@@ -235,8 +235,8 @@ type CreateSourceRequest struct {
 	Type        string `json:"type" form:"type"`
 	URL         string `json:"url,omitempty" form:"url"`
 	Ref         string `json:"ref,omitempty" form:"ref"`
-	GlobalRoles bool   `json:"globalRoles,omitempty" form:"globalRoles"`
-	Force       bool   `json:"force,omitempty" form:"force"`
+	Global bool `json:"global,omitempty" form:"global"`
+	Force  bool `json:"force,omitempty" form:"force"`
 }
 
 // InstallRequest is the body for POST /sources/{sourceID}/install.
@@ -257,9 +257,9 @@ type CreateSourceRequest struct {
 // empty" — Go's json package gives us nil for the former and a non-nil
 // pointer to a zero-value struct for the latter.
 type InstallRequest struct {
-	Selection   *InstallSelectionDTO `json:"selection,omitempty"`
-	GlobalRoles bool                 `json:"globalRoles,omitempty"`
-	Force       bool                 `json:"force,omitempty"`
+	Selection *InstallSelectionDTO `json:"selection,omitempty"`
+	Global    bool                 `json:"global,omitempty"`
+	Force     bool                 `json:"force,omitempty"`
 	// NoDeps skips installing the selected blueprints' galaxy role/collection
 	// dependencies — no reaching out to ansible-galaxy; only what's already on
 	// disk is used. Default false: deps install, since a blueprint needs them
@@ -273,15 +273,15 @@ type InstallSelectionDTO struct {
 	LocalRoles []string `json:"localRoles,omitempty"`
 }
 type UpdateSourceRequest struct {
-	Ref         string `json:"ref"`
-	GlobalRoles bool   `json:"globalRoles,omitempty"`
-	Force       bool   `json:"force,omitempty"`
+	Ref    string `json:"ref"`
+	Global bool   `json:"global,omitempty"`
+	Force  bool   `json:"force,omitempty"`
 }
 type SyncSourceRequest struct {
-	GlobalRoles bool `json:"globalRoles,omitempty" form:"globalRoles"`
-	Force       bool `json:"force,omitempty" form:"force"`
+	Global bool `json:"global,omitempty" form:"global"`
+	Force  bool `json:"force,omitempty" form:"force"`
 }
 type InstallBlueprintDepsRequest struct {
-	GlobalRoles bool `json:"globalRoles,omitempty"`
-	ForceRoles  bool `json:"forceRoles,omitempty"`
+	Global     bool `json:"global,omitempty"`
+	ForceRoles bool `json:"forceRoles,omitempty"`
 }

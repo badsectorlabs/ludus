@@ -23,9 +23,9 @@ const (
 
 // Advanced collects toggleable flags settable from the picker footer.
 type Advanced struct {
-	GlobalRoles bool
-	Force       bool
-	IsAdmin     bool
+	Global  bool
+	Force   bool
+	IsAdmin bool
 	// NoDeps skips installing the selected blueprints' galaxy role/collection
 	// dependencies. Carried through the picker unchanged (no footer toggle).
 	NoDeps bool

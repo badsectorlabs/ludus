@@ -89,7 +89,7 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 	// artifacts land is never a function of the source owner — every user
 	// installs into their own home, matching the catalog's viewer-relative read.
 	installProxmoxUsername := ""
-	if !opts.GlobalRoles {
+	if !opts.Global {
 		installProxmoxUsername = opts.InitiatorProxmoxUsername
 	}
 	for _, dir := range walked.LocalRoles {
@@ -97,7 +97,7 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 		if opts.Selection != nil && !slices.Contains(opts.Selection.LocalRoles, name) {
 			continue
 		}
-		if err := addLocalRoleFromDirectory(app, dir, installProxmoxUsername, opts.GlobalRoles, opts.Force); err != nil {
+		if err := addLocalRoleFromDirectory(app, dir, installProxmoxUsername, opts.Global, opts.Force); err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
 		}
@@ -109,7 +109,7 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 
 // registerLocalCollections installs each source-bundled collection under
 // ansible/collections/ into the requesting user's per-user collections path
-// (or the global path with --global-roles), recording a "local_collection"
+// (or the global path with --global), recording a "local_collection"
 // claim per collection. Mirrors registerLocalRoles: selection-gated, force/
 // idempotent via addLocalCollectionFromDirectory, viewer-relative install.
 //
@@ -119,7 +119,7 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 func registerLocalCollections(app core.App, src *core.Record, walked *WalkedSource, opts SyncOptions) []ArtifactResult {
 	var results []ArtifactResult
 	base := globalCollectionsPath()
-	if !opts.GlobalRoles {
+	if !opts.Global {
 		base = userCollectionsPath(opts.InitiatorProxmoxUsername)
 	}
 	for _, dir := range walked.LocalCollections {
@@ -448,7 +448,7 @@ func installUnionedRoles(e *core.RequestEvent, app core.App, src *core.Record, w
 		}
 		results := installRolesForBlueprint(e, app, bp, ResolverOpts{
 			ForceRoles:              opts.Force,
-			GlobalRoles:             opts.GlobalRoles,
+			Global:                  opts.Global,
 			ProxmoxUser:             installProxmoxUser,
 			AnsibleHome:             userAnsibleHome(installProxmoxUser),
 			SourceRecordID:          src.Id,

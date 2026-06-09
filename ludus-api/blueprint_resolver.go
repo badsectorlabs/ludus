@@ -94,7 +94,7 @@ func pickRolesPathForUser(_ core.App, user *models.User, global bool) string {
 // ansibleHomeForUser returns the writable ANSIBLE_HOME for a galaxy install.
 // ANSIBLE_HOME must stay on a writable /opt/ludus path regardless of install
 // scope: global vs per-user only selects the roles install --path (via
-// ResolverOpts.GlobalRoles), never the home. Returning "" would leave
+// ResolverOpts.Global), never the home. Returning "" would leave
 // ANSIBLE_HOME unset, so ansible-galaxy's local_tmp falls back to
 // $HOME/.ansible/tmp — read-only under the service's ProtectHome=read-only
 // sandbox — and the install fails.
@@ -106,8 +106,8 @@ func ansibleHomeForUser(user *models.User) string {
 }
 
 type ResolverOpts struct {
-	ForceRoles  bool
-	GlobalRoles bool
+	ForceRoles bool
+	Global     bool
 	// ProxmoxUser is the user whose per-user roles dir non-global installs land
 	// in — always the requesting user, never the source owner.
 	ProxmoxUser string
@@ -161,7 +161,7 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 
 	if hasRequirementsRoles(galaxyRequirements) {
 		rolesPath := ""
-		if opts.GlobalRoles {
+		if opts.Global {
 			rolesPath = globalRolesPath()
 		} else if opts.ProxmoxUser != "" {
 			rolesPath = userRolesPath(opts.ProxmoxUser)

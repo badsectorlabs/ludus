@@ -540,7 +540,7 @@ Usage:
 
 Flags:
         --force-roles    overwrite already-installed roles
-        --global-roles   admin only: install roles instance-wide
+        --global         admin only: install the source's roles and collections for all users
 ```
 
 ### Blueprint List
@@ -1579,7 +1579,7 @@ Usage:
 Flags:
         --id string       explicit sourceID; overrides auto-derived slug
         --ref string      git branch/tag/commit (git sources only)
-        --global-roles    admin only: install roles instance-wide
+        --global          admin only: install the source's roles and collections for all users
         --force           overwrite already-installed templates and galaxy/local roles
 ```
 
@@ -1601,7 +1601,7 @@ Usage:
   ludus source sync [<sourceID>] [flags]
 
 Flags:
-        --global-roles   admin only: install roles instance-wide
+        --global         admin only: install the source's roles and collections for all users
         --force          overwrite already-installed templates and galaxy/local roles
 ```
 
@@ -1616,7 +1616,7 @@ Usage:
 Flags:
         --ref string         new git branch/tag/commit (git sources)
     -d, --directory string   tar a local directory and upload it as the new source content (upload sources)
-        --global-roles       admin only: install roles instance-wide (upload only)
+        --global             admin only: install the source's roles and collections for all users (upload only)
         --force              overwrite already-installed templates and galaxy/local roles (upload only)
 ```
 

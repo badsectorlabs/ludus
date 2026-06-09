@@ -32,7 +32,7 @@ var (
 	implyStyle     = lipgloss.NewStyle().Foreground(accentColor)
 	installedStyle = lipgloss.NewStyle().Foreground(installedColor)
 	// Footer chip styles. The "on" color encodes severity: gold for the
-	// benign scope flip (global-roles), orange for the actually-risky
+	// benign scope flip (global), orange for the actually-risky
 	// toggle (force overwrite) so the eye treats them differently. Off
 	// stays a neutral grey for both.
 	globalOnStyle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
@@ -165,8 +165,8 @@ func (m model) View() string {
 	// Built pre-styled (so no truncate — the escape codes would inflate a
 	// width count and clip it); the bar's visible width is bounded and small.
 	sep := controlStyle.Render(" · ")
-	footer := keyStyle.Render("[g]") + controlStyle.Render(" global roles: ") +
-		chipFor(m.adv.GlobalRoles, m.adv.IsAdmin, globalOnStyle)
+	footer := keyStyle.Render("[g]") + controlStyle.Render(" global: ") +
+		chipFor(m.adv.Global, m.adv.IsAdmin, globalOnStyle)
 	if m.mode == ModeInstall {
 		footer += sep + keyStyle.Render("[f]") + controlStyle.Render(" force overwrite: ") +
 			chipFor(m.adv.Force, true, forceOnStyle)
@@ -206,7 +206,7 @@ func (m model) headerCounts() string {
 
 // chipFor renders an on/off chip for one footer toggle. onStyle lets each
 // toggle pick its severity color (gold for benign scope flips, orange for
-// risky ones). Non-admin callers see "admin-only" in the global-roles slot
+// risky ones). Non-admin callers see "admin-only" in the global slot
 // — they can't flip it.
 func chipFor(on, allowed bool, onStyle lipgloss.Style) string {
 	if !allowed {
@@ -274,7 +274,7 @@ func (m model) hasUpgradeMismatch() bool {
 // toggle: "global" (the system-wide roles path) when on, "user" (the owner's
 // per-user path) when off.
 func (m model) targetScope() string {
-	if m.adv.GlobalRoles {
+	if m.adv.Global {
 		return "global"
 	}
 	return "user"

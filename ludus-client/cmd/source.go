@@ -64,8 +64,8 @@ func updateSourceRequestToForm(req dto.UpdateSourceRequest) map[string]string {
 	if req.Ref != "" {
 		form["ref"] = req.Ref
 	}
-	if req.GlobalRoles {
-		form["globalRoles"] = "true"
+	if req.Global {
+		form["global"] = "true"
 	}
 	if req.Force {
 		form["force"] = "true"
@@ -88,8 +88,8 @@ func createSourceRequestToForm(req dto.CreateSourceRequest) map[string]string {
 	if req.Ref != "" {
 		form["ref"] = req.Ref
 	}
-	if req.GlobalRoles {
-		form["globalRoles"] = "true"
+	if req.Global {
+		form["global"] = "true"
 	}
 	if req.Force {
 		form["force"] = "true"
@@ -225,10 +225,10 @@ func appendUniqueStr(s []string, v string) []string {
 
 // Source-related flag vars; reused across subcommands.
 var (
-	sourceFlagID          string
-	sourceFlagRef         string
-	sourceFlagGlobalRoles bool
-	sourceFlagForce       bool
+	sourceFlagID     string
+	sourceFlagRef    string
+	sourceFlagGlobal bool
+	sourceFlagForce  bool
 	sourceFlagNoDeps      bool
 	sourceFlagNoPrompt    bool
 
@@ -319,7 +319,7 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 
 	if mode == modeInstallAll {
 		doInstallAll(client, registerResp.SourceID, registerResp.Catalog, sourcepicker.Advanced{
-			GlobalRoles: flags.GlobalRoles,
+			Global: flags.Global,
 			Force:       flags.Force,
 			IsAdmin:     clientIsAdmin(),
 			NoDeps:      flags.NoDeps,
@@ -518,7 +518,7 @@ func tryFetchCatalog(client *resty.Client, sourceID string) (dto.SourceCatalogDT
 func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.SourceCatalogDTO, flags sourceFlags, mode installMode, intent sourcepicker.Mode) {
 	if mode == modeInstallAll {
 		doInstallAll(client, sourceID, cat, sourcepicker.Advanced{
-			GlobalRoles: flags.GlobalRoles,
+			Global: flags.Global,
 			Force:       flags.Force,
 			IsAdmin:     clientIsAdmin(),
 			NoDeps:      flags.NoDeps,
@@ -558,7 +558,7 @@ func readSourceAddFlags() sourceFlags {
 		Blueprints:  []string(sourceFlagBlueprints),
 		Templates:   []string(sourceFlagTemplates),
 		LocalRoles:  []string(sourceFlagLocalRoles),
-		GlobalRoles: sourceFlagGlobalRoles,
+		Global: sourceFlagGlobal,
 		Force:       sourceFlagForce,
 		NoDeps:      sourceFlagNoDeps,
 	}
@@ -571,7 +571,7 @@ func readSourceAddFlags() sourceFlags {
 func postSourceRegister(client *resty.Client, arg string, flags sourceFlags) (dto.RegisterSourceResponse, bool, error) {
 	req := dto.CreateSourceRequest{
 		ID:          flags.ID,
-		GlobalRoles: flags.GlobalRoles,
+		Global: flags.Global,
 		Force:       flags.Force,
 	}
 	var fileField, fileName string
@@ -647,7 +647,7 @@ func postSourceRegister(client *resty.Client, arg string, flags sourceFlags) (dt
 //     proceeds — its empty selection is the server's prune-all signal.
 func chooseSelection(mode installMode, intent sourcepicker.Mode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, bool, error) {
 	adv := sourcepicker.Advanced{
-		GlobalRoles: flags.GlobalRoles,
+		Global: flags.Global,
 		Force:       flags.Force,
 		IsAdmin:     clientIsAdmin(),
 		NoDeps:      flags.NoDeps,
@@ -707,7 +707,7 @@ func deriveCurrentSelection(cat dto.SourceCatalogDTO) dto.InstallSelectionDTO {
 	return out
 }
 
-// clientIsAdmin is currently a stub — the server already gates --global-roles
+// clientIsAdmin is currently a stub — the server already gates --global
 // for non-admins, so this only affects the picker's display.
 func clientIsAdmin() bool { return true }
 
@@ -725,7 +725,7 @@ func installVerbPast(intent sourcepicker.Mode) string {
 func doInstall(client *resty.Client, sourceID string, sel dto.InstallSelectionDTO, adv sourcepicker.Advanced, verbPast string) {
 	postInstall(client, sourceID, dto.InstallRequest{
 		Selection:   &sel,
-		GlobalRoles: adv.GlobalRoles,
+		Global: adv.Global,
 		Force:       adv.Force,
 		NoDeps:      adv.NoDeps,
 	}, verbPast)
@@ -740,7 +740,7 @@ func doInstallAll(client *resty.Client, sourceID string, _ dto.SourceCatalogDTO,
 	// install-all is only ever an install path (remove builds an explicit
 	// selection), so the verb is fixed.
 	postInstall(client, sourceID, dto.InstallRequest{
-		GlobalRoles: adv.GlobalRoles,
+		Global: adv.Global,
 		Force:       adv.Force,
 		NoDeps:      adv.NoDeps,
 	}, "installed")
@@ -925,7 +925,7 @@ func runSourceSync(cmd *cobra.Command, args []string) {
 	}
 
 	body, _ := json.Marshal(dto.SyncSourceRequest{
-		GlobalRoles: sourceFlagGlobalRoles,
+		Global: sourceFlagGlobal,
 		Force:       sourceFlagForce,
 	})
 
@@ -1013,7 +1013,7 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 
 	if fileField != "" {
 		updateReq := dto.UpdateSourceRequest{
-			GlobalRoles: sourceFlagGlobalRoles,
+			Global: sourceFlagGlobal,
 			Force:       sourceFlagForce,
 		}
 		responseJSON, success := rest.FileUpload(client, "PATCH",
@@ -1077,7 +1077,7 @@ func runSourceRemove(cmd *cobra.Command, args []string) {
 			logger.Logger.Fatalf("Could not fetch catalog for source %q", sid)
 		}
 		runExistingSourceFlow(client, sid, catalog, sourceFlags{
-			GlobalRoles: sourceFlagGlobalRoles,
+			Global: sourceFlagGlobal,
 			Force:       sourceFlagForce,
 		}, modeInteractive, sourcepicker.ModeRemove)
 		return
@@ -1110,7 +1110,7 @@ func runSourceRemove(cmd *cobra.Command, args []string) {
 
 	postInstall(client, sid, dto.InstallRequest{
 		Selection:   &newSelection,
-		GlobalRoles: sourceFlagGlobalRoles,
+		Global: sourceFlagGlobal,
 		Force:       sourceFlagForce,
 	}, "removed")
 }
@@ -1262,19 +1262,19 @@ func init() {
 
 	sourceAddCmd.Flags().BoolVar(&sourceFlagCatalog, "catalog", false, "walk the source and render its catalog (tables by default, JSON with --json); registers nothing")
 
-	sourceAddCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide")
+	sourceAddCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: install the source's roles and collections for all users")
 	sourceAddCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "force install: re-extract templates and source roles, and rerun ansible-galaxy with -f for galaxy roles and collections")
 	sourceAddCmd.Flags().BoolVar(&sourceFlagNoDeps, "no-deps", false, "skip installing blueprint galaxy role/collection dependencies; use only what's already on disk")
 
 	// Sync flags (reuses sourceFlagRef, etc. from add).
-	sourceSyncCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide")
+	sourceSyncCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: install the source's roles and collections for all users")
 	sourceSyncCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "force install: re-extract templates and source roles, and rerun ansible-galaxy with -f for galaxy roles and collections")
 
 	// Update flags.
 	sourceUpdateCmd.Flags().SortFlags = false
 	sourceUpdateCmd.Flags().StringVar(&sourceFlagRef, "ref", "", "new git branch/tag/commit (git sources)")
 	sourceUpdateCmd.Flags().StringVarP(&sourceFlagDirectory, "directory", "d", "", "tar a local directory and upload it as the new source content (upload sources)")
-	sourceUpdateCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide (upload only)")
+	sourceUpdateCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: install the source's roles and collections for all users (upload only)")
 	sourceUpdateCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "force install when a new archive triggers an inline reinstall (upload only)")
 
 	// Rm flags.
@@ -1288,7 +1288,7 @@ func init() {
 	sourceRemoveCmd.Flags().Var(&sourceFlagTemplates, "templates", "template names to drop (CSV or repeated)")
 	sourceRemoveCmd.Flags().Var(&sourceFlagLocalRoles, "source-roles", "source role names to drop (CSV or repeated)")
 	sourceRemoveCmd.Flags().BoolVar(&sourceFlagAll, "all", false, "drop every item from this source (the source itself stays registered)")
-	sourceRemoveCmd.Flags().BoolVar(&sourceFlagGlobalRoles, "global-roles", false, "admin only: also affect roles installed instance-wide")
+	sourceRemoveCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: also affect roles and collections installed instance-wide")
 	sourceRemoveCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "no-op for remove; kept for symmetry with add")
 
 	sourceCmd.AddCommand(sourceAddCmd)

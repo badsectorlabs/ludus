@@ -1548,8 +1548,8 @@ func InstallBlueprintDeps(e *core.RequestEvent) error {
 
 	var req dto.InstallBlueprintDepsRequest
 	_ = e.BindBody(&req) // body is optional; defaults leave req zero-valued
-	if req.GlobalRoles && !user.IsAdmin() {
-		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
+	if req.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "global requires admin caller")
 	}
 
 	bpRec, err := findLocalBlueprintByID(e, id, user)
@@ -1574,7 +1574,7 @@ func InstallBlueprintDeps(e *core.RequestEvent) error {
 	}
 	results := installRolesForBlueprint(e, e.App, walked, ResolverOpts{
 		ForceRoles:     req.ForceRoles,
-		GlobalRoles:    req.GlobalRoles,
+		Global:         req.Global,
 		ProxmoxUser:    user.ProxmoxUsername(),
 		AnsibleHome:    ansibleHomeForUser(user),
 		SourceRecordID: sourceRecordID,

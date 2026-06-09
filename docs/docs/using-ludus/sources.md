@@ -210,7 +210,7 @@ Ludus reads each role's `meta/main.yml` `galaxy_info.description` and shows it a
 
 Reference roles by directory name (`my_helper`) under `roles:` in any blueprint's `range-config.yml`. If a local role shares a name with a galaxy role, Ludus skips the galaxy install and uses the local role.
 
-Roles install per-user by default; admins can use `--global-roles` on `source add` to install instance-wide.
+Roles install per-user by default; admins can use `--global` on `source add` to install instance-wide.
 
 ### Blueprints
 
@@ -323,14 +323,14 @@ Sources are personal — only the user who ran `source add` sees them in `source
 
 Templates install per-user. The built VM image is shared instance-wide by name, so building a template once makes it usable by every range; another user installs it from the source only to rebuild it.
 
-Roles install per-user. An admin can install them instance-wide by passing `--global-roles` to `source add`, which makes them available to every user on the instance.
+Roles install per-user. An admin can install them instance-wide by passing `--global` to `source add`, which makes them available to every user on the instance.
 
 Blueprints share per-blueprint with `ludus blueprint share user <sourceID>/<bpID> <userID>` (or `share group`).
 
 ```bash
-# Admin: register a source with global roles for all users
+# Admin: register a source with global roles and collections for all users
 # terminal-command-local
-ludus source add https://github.com/.../my-class --global-roles
+ludus source add https://github.com/.../my-class --global
 
 # Share each blueprint with the class group
 # terminal-command-local
@@ -379,7 +379,7 @@ A source removed with `ludus source rm` is re-registered on the next restart unl
 | `--blueprints <ids>` | `source add` | Scripted selection: blueprint IDs to install (CSV or repeated) |
 | `--templates <names>` | `source add` | Scripted selection: template names to install (CSV or repeated) |
 | `--source-roles <names>` | `source add` | Scripted selection: source-bundled role names to install (CSV or repeated) |
-| `--global-roles` | `source add`, `source sync`, `source update`, `blueprint install` | Admin only. Install roles instance-wide instead of user-scoped |
+| `--global` | `source add`, `source sync`, `source update`, `blueprint install` | Admin only. Install the source's roles and collections instance-wide instead of user-scoped |
 | `--force` | `source add`, `source sync`, `source update` | Overwrite already-installed templates and galaxy/local roles |
 | `--force-roles` | `blueprint install` | Overwrite already-installed galaxy/local roles |
 | `--id <sourceID>` | `source add` | Override the auto-derived sourceID |

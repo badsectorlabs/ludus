@@ -39,9 +39,9 @@ type sourceFlags struct {
 	Templates  []string
 	LocalRoles []string
 
-	GlobalRoles bool
-	Force       bool
-	NoDeps      bool
+	Global bool
+	Force  bool
+	NoDeps bool
 }
 
 // selectInstallMode classifies the invocation. --all and --no-prompt force

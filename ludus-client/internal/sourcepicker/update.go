@@ -87,7 +87,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "g":
 		if m.adv.IsAdmin {
-			m.adv.GlobalRoles = !m.adv.GlobalRoles
+			m.adv.Global = !m.adv.Global
 		}
 		return m, nil
 	case "f":

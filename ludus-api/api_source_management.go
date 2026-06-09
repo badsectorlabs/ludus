@@ -75,7 +75,7 @@ func CreateSource(e *core.RequestEvent) error {
 		req.Type = strings.TrimSpace(e.Request.FormValue("type"))
 		req.URL = strings.TrimSpace(e.Request.FormValue("url"))
 		req.Ref = strings.TrimSpace(e.Request.FormValue("ref"))
-		req.GlobalRoles = e.Request.FormValue("globalRoles") == "true"
+		req.Global = e.Request.FormValue("global") == "true"
 		req.Force = e.Request.FormValue("force") == "true"
 	} else {
 		if err := e.BindBody(&req); err != nil {
@@ -83,8 +83,8 @@ func CreateSource(e *core.RequestEvent) error {
 		}
 	}
 
-	if req.GlobalRoles && !user.IsAdmin() {
-		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
+	if req.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "global requires admin caller")
 	}
 
 	if req.Type != "git" && req.Type != "upload" {
@@ -193,7 +193,7 @@ func CreateSource(e *core.RequestEvent) error {
 	}
 
 	opts := SyncOptions{
-		GlobalRoles:     req.GlobalRoles,
+		Global:          req.Global,
 		Force:           req.Force,
 		Archive:         uploadBytes,
 		ArchiveFilename: uploadFilename,
@@ -410,7 +410,7 @@ func UpdateSource(e *core.RequestEvent) error {
 			return JSONError(e, http.StatusBadRequest, fmt.Sprintf("failed to parse multipart form: %v", err))
 		}
 		req.Ref = strings.TrimSpace(e.Request.FormValue("ref"))
-		req.GlobalRoles = e.Request.FormValue("globalRoles") == "true"
+		req.Global = e.Request.FormValue("global") == "true"
 		req.Force = e.Request.FormValue("force") == "true"
 		uploadBytes, uploadFilename, _ = readMultipartArchive(e, "archive")
 	} else if e.Request.ContentLength > 0 {
@@ -419,8 +419,8 @@ func UpdateSource(e *core.RequestEvent) error {
 		}
 	}
 
-	if req.GlobalRoles && !user.IsAdmin() {
-		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
+	if req.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "global requires admin caller")
 	}
 	if uploadBytes != nil && src.GetString("type") != "upload" {
 		return JSONError(e, http.StatusBadRequest,
@@ -445,7 +445,7 @@ func UpdateSource(e *core.RequestEvent) error {
 	// New archive bytes on an upload source: re-extract + re-register inline.
 	if uploadBytes != nil {
 		opts := SyncOptions{
-			GlobalRoles:              req.GlobalRoles,
+			Global:                   req.Global,
 			Force:                    req.Force,
 			InitiatorIsAdmin:         user.IsAdmin(),
 			InitiatorProxmoxUsername: user.ProxmoxUsername(),
@@ -920,12 +920,12 @@ func InstallSource(e *core.RequestEvent) error {
 	if err := e.BindBody(&req); err != nil {
 		return JSONError(e, http.StatusBadRequest, fmt.Sprintf("invalid request: %v", err))
 	}
-	if req.GlobalRoles && !user.IsAdmin() {
-		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
+	if req.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "global requires admin caller")
 	}
 
 	opts := SyncOptions{
-		GlobalRoles:              req.GlobalRoles,
+		Global:                   req.Global,
 		Force:                    req.Force,
 		NoDeps:                   req.NoDeps,
 		InitiatorIsAdmin:         user.IsAdmin(),

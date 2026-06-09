@@ -51,7 +51,7 @@ type ArtifactResult struct {
 }
 
 type SyncOptions struct {
-	GlobalRoles bool
+	Global bool
 	Force       bool
 	// NoDeps skips the galaxy dependency install (installUnionedRoles): the
 	// selected blueprints register, but their role/collection deps are not

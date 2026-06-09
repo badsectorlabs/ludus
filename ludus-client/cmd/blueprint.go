@@ -653,7 +653,7 @@ func init() {
 
 	blueprintCmd.AddCommand(blueprintInfoCmd)
 
-	blueprintInstallCmd.Flags().BoolVar(&installFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide")
+	blueprintInstallCmd.Flags().BoolVar(&installFlagGlobal, "global", false, "admin only: install the source's roles and collections for all users")
 	blueprintInstallCmd.Flags().BoolVar(&installFlagForceRoles, "force-roles", false, "overwrite already-installed roles")
 	blueprintCmd.AddCommand(blueprintInstallCmd)
 
@@ -759,8 +759,8 @@ func printBlueprintInfo(d map[string]any) {
 
 
 var (
-	installFlagGlobalRoles bool
-	installFlagForceRoles  bool
+	installFlagGlobal     bool
+	installFlagForceRoles bool
 )
 
 var blueprintInstallCmd = &cobra.Command{
@@ -775,8 +775,8 @@ Works on local blueprints (e.g. 'my-lab') OR slug-prefixed source-blueprints (e.
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 		body, _ := json.Marshal(dto.InstallBlueprintDepsRequest{
-			GlobalRoles: installFlagGlobalRoles,
-			ForceRoles:  installFlagForceRoles,
+			Global:     installFlagGlobal,
+			ForceRoles: installFlagForceRoles,
 		})
 		path := fmt.Sprintf("/blueprints/%s/install", neturl.PathEscape(args[0]))
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(path), string(body))
