@@ -92,6 +92,7 @@ func CreateSource(e *core.RequestEvent) error {
 	}
 
 	sourceID := strings.TrimSpace(req.ID)
+	explicitID := sourceID != ""
 	var err error
 	if sourceID == "" {
 		sourceID, err = deriveSourceIDFromRequest(&req, e)
@@ -150,6 +151,20 @@ func CreateSource(e *core.RequestEvent) error {
 			SourceID: existing[0].GetString("sourceID"),
 			Catalog:  toCatalogDTO(catalog),
 		})
+	}
+
+	// sourceID must be globally unique, not just per-owner. The same-owner case
+	// is handled above, so any remaining collision is with another owner. Reject
+	// it and have the caller pick a different id — matching how templates, users,
+	// and blueprints handle id collisions (no auto-rename).
+	if taken, _ := e.App.FindRecordsByFilter("sources",
+		"sourceID = {:s}", "", 1, 0, map[string]any{"s": sourceID}); len(taken) > 0 {
+		if explicitID {
+			return JSONError(e, http.StatusConflict,
+				fmt.Sprintf("source id %q is already in use; choose a different id", sourceID))
+		}
+		return JSONError(e, http.StatusConflict,
+			fmt.Sprintf("auto-derived source id %q is already in use; provide an explicit source id", sourceID))
 	}
 
 	collection, err := e.App.FindCollectionByNameOrId("sources")
@@ -610,52 +625,31 @@ func sourceRecordToResponseWithKind(app core.App, r *core.Record) dto.SourceResp
 	return resp
 }
 
-// findSourceByVisibleID looks up a source by its user-facing sourceID, scoped to
-// what the caller can see (owner / shared / admin). Returns a JSONError-wrapped
-// error suitable for direct return from handlers.
+// findSourceByVisibleID looks up a source by its user-facing sourceID, scoped
+// to what the caller can see (owner / admin). sourceID is globally unique, so
+// at most one record ever matches.
 func findSourceByVisibleID(e *core.RequestEvent, sourceID string) (*core.Record, error) {
 	user, ok := e.Get("user").(*models.User)
 	if !ok || user == nil {
 		return nil, JSONError(e, http.StatusUnauthorized, "unauthenticated")
 	}
-	// PocketBase enforces uniqueness on (owner, sourceID), not sourceID alone,
-	// so two users may legitimately have a source with the same id. Pull up to
-	// 2 rows so we can detect collisions and force the caller to disambiguate
-	// rather than silently picking one — that path was a real authorization
-	// hazard for admin queries.
-	//
-	// Admin scoping: an admin acting on their own behalf can target any user's
-	// source (the cross-tenant path below). When the request carried an
-	// explicit `?userID=X` impersonation (which the middleware already used to
-	// swap `user` to X), treat the call as scoped to that user — otherwise an
-	// admin impersonating another admin still hits the cross-tenant branch and
-	// the disambiguation hint becomes a dead end.
+	// An admin acting on their own behalf can target any owner's source. An
+	// explicit ?userID=X impersonation (middleware already swapped `user` to X)
+	// scopes to that user.
 	impersonating := e.Request.URL.Query().Get("userID") != ""
 	var records []*core.Record
 	var err error
 	if user.IsAdmin() && !impersonating {
 		records, err = e.App.FindRecordsByFilter("sources",
-			"sourceID = {:s}", "+owner", 2, 0,
-			map[string]any{"s": sourceID})
+			"sourceID = {:s}", "", 1, 0, map[string]any{"s": sourceID})
 	} else {
 		records, err = e.App.FindRecordsByFilter("sources",
-			"sourceID = {:s} && owner = {:u}", "+owner", 2, 0,
+			"sourceID = {:s} && owner = {:u}", "", 1, 0,
 			map[string]any{"s": sourceID, "u": user.Id})
 	}
 	if err != nil || len(records) == 0 {
 		return nil, JSONError(e, http.StatusNotFound, fmt.Sprintf("source %q not found", sourceID))
 	}
-	if len(records) > 1 {
-		owners := make([]string, 0, len(records))
-		for _, r := range records {
-			owners = append(owners, resolveOwnerUserID(e, r.GetString("owner")))
-		}
-		return nil, JSONError(e, http.StatusConflict,
-			fmt.Sprintf("multiple sources match %q (owners: %s); re-run with -u <ownerID> to disambiguate",
-				sourceID, strings.Join(owners, ", ")))
-	}
-	// For non-admins, prefer the owned row when both an owned and a shared
-	// copy match (impossible in current schema but the +owner sort is stable).
 	return records[0], nil
 }
 
