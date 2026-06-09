@@ -58,7 +58,7 @@ func writeGalaxyYml(t *testing.T, dir, namespace, name, version, description str
 func TestWalkSourceRepoFindsAnsibleRolesAndCollections(t *testing.T) {
 	root := t.TempDir()
 
-	// v2 layout: roles under ansible/roles, collections under ansible/collections.
+	// Roles live under ansible/roles, collections under ansible/collections.
 	writeRepoFile(t, root, "ansible/roles/myrole/tasks/main.yml", "- debug: msg=hi\n")
 	writeRepoFile(t, root, "ansible/roles/myrole/meta/main.yml",
 		"galaxy_info:\n  role_name: myrole\n")
@@ -101,7 +101,7 @@ func TestWalkSourceRepoFindsAnsibleRolesAndCollections(t *testing.T) {
 	}
 	for _, r := range walked2.LocalRoles {
 		if filepath.Base(r) == "legacy" {
-			t.Fatalf("top-level roles/ must not be walked in v2 layout, but found %s", r)
+			t.Fatalf("top-level roles/ must not be walked (roles live under ansible/roles), but found %s", r)
 		}
 	}
 	_ = os.Stat // keep os imported for later tasks in this file
