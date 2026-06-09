@@ -225,6 +225,7 @@ func (m model) currentSelection() dto.InstallSelectionDTO {
 	out.Blueprints = setToSortedSlice(m.picked[sectionBlueprints.key()])
 	out.Templates = setToSortedSlice(m.picked[sectionTemplates.key()])
 	out.LocalRoles = setToSortedSlice(m.picked[sectionLocalRoles.key()])
+	out.LocalCollections = setToSortedSlice(m.picked[sectionLocalCollections.key()])
 	return out
 }
 
@@ -272,7 +273,7 @@ func (m model) visibleToggleable(sec section) []row {
 	var out []row
 	switch sec {
 	case sectionBlueprints:
-		for _, bp := range m.catalog.Blueprints {
+		for _, bp := range m.catalog.Blueprints.Items {
 			r := row{
 				kind:             rowToggleable,
 				section:          sec,
@@ -322,6 +323,23 @@ func (m model) visibleToggleable(sec section) []row {
 				out = append(out, r)
 			}
 		}
+	case sectionLocalCollections:
+		for _, lc := range m.catalog.LocalCollections {
+			r := row{
+				kind:             rowToggleable,
+				section:          sec,
+				id:               lc.Name,
+				label:            lc.Name,
+				description:      lc.Description,
+				version:          lc.Version,
+				state:            lc.State,
+				installedVersion: lc.InstalledVersion,
+				requiredBy:       lc.RequiredBy,
+			}
+			if m.matchesFilter(r) && m.visibleInMode(r) {
+				out = append(out, r)
+			}
+		}
 	}
 	return out
 }
@@ -343,9 +361,9 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 	var src []dto.CatalogItemDTO
 	switch kind {
 	case readOnlyGalaxyRoles:
-		src = m.catalog.GalaxyRoles
+		src = m.catalog.Blueprints.RequiredRoles
 	case readOnlyGalaxyCollections:
-		src = m.catalog.GalaxyCollections
+		src = m.catalog.Blueprints.RequiredCollections
 	case readOnlySubscriptionRoles:
 		src = m.catalog.SubscriptionRoles
 	}
@@ -356,7 +374,7 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 	// Map blueprint ID → display name so the trail says "by GOAD" not
 	// "by goad-light". requiredBy on a catalog item carries IDs.
 	nameByID := map[string]string{}
-	for _, bp := range m.catalog.Blueprints {
+	for _, bp := range m.catalog.Blueprints.Items {
 		nameByID[bp.ID] = bp.Name
 	}
 

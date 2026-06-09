@@ -13,6 +13,7 @@ const (
 	sectionBlueprints section = iota
 	sectionTemplates
 	sectionLocalRoles
+	sectionLocalCollections
 	numToggleableSections
 )
 
@@ -24,6 +25,8 @@ func (s section) key() string {
 		return "templates"
 	case sectionLocalRoles:
 		return "localRoles"
+	case sectionLocalCollections:
+		return "localCollections"
 	}
 	return ""
 }
@@ -36,6 +39,8 @@ func (s section) title() string {
 		return "Templates"
 	case sectionLocalRoles:
 		return "Source roles"
+	case sectionLocalCollections:
+		return "Source collections"
 	}
 	return ""
 }
@@ -111,9 +116,10 @@ func newModel(catalog dto.SourceCatalogDTO, mode Mode, adv Advanced) model {
 	ti.CharLimit = 64
 
 	picked := map[string]map[string]struct{}{
-		sectionBlueprints.key(): {},
-		sectionTemplates.key():  {},
-		sectionLocalRoles.key(): {},
+		sectionBlueprints.key():       {},
+		sectionTemplates.key():        {},
+		sectionLocalRoles.key():       {},
+		sectionLocalCollections.key(): {},
 	}
 
 	return model{
@@ -123,9 +129,10 @@ func newModel(catalog dto.SourceCatalogDTO, mode Mode, adv Advanced) model {
 		picked:  picked,
 		active:  sectionBlueprints,
 		cursor: map[section]int{
-			sectionBlueprints: 0,
-			sectionTemplates:  0,
-			sectionLocalRoles: 0,
+			sectionBlueprints:       0,
+			sectionTemplates:        0,
+			sectionLocalRoles:       0,
+			sectionLocalCollections: 0,
 		},
 		searchInput: ti,
 	}

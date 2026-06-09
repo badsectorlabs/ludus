@@ -26,7 +26,7 @@ func ExpandImplied(catalog dto.SourceCatalogDTO, sel dto.InstallSelectionDTO) Im
 		Templates:  map[string]struct{}{},
 		LocalRoles: map[string]struct{}{},
 	}
-	for _, bp := range catalog.Blueprints {
+	for _, bp := range catalog.Blueprints.Items {
 		if _, ok := picked[bp.ID]; !ok {
 			continue
 		}

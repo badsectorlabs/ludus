@@ -115,11 +115,11 @@ func (m model) View() string {
 	// installing (you can't drop an implied role directly — removing its
 	// blueprint prunes it). They sit right under Blueprints.
 	if m.mode == ModeInstall {
-		if len(m.catalog.GalaxyRoles) > 0 {
+		if len(m.catalog.Blueprints.RequiredRoles) > 0 {
 			b.WriteString(m.renderReadOnlySection("Blueprint roles", readOnlyGalaxyRoles))
 			b.WriteString("\n")
 		}
-		if len(m.catalog.GalaxyCollections) > 0 {
+		if len(m.catalog.Blueprints.RequiredCollections) > 0 {
 			b.WriteString(m.renderReadOnlySection("Blueprint collections", readOnlyGalaxyCollections))
 			b.WriteString("\n")
 		}
@@ -131,7 +131,7 @@ func (m model) View() string {
 
 	// Remaining toggleable sections — skip entirely when empty (or the search
 	// filter / remove-mode installed-only rule eliminated them all).
-	for _, sec := range []section{sectionTemplates, sectionLocalRoles} {
+	for _, sec := range []section{sectionTemplates, sectionLocalRoles, sectionLocalCollections} {
 		if len(m.visibleToggleable(sec)) == 0 {
 			continue
 		}
@@ -598,7 +598,7 @@ func (m model) selectionCounts() (install, upgrade, remove int) {
 		}
 	}
 	bpSet := m.picked[sectionBlueprints.key()]
-	for _, bp := range m.catalog.Blueprints {
+	for _, bp := range m.catalog.Blueprints.Items {
 		classify(bp.ID, bp.State, bpSet)
 	}
 	tSet := m.picked[sectionTemplates.key()]

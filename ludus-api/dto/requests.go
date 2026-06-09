@@ -231,12 +231,12 @@ type AutoShutdownRequest struct {
 // source row is created, the repo is fetched and walked, and a catalog is
 // returned. Callers drive the install via POST /sources/{id}/install.
 type CreateSourceRequest struct {
-	ID          string `json:"id,omitempty" form:"id"`
-	Type        string `json:"type" form:"type"`
-	URL         string `json:"url,omitempty" form:"url"`
-	Ref         string `json:"ref,omitempty" form:"ref"`
-	Global bool `json:"global,omitempty" form:"global"`
-	Force  bool `json:"force,omitempty" form:"force"`
+	ID     string `json:"id,omitempty" form:"id"`
+	Type   string `json:"type" form:"type"`
+	URL    string `json:"url,omitempty" form:"url"`
+	Ref    string `json:"ref,omitempty" form:"ref"`
+	Global bool   `json:"global,omitempty" form:"global"`
+	Force  bool   `json:"force,omitempty" form:"force"`
 }
 
 // InstallRequest is the body for POST /sources/{sourceID}/install.
@@ -268,9 +268,10 @@ type InstallRequest struct {
 }
 
 type InstallSelectionDTO struct {
-	Blueprints []string `json:"blueprints,omitempty"`
-	Templates  []string `json:"templates,omitempty"`
-	LocalRoles []string `json:"localRoles,omitempty"`
+	Blueprints       []string `json:"blueprints,omitempty"`
+	Templates        []string `json:"templates,omitempty"`
+	LocalRoles       []string `json:"localRoles,omitempty"`
+	LocalCollections []string `json:"localCollections,omitempty"`
 }
 type UpdateSourceRequest struct {
 	Ref    string `json:"ref"`

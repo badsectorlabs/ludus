@@ -35,9 +35,10 @@ type sourceFlags struct {
 	All      bool
 	NoPrompt bool
 
-	Blueprints []string
-	Templates  []string
-	LocalRoles []string
+	Blueprints       []string
+	Templates        []string
+	LocalRoles       []string
+	LocalCollections []string
 
 	Global bool
 	Force  bool
@@ -52,7 +53,7 @@ func selectInstallMode(f sourceFlags, isTTY bool) installMode {
 	if f.All || f.NoPrompt {
 		return modeInstallAll
 	}
-	if len(f.Blueprints)+len(f.Templates)+len(f.LocalRoles) > 0 {
+	if len(f.Blueprints)+len(f.Templates)+len(f.LocalRoles)+len(f.LocalCollections) > 0 {
 		return modeScripted
 	}
 	if !isTTY {

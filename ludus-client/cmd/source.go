@@ -225,21 +225,22 @@ func appendUniqueStr(s []string, v string) []string {
 
 // Source-related flag vars; reused across subcommands.
 var (
-	sourceFlagID     string
-	sourceFlagRef    string
-	sourceFlagGlobal bool
-	sourceFlagForce  bool
-	sourceFlagNoDeps      bool
-	sourceFlagNoPrompt    bool
+	sourceFlagID       string
+	sourceFlagRef      string
+	sourceFlagGlobal   bool
+	sourceFlagForce    bool
+	sourceFlagNoDeps   bool
+	sourceFlagNoPrompt bool
 
 	// Selection flags for `source add`. Picker is used when none are set
 	// and stdin is a TTY; otherwise these drive scripted installs.
-	sourceFlagBlueprints stringSliceCSV
-	sourceFlagTemplates  stringSliceCSV
-	sourceFlagLocalRoles stringSliceCSV
-	sourceFlagAll        bool
-	sourceFlagCatalog    bool
-	sourceFlagDirectory  string
+	sourceFlagBlueprints       stringSliceCSV
+	sourceFlagTemplates        stringSliceCSV
+	sourceFlagLocalRoles       stringSliceCSV
+	sourceFlagLocalCollections stringSliceCSV
+	sourceFlagAll              bool
+	sourceFlagCatalog          bool
+	sourceFlagDirectory        string
 )
 
 var sourceCmd = &cobra.Command{
@@ -261,7 +262,7 @@ The positional argument is classified by shape:
   ludus source add -d ./local-source-dir         # local directory (must use -d)
 
 Run without selection flags in a TTY to open the interactive picker. Pass
---blueprints / --templates / --source-roles for a scripted install. Pass --all
+--blueprints / --templates / --source-roles / --source-collections for a scripted install. Pass --all
 to install everything. Pass --catalog to walk the source and render its
 catalog without registering anything (tables by default, raw JSON when
 combined with --json).`,
@@ -319,10 +320,10 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 
 	if mode == modeInstallAll {
 		doInstallAll(client, registerResp.SourceID, registerResp.Catalog, sourcepicker.Advanced{
-			Global: flags.Global,
-			Force:       flags.Force,
-			IsAdmin:     clientIsAdmin(),
-			NoDeps:      flags.NoDeps,
+			Global:  flags.Global,
+			Force:   flags.Force,
+			IsAdmin: clientIsAdmin(),
+			NoDeps:  flags.NoDeps,
 		})
 		return
 	}
@@ -348,7 +349,7 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 // "nothing to do" gate. (Distinct from a present-but-empty selection sent to
 // the server, which is the prune-all signal.)
 func isEmptySelection(sel dto.InstallSelectionDTO) bool {
-	return len(sel.Blueprints)+len(sel.Templates)+len(sel.LocalRoles) == 0
+	return len(sel.Blueprints)+len(sel.Templates)+len(sel.LocalRoles)+len(sel.LocalCollections) == 0
 }
 
 // runSourceCatalogDump renders the source's catalog without registering
@@ -403,11 +404,11 @@ func renderCatalogTables(cat dto.SourceCatalogDTO) {
 		fmt.Printf("Source: %s\n", cat.SourceID)
 	}
 
-	renderBlueprintsTable(cat.Blueprints)
+	renderBlueprintsTable(cat.Blueprints.Items)
 	renderItemsTable("Templates", cat.Templates, false)
 	renderItemsTable("Source roles", cat.LocalRoles, false)
-	renderItemsTable("Blueprint role requirements", cat.GalaxyRoles, true)
-	renderItemsTable("Blueprint collection requirements", cat.GalaxyCollections, true)
+	renderItemsTable("Blueprint role requirements", cat.Blueprints.RequiredRoles, true)
+	renderItemsTable("Blueprint collection requirements", cat.Blueprints.RequiredCollections, true)
 	renderItemsTable("Subscription roles", cat.SubscriptionRoles, true)
 
 	if len(cat.UndeclaredDependencies) > 0 {
@@ -518,10 +519,10 @@ func tryFetchCatalog(client *resty.Client, sourceID string) (dto.SourceCatalogDT
 func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.SourceCatalogDTO, flags sourceFlags, mode installMode, intent sourcepicker.Mode) {
 	if mode == modeInstallAll {
 		doInstallAll(client, sourceID, cat, sourcepicker.Advanced{
-			Global: flags.Global,
-			Force:       flags.Force,
-			IsAdmin:     clientIsAdmin(),
-			NoDeps:      flags.NoDeps,
+			Global:  flags.Global,
+			Force:   flags.Force,
+			IsAdmin: clientIsAdmin(),
+			NoDeps:  flags.NoDeps,
 		})
 		return
 	}
@@ -550,17 +551,18 @@ func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.Source
 // pure.
 func readSourceAddFlags() sourceFlags {
 	return sourceFlags{
-		ID:          sourceFlagID,
-		Ref:         sourceFlagRef,
-		Directory:   sourceFlagDirectory,
-		Catalog:     sourceFlagCatalog,
-		All:         sourceFlagAll,
-		Blueprints:  []string(sourceFlagBlueprints),
-		Templates:   []string(sourceFlagTemplates),
-		LocalRoles:  []string(sourceFlagLocalRoles),
-		Global: sourceFlagGlobal,
-		Force:       sourceFlagForce,
-		NoDeps:      sourceFlagNoDeps,
+		ID:               sourceFlagID,
+		Ref:              sourceFlagRef,
+		Directory:        sourceFlagDirectory,
+		Catalog:          sourceFlagCatalog,
+		All:              sourceFlagAll,
+		Blueprints:       []string(sourceFlagBlueprints),
+		Templates:        []string(sourceFlagTemplates),
+		LocalRoles:       []string(sourceFlagLocalRoles),
+		LocalCollections: []string(sourceFlagLocalCollections),
+		Global:           sourceFlagGlobal,
+		Force:            sourceFlagForce,
+		NoDeps:           sourceFlagNoDeps,
 	}
 }
 
@@ -570,9 +572,9 @@ func readSourceAddFlags() sourceFlags {
 // doInstall.
 func postSourceRegister(client *resty.Client, arg string, flags sourceFlags) (dto.RegisterSourceResponse, bool, error) {
 	req := dto.CreateSourceRequest{
-		ID:          flags.ID,
+		ID:     flags.ID,
 		Global: flags.Global,
-		Force:       flags.Force,
+		Force:  flags.Force,
 	}
 	var fileField, fileName string
 	var fileBytes []byte
@@ -647,17 +649,18 @@ func postSourceRegister(client *resty.Client, arg string, flags sourceFlags) (dt
 //     proceeds — its empty selection is the server's prune-all signal.
 func chooseSelection(mode installMode, intent sourcepicker.Mode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, bool, error) {
 	adv := sourcepicker.Advanced{
-		Global: flags.Global,
-		Force:       flags.Force,
-		IsAdmin:     clientIsAdmin(),
-		NoDeps:      flags.NoDeps,
+		Global:  flags.Global,
+		Force:   flags.Force,
+		IsAdmin: clientIsAdmin(),
+		NoDeps:  flags.NoDeps,
 	}
 	switch mode {
 	case modeScripted:
 		sel := dto.InstallSelectionDTO{
-			Blueprints: flags.Blueprints,
-			Templates:  flags.Templates,
-			LocalRoles: flags.LocalRoles,
+			Blueprints:       flags.Blueprints,
+			Templates:        flags.Templates,
+			LocalRoles:       flags.LocalRoles,
+			LocalCollections: flags.LocalCollections,
 		}
 		return sel, adv, true, !isEmptySelection(sel), nil
 	case modeInteractive:
@@ -689,7 +692,7 @@ func chooseSelection(mode installMode, intent sourcepicker.Mode, flags sourceFla
 // they reference no longer exist upstream).
 func deriveCurrentSelection(cat dto.SourceCatalogDTO) dto.InstallSelectionDTO {
 	out := dto.InstallSelectionDTO{}
-	for _, bp := range cat.Blueprints {
+	for _, bp := range cat.Blueprints.Items {
 		if bp.State == "installed" || bp.State == "upgrade_available" {
 			out.Blueprints = append(out.Blueprints, bp.ID)
 		}
@@ -702,6 +705,11 @@ func deriveCurrentSelection(cat dto.SourceCatalogDTO) dto.InstallSelectionDTO {
 	for _, r := range cat.LocalRoles {
 		if r.State == "installed" || r.State == "upgrade_available" {
 			out.LocalRoles = append(out.LocalRoles, r.Name)
+		}
+	}
+	for _, c := range cat.LocalCollections {
+		if c.State == "installed" || c.State == "upgrade_available" {
+			out.LocalCollections = append(out.LocalCollections, c.Name)
 		}
 	}
 	return out
@@ -724,10 +732,10 @@ func installVerbPast(intent sourcepicker.Mode) string {
 
 func doInstall(client *resty.Client, sourceID string, sel dto.InstallSelectionDTO, adv sourcepicker.Advanced, verbPast string) {
 	postInstall(client, sourceID, dto.InstallRequest{
-		Selection:   &sel,
-		Global: adv.Global,
-		Force:       adv.Force,
-		NoDeps:      adv.NoDeps,
+		Selection: &sel,
+		Global:    adv.Global,
+		Force:     adv.Force,
+		NoDeps:    adv.NoDeps,
 	}, verbPast)
 }
 
@@ -741,8 +749,8 @@ func doInstallAll(client *resty.Client, sourceID string, _ dto.SourceCatalogDTO,
 	// selection), so the verb is fixed.
 	postInstall(client, sourceID, dto.InstallRequest{
 		Global: adv.Global,
-		Force:       adv.Force,
-		NoDeps:      adv.NoDeps,
+		Force:  adv.Force,
+		NoDeps: adv.NoDeps,
 	}, "installed")
 }
 
@@ -926,7 +934,7 @@ func runSourceSync(cmd *cobra.Command, args []string) {
 
 	body, _ := json.Marshal(dto.SyncSourceRequest{
 		Global: sourceFlagGlobal,
-		Force:       sourceFlagForce,
+		Force:  sourceFlagForce,
 	})
 
 	// Multi-target syncs without a header leave per-source errors floating
@@ -1014,7 +1022,7 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 	if fileField != "" {
 		updateReq := dto.UpdateSourceRequest{
 			Global: sourceFlagGlobal,
-			Force:       sourceFlagForce,
+			Force:  sourceFlagForce,
 		}
 		responseJSON, success := rest.FileUpload(client, "PATCH",
 			buildURLWithRangeAndUserID(path), fileField, fileName, fileBytes, updateSourceRequestToForm(updateReq))
@@ -1051,6 +1059,7 @@ files.
   ludus source remove <id> --blueprints A,B             # scripted: drop blueprints A and B from the current selection
   ludus source remove <id> --templates T1               # scripted: drop template T1
   ludus source remove <id> --source-roles R1            # scripted: drop local role R1
+  ludus source remove <id> --source-collections ns.col  # scripted: drop local collection ns.col
   ludus source remove <id> --all                        # scripted: drop every item (the source stays registered)
 
 To DELETE the source entirely (registration + every installed item),
@@ -1078,7 +1087,7 @@ func runSourceRemove(cmd *cobra.Command, args []string) {
 		}
 		runExistingSourceFlow(client, sid, catalog, sourceFlags{
 			Global: sourceFlagGlobal,
-			Force:       sourceFlagForce,
+			Force:  sourceFlagForce,
 		}, modeInteractive, sourcepicker.ModeRemove)
 		return
 	}
@@ -1109,17 +1118,17 @@ func runSourceRemove(cmd *cobra.Command, args []string) {
 	}
 
 	postInstall(client, sid, dto.InstallRequest{
-		Selection:   &newSelection,
-		Global: sourceFlagGlobal,
-		Force:       sourceFlagForce,
+		Selection: &newSelection,
+		Global:    sourceFlagGlobal,
+		Force:     sourceFlagForce,
 	}, "removed")
 }
 
 // installedBlueprintIDs returns the sourceBlueprintID of every catalog
 // blueprint currently installed (or in upgrade-available state).
 func installedBlueprintIDs(cat dto.SourceCatalogDTO) []string {
-	out := make([]string, 0, len(cat.Blueprints))
-	for _, bp := range cat.Blueprints {
+	out := make([]string, 0, len(cat.Blueprints.Items))
+	for _, bp := range cat.Blueprints.Items {
 		if bp.State == "installed" || bp.State == "upgrade_available" {
 			out = append(out, bp.ID)
 		}
@@ -1197,15 +1206,17 @@ func composeInteractiveSelection(mode sourcepicker.Mode, cat dto.SourceCatalogDT
 	current := deriveCurrentSelection(cat)
 	if mode == sourcepicker.ModeRemove {
 		return dto.InstallSelectionDTO{
-			Blueprints: subtractStrings(current.Blueprints, picked.Blueprints),
-			Templates:  subtractStrings(current.Templates, picked.Templates),
-			LocalRoles: subtractStrings(current.LocalRoles, picked.LocalRoles),
+			Blueprints:       subtractStrings(current.Blueprints, picked.Blueprints),
+			Templates:        subtractStrings(current.Templates, picked.Templates),
+			LocalRoles:       subtractStrings(current.LocalRoles, picked.LocalRoles),
+			LocalCollections: subtractStrings(current.LocalCollections, picked.LocalCollections),
 		}
 	}
 	return dto.InstallSelectionDTO{
-		Blueprints: unionStrings(current.Blueprints, picked.Blueprints),
-		Templates:  unionStrings(current.Templates, picked.Templates),
-		LocalRoles: unionStrings(current.LocalRoles, picked.LocalRoles),
+		Blueprints:       unionStrings(current.Blueprints, picked.Blueprints),
+		Templates:        unionStrings(current.Templates, picked.Templates),
+		LocalRoles:       unionStrings(current.LocalRoles, picked.LocalRoles),
+		LocalCollections: unionStrings(current.LocalCollections, picked.LocalCollections),
 	}
 }
 
@@ -1259,6 +1270,7 @@ func init() {
 	sourceAddCmd.Flags().Var(&sourceFlagBlueprints, "blueprints", "blueprint IDs to install (CSV or repeated)")
 	sourceAddCmd.Flags().Var(&sourceFlagTemplates, "templates", "template names to install (CSV or repeated)")
 	sourceAddCmd.Flags().Var(&sourceFlagLocalRoles, "source-roles", "source role names to install (CSV or repeated)")
+	sourceAddCmd.Flags().Var(&sourceFlagLocalCollections, "source-collections", "source collection FQCNs to install (CSV or repeated)")
 
 	sourceAddCmd.Flags().BoolVar(&sourceFlagCatalog, "catalog", false, "walk the source and render its catalog (tables by default, JSON with --json); registers nothing")
 
@@ -1287,6 +1299,7 @@ func init() {
 	sourceRemoveCmd.Flags().Var(&sourceFlagBlueprints, "blueprints", "blueprint IDs to drop from the current selection (CSV or repeated)")
 	sourceRemoveCmd.Flags().Var(&sourceFlagTemplates, "templates", "template names to drop (CSV or repeated)")
 	sourceRemoveCmd.Flags().Var(&sourceFlagLocalRoles, "source-roles", "source role names to drop (CSV or repeated)")
+	sourceRemoveCmd.Flags().Var(&sourceFlagLocalCollections, "source-collections", "source collection FQCNs to drop (CSV or repeated)")
 	sourceRemoveCmd.Flags().BoolVar(&sourceFlagAll, "all", false, "drop every item from this source (the source itself stays registered)")
 	sourceRemoveCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: also affect roles and collections installed instance-wide")
 	sourceRemoveCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "no-op for remove; kept for symmetry with add")

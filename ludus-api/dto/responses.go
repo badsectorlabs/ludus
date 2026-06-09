@@ -678,26 +678,33 @@ type RegisterSourceResponse struct {
 type SourceCatalogDTO struct {
 	SourceID               string                    `json:"sourceID"`
 	SourceName             string                    `json:"sourceName"`
-	Blueprints             []CatalogBlueprintDTO     `json:"blueprints"`
+	Blueprints             CatalogBlueprintsDTO      `json:"blueprints"`
 	Templates              []CatalogItemDTO          `json:"templates"`
 	LocalRoles             []CatalogItemDTO          `json:"localRoles"`
-	GalaxyRoles            []CatalogItemDTO          `json:"galaxyRoles"`
-	GalaxyCollections      []CatalogItemDTO          `json:"galaxyCollections"`
+	LocalCollections       []CatalogItemDTO          `json:"localCollections"`
 	SubscriptionRoles      []CatalogItemDTO          `json:"subscriptionRoles"`
 	UndeclaredDependencies []UndeclaredDependencyDTO `json:"undeclaredDependencies,omitempty"`
 }
 
+// CatalogBlueprintsDTO groups the source's blueprints with the role and
+// collection dependency closure those blueprints pull from ansible-galaxy.
+type CatalogBlueprintsDTO struct {
+	Items               []CatalogBlueprintDTO `json:"items"`
+	RequiredRoles       []CatalogItemDTO      `json:"requiredRoles"`
+	RequiredCollections []CatalogItemDTO      `json:"requiredCollections"`
+}
+
 type CatalogBlueprintDTO struct {
-	ID                        string   `json:"id"`
-	Name                      string   `json:"name"`
-	Description               string   `json:"description,omitempty"`
-	Version                   string   `json:"version"`
-	State                     string   `json:"state"`
-	InstalledVersion          string   `json:"installedVersion,omitempty"`
-	RequiredTemplates         []string `json:"requiredTemplates,omitempty"`
-	RequiredLocalRoles        []string `json:"requiredLocalRoles,omitempty"`
-	RequiredGalaxyRoles       []string `json:"requiredGalaxyRoles,omitempty"`
-	RequiredGalaxyCollections []string `json:"requiredGalaxyCollections,omitempty"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Description         string   `json:"description,omitempty"`
+	Version             string   `json:"version"`
+	State               string   `json:"state"`
+	InstalledVersion    string   `json:"installedVersion,omitempty"`
+	RequiredTemplates   []string `json:"requiredTemplates,omitempty"`
+	RequiredLocalRoles  []string `json:"requiredLocalRoles,omitempty"`
+	RequiredRoles       []string `json:"requiredRoles,omitempty"`
+	RequiredCollections []string `json:"requiredCollections,omitempty"`
 }
 
 type CatalogItemDTO struct {

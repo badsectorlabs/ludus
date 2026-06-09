@@ -929,9 +929,10 @@ func InstallSource(e *core.RequestEvent) error {
 		// Caller supplied selection (even if empty). Honor it verbatim;
 		// empty arrays are the explicit "uninstall everything" signal.
 		opts.Selection = &InstallSelection{
-			Blueprints: req.Selection.Blueprints,
-			Templates:  req.Selection.Templates,
-			LocalRoles: req.Selection.LocalRoles,
+			Blueprints:       req.Selection.Blueprints,
+			Templates:        req.Selection.Templates,
+			LocalRoles:       req.Selection.LocalRoles,
+			LocalCollections: req.Selection.LocalCollections,
 		}
 	}
 	// opts.Selection stays nil only when the caller omitted the selection
@@ -947,7 +948,7 @@ func InstallSource(e *core.RequestEvent) error {
 }
 
 func isEmptySelection(s dto.InstallSelectionDTO) bool {
-	return len(s.Blueprints) == 0 && len(s.Templates) == 0 && len(s.LocalRoles) == 0
+	return len(s.Blueprints) == 0 && len(s.Templates) == 0 && len(s.LocalRoles) == 0 && len(s.LocalCollections) == 0
 }
 
 // toCatalogDTO copies an internal SourceCatalog onto the wire DTO. Trivial
@@ -960,31 +961,30 @@ func toCatalogDTO(c *SourceCatalog) dto.SourceCatalogDTO {
 	out := dto.SourceCatalogDTO{
 		SourceID:          c.SourceID,
 		SourceName:        c.SourceName,
-		Blueprints:        make([]dto.CatalogBlueprintDTO, 0, len(c.Blueprints)),
 		Templates:         make([]dto.CatalogItemDTO, 0, len(c.Templates)),
 		LocalRoles:        make([]dto.CatalogItemDTO, 0, len(c.LocalRoles)),
-		GalaxyRoles:       make([]dto.CatalogItemDTO, 0, len(c.GalaxyRoles)),
-		GalaxyCollections: make([]dto.CatalogItemDTO, 0, len(c.GalaxyCollections)),
 		SubscriptionRoles: make([]dto.CatalogItemDTO, 0, len(c.SubscriptionRoles)),
 	}
+	out.Blueprints.Items = make([]dto.CatalogBlueprintDTO, 0, len(c.Blueprints))
 	for _, bp := range c.Blueprints {
-		out.Blueprints = append(out.Blueprints, dto.CatalogBlueprintDTO{
-			ID:                        bp.ID,
-			Name:                      bp.Name,
-			Description:               bp.Description,
-			Version:                   bp.Version,
-			State:                     bp.State,
-			InstalledVersion:          bp.InstalledVersion,
-			RequiredTemplates:         bp.RequiredTemplates,
-			RequiredLocalRoles:        bp.RequiredLocalRoles,
-			RequiredGalaxyRoles:       bp.RequiredGalaxyRoles,
-			RequiredGalaxyCollections: bp.RequiredGalaxyCollections,
+		out.Blueprints.Items = append(out.Blueprints.Items, dto.CatalogBlueprintDTO{
+			ID:                  bp.ID,
+			Name:                bp.Name,
+			Description:         bp.Description,
+			Version:             bp.Version,
+			State:               bp.State,
+			InstalledVersion:    bp.InstalledVersion,
+			RequiredTemplates:   bp.RequiredTemplates,
+			RequiredLocalRoles:  bp.RequiredLocalRoles,
+			RequiredRoles:       bp.RequiredGalaxyRoles,
+			RequiredCollections: bp.RequiredGalaxyCollections,
 		})
 	}
 	out.Templates = catalogItemsToDTO(c.Templates)
 	out.LocalRoles = catalogItemsToDTO(c.LocalRoles)
-	out.GalaxyRoles = catalogItemsToDTO(c.GalaxyRoles)
-	out.GalaxyCollections = catalogItemsToDTO(c.GalaxyCollections)
+	out.LocalCollections = catalogItemsToDTO(c.LocalCollections)
+	out.Blueprints.RequiredRoles = catalogItemsToDTO(c.GalaxyRoles)
+	out.Blueprints.RequiredCollections = catalogItemsToDTO(c.GalaxyCollections)
 	out.SubscriptionRoles = catalogItemsToDTO(c.SubscriptionRoles)
 	out.UndeclaredDependencies = undeclaredDepsToDTO(c.UndeclaredDependencies)
 	return out
