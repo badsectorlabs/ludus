@@ -1431,6 +1431,30 @@ post-deploy blueprints-as-admin:
     - set +o pipefail
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ci-src --no-prompt 2>&1 | grep -qiE "not found|owner or an admin"'
     - set -o pipefail
+    # --- sourceID is globally unique across owners (regression) ---
+    # ci-src is still registered by CIA above. A DIFFERENT user adding the same
+    # EXPLICIT id must be rejected (UX-agnostic, no CLI flags) instead of
+    # silently creating a cross-owner duplicate (the bug this fixes).
+    - set +o pipefail
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --force 2>&1 | grep -qiE "already in use"'
+    - set -o pipefail
+    # A DERIVED id that collides across owners is REJECTED — the caller must pass
+    # an explicit id. Matches how templates/users/blueprints handle id collisions
+    # (no auto-rename). CIA registers the fixture's natural slug; CIU adding the
+    # same fixture with no --id is rejected, but CIU CAN add it under an explicit
+    # unique id.
+    - ludus source rm source-template --no-prompt || true
+    - ludus source rm ciu-src-template --no-prompt || true
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --force
+    - 'ludus source list | grep -q "source-template "'
+    - set +o pipefail
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --force 2>&1 | grep -qiE "already in use"'
+    - set -o pipefail
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ciu-src-template --force'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source list | grep -q "ciu-src-template "'
+    # cleanup
+    - ludus source rm source-template --no-prompt || true
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ciu-src-template --no-prompt || true'
     # Two distinct verbs, both exercised here:
     #   `source rm`     — registration-only: drops the source + its blueprints,
     #                     leaves installed templates/roles on disk.
