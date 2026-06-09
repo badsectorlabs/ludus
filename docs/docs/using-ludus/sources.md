@@ -66,8 +66,9 @@ so submodules are pulled (and refreshed on re-sync) automatically. This lets a
 source aggregate content that lives in its own repository while keeping that repo
 independent for issues and development.
 
-Use **relative** submodule URLs (e.g. `../ludus_adcs.git`) in `.gitmodules` so the
-source resolves submodules against whatever host it was cloned from.
+Each submodule points at its upstream repository URL in `.gitmodules` (e.g.
+`https://github.com/badsectorlabs/ludus_adcs.git`); public repositories clone
+without credentials.
 
 ## Common Workflows
 
