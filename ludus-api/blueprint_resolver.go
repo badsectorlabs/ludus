@@ -354,8 +354,9 @@ func markInstallStatus(app core.App, rec *core.Record, status, errMsg string) {
 	_ = app.Save(rec)
 }
 
-func embedArtifactResults(resp map[string]any, templates, localRoles []ArtifactResult, roles []RoleInstallResult) {
+func embedArtifactResults(resp map[string]any, templates, localRoles, localCollections []ArtifactResult, roles []RoleInstallResult) {
 	resp["templateResults"] = templates
 	resp["localRoleResults"] = localRoles
+	resp["localCollectionResults"] = localCollections
 	resp["roleResults"] = roles
 }

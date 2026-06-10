@@ -30,7 +30,7 @@ type blueprintInstallPayload struct {
 // blueprint install/create/import. label is what to print when there are no
 // failures (e.g. "Blueprint 'goad'").
 func printBlueprintInstallFailures(label string, p blueprintInstallPayload) {
-	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, p.RoleResults)
+	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, nil, p.RoleResults)
 	printArtifactOutcome(label, "dependencies installed", "install completed with errors", failures)
 }
 
@@ -38,10 +38,10 @@ var (
 	blueprintID          string
 	blueprintName        string
 	blueprintDescription string
-	blueprintFromRange  string
-	blueprintFromBP     string
-	blueprintFromImport string
-	blueprintConfigFile string
+	blueprintFromRange   string
+	blueprintFromBP      string
+	blueprintFromImport  string
+	blueprintConfigFile  string
 	blueprintTargetRange string
 	blueprintForce       bool
 	blueprintNoPrompt    bool
@@ -676,7 +676,6 @@ func init() {
 	rootCmd.AddCommand(blueprintCmd)
 }
 
-
 var blueprintInfoCmd = &cobra.Command{
 	Use:     "info <id>",
 	Short:   "Show blueprint metadata and dependency status",
@@ -757,7 +756,6 @@ func printBlueprintInfo(d map[string]any) {
 	}
 }
 
-
 var (
 	installFlagGlobal     bool
 	installFlagForceRoles bool
@@ -791,7 +789,6 @@ Works on local blueprints (e.g. 'my-lab') OR slug-prefixed source-blueprints (e.
 		printBlueprintInstallFailures(fmt.Sprintf("Blueprint '%s'", resp.BlueprintID), resp)
 	},
 }
-
 
 var (
 	updateFlagVersion     string
@@ -844,7 +841,6 @@ field. For interactive editing of the YAML config, use 'ludus blueprint config e
 		logger.Logger.Infof("Blueprint '%s' updated", args[0])
 	},
 }
-
 
 var blueprintExportOut string
 
@@ -931,7 +927,6 @@ func runBlueprintImport(client *resty.Client, tarPath string) {
 		}
 	}
 }
-
 
 var blueprintEditEditor string
 
@@ -1029,4 +1024,3 @@ func runBlueprintConfigEdit(bpID string) {
 	}
 	handleGenericResult(responseJSON)
 }
-

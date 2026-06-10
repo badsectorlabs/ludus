@@ -42,6 +42,7 @@ type syncResultPayload struct {
 	SourceID               string                        `json:"sourceID"`
 	TemplateResults        []artifactResultPayload       `json:"templateResults"`
 	LocalRoleResults       []artifactResultPayload       `json:"localRoleResults"`
+	LocalCollectionResults []artifactResultPayload       `json:"localCollectionResults"`
 	RoleResults            []roleResultPayload           `json:"roleResults"`
 	UndeclaredDependencies []undeclaredDependencyPayload `json:"undeclaredDependencies,omitempty"`
 }
@@ -103,7 +104,7 @@ type roleResultPayload struct {
 	Error string `json:"error,omitempty"`
 }
 
-func collectArtifactFailureLines(templates, localRoles []artifactResultPayload, roles []roleResultPayload) []string {
+func collectArtifactFailureLines(templates, localRoles, localCollections []artifactResultPayload, roles []roleResultPayload) []string {
 	var failures []string
 	for _, r := range templates {
 		if !r.OK {
@@ -113,6 +114,11 @@ func collectArtifactFailureLines(templates, localRoles []artifactResultPayload, 
 	for _, r := range localRoles {
 		if !r.OK {
 			failures = append(failures, fmt.Sprintf("local_role %s: %s", r.Name, r.Message))
+		}
+	}
+	for _, r := range localCollections {
+		if !r.OK {
+			failures = append(failures, fmt.Sprintf("local_collection %s: %s", r.Name, r.Message))
 		}
 	}
 	for _, r := range roles {
@@ -140,7 +146,7 @@ func printArtifactOutcome(label, successPhrase, failurePhrase string, failures [
 // "updated" from source update — so the output matches what the user
 // actually invoked.
 func printSyncFailures(label, verbPast string, p syncResultPayload) {
-	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, p.RoleResults)
+	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, p.LocalCollectionResults, p.RoleResults)
 	printArtifactOutcome(label, verbPast+" successfully", verbPast+" with errors", failures)
 	printUndeclaredDependencies(p.UndeclaredDependencies)
 }
