@@ -457,7 +457,7 @@ func renderAnsibleTable(cat dto.SourceCatalogDTO) {
 	}
 	fmt.Printf("\nAnsible (%d)\n", len(rows))
 	t := tablewriter.NewWriter(os.Stdout)
-	t.SetHeader([]string{"Name", "Kind", "Version", "State"})
+	t.SetHeader([]string{"Name", "Kind", "Version", "Install State"})
 	for _, r := range rows {
 		version := r.item.Version
 		if version == "" {
@@ -474,10 +474,9 @@ func renderAnsibleTable(cat dto.SourceCatalogDTO) {
 }
 
 // scopedInstallState renders where an item is installed, one entry per copy:
-// "installed (global, v1.0.0), (user, v1.2.0)". A copy with no recorded
-// version (local roles are versionless) is just its bare scope name, e.g.
-// "installed global, user". Items without per-scope data fall back to a
-// plain installed/not installed.
+// "(global, v1.0.0), (user, v1.2.0)". A copy with no recorded version (local
+// roles are versionless) is just its bare scope name, e.g. "global, user".
+// Items without per-scope data fall back to a plain installed/not installed.
 func scopedInstallState(it dto.CatalogItemDTO) string {
 	if len(it.Scopes) > 0 {
 		parts := make([]string, 0, len(it.Scopes))
@@ -488,7 +487,7 @@ func scopedInstallState(it dto.CatalogItemDTO) string {
 				parts = append(parts, s.Scope)
 			}
 		}
-		return "installed " + strings.Join(parts, ", ")
+		return strings.Join(parts, ", ")
 	}
 	if it.State == "not_installed" || it.State == "" {
 		return "not installed"
@@ -848,14 +847,15 @@ ansible roles/collections) joined with the current install state.`,
 			return
 		}
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Source ID", "Name", "Owner", "Type", "Authors", "Last Synced", "Status"})
+		// "Last Updated" is type-neutral on purpose: the timestamp is the last
+		// content refresh — a re-pull for git sources, a tarball push for uploads.
+		table.SetHeader([]string{"Source ID", "Name", "Authors", "Type", "Last Updated", "Status"})
 		for _, s := range sources {
 			table.Append([]string{
 				s.SourceID,
 				s.Name,
-				s.OwnerUserID,
-				s.Type,
 				strings.Join(s.Authors, ", "),
+				s.Type,
 				s.LastSyncedAt,
 				s.LastSyncStatus,
 			})
@@ -910,7 +910,7 @@ func runSourceDetail(client *resty.Client, sourceID string) {
 	row("Homepage", src.Homepage)
 	row("Owner", src.OwnerUserID)
 	row("Kind", src.Kind)
-	row("Last synced", src.LastSyncedAt)
+	row("Last updated", src.LastSyncedAt)
 	row("Status", src.LastSyncStatus)
 	row("Error", src.LastSyncError)
 	t.Render()
