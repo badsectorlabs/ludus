@@ -127,7 +127,7 @@ type ResolverOpts struct {
 // blueprint's requirements.yml: galaxy roles (`roles:`), collections
 // (`collections:`), and subscription roles (`subscription_roles:`).
 // Returns per-role results.
-func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedBlueprint, opts ResolverOpts) []RoleInstallResult {
+func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedBlueprint, opts ResolverOpts) []AnsibleInstallResult {
 	declaredSub := subscriptionRolesFromRequirements(walked.RequirementsYAML)
 	catalog := getSubscriptionCatalogNames(e)
 
@@ -140,18 +140,20 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 		galaxyRequirements = filtered
 	}
 
-	var out []RoleInstallResult
+	var out []AnsibleInstallResult
 
 	if len(declaredSub) > 0 {
 		switch {
 		case server == nil || !server.LicenseValid || server.LicenseKey == "":
-			out = append(out, RoleInstallResult{
+			out = append(out, AnsibleInstallResult{
+				Type:  AnsibleResultSubscriptionRole,
 				OK:    false,
 				Error: fmt.Sprintf("blueprint declares Ludus subscription roles, but this instance has no valid license: %v", declaredSub),
 			})
 			return out
 		case len(catalog) == 0:
-			out = append(out, RoleInstallResult{
+			out = append(out, AnsibleInstallResult{
+				Type:  AnsibleResultSubscriptionRole,
 				OK:    false,
 				Error: fmt.Sprintf("blueprint declares Ludus subscription roles, but the live subscription catalog is empty (license-server unreachable, missing entitlement, or community license): %v", declaredSub),
 			})
@@ -168,15 +170,16 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 		}
 		results, err := InstallRolesFromRequirementsWithHome(galaxyRequirements, rolesPath, opts.AnsibleHome, opts.ForceRoles)
 		if err != nil && len(results) == 0 {
-			out = append(out, RoleInstallResult{OK: false, Error: err.Error()})
+			out = append(out, AnsibleInstallResult{Type: AnsibleResultRole, OK: false, Error: err.Error()})
 		}
 		// galaxy reports "already installed" as OK regardless of version. A
 		// version pin mismatch is a real failure for our purposes — surface it
 		// so the user knows their deps are stale.
 		results = detectGalaxyVersionMismatches(results, galaxyRequirements, rolesPath)
-		for _, r := range results {
-			if r.OK && opts.SourceRecordID != "" {
-				insertSourceArtifact(app, opts.SourceRecordID, "galaxy_role", r.Name, r.Version)
+		for i := range results {
+			results[i].Type = AnsibleResultRole
+			if results[i].OK && opts.SourceRecordID != "" {
+				insertSourceArtifact(app, opts.SourceRecordID, "galaxy_role", results[i].Name, results[i].Version)
 			}
 		}
 		out = append(out, results...)
@@ -195,11 +198,12 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 	if hasRequirementsCollections(galaxyRequirements) {
 		colResults, err := InstallCollectionsFromRequirementsWithHome(galaxyRequirements, opts.AnsibleHome, opts.ForceRoles)
 		if err != nil && len(colResults) == 0 {
-			out = append(out, RoleInstallResult{OK: false, Error: err.Error()})
+			out = append(out, AnsibleInstallResult{Type: AnsibleResultCollection, OK: false, Error: err.Error()})
 		}
-		for _, r := range colResults {
-			if r.OK && opts.SourceRecordID != "" && r.Name != "" {
-				insertSourceArtifact(app, opts.SourceRecordID, "collection", r.Name, r.Version)
+		for i := range colResults {
+			colResults[i].Type = AnsibleResultCollection
+			if colResults[i].OK && opts.SourceRecordID != "" && colResults[i].Name != "" {
+				insertSourceArtifact(app, opts.SourceRecordID, "collection", colResults[i].Name, colResults[i].Version)
 			}
 		}
 		out = append(out, colResults...)
@@ -217,9 +221,9 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 	// progress) and we'd rather attempt and fail loudly than silently skip.
 	for _, name := range declaredSub {
 		if err := installSubscriptionRoleByName(e, name, opts.AnsibleHome); err != nil {
-			out = append(out, RoleInstallResult{Name: name, OK: false, Error: err.Error()})
+			out = append(out, AnsibleInstallResult{Type: AnsibleResultSubscriptionRole, Name: name, OK: false, Error: err.Error()})
 		} else {
-			out = append(out, RoleInstallResult{Name: name, OK: true})
+			out = append(out, AnsibleInstallResult{Type: AnsibleResultSubscriptionRole, Name: name, OK: true})
 			if opts.SourceRecordID != "" {
 				insertSourceArtifact(app, opts.SourceRecordID, "subscription_role", name, "")
 			}
@@ -229,7 +233,7 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 	return out
 }
 
-func applyRoleResultsToStatus(app core.App, rec *core.Record, roles []RoleInstallResult) {
+func applyRoleResultsToStatus(app core.App, rec *core.Record, roles []AnsibleInstallResult) {
 	failures := collectArtifactFailures(nil, nil, roles)
 	markInstallStatusFromFailures(app, rec, failures)
 }
@@ -292,17 +296,18 @@ func filterRequirements(requirementsYAML []byte, vendoredRoles, vendoredCollecti
 	return out, nil
 }
 
-func roleResultsToDTO(in []RoleInstallResult) []dto.BlueprintCreatedResponseRoleResult {
+func roleResultsToDTO(in []AnsibleInstallResult) []dto.BlueprintCreatedResponseAnsibleResult {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]dto.BlueprintCreatedResponseRoleResult, len(in))
+	out := make([]dto.BlueprintCreatedResponseAnsibleResult, len(in))
 	for i, r := range in {
-		out[i] = dto.BlueprintCreatedResponseRoleResult{
+		out[i] = dto.BlueprintCreatedResponseAnsibleResult{
 			Name:    r.Name,
 			Version: r.Version,
 			OK:      r.OK,
 			Error:   r.Error,
+			Type:    r.Type,
 		}
 	}
 	return out
@@ -310,7 +315,7 @@ func roleResultsToDTO(in []RoleInstallResult) []dto.BlueprintCreatedResponseRole
 
 // collectArtifactFailures walks per-artifact results and returns one
 // "<kind> <name>: <reason>" string per failed entry.
-func collectArtifactFailures(templates, localRoles []ArtifactResult, roles []RoleInstallResult) []string {
+func collectArtifactFailures(templates, localRoles []ArtifactResult, roles []AnsibleInstallResult) []string {
 	var failures []string
 	for _, r := range templates {
 		if !r.OK {
@@ -324,7 +329,11 @@ func collectArtifactFailures(templates, localRoles []ArtifactResult, roles []Rol
 	}
 	for _, r := range roles {
 		if !r.OK {
-			failures = append(failures, fmt.Sprintf("role %s: %s", r.Name, r.Error))
+			kind := r.Type
+			if kind == "" {
+				kind = AnsibleResultRole
+			}
+			failures = append(failures, fmt.Sprintf("%s %s: %s", kind, r.Name, r.Error))
 		}
 	}
 	return failures
@@ -354,9 +363,9 @@ func markInstallStatus(app core.App, rec *core.Record, status, errMsg string) {
 	_ = app.Save(rec)
 }
 
-func embedArtifactResults(resp map[string]any, templates, localRoles, localCollections []ArtifactResult, roles []RoleInstallResult) {
+func embedArtifactResults(resp map[string]any, templates, localRoles, localCollections []ArtifactResult, ansible []AnsibleInstallResult) {
 	resp["templateResults"] = templates
 	resp["localRoleResults"] = localRoles
 	resp["localCollectionResults"] = localCollections
-	resp["roleResults"] = roles
+	resp["ansibleResults"] = ansible
 }

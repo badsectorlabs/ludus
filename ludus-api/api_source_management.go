@@ -249,7 +249,7 @@ func sourceSyncResponse(sourceID string, res *SyncResult) map[string]any {
 		"sourceID": sourceID,
 	}
 	if res != nil {
-		embedArtifactResults(out, res.TemplateResults, res.LocalRoleResults, res.LocalCollectionResults, res.RoleResults)
+		embedArtifactResults(out, res.TemplateResults, res.LocalRoleResults, res.LocalCollectionResults, res.AnsibleResults)
 		if len(res.UndeclaredDependencies) > 0 {
 			out["undeclaredDependencies"] = res.UndeclaredDependencies
 		}

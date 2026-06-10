@@ -610,7 +610,7 @@ func CreateBlueprint(e *core.RequestEvent) error {
 			AnsibleHome: ansibleHomeForUser(user),
 		})
 		applyRoleResultsToStatus(e.App, bp, roles)
-		resp.RoleResults = roleResultsToDTO(roles)
+		resp.AnsibleResults = roleResultsToDTO(roles)
 	}
 	return e.JSON(http.StatusCreated, resp)
 }
@@ -694,7 +694,7 @@ func CreateBlueprintFromRange(e *core.RequestEvent) error {
 			AnsibleHome: ansibleHomeForUser(user),
 		})
 		applyRoleResultsToStatus(e.App, blueprintRecord, roles)
-		resp.RoleResults = roleResultsToDTO(roles)
+		resp.AnsibleResults = roleResultsToDTO(roles)
 	}
 	return e.JSON(http.StatusCreated, resp)
 }
@@ -1584,8 +1584,8 @@ func InstallBlueprintDeps(e *core.RequestEvent) error {
 	markInstallStatusFromFailures(e.App, statusRec, failures)
 
 	return e.JSON(http.StatusOK, map[string]any{
-		"blueprintID": id,
-		"roleResults": results,
+		"blueprintID":    id,
+		"ansibleResults": results,
 	})
 }
 
@@ -1808,7 +1808,7 @@ func ImportBlueprint(e *core.RequestEvent) error {
 			AnsibleHome: ansibleHomeForUser(user),
 		})
 		applyRoleResultsToStatus(e.App, bp, roles)
-		resp.RoleResults = roleResultsToDTO(roles)
+		resp.AnsibleResults = roleResultsToDTO(roles)
 	}
 	return e.JSON(http.StatusCreated, resp)
 }

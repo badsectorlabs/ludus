@@ -408,11 +408,11 @@ func synthesizeRoleMetaIfMissing(roleDir, name string) (bool, error) {
 	return true, nil
 }
 
-// installUnionedRoles installs galaxy and subscription roles for every
+// installUnionedAnsible installs galaxy and subscription roles for every
 // blueprint in a source. registerTemplates and registerLocalRoles handle
 // the source-root local artifacts; this only deals with galaxy + subscription
 // roles declared in each blueprint's requirements.yml.
-func installUnionedRoles(e *core.RequestEvent, app core.App, src *core.Record, walked *WalkedSource, opts SyncOptions) []RoleInstallResult {
+func installUnionedAnsible(e *core.RequestEvent, app core.App, src *core.Record, walked *WalkedSource, opts SyncOptions) []AnsibleInstallResult {
 	// Deps install into the requesting user's home — the same user the catalog
 	// reads install-state for — never the source owner's.
 	installProxmoxUser := opts.InitiatorProxmoxUsername
@@ -441,7 +441,7 @@ func installUnionedRoles(e *core.RequestEvent, app core.App, src *core.Record, w
 		}
 	}
 
-	var out []RoleInstallResult
+	var out []AnsibleInstallResult
 	for _, bp := range walked.Blueprints {
 		if bp.Manifest == nil || !selectedBP(bp.Manifest.ID) {
 			continue

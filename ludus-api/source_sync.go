@@ -22,7 +22,7 @@ type SyncResult struct {
 	TemplateResults        []ArtifactResult       `json:"templateResults"`
 	LocalRoleResults       []ArtifactResult       `json:"localRoleResults"`
 	LocalCollectionResults []ArtifactResult       `json:"localCollectionResults"`
-	RoleResults            []RoleInstallResult    `json:"roleResults"`
+	AnsibleResults         []AnsibleInstallResult `json:"ansibleResults"`
 	UndeclaredDependencies []UndeclaredDependency `json:"undeclaredDependencies,omitempty"`
 }
 
@@ -52,8 +52,8 @@ type ArtifactResult struct {
 
 type SyncOptions struct {
 	Global bool
-	Force       bool
-	// NoDeps skips the galaxy dependency install (installUnionedRoles): the
+	Force  bool
+	// NoDeps skips the galaxy dependency install (installUnionedAnsible): the
 	// selected blueprints register, but their role/collection deps are not
 	// fetched from ansible-galaxy — only what's already on disk is used.
 	NoDeps bool
@@ -259,7 +259,7 @@ func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, s
 	res.LocalCollectionResults = registerLocalCollections(app, sourceRecord, walked, opts)
 	pruneSourceArtifactClaims(app, sourceRecord, walked, opts.Selection, opts.InitiatorIsAdmin, opts.InitiatorProxmoxUsername)
 	if !opts.NoDeps {
-		res.RoleResults = installUnionedRoles(e, app, sourceRecord, walked, opts)
+		res.AnsibleResults = installUnionedAnsible(e, app, sourceRecord, walked, opts)
 	}
 	res.UndeclaredDependencies = findUndeclaredDependencies(walked)
 
@@ -351,7 +351,7 @@ func validateSelectionAgainstWalk(sel *InstallSelection, walked *WalkedSource) e
 }
 
 func collectSyncFailures(res *SyncResult) []string {
-	failures := collectArtifactFailures(res.TemplateResults, res.LocalRoleResults, res.RoleResults)
+	failures := collectArtifactFailures(res.TemplateResults, res.LocalRoleResults, res.AnsibleResults)
 	for _, r := range res.LocalCollectionResults {
 		if !r.OK {
 			failures = append(failures, fmt.Sprintf("local_collection %s: %s", r.Name, r.Message))
@@ -508,7 +508,7 @@ func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource
 // another source ships the same name (that source can reinstall it).
 //
 // Galaxy roles and collections are not pruned here: their claims come from
-// blueprint requirements.yml, and installUnionedRoles already filters by
+// blueprint requirements.yml, and installUnionedAnsible already filters by
 // the selected blueprints, so a stale row would imply a blueprint-level
 // inconsistency rather than a template/role one. Left for a follow-up if
 // it becomes a real problem.

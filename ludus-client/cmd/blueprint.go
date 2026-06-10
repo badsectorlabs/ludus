@@ -23,14 +23,14 @@ type blueprintInstallPayload struct {
 	BlueprintID      string                  `json:"blueprintID"`
 	TemplateResults  []artifactResultPayload `json:"templateResults"`
 	LocalRoleResults []artifactResultPayload `json:"localRoleResults"`
-	RoleResults      []roleResultPayload     `json:"roleResults"`
+	AnsibleResults   []ansibleResultPayload  `json:"ansibleResults"`
 }
 
 // printBlueprintInstallFailures emits one log line per failed artifact for a
 // blueprint install/create/import. label is what to print when there are no
 // failures (e.g. "Blueprint 'goad'").
 func printBlueprintInstallFailures(label string, p blueprintInstallPayload) {
-	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, nil, p.RoleResults)
+	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, nil, p.AnsibleResults)
 	printArtifactOutcome(label, "dependencies installed", "install completed with errors", failures)
 }
 

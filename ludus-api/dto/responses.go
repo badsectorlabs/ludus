@@ -635,17 +635,18 @@ type DeleteSourceResponse struct {
 // BlueprintCreatedResponse is the shape returned by CreateBlueprint,
 // CreateBlueprintFromRange, CopyBlueprint, and ImportBlueprint.
 type BlueprintCreatedResponse struct {
-	Result      string                               `json:"result,omitempty"`
-	BlueprintID string                               `json:"blueprintID"`
-	ID          string                               `json:"id,omitempty"` // record ID; emitted by ImportBlueprint
-	RoleResults []BlueprintCreatedResponseRoleResult `json:"roleResults,omitempty"`
+	Result         string                                  `json:"result,omitempty"`
+	BlueprintID    string                                  `json:"blueprintID"`
+	ID             string                                  `json:"id,omitempty"` // record ID; emitted by ImportBlueprint
+	AnsibleResults []BlueprintCreatedResponseAnsibleResult `json:"ansibleResults,omitempty"`
 }
 
-type BlueprintCreatedResponseRoleResult struct {
+type BlueprintCreatedResponseAnsibleResult struct {
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
 	OK      bool   `json:"ok"`
 	Error   string `json:"error,omitempty"`
+	Type    string `json:"type,omitempty"`
 }
 
 type SourceResponse struct {

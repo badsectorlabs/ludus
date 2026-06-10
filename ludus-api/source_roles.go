@@ -133,11 +133,21 @@ func declaredFromRequirements(requirementsYAML []byte) (roles, collections, subs
 	return roles, collections, subscriptionRoles
 }
 
-type RoleInstallResult struct {
+// Ansible install-result kinds. Galaxy roles, collections, and subscription
+// roles all flow through the same install path; Type keeps them distinct on
+// the wire so consumers can label and group them.
+const (
+	AnsibleResultRole             = "role"
+	AnsibleResultCollection       = "collection"
+	AnsibleResultSubscriptionRole = "subscription_role"
+)
+
+type AnsibleInstallResult struct {
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
 	OK      bool   `json:"ok"`
 	Error   string `json:"error,omitempty"`
+	Type    string `json:"type,omitempty"`
 }
 
 // InstallRolesFromRequirementsWithHome shells out to `ansible-galaxy role
@@ -145,7 +155,7 @@ type RoleInstallResult struct {
 // systemd-protected /home default. Callers MUST inspect each result's OK
 // field; ansible-galaxy may exit non-zero while still installing some roles,
 // and the mixed state is surfaced via per-role results, not a wrapped error.
-func InstallRolesFromRequirementsWithHome(requirementsYAML []byte, rolesPath, ansibleHome string, force bool) ([]RoleInstallResult, error) {
+func InstallRolesFromRequirementsWithHome(requirementsYAML []byte, rolesPath, ansibleHome string, force bool) ([]AnsibleInstallResult, error) {
 	if len(requirementsYAML) == 0 || strings.TrimSpace(string(requirementsYAML)) == "{}" {
 		return nil, nil
 	}
@@ -186,7 +196,7 @@ func InstallRolesFromRequirementsWithHome(requirementsYAML []byte, rolesPath, an
 // install location so collections land alongside roles instead of in the
 // systemd-protected /home default. Returns one result per collection touched;
 // callers should treat the result list the same way they treat role results.
-func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansibleHome string, force bool) ([]RoleInstallResult, error) {
+func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansibleHome string, force bool) ([]AnsibleInstallResult, error) {
 	if !hasRequirementsCollections(requirementsYAML) {
 		return nil, nil
 	}
@@ -240,7 +250,7 @@ func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansible
 			if version == "" {
 				version = c.Version
 			}
-			results = append(results, RoleInstallResult{Name: c.Name, Version: version, OK: true})
+			results = append(results, AnsibleInstallResult{Name: c.Name, Version: version, OK: true})
 		}
 	}
 	return results, nil
@@ -376,8 +386,8 @@ func parseDeclaredRequirements(requirementsYAML []byte) (roles, collections map[
 //	"'community.general:9.4.0' was installed successfully"
 //	"Nothing to do. All requested collections are already installed."
 //	"ERROR! Failed to resolve the requested dependencies map. ..."
-func parseGalaxyCollectionInstallOutput(out string) []RoleInstallResult {
-	var results []RoleInstallResult
+func parseGalaxyCollectionInstallOutput(out string) []AnsibleInstallResult {
+	var results []AnsibleInstallResult
 	seen := map[string]bool{}
 	for _, raw := range strings.Split(out, "\n") {
 		line := strings.TrimSpace(raw)
@@ -386,17 +396,17 @@ func parseGalaxyCollectionInstallOutput(out string) []RoleInstallResult {
 			name, version, ok := parseCollectionInstallingLine(line)
 			if ok && !seen[name] {
 				seen[name] = true
-				results = append(results, RoleInstallResult{Name: name, Version: version, OK: true})
+				results = append(results, AnsibleInstallResult{Name: name, Version: version, OK: true})
 			}
 		case strings.Contains(line, "was installed successfully"):
 			// Format: "'ns.coll:1.2.3' was installed successfully"
 			name, version, ok := parseCollectionQuotedSpec(line)
 			if ok && !seen[name] {
 				seen[name] = true
-				results = append(results, RoleInstallResult{Name: name, Version: version, OK: true})
+				results = append(results, AnsibleInstallResult{Name: name, Version: version, OK: true})
 			}
 		case strings.HasPrefix(line, "ERROR!"):
-			results = append(results, RoleInstallResult{OK: false, Error: strings.TrimPrefix(line, "ERROR! ")})
+			results = append(results, AnsibleInstallResult{OK: false, Error: strings.TrimPrefix(line, "ERROR! ")})
 		}
 	}
 	return results
@@ -448,8 +458,8 @@ func splitCollectionSpec(spec string) (name, version string, ok bool) {
 //	"- the role geerlingguy.docker is already installed, skipping."
 //	"[WARNING]: - <name> is already installed, skipping"
 //	"[WARNING]: - <name> was NOT installed successfully: <reason>"
-func parseGalaxyInstallOutput(out string) []RoleInstallResult {
-	var results []RoleInstallResult
+func parseGalaxyInstallOutput(out string) []AnsibleInstallResult {
+	var results []AnsibleInstallResult
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 
@@ -464,7 +474,7 @@ func parseGalaxyInstallOutput(out string) []RoleInstallResult {
 					name = strings.TrimSpace(body[:idx])
 					reason = strings.TrimSpace(body[idx+len(" was NOT installed successfully:"):])
 				}
-				results = append(results, RoleInstallResult{Name: name, OK: false, Error: reason})
+				results = append(results, AnsibleInstallResult{Name: name, OK: false, Error: reason})
 				continue
 			} else {
 				continue
@@ -482,7 +492,7 @@ func parseGalaxyInstallOutput(out string) []RoleInstallResult {
 				if len(parts) >= 2 && strings.HasPrefix(parts[1], "(") {
 					ver = strings.Trim(parts[1], "()")
 				}
-				results = append(results, RoleInstallResult{Name: name, Version: ver, OK: true})
+				results = append(results, AnsibleInstallResult{Name: name, Version: ver, OK: true})
 			}
 		case strings.Contains(line, "is already installed"):
 			parts := strings.Fields(strings.TrimPrefix(line, "-"))
@@ -495,14 +505,14 @@ func parseGalaxyInstallOutput(out string) []RoleInstallResult {
 				if len(parts) >= 2 && strings.HasPrefix(parts[1], "(") {
 					ver = strings.Trim(parts[1], "()")
 				}
-				results = append(results, RoleInstallResult{Name: name, Version: ver, OK: true, Error: "already installed (skipped)"})
+				results = append(results, AnsibleInstallResult{Name: name, Version: ver, OK: true, Error: "already installed (skipped)"})
 			}
 		case strings.HasPrefix(strings.ToUpper(line), "ERROR! - YOU CAN USE --IGNORE-ERRORS"):
 			// Generic trailing line ansible-galaxy emits whenever any role failed.
 			// The per-role failure was already captured from the [WARNING]: line.
 			continue
 		case strings.HasPrefix(strings.ToUpper(line), "ERROR"):
-			results = append(results, RoleInstallResult{OK: false, Error: line})
+			results = append(results, AnsibleInstallResult{OK: false, Error: line})
 		}
 	}
 	return results
@@ -512,7 +522,7 @@ func parseGalaxyInstallOutput(out string) []RoleInstallResult {
 // results to OK=false when the on-disk version disagrees with the requested
 // pin. Bare-name deps (no pin) are left alone — "already installed" is the
 // right answer for them.
-func detectGalaxyVersionMismatches(results []RoleInstallResult, requirementsYAML []byte, rolesPath string) []RoleInstallResult {
+func detectGalaxyVersionMismatches(results []AnsibleInstallResult, requirementsYAML []byte, rolesPath string) []AnsibleInstallResult {
 	requested := parseRequestedVersions(requirementsYAML)
 	for i, r := range results {
 		if !r.OK || !strings.Contains(r.Error, "already installed") {

@@ -43,7 +43,7 @@ type syncResultPayload struct {
 	TemplateResults        []artifactResultPayload       `json:"templateResults"`
 	LocalRoleResults       []artifactResultPayload       `json:"localRoleResults"`
 	LocalCollectionResults []artifactResultPayload       `json:"localCollectionResults"`
-	RoleResults            []roleResultPayload           `json:"roleResults"`
+	AnsibleResults         []ansibleResultPayload        `json:"ansibleResults"`
 	UndeclaredDependencies []undeclaredDependencyPayload `json:"undeclaredDependencies,omitempty"`
 }
 
@@ -98,13 +98,14 @@ func createSourceRequestToForm(req dto.CreateSourceRequest) map[string]string {
 	return form
 }
 
-type roleResultPayload struct {
+type ansibleResultPayload struct {
 	Name  string `json:"name"`
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	Type  string `json:"type,omitempty"`
 }
 
-func collectArtifactFailureLines(templates, localRoles, localCollections []artifactResultPayload, roles []roleResultPayload) []string {
+func collectArtifactFailureLines(templates, localRoles, localCollections []artifactResultPayload, ansible []ansibleResultPayload) []string {
 	var failures []string
 	for _, r := range templates {
 		if !r.OK {
@@ -121,9 +122,13 @@ func collectArtifactFailureLines(templates, localRoles, localCollections []artif
 			failures = append(failures, fmt.Sprintf("local_collection %s: %s", r.Name, r.Message))
 		}
 	}
-	for _, r := range roles {
+	for _, r := range ansible {
 		if !r.OK {
-			failures = append(failures, fmt.Sprintf("role %s: %s", r.Name, r.Error))
+			kind := r.Type
+			if kind == "" {
+				kind = "role"
+			}
+			failures = append(failures, fmt.Sprintf("%s %s: %s", kind, r.Name, r.Error))
 		}
 	}
 	return failures
@@ -146,7 +151,7 @@ func printArtifactOutcome(label, successPhrase, failurePhrase string, failures [
 // "updated" from source update — so the output matches what the user
 // actually invoked.
 func printSyncFailures(label, verbPast string, p syncResultPayload) {
-	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, p.LocalCollectionResults, p.RoleResults)
+	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, p.LocalCollectionResults, p.AnsibleResults)
 	printArtifactOutcome(label, verbPast+" successfully", verbPast+" with errors", failures)
 	printUndeclaredDependencies(p.UndeclaredDependencies)
 }
