@@ -74,11 +74,16 @@ func createSourcesCollection(app core.App) error {
 		owner.id = @request.auth.id
 	)`)
 
+	// Reads stay open to owner/admin; writes are locked (nil = superuser only)
+	// so the custom /sources routes are the only write path. Raw record writes
+	// would bypass the invariants those routes enforce: sourceID slug + global
+	// uniqueness on create, the field whitelist and checkout re-clone on
+	// update, and checkout-dir cleanup on delete.
 	c.ListRule = ownerOrAdminRule
 	c.ViewRule = ownerOrAdminRule
-	c.CreateRule = types.Pointer(`@request.auth.id != ""`)
-	c.UpdateRule = ownerOrAdminRule
-	c.DeleteRule = ownerOrAdminRule
+	c.CreateRule = nil
+	c.UpdateRule = nil
+	c.DeleteRule = nil
 
 	c.Fields.Add(
 		&core.TextField{Name: "name", Required: true},
