@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"ludusapi/dto"
+
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
 
@@ -90,7 +92,7 @@ func createSourcesCollection(app core.App) error {
 		&core.TextField{
 			Name:     "sourceID",
 			Required: true,
-			Pattern:  `^[A-Za-z][A-Za-z0-9_\-]*$`,
+			Pattern:  dto.SourceIDRegex.String(),
 		},
 		&core.TextField{Name: "description"},
 		&core.JSONField{Name: "authors"},

@@ -1,5 +1,12 @@
 package dto
 
+import "regexp"
+
+// SourceIDRegex is the sourceID slug contract: one regex shared by the
+// server's create-time validation, the sources collection schema, and the
+// client's positional-argument validation, so the three can't drift.
+var SourceIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*$`)
+
 type AddTemplateFromTarRequest struct {
 	Force bool   `json:"force,omitempty"`
 	File  string `json:"file,omitempty"`

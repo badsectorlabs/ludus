@@ -12,7 +12,6 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -750,14 +749,10 @@ const (
 	sourceArgArchive
 )
 
-// sourceIDPattern mirrors the server's source slug rule. Validating
-// client-side turns "you passed a URL where a sourceID goes" into a pointed
-// error instead of a request with a mangled path.
-var sourceIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*$`)
-
-// requireSourceID fatals with a targeted hint unless arg is a valid sourceID.
+// requireSourceID fatals with a targeted hint unless arg matches the shared
+// sourceID contract (dto.SourceIDRegex — the same rule the server enforces).
 func requireSourceID(arg string) string {
-	if sourceIDPattern.MatchString(arg) {
+	if dto.SourceIDRegex.MatchString(arg) {
 		return arg
 	}
 	if isSourceURL(arg) {
@@ -865,35 +860,31 @@ func runSourceDetail(client *resty.Client, sourceID string) {
 		logger.Logger.Fatal(err)
 	}
 
-	fmt.Printf("Source: %s\n", src.SourceID)
-	printField("Name", src.Name)
-	printField("Description", src.Description)
-	printField("Type", src.Type)
+	t := tablewriter.NewWriter(os.Stdout)
+	row := func(label, value string) {
+		if value != "" {
+			t.Append([]string{label, value})
+		}
+	}
+	row("Source ID", src.SourceID)
+	row("Name", src.Name)
+	row("Description", src.Description)
+	row("Type", src.Type)
 	if src.Type == "git" {
-		printField("URL", src.URL)
-		printField("Ref", src.Ref)
+		row("URL", src.URL)
+		row("Ref", src.Ref)
 	}
-	if len(src.Authors) > 0 {
-		printField("Authors", strings.Join(src.Authors, ", "))
-	}
-	printField("License", src.License)
-	printField("Homepage", src.Homepage)
-	printField("Owner", src.OwnerUserID)
-	printField("Kind", src.Kind)
-	printField("Last synced", src.LastSyncedAt)
-	printField("Status", src.LastSyncStatus)
-	if src.LastSyncError != "" {
-		printField("Error", src.LastSyncError)
-	}
-	fmt.Println()
-	fmt.Printf("Run `ludus source list %s --catalog` to see what this source ships (blueprints, templates, ansible).\n", sourceID)
-}
+	row("Authors", strings.Join(src.Authors, ", "))
+	row("License", src.License)
+	row("Homepage", src.Homepage)
+	row("Owner", src.OwnerUserID)
+	row("Kind", src.Kind)
+	row("Last synced", src.LastSyncedAt)
+	row("Status", src.LastSyncStatus)
+	row("Error", src.LastSyncError)
+	t.Render()
 
-func printField(label, value string) {
-	if value == "" {
-		return
-	}
-	fmt.Printf("  %-13s %s\n", label+":", value)
+	fmt.Printf("\nRun `ludus source list %s --catalog` to see what this source ships (blueprints, templates, ansible).\n", sourceID)
 }
 
 var sourceSyncCmd = &cobra.Command{

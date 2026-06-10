@@ -16,8 +16,6 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-var sourceSlugRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*$`)
-
 // reservedSourceIDs collides with literal-segment routes registered under
 // /sources/. A sourceID equal to any of these would shadow the route and
 // make the source unreachable via /sources/{sourceID}.
@@ -100,9 +98,9 @@ func CreateSource(e *core.RequestEvent) error {
 			return JSONError(e, http.StatusBadRequest, err.Error())
 		}
 	}
-	if !sourceSlugRegex.MatchString(sourceID) {
+	if !dto.SourceIDRegex.MatchString(sourceID) {
 		return JSONError(e, http.StatusBadRequest,
-			fmt.Sprintf("sourceID %q does not match %s", sourceID, sourceSlugRegex.String()))
+			fmt.Sprintf("sourceID %q does not match %s", sourceID, dto.SourceIDRegex.String()))
 	}
 	if reservedSourceIDs[sourceID] {
 		return JSONError(e, http.StatusBadRequest,
@@ -281,7 +279,7 @@ func deriveSourceIDFromRequest(req *dto.CreateSourceRequest, e *core.RequestEven
 	basename = regexp.MustCompile(`[^a-z0-9_-]+`).ReplaceAllString(basename, "-")
 	basename = regexp.MustCompile(`-+`).ReplaceAllString(basename, "-")
 	basename = strings.Trim(basename, "-")
-	if basename == "" || !sourceSlugRegex.MatchString(basename) || reservedSourceIDs[basename] {
+	if basename == "" || !dto.SourceIDRegex.MatchString(basename) || reservedSourceIDs[basename] {
 		return "", fmt.Errorf("could not auto-derive sourceID; provide an explicit sourceID override")
 	}
 	return basename, nil
