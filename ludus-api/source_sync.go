@@ -125,6 +125,7 @@ func fetchAndWalkSource(app core.App, sourceRecord *core.Record, opts SyncOption
 			markSyncFailed(app, sourceRecord, err)
 			return nil, err
 		}
+		markContentLanded(app, sourceRecord)
 	case "upload":
 		if len(opts.Archive) > 0 {
 			tmpDir, err := os.MkdirTemp("", "ludus-archive-*")
@@ -168,6 +169,7 @@ func fetchAndWalkSource(app core.App, sourceRecord *core.Record, opts SyncOption
 				return nil, err
 			}
 			_ = os.RemoveAll(backupDir)
+			markContentLanded(app, sourceRecord)
 		} else if _, err := os.Stat(checkoutDir); err != nil {
 			err := fmt.Errorf("upload source has no on-disk content; re-upload via PATCH /sources/%s", sourceRecord.GetString("sourceID"))
 			markSyncFailed(app, sourceRecord, err)
@@ -215,7 +217,6 @@ func runSourceRefresh(app core.App, sourceRecord *core.Record, opts SyncOptions)
 	}
 
 	applySourceManifestToRecord(sourceRecord, walked.Source)
-	sourceRecord.Set("lastSyncedAt", time.Now().UTC().Format(time.RFC3339))
 	sourceRecord.Set("lastSyncStatus", "ok")
 	sourceRecord.Set("lastSyncError", "")
 
@@ -277,7 +278,6 @@ func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, s
 	}
 	res.BlueprintResults.UndeclaredDependencies = findUndeclaredDependencies(walked)
 
-	sourceRecord.Set("lastSyncedAt", time.Now().UTC().Format(time.RFC3339))
 	failures := collectSyncFailures(res)
 	if len(failures) == 0 {
 		sourceRecord.Set("lastSyncStatus", "ok")
@@ -426,8 +426,16 @@ func collectSyncFailures(res *SyncResult) []string {
 	return failures
 }
 
-func markSyncFailed(app core.App, src *core.Record, err error) {
+// markContentLanded stamps lastSyncedAt at the moment source content actually
+// lands on disk — a git clone/pull or an uploaded archive swap. Nothing else
+// moves it: installs and walks of already-present content, and failed fetch
+// attempts, must not bump "last updated".
+func markContentLanded(app core.App, src *core.Record) {
 	src.Set("lastSyncedAt", time.Now().UTC().Format(time.RFC3339))
+	_ = app.Save(src)
+}
+
+func markSyncFailed(app core.App, src *core.Record, err error) {
 	src.Set("lastSyncStatus", "error")
 	src.Set("lastSyncError", truncateError(err.Error(), 2000))
 	_ = app.Save(src)
