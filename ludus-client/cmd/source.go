@@ -12,6 +12,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -749,6 +750,23 @@ const (
 	sourceArgArchive
 )
 
+// sourceIDPattern mirrors the server's source slug rule. Validating
+// client-side turns "you passed a URL where a sourceID goes" into a pointed
+// error instead of a request with a mangled path.
+var sourceIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*$`)
+
+// requireSourceID fatals with a targeted hint unless arg is a valid sourceID.
+func requireSourceID(arg string) string {
+	if sourceIDPattern.MatchString(arg) {
+		return arg
+	}
+	if isSourceURL(arg) {
+		logger.Logger.Fatalf("%q is a git URL — this command takes the sourceID (see `ludus source list`)", arg)
+	}
+	logger.Logger.Fatalf("%q is not a valid sourceID (letters, digits, _ and - only; see `ludus source list`)", arg)
+	return "" // unreachable; Fatalf exits
+}
+
 // detectSourceArg classifies a positional source argument. URL wins outright;
 // regular files with an archive suffix are treated as archives. Directories
 // do not auto-detect — they must be passed via `-d`/`--directory` so source
@@ -781,7 +799,7 @@ ansible roles/collections) joined with the current install state.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		detailID := ""
 		if len(args) == 1 {
-			detailID = args[0]
+			detailID = requireSourceID(args[0])
 		}
 		if sourceFlagCatalog && detailID == "" {
 			logger.Logger.Fatal("--catalog requires a sourceID: ludus source list <sourceID> --catalog")
@@ -895,7 +913,7 @@ func runSourceSync(cmd *cobra.Command, args []string) {
 	// demanding credentials first.
 	var targets []string
 	if len(args) == 1 {
-		targets = []string{args[0]}
+		targets = []string{requireSourceID(args[0])}
 	}
 
 	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
@@ -960,7 +978,7 @@ var sourceUpdateCmd = &cobra.Command{
 
 func runSourceUpdate(cmd *cobra.Command, args []string) {
 	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-	sid := args[0]
+	sid := requireSourceID(args[0])
 	path := fmt.Sprintf("/sources/%s", sid)
 
 	if len(args) == 2 && sourceFlagDirectory != "" {
@@ -1080,7 +1098,7 @@ templates/ansible commands ('ludus templates rm', 'ludus ansible role rm',
 'ludus ansible collection rm').`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		sid := args[0]
+		sid := requireSourceID(args[0])
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 		// Skip the prompt automatically when stdin is piped/non-TTY (CI, scripts).
 		// Callers can also force-skip with --no-prompt.
