@@ -249,10 +249,9 @@ func sourceSyncResponse(sourceID string, res *SyncResult) map[string]any {
 		"sourceID": sourceID,
 	}
 	if res != nil {
-		embedArtifactResults(out, res.TemplateResults, res.LocalRoleResults, res.LocalCollectionResults, res.AnsibleResults)
-		if len(res.UndeclaredDependencies) > 0 {
-			out["undeclaredDependencies"] = res.UndeclaredDependencies
-		}
+		out["templateResults"] = res.TemplateResults
+		out["localAnsibleResults"] = res.LocalAnsibleResults
+		out["blueprintResults"] = res.BlueprintResults
 	}
 	return out
 }
@@ -684,7 +683,7 @@ func SyncSource(e *core.RequestEvent) error {
 	// No install side-effects to report, but undeclared-dep warnings still
 	// matter — they tell the user what would be missing if they ran install.
 	return e.JSON(http.StatusOK, sourceSyncResponse(src.GetString("sourceID"), &SyncResult{
-		UndeclaredDependencies: refresh.UndeclaredDependencies,
+		BlueprintResults: BlueprintResults{UndeclaredDependencies: refresh.UndeclaredDependencies},
 	}))
 }
 

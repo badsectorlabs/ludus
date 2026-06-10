@@ -362,10 +362,3 @@ func markInstallStatus(app core.App, rec *core.Record, status, errMsg string) {
 	rec.Set("lastInstalledAt", time.Now().UTC().Format(time.RFC3339))
 	_ = app.Save(rec)
 }
-
-func embedArtifactResults(resp map[string]any, templates, localRoles, localCollections []ArtifactResult, ansible []AnsibleInstallResult) {
-	resp["templateResults"] = templates
-	resp["localRoleResults"] = localRoles
-	resp["localCollectionResults"] = localCollections
-	resp["ansibleResults"] = ansible
-}

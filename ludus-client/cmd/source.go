@@ -37,12 +37,22 @@ func gzipBytes(in []byte) ([]byte, error) {
 }
 
 // syncResultPayload mirrors the synchronous response shape from
-// POST /sources and POST /sources/{id}/sync.
+// POST /sources and POST /sources/{id}/sync. Results are grouped by the
+// source-repo dir the content came from: templates/, ansible/ (vendored
+// roles + collections), and the blueprints' galaxy dependency closure.
 type syncResultPayload struct {
-	SourceID               string                        `json:"sourceID"`
-	TemplateResults        []artifactResultPayload       `json:"templateResults"`
-	LocalRoleResults       []artifactResultPayload       `json:"localRoleResults"`
-	LocalCollectionResults []artifactResultPayload       `json:"localCollectionResults"`
+	SourceID            string                     `json:"sourceID"`
+	TemplateResults     []artifactResultPayload    `json:"templateResults"`
+	LocalAnsibleResults localAnsibleResultsPayload `json:"localAnsibleResults"`
+	BlueprintResults    blueprintResultsPayload    `json:"blueprintResults"`
+}
+
+type localAnsibleResultsPayload struct {
+	RoleResults       []artifactResultPayload `json:"roleResults"`
+	CollectionResults []artifactResultPayload `json:"collectionResults"`
+}
+
+type blueprintResultsPayload struct {
 	AnsibleResults         []ansibleResultPayload        `json:"ansibleResults"`
 	UndeclaredDependencies []undeclaredDependencyPayload `json:"undeclaredDependencies,omitempty"`
 }
@@ -151,9 +161,9 @@ func printArtifactOutcome(label, successPhrase, failurePhrase string, failures [
 // "updated" from source update — so the output matches what the user
 // actually invoked.
 func printSyncFailures(label, verbPast string, p syncResultPayload) {
-	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, p.LocalCollectionResults, p.AnsibleResults)
+	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalAnsibleResults.RoleResults, p.LocalAnsibleResults.CollectionResults, p.BlueprintResults.AnsibleResults)
 	printArtifactOutcome(label, verbPast+" successfully", verbPast+" with errors", failures)
-	printUndeclaredDependencies(p.UndeclaredDependencies)
+	printUndeclaredDependencies(p.BlueprintResults.UndeclaredDependencies)
 }
 
 // printUndeclaredDependencies surfaces range-config role references that

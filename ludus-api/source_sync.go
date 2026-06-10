@@ -18,10 +18,22 @@ import (
 	"github.com/pocketbase/pocketbase/tools/types"
 )
 
+// SyncResult groups per-artifact outcomes by the source-repo dir the content
+// came from, mirroring the catalog shape: templates/ at the root,
+// ansible/ (vendored roles + collections) under localAnsibleResults, and the
+// blueprints' galaxy dependency closure under blueprintResults.
 type SyncResult struct {
-	TemplateResults        []ArtifactResult       `json:"templateResults"`
-	LocalRoleResults       []ArtifactResult       `json:"localRoleResults"`
-	LocalCollectionResults []ArtifactResult       `json:"localCollectionResults"`
+	TemplateResults     []ArtifactResult    `json:"templateResults"`
+	LocalAnsibleResults LocalAnsibleResults `json:"localAnsibleResults"`
+	BlueprintResults    BlueprintResults    `json:"blueprintResults"`
+}
+
+type LocalAnsibleResults struct {
+	RoleResults       []ArtifactResult `json:"roleResults"`
+	CollectionResults []ArtifactResult `json:"collectionResults"`
+}
+
+type BlueprintResults struct {
 	AnsibleResults         []AnsibleInstallResult `json:"ansibleResults"`
 	UndeclaredDependencies []UndeclaredDependency `json:"undeclaredDependencies,omitempty"`
 }
@@ -255,13 +267,13 @@ func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, s
 
 	res := &SyncResult{}
 	res.TemplateResults = registerTemplates(app, sourceRecord, walked, opts)
-	res.LocalRoleResults = registerLocalRoles(app, sourceRecord, walked, opts)
-	res.LocalCollectionResults = registerLocalCollections(app, sourceRecord, walked, opts)
+	res.LocalAnsibleResults.RoleResults = registerLocalRoles(app, sourceRecord, walked, opts)
+	res.LocalAnsibleResults.CollectionResults = registerLocalCollections(app, sourceRecord, walked, opts)
 	pruneSourceArtifactClaims(app, sourceRecord, walked, opts.Selection, opts.InitiatorIsAdmin, opts.InitiatorProxmoxUsername)
 	if !opts.NoDeps {
-		res.AnsibleResults = installUnionedAnsible(e, app, sourceRecord, walked, opts)
+		res.BlueprintResults.AnsibleResults = installUnionedAnsible(e, app, sourceRecord, walked, opts)
 	}
-	res.UndeclaredDependencies = findUndeclaredDependencies(walked)
+	res.BlueprintResults.UndeclaredDependencies = findUndeclaredDependencies(walked)
 
 	sourceRecord.Set("lastSyncedAt", time.Now().UTC().Format(time.RFC3339))
 	failures := collectSyncFailures(res)
@@ -351,8 +363,8 @@ func validateSelectionAgainstWalk(sel *InstallSelection, walked *WalkedSource) e
 }
 
 func collectSyncFailures(res *SyncResult) []string {
-	failures := collectArtifactFailures(res.TemplateResults, res.LocalRoleResults, res.AnsibleResults)
-	for _, r := range res.LocalCollectionResults {
+	failures := collectArtifactFailures(res.TemplateResults, res.LocalAnsibleResults.RoleResults, res.BlueprintResults.AnsibleResults)
+	for _, r := range res.LocalAnsibleResults.CollectionResults {
 		if !r.OK {
 			failures = append(failures, fmt.Sprintf("local_collection %s: %s", r.Name, r.Message))
 		}
