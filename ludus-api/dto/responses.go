@@ -657,7 +657,6 @@ type SourceResponse struct {
 	Authors        []string `json:"authors,omitempty"`
 	Homepage       string   `json:"homepage,omitempty"`
 	License        string   `json:"license,omitempty"`
-	Kind           string   `json:"kind"`
 	Type           string   `json:"type"`
 	URL            string   `json:"url,omitempty"`
 	Ref            string   `json:"ref,omitempty"`

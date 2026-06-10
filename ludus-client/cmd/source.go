@@ -945,7 +945,6 @@ func runSourceDetail(client *resty.Client, sourceID string) {
 	row("License", src.License)
 	row("Homepage", src.Homepage)
 	row("Owner", src.OwnerUserID)
-	row("Kind", src.Kind)
 	if src.Type == "upload" {
 		row("Uploaded", src.LastSyncedAt)
 	} else {

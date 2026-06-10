@@ -373,7 +373,7 @@ func ListSources(e *core.RequestEvent) error {
 
 	out := make([]dto.SourceResponse, 0, len(records))
 	for _, r := range records {
-		out = append(out, sourceRecordToResponseWithKind(e.App, r))
+		out = append(out, sourceRecordToResponseWithOwner(e.App, r))
 	}
 	return e.JSON(http.StatusOK, out)
 }
@@ -383,7 +383,7 @@ func GetSource(e *core.RequestEvent) error {
 	if err != nil {
 		return err // already a JSONError
 	}
-	return e.JSON(http.StatusOK, sourceRecordToResponseWithKind(e.App, src))
+	return e.JSON(http.StatusOK, sourceRecordToResponseWithOwner(e.App, src))
 }
 
 // UpdateSource handles PATCH /sources/{sourceID}. Body is multipart
@@ -487,7 +487,7 @@ func UpdateSource(e *core.RequestEvent) error {
 		return e.JSON(http.StatusOK, sourceSyncResponse(src.GetString("sourceID"), syncResult))
 	}
 
-	return e.JSON(http.StatusOK, sourceRecordToResponseWithKind(e.App, src))
+	return e.JSON(http.StatusOK, sourceRecordToResponseWithOwner(e.App, src))
 }
 
 // DeleteSource handles DELETE /sources/{sourceID}. Registration-only: it
@@ -520,8 +520,8 @@ func DeleteSource(e *core.RequestEvent) error {
 }
 
 // sourceRecordToResponse converts a sources PocketBase record to the wire DTO.
-// Kind is left as the zero value; use sourceRecordToResponseWithKind when the
-// caller can pay the extra DB queries.
+// OwnerUserID holds the raw owner record id; use sourceRecordToResponseWithOwner
+// when the caller can pay the extra DB query to translate it.
 func sourceRecordToResponse(r *core.Record) dto.SourceResponse {
 	return dto.SourceResponse{
 		ID:             r.Id,
@@ -534,51 +534,15 @@ func sourceRecordToResponse(r *core.Record) dto.SourceResponse {
 		Type:           r.GetString("type"),
 		URL:            r.GetString("url"),
 		Ref:            r.GetString("ref"),
-		OwnerUserID:    r.GetString("owner"), // record-id placeholder; WithKind translates
+		OwnerUserID:    r.GetString("owner"), // record-id placeholder; WithOwner translates
 		LastSyncedAt:   r.GetString("lastSyncedAt"),
 		LastSyncStatus: r.GetString("lastSyncStatus"),
 		LastSyncError:  r.GetString("lastSyncError"),
 	}
 }
 
-// computeSourceKind returns a "+" joined string of artifact kinds shipped by a
-// source: any nonempty subset of {"templates", "roles", "collections",
-// "blueprints"}. Returns "(empty)" when the source has none.
-func computeSourceKind(app core.App, srcID string) string {
-	hasBP, _ := app.FindRecordsByFilter("blueprints", "source = {:s}", "", 1, 0,
-		map[string]any{"s": srcID})
-	hasTpl, _ := app.FindRecordsByFilter("source_artifacts",
-		"source = {:s} && kind = 'template'", "", 1, 0,
-		map[string]any{"s": srcID})
-	hasRole, _ := app.FindRecordsByFilter("source_artifacts",
-		"source = {:s} && (kind = 'local_role' || kind = 'galaxy_role')", "", 1, 0,
-		map[string]any{"s": srcID})
-	hasCol, _ := app.FindRecordsByFilter("source_artifacts",
-		"source = {:s} && kind = 'collection'", "", 1, 0,
-		map[string]any{"s": srcID})
-
-	parts := []string{}
-	if len(hasTpl) > 0 {
-		parts = append(parts, "templates")
-	}
-	if len(hasRole) > 0 {
-		parts = append(parts, "roles")
-	}
-	if len(hasCol) > 0 {
-		parts = append(parts, "collections")
-	}
-	if len(hasBP) > 0 {
-		parts = append(parts, "blueprints")
-	}
-	if len(parts) == 0 {
-		return "(empty)"
-	}
-	return strings.Join(parts, "+")
-}
-
-func sourceRecordToResponseWithKind(app core.App, r *core.Record) dto.SourceResponse {
+func sourceRecordToResponseWithOwner(app core.App, r *core.Record) dto.SourceResponse {
 	resp := sourceRecordToResponse(r)
-	resp.Kind = computeSourceKind(app, r.Id)
 	if owner, err := app.FindRecordById("users", r.GetString("owner")); err == nil {
 		if userID := owner.GetString("userID"); userID != "" {
 			resp.OwnerUserID = userID
