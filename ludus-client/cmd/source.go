@@ -966,19 +966,21 @@ func runSourceSync(cmd *cobra.Command, args []string) {
 
 var sourceUpdateCmd = &cobra.Command{
 	Use:   "update <sourceID> [<tarball>]",
-	Short: "Change a source's tracked ref or content",
-	Long: `Update a source.
+	Short: "Replace an upload source's content",
+	Long: `Push new content to an existing upload-type source. The archive is
+extracted in place of the old content and everything this source has
+installed is re-applied against it. (For git sources, use 'source set-url'
+to repoint the remote or change the tracked ref.)
 
-  ludus source update <id> --ref main           # git: change tracked ref
-  ludus source update <id> ./new-source.tar.gz  # upload: replace content
-  ludus source update <id> -d ./source-dir      # upload: tar a directory and replace`,
+  ludus source update <id> ./new-source.tar.gz  # replace content with a tarball
+  ludus source update <id> -d ./source-dir      # tar a directory and replace`,
 	Args: cobra.RangeArgs(1, 2),
 	Run:  runSourceUpdate,
 }
 
 func runSourceUpdate(cmd *cobra.Command, args []string) {
-	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 	sid := requireSourceID(args[0])
+	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 	path := fmt.Sprintf("/sources/%s", sid)
 
 	if len(args) == 2 && sourceFlagDirectory != "" {
@@ -1001,49 +1003,78 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 		fileBytes = gz
 		fileName = filepath.Base(strings.TrimSuffix(sourceFlagDirectory, string(os.PathSeparator))) + ".tar.gz"
 	case len(args) == 2:
-		switch detectSourceArg(args[1]) {
-		case sourceArgArchive:
-			data, err := os.ReadFile(args[1])
-			if err != nil {
-				logger.Logger.Fatal(err)
-			}
-			fileField = "archive"
-			fileBytes = data
-			fileName = filepath.Base(args[1])
-		default:
+		if detectSourceArg(args[1]) != sourceArgArchive {
 			logger.Logger.Fatalf("could not interpret %q: expected a tarball/zip path (use -d for a local directory)", args[1])
 		}
+		data, err := os.ReadFile(args[1])
+		if err != nil {
+			logger.Logger.Fatal(err)
+		}
+		fileField = "archive"
+		fileBytes = data
+		fileName = filepath.Base(args[1])
+	default:
+		logger.Logger.Fatal("provide a tarball path or -d <dir>")
 	}
 
-	if fileField == "" && sourceFlagRef == "" {
-		logger.Logger.Fatal("provide --ref (git) or a tarball path / -d <dir> (upload)")
+	updateReq := dto.UpdateSourceRequest{
+		Global: sourceFlagGlobal,
+		Force:  sourceFlagForce,
 	}
-
-	if fileField != "" {
-		updateReq := dto.UpdateSourceRequest{
-			Global: sourceFlagGlobal,
-			Force:  sourceFlagForce,
-		}
-		responseJSON, success := rest.FileUpload(client, "PATCH",
-			buildURLWithRangeAndUserID(path), fileField, fileName, fileBytes, updateSourceRequestToForm(updateReq))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
-		var resp syncResultPayload
-		if err := json.Unmarshal(responseJSON, &resp); err != nil || resp.SourceID == "" {
-			logger.Logger.Info(string(responseJSON))
-			return
-		}
-		printSyncFailures(fmt.Sprintf("Source '%s'", resp.SourceID), "updated", resp)
-		return
-	}
-
-	body, _ := json.Marshal(dto.UpdateSourceRequest{Ref: sourceFlagRef})
-	responseJSON, success := rest.GenericJSONPatch(client, buildURLWithRangeAndUserID(path), string(body))
+	responseJSON, success := rest.FileUpload(client, "PATCH",
+		buildURLWithRangeAndUserID(path), fileField, fileName, fileBytes, updateSourceRequestToForm(updateReq))
 	if didFailOrWantJSON(success, responseJSON) {
 		return
 	}
-	logger.Logger.Infof("Source '%s' ref updated. Run `ludus source sync %s` to apply.", sid, sid)
+	var resp syncResultPayload
+	if err := json.Unmarshal(responseJSON, &resp); err != nil || resp.SourceID == "" {
+		logger.Logger.Info(string(responseJSON))
+		return
+	}
+	printSyncFailures(fmt.Sprintf("Source '%s'", resp.SourceID), "updated", resp)
+}
+
+var sourceSetURLCmd = &cobra.Command{
+	Use:   "set-url <sourceID> [<git-url>]",
+	Short: "Repoint a git source's remote URL and/or tracked ref",
+	Long: `Change where a git source pulls from. The old checkout is dropped and the
+next sync re-clones from the new remote.
+
+  ludus source set-url <id> <git-url>             # repoint the remote
+  ludus source set-url <id> <git-url> --ref main  # repoint and switch the tracked ref
+  ludus source set-url <id> --ref v2              # just switch the tracked ref`,
+	Args: cobra.RangeArgs(1, 2),
+	Run:  runSourceSetURL,
+}
+
+func runSourceSetURL(cmd *cobra.Command, args []string) {
+	sid := requireSourceID(args[0])
+	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+	newURL := ""
+	if len(args) == 2 {
+		if !isSourceURL(args[1]) {
+			logger.Logger.Fatalf("could not interpret %q as a git URL", args[1])
+		}
+		newURL = args[1]
+	}
+	if newURL == "" && sourceFlagRef == "" {
+		logger.Logger.Fatal("provide a git URL and/or --ref")
+	}
+
+	body, _ := json.Marshal(dto.UpdateSourceRequest{Ref: sourceFlagRef, URL: newURL})
+	responseJSON, success := rest.GenericJSONPatch(client, buildURLWithRangeAndUserID(fmt.Sprintf("/sources/%s", sid)), string(body))
+	if didFailOrWantJSON(success, responseJSON) {
+		return
+	}
+	var changed []string
+	if newURL != "" {
+		changed = append(changed, "url")
+	}
+	if sourceFlagRef != "" {
+		changed = append(changed, "ref")
+	}
+	logger.Logger.Infof("Source '%s' %s updated. Run `ludus source sync %s` to apply.", sid, strings.Join(changed, " and "), sid)
 }
 
 // unionStrings returns the sorted, de-duplicated union of a and b. Used to
@@ -1150,10 +1181,12 @@ func init() {
 
 	// Update flags.
 	sourceUpdateCmd.Flags().SortFlags = false
-	sourceUpdateCmd.Flags().StringVar(&sourceFlagRef, "ref", "", "new git branch/tag/commit (git sources)")
-	sourceUpdateCmd.Flags().StringVarP(&sourceFlagDirectory, "directory", "d", "", "tar a local directory and upload it as the new source content (upload sources)")
-	sourceUpdateCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: install the source's roles and collections for all users (upload only)")
-	sourceUpdateCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "force install when a new archive triggers an inline reinstall (upload only)")
+	sourceUpdateCmd.Flags().StringVarP(&sourceFlagDirectory, "directory", "d", "", "tar a local directory and upload it as the new source content")
+	sourceUpdateCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: install the source's roles and collections for all users")
+	sourceUpdateCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "force install when the new archive triggers the inline reinstall")
+
+	// Set-url flags.
+	sourceSetURLCmd.Flags().StringVar(&sourceFlagRef, "ref", "", "git branch/tag/commit to track")
 
 	// Rm flags.
 	sourceRmCmd.Flags().BoolVar(&sourceFlagNoPrompt, "no-prompt", false, "skip confirmation prompt")
@@ -1163,6 +1196,7 @@ func init() {
 		sourceListCmd,
 		sourceSyncCmd,
 		sourceUpdateCmd,
+		sourceSetURLCmd,
 		sourceRmCmd,
 	)
 	rootCmd.AddCommand(sourceCmd)

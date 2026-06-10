@@ -268,6 +268,7 @@ type InstallSelectionDTO struct {
 }
 type UpdateSourceRequest struct {
 	Ref    string `json:"ref"`
+	URL    string `json:"url,omitempty"`
 	Global bool   `json:"global,omitempty"`
 	Force  bool   `json:"force,omitempty"`
 }

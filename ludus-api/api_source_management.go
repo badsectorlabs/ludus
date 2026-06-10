@@ -128,7 +128,7 @@ func CreateSource(e *core.RequestEvent) error {
 		}
 		if req.Type == "git" && req.URL != "" && req.URL != existing[0].GetString("url") {
 			return JSONError(e, http.StatusConflict,
-				fmt.Sprintf("source %q already exists pointing at %s; choose a different source ID, or remove it and register again to point at a new URL",
+				fmt.Sprintf("source %q already exists pointing at %s; choose a different source ID, or update the existing source's url",
 					sourceID, existing[0].GetString("url")))
 		}
 		// Register-only re-walk: fetch fresh content (for git, re-clone; for
@@ -424,6 +424,7 @@ func UpdateSource(e *core.RequestEvent) error {
 			return JSONError(e, http.StatusBadRequest, fmt.Sprintf("failed to parse multipart form: %v", err))
 		}
 		req.Ref = strings.TrimSpace(e.Request.FormValue("ref"))
+		req.URL = strings.TrimSpace(e.Request.FormValue("url"))
 		req.Global = e.Request.FormValue("global") == "true"
 		req.Force = e.Request.FormValue("force") == "true"
 		uploadBytes, uploadFilename, _ = readMultipartArchive(e, "archive")
@@ -444,13 +445,25 @@ func UpdateSource(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest,
 			"ref is only meaningful for git-type sources")
 	}
+	if req.URL != "" && src.GetString("type") != "git" {
+		return JSONError(e, http.StatusBadRequest,
+			"url is only meaningful for git-type sources")
+	}
 
-	refChanged := false
+	changed := false
 	if req.Ref != "" && req.Ref != src.GetString("ref") {
 		src.Set("ref", req.Ref)
-		refChanged = true
+		changed = true
 	}
-	if refChanged {
+	if req.URL != "" && req.URL != src.GetString("url") {
+		// The checkout's origin still points at the old URL and
+		// CloneOrUpdateGit only fetches an existing checkout — drop it so
+		// the next sync re-clones from the new remote.
+		src.Set("url", req.URL)
+		_ = os.RemoveAll(SourceCheckoutDir(src.Id))
+		changed = true
+	}
+	if changed {
 		if err := e.App.Save(src); err != nil {
 			return JSONError(e, http.StatusInternalServerError, err.Error())
 		}

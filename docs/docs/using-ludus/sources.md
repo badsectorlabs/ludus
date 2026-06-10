@@ -124,7 +124,7 @@ ludus source add badsectorlabs-ludus-source-bsl --blueprints goad  # scripted
 ludus source add badsectorlabs-ludus-source-bsl --all              # install everything in the catalog
 ```
 
-Re-adding the same git URL is idempotent — Ludus re-pulls and refreshes the catalog without touching what's already installed. Re-adding the same sourceID with a different URL returns `409`; override the sourceID or use `ludus source update --ref` to change the tracked ref.
+Re-adding the same git URL is idempotent — Ludus re-pulls and refreshes the catalog without touching what's already installed. Re-adding the same sourceID with a different URL returns `409`; pick a different sourceID, or repoint the existing source with `ludus source set-url <sourceID> <git-url>`.
 
 ### Retry a Partial Source Add
 
@@ -372,9 +372,9 @@ A source removed with `ludus source rm` is re-registered on the next restart unl
 | Command | Description |
 |---------|-------------|
 | `ludus source add <url\|tarball\|directory\|existing-sourceID>` | Register a new source or open the picker for an existing one (argument auto-detected) |
-| `ludus source list` | List registered sources |
+| `ludus source list [<sourceID>]` | List registered sources, or show one source's metadata (`--catalog` to see what it ships instead) |
 | `ludus source sync [<sourceID>]` | Re-pull a git source's content and refresh its catalog (read-only — installs nothing) |
-| `ludus source update <sourceID> --ref <ref>` | Change a git source's tracked ref |
+| `ludus source set-url <sourceID> <git-url>` | Repoint a git source at a new remote URL (`--ref` to also switch the tracked ref) |
 | `ludus source update <sourceID> <tarball>` (or `-d <dir>`) | Push new content to an upload source |
 | `ludus source rm <sourceID>` | Remove a source's registration and blueprints (installed templates, roles, and collections stay on disk) |
 
@@ -402,4 +402,4 @@ Installing is additive — re-running `ludus source add` only ever adds to what'
 | `--force` | `source add`, `source sync`, `source update` | Overwrite already-installed templates and galaxy/local roles |
 | `--force-roles` | `blueprint install` | Overwrite already-installed galaxy/local roles |
 | `--id <sourceID>` | `source add` | Override the auto-derived sourceID |
-| `--ref <ref>` | `source add`, `source update` | Git branch, tag, or commit to track |
+| `--ref <ref>` | `source add`, `source set-url` | Git branch, tag, or commit to track |
