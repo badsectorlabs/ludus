@@ -9,6 +9,7 @@ import (
 	"ludus/logger"
 	"ludus/rest"
 	"ludusapi/dto"
+	"net/http"
 	neturl "net/url"
 	"os"
 	"path/filepath"
@@ -332,16 +333,18 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 	}
 
 	if mode == modeInstallAll {
+		// Show admin capability unless whoami positively says non-admin.
+		isAdmin, ok := clientIsAdmin(client)
 		doInstallAll(client, registerResp.SourceID, registerResp.Catalog, sourcepicker.Advanced{
 			Global:  flags.Global,
 			Force:   flags.Force,
-			IsAdmin: clientIsAdmin(),
+			IsAdmin: isAdmin || !ok,
 			NoDeps:  flags.NoDeps,
 		})
 		return
 	}
 
-	selection, advanced, committed, proceed, err := chooseSelection(mode, flags, registerResp.Catalog)
+	selection, advanced, committed, proceed, err := chooseSelection(client, mode, flags, registerResp.Catalog)
 	if err != nil {
 		logger.Logger.Fatal(err)
 	}
@@ -538,16 +541,18 @@ func tryFetchCatalog(client *resty.Client, sourceID string) (dto.SourceCatalogDT
 // skips the upload/git work since the source content is already on disk.
 func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.SourceCatalogDTO, flags sourceFlags, mode installMode) {
 	if mode == modeInstallAll {
+		// Show admin capability unless whoami positively says non-admin.
+		isAdmin, ok := clientIsAdmin(client)
 		doInstallAll(client, sourceID, cat, sourcepicker.Advanced{
 			Global:  flags.Global,
 			Force:   flags.Force,
-			IsAdmin: clientIsAdmin(),
+			IsAdmin: isAdmin || !ok,
 			NoDeps:  flags.NoDeps,
 		})
 		return
 	}
 
-	selection, advanced, committed, proceed, err := chooseSelection(mode, flags, cat)
+	selection, advanced, committed, proceed, err := chooseSelection(client, mode, flags, cat)
 	if err != nil {
 		logger.Logger.Fatal(err)
 	}
@@ -659,11 +664,13 @@ func postSourceRegister(client *resty.Client, arg string, flags sourceFlags) (dt
 //   - proceed is false when there is nothing to do (no items picked / scripted
 //     selection empty); the caller prints a "nothing selected" notice and
 //     skips the round-trip.
-func chooseSelection(mode installMode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, bool, error) {
+func chooseSelection(client *resty.Client, mode installMode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, bool, error) {
+	// Show admin capability unless whoami positively says non-admin.
+	isAdmin, whoamiOK := clientIsAdmin(client)
 	adv := sourcepicker.Advanced{
 		Global:  flags.Global,
 		Force:   flags.Force,
-		IsAdmin: clientIsAdmin(),
+		IsAdmin: isAdmin || !whoamiOK,
 		NoDeps:  flags.NoDeps,
 	}
 	switch mode {
@@ -722,9 +729,25 @@ func deriveCurrentSelection(cat dto.SourceCatalogDTO) dto.InstallSelectionDTO {
 	return out
 }
 
-// clientIsAdmin is currently a stub — the server already gates --global
-// for non-admins, so this only affects the picker's display.
-func clientIsAdmin() bool { return true }
+// clientIsAdmin reports whether the caller's API key belongs to an admin,
+// via /whoami. ok is false when the endpoint couldn't be reached or parsed;
+// admin-ness is never assumed on failure — each renderer picks its own
+// fallback (display-only either way: every admin action is gated server-side).
+func clientIsAdmin(client *resty.Client) (isAdmin bool, ok bool) {
+	resp, err := client.R().Get(rest.APIBasePath + "/whoami")
+	if err != nil || resp.StatusCode() != http.StatusOK {
+		return false, false
+	}
+	var body struct {
+		User struct {
+			IsAdmin bool `json:"isAdmin"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(resp.Body(), &body); err != nil {
+		return false, false
+	}
+	return body.User.IsAdmin, true
+}
 
 func doInstall(client *resty.Client, sourceID string, sel dto.InstallSelectionDTO, adv sourcepicker.Advanced) {
 	postInstall(client, sourceID, dto.InstallRequest{
@@ -846,19 +869,32 @@ ansible roles/collections) joined with the current install state.`,
 			logger.Logger.Info("No sources registered.")
 			return
 		}
+		// Admins see everyone's sources, so owner matters; non-admins only
+		// ever see their own and the column would be noise. When whoami
+		// can't answer, default to showing it.
+		isAdmin, whoamiOK := clientIsAdmin(client)
+		showOwner := isAdmin || !whoamiOK
 		table := tablewriter.NewWriter(os.Stdout)
 		// "Last Updated" is type-neutral on purpose: the timestamp is the last
 		// content refresh — a re-pull for git sources, a tarball push for uploads.
-		table.SetHeader([]string{"Source ID", "Name", "Authors", "Type", "Last Updated", "Status"})
+		header := []string{"Source ID", "Name", "Authors", "Type", "Last Updated", "Status"}
+		if showOwner {
+			header = append(header, "Owner")
+		}
+		table.SetHeader(header)
 		for _, s := range sources {
-			table.Append([]string{
+			row := []string{
 				s.SourceID,
 				s.Name,
 				strings.Join(s.Authors, ", "),
 				s.Type,
 				s.LastSyncedAt,
 				s.LastSyncStatus,
-			})
+			}
+			if showOwner {
+				row = append(row, s.OwnerUserID)
+			}
+			table.Append(row)
 		}
 		table.Render()
 	},
@@ -910,7 +946,11 @@ func runSourceDetail(client *resty.Client, sourceID string) {
 	row("Homepage", src.Homepage)
 	row("Owner", src.OwnerUserID)
 	row("Kind", src.Kind)
-	row("Last updated", src.LastSyncedAt)
+	if src.Type == "upload" {
+		row("Uploaded", src.LastSyncedAt)
+	} else {
+		row("Last updated", src.LastSyncedAt)
+	}
 	row("Status", src.LastSyncStatus)
 	row("Error", src.LastSyncError)
 	t.Render()
