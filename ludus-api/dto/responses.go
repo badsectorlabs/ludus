@@ -729,10 +729,10 @@ type CatalogItemDTO struct {
 	VersionByBlueprint map[string]string `json:"versionByBlueprint,omitempty"`
 }
 
-// ScopeInstallDTO is one installed copy of a role: the scope it lives in
-// ("global"/"user"), the on-disk version there, and its state against the
-// required pin ("installed" / "upgrade_available"). A role can have entries
-// for both scopes, at different versions.
+// ScopeInstallDTO is one installed copy of a role or vendored collection:
+// the scope it lives in ("global"/"user"), the on-disk version there, and its
+// state against the required pin ("installed" / "upgrade_available"). An
+// artifact can have entries for both scopes, at different versions.
 type ScopeInstallDTO struct {
 	Scope   string `json:"scope"`
 	Version string `json:"version,omitempty"`

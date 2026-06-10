@@ -570,13 +570,40 @@ func readGalaxyInstalledCollectionVersion(ansibleHome, name string) string {
 	if dot <= 0 || dot == len(name)-1 {
 		return ""
 	}
-	manifestPath := filepath.Join(
+	v, _ := readCollectionManifestVersion(filepath.Join(
 		ansibleHome, "collections", "ansible_collections",
 		name[:dot], name[dot+1:], "MANIFEST.json",
-	)
+	))
+	return v
+}
+
+// readInstalledCollectionVersion reports whether a collection is installed at
+// dir, and the version recorded there. ansible-galaxy-built installs carry a
+// MANIFEST.json; source-vendored collections are copied verbatim and carry
+// only their galaxy.yml — either one counts as installed.
+func readInstalledCollectionVersion(dir string) (version string, ok bool) {
+	if v, mok := readCollectionManifestVersion(filepath.Join(dir, "MANIFEST.json")); mok {
+		return v, true
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+	if err != nil {
+		return "", false
+	}
+	gm, perr := ParseGalaxyManifest(data)
+	if perr != nil {
+		return "", true
+	}
+	return gm.Version, true
+}
+
+// readCollectionManifestVersion reads the version recorded in a collection's
+// MANIFEST.json at the given path. ok reports whether the manifest exists at
+// all — presence means the collection is installed even when the version
+// can't be parsed out.
+func readCollectionManifestVersion(manifestPath string) (version string, ok bool) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	var doc struct {
 		CollectionInfo struct {
@@ -584,9 +611,9 @@ func readGalaxyInstalledCollectionVersion(ansibleHome, name string) string {
 		} `json:"collection_info"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return ""
+		return "", true
 	}
-	return doc.CollectionInfo.Version
+	return doc.CollectionInfo.Version, true
 }
 
 func readGalaxyInstalledVersion(rolesPath, name string) string {

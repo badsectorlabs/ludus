@@ -457,15 +457,46 @@ func renderAnsibleTable(cat dto.SourceCatalogDTO) {
 	}
 	fmt.Printf("\nAnsible (%d)\n", len(rows))
 	t := tablewriter.NewWriter(os.Stdout)
-	t.SetHeader([]string{"Name", "Kind", "State"})
+	t.SetHeader([]string{"Name", "Kind", "Version", "State"})
 	for _, r := range rows {
+		version := r.item.Version
+		if version == "" {
+			version = "-"
+		}
 		t.Append([]string{
 			r.item.Name,
 			r.kind,
-			prettyState(r.item.State, r.item.InstalledVersion),
+			version,
+			scopedInstallState(r.item),
 		})
 	}
 	t.Render()
+}
+
+// scopedInstallState renders where an item is installed, one entry per copy:
+// "installed (global, v1.0.0), (user, v1.2.0)". A copy with no recorded
+// version (local roles are versionless) is just its bare scope name, e.g.
+// "installed global, user". Items without per-scope data fall back to a
+// plain installed/not installed.
+func scopedInstallState(it dto.CatalogItemDTO) string {
+	if len(it.Scopes) > 0 {
+		parts := make([]string, 0, len(it.Scopes))
+		for _, s := range it.Scopes {
+			if s.Version != "" {
+				parts = append(parts, fmt.Sprintf("(%s, v%s)", s.Scope, strings.TrimPrefix(s.Version, "v")))
+			} else {
+				parts = append(parts, s.Scope)
+			}
+		}
+		return "installed " + strings.Join(parts, ", ")
+	}
+	if it.State == "not_installed" || it.State == "" {
+		return "not installed"
+	}
+	if it.InstalledVersion != "" {
+		return fmt.Sprintf("installed (v%s)", strings.TrimPrefix(it.InstalledVersion, "v"))
+	}
+	return "installed"
 }
 
 func prettyState(state, installedVersion string) string {

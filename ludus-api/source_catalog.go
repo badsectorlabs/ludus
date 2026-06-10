@@ -57,12 +57,12 @@ type CatalogBlueprint struct {
 	RequiredGalaxyCollections []string `json:"requiredGalaxyCollections,omitempty"`
 }
 
-// ScopeInstall is one installed copy of a role: which scope it lives in
-// ("global"/"user"), the version on disk there, and its state against the
-// required pin ("installed" when it satisfies, "upgrade_available" on a
-// mismatch). A role can have more than one — global and per-user copies can
-// sit at different versions. State is empty at the disk-scan layer and filled
-// once the catalog knows the pin.
+// ScopeInstall is one installed copy of a role or vendored collection: which
+// scope it lives in ("global"/"user"), the version on disk there, and its
+// state against the required pin ("installed" when it satisfies,
+// "upgrade_available" on a mismatch). An artifact can have more than one —
+// global and per-user copies can sit at different versions. State is empty at
+// the disk-scan layer and filled once the catalog knows the pin.
 type ScopeInstall struct {
 	Scope   string `json:"scope"`
 	Version string `json:"version,omitempty"`
@@ -81,10 +81,11 @@ type CatalogItem struct {
 	// pointed at the right path or it reports "not installed, skipping".
 	// Meaningless (always false) for templates and collections.
 	Global bool `json:"global,omitempty"`
-	// Scopes lists every installed copy of a role with its scope, on-disk
-	// version, and per-scope state vs the pin. A role can occupy both global
-	// and user at different versions. Drives the per-scope subrows and the
-	// per-scope remove submenu. nil for non-role kinds and not-installed roles.
+	// Scopes lists every installed copy of a role or vendored collection with
+	// its scope, on-disk version, and per-scope state vs the pin. An artifact
+	// can occupy both global and user at different versions. Drives the
+	// per-scope subrows and the per-scope remove submenu. nil for templates,
+	// galaxy deps, and not-installed items.
 	Scopes []ScopeInstall `json:"scopes,omitempty"`
 	// Type is the requirements.yml install type for a collection — "git"
 	// when the collection is sourced from a git repo (Name holds the repo
@@ -326,8 +327,11 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 		c.LocalCollections = append(c.LocalCollections, CatalogItem{
 			Name:             fqcn,
 			Description:      localCollectionDescription(dir),
+			Version:          gm.Version,
 			State:            state,
 			InstalledVersion: installedVer,
+			Global:           installed["local_collection/"+fqcn].Global,
+			Scopes:           annotateScopeStates(installed["local_collection/"+fqcn].Scopes, ""),
 		})
 	}
 
@@ -400,8 +404,14 @@ func loadInstalledArtifacts(e *core.RequestEvent, walked *WalkedSource) map[stri
 
 	// Local collections — install state from ansible_collections/<ns>/<name>/MANIFEST.json.
 	// Check both per-user/subscription homes and the global collections base.
-	for k := range localCollectionDiskState(walked, ansibleHomes, globalCollectionsPath()) {
-		out[k] = installedArtifact{}
+	for k, installs := range localCollectionScopes(walked, ansibleHomes, globalCollectionsPath()) {
+		global := false
+		for _, s := range installs {
+			if s.Scope == "global" {
+				global = true
+			}
+		}
+		out[k] = installedArtifact{Version: installs[0].Version, Global: global, Scopes: installs}
 	}
 
 	// A template counts as installed (for this viewer) when its *-template name
@@ -511,27 +521,30 @@ func loadInstalledFromDisk(walked *WalkedSource, rolePaths, subRolePaths, ansibl
 	return out
 }
 
-// localCollectionDiskState reports, per source-bundled collection, whether its
-// installed copy exists under any of the given ansible homes or the global
-// collections base. A collection is "installed" when
-// ansible_collections/<ns>/<name>/MANIFEST.json is present.
+// localCollectionScopes reports, per source-bundled collection, every
+// installed copy with its scope and on-disk version. A copy exists where
+// ansible_collections/<ns>/<name>/MANIFEST.json is present. Vendored
+// collections install per-user by default and globally with --global, so —
+// like roles — both scopes can be occupied at once, at different versions.
 //
-// ansibleHomes are per-user (or subscription) roots where the MANIFEST lives
-// at <home>/collections/ansible_collections/<ns>/<name>/MANIFEST.json —
+// globalCollectionBase is the system-wide base (globalCollectionsPath()),
+// reported as scope "global". Its MANIFEST lives at
+// <globalCollectionBase>/ansible_collections/<ns>/<name>/MANIFEST.json with
+// NO additional "collections/" prefix, so it is read directly rather than
+// through readGalaxyInstalledCollectionVersion.
+//
+// ansibleHomes are per-user (or subscription) roots, reported as scope
+// "user", where the MANIFEST lives at
+// <home>/collections/ansible_collections/<ns>/<name>/MANIFEST.json —
 // readGalaxyInstalledCollectionVersion handles that "collections/" prefix.
-//
-// globalCollectionBase is the system-wide base (globalCollectionsPath()). Its
-// MANIFEST lives at <globalCollectionBase>/ansible_collections/<ns>/<name>/
-// MANIFEST.json with NO additional "collections/" prefix, so we stat it
-// directly rather than routing through readGalaxyInstalledCollectionVersion.
 //
 // The FQCN (<namespace>.<name>) is read from the source dir's galaxy.yml and
 // is the canonical identity: the map is keyed "local_collection/<FQCN>" so it
 // lines up with the catalog item's Name and the artifactState lookup (NOT the
 // on-disk dir basename). Split out so the disk check is testable without a
 // request event.
-func localCollectionDiskState(walked *WalkedSource, ansibleHomes []string, globalCollectionBase string) map[string]bool {
-	out := map[string]bool{}
+func localCollectionScopes(walked *WalkedSource, ansibleHomes []string, globalCollectionBase string) map[string][]ScopeInstall {
+	out := map[string][]ScopeInstall{}
 	if walked == nil {
 		return out
 	}
@@ -545,21 +558,25 @@ func localCollectionDiskState(walked *WalkedSource, ansibleHomes []string, globa
 			continue
 		}
 		fqcn := gm.Namespace + "." + gm.Name
-		installed := false
+		var installs []ScopeInstall
+		if globalCollectionBase != "" {
+			dir := filepath.Join(globalCollectionBase, "ansible_collections", gm.Namespace, gm.Name)
+			if v, ok := readInstalledCollectionVersion(dir); ok {
+				installs = append(installs, ScopeInstall{Scope: "global", Version: v})
+			}
+		}
 		for _, home := range ansibleHomes {
-			if readGalaxyInstalledCollectionVersion(home, fqcn) != "" {
-				installed = true
+			if home == "" {
+				continue
+			}
+			dir := filepath.Join(home, "collections", "ansible_collections", gm.Namespace, gm.Name)
+			if v, ok := readInstalledCollectionVersion(dir); ok {
+				installs = append(installs, ScopeInstall{Scope: "user", Version: v})
 				break
 			}
 		}
-		if !installed && globalCollectionBase != "" {
-			manifest := filepath.Join(globalCollectionBase, "ansible_collections", gm.Namespace, gm.Name, "MANIFEST.json")
-			if _, serr := os.Stat(manifest); serr == nil {
-				installed = true
-			}
-		}
-		if installed {
-			out["local_collection/"+fqcn] = true
+		if len(installs) > 0 {
+			out["local_collection/"+fqcn] = installs
 		}
 	}
 	return out
