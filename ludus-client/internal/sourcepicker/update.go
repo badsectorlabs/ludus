@@ -67,11 +67,17 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchInput.Focus()
 		m.searchInput.SetValue("")
 		return m, nil
-	case "tab":
-		m.active = (m.active + 1) % numToggleableSections
+	case "tab", "right", "l":
+		m.cycleTab(1)
 		return m, nil
-	case "shift+tab":
-		m.active = (m.active + numToggleableSections - 1) % numToggleableSections
+	case "shift+tab", "left", "h":
+		m.cycleTab(-1)
+		return m, nil
+	case "1", "2", "3":
+		t := tab(msg.String()[0] - '1')
+		if t < numTabs && m.tabHasContent(t) {
+			m.switchTab(t)
+		}
 		return m, nil
 	case "up", "k":
 		m.cursorUp()
@@ -83,6 +89,9 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toggleAtCursor()
 		return m, nil
 	case "a":
+		m.toggleAllInTab()
+		return m, nil
+	case "A":
 		m.toggleAllEverywhere()
 		return m, nil
 	case "g":
@@ -121,15 +130,13 @@ func (m *model) toggleAtCursor() {
 	}
 }
 
-// toggleAllEverywhere: if any visible row across any toggleable section is
-// unpicked, pick everything; otherwise unpick everything. Implied-only rows
-// are skipped (they're not user-pickable). Spans all three toggleable
-// sections so `a` is a true "select all" — section-local toggling is no
-// longer a separate keybind.
-func (m *model) toggleAllEverywhere() {
+// toggleAllOver: if any visible row across the given sections is unpicked,
+// pick everything; otherwise unpick everything. Implied-only rows are skipped
+// (they're not user-pickable).
+func (m *model) toggleAllOver(secs []section) {
 	anyUnpicked := false
 outer:
-	for sec := section(0); sec < numToggleableSections; sec++ {
+	for _, sec := range secs {
 		set := m.picked[sec.key()]
 		for _, r := range m.visibleToggleable(sec) {
 			if m.isImpliedOnly(r) {
@@ -141,7 +148,7 @@ outer:
 			}
 		}
 	}
-	for sec := section(0); sec < numToggleableSections; sec++ {
+	for _, sec := range secs {
 		set := m.picked[sec.key()]
 		for _, r := range m.visibleToggleable(sec) {
 			if m.isImpliedOnly(r) {
@@ -156,42 +163,128 @@ outer:
 	}
 }
 
+// toggleAllInTab is `a`: select-all scoped to the visible panel.
+func (m *model) toggleAllInTab() {
+	m.toggleAllOver(m.activeTab.sections())
+}
+
+// toggleAllEverywhere is `A`: select-all across every tab.
+func (m *model) toggleAllEverywhere() {
+	all := make([]section, 0, numToggleableSections)
+	for sec := section(0); sec < numToggleableSections; sec++ {
+		all = append(all, sec)
+	}
+	m.toggleAllOver(all)
+}
+
+// tabHasContent reports whether the tab has any rows, ignoring the search
+// filter — a tab emptied only by the filter stays visible (showing "no
+// matches") so the user knows it exists.
+func (m model) tabHasContent(t tab) bool {
+	for _, sec := range t.sections() {
+		if len(m.allRows(sec)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// visibleTabs lists the tabs worth showing: those with content in the
+// current mode.
+func (m model) visibleTabs() []tab {
+	var out []tab
+	for t := tab(0); t < numTabs; t++ {
+		if m.tabHasContent(t) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// switchTab activates a tab and drops the cursor on its first section with
+// visible rows (falling back to the first section so the highlight always
+// lands somewhere sane).
+func (m *model) switchTab(t tab) {
+	m.activeTab = t
+	secs := t.sections()
+	m.active = secs[0]
+	for _, sec := range secs {
+		if len(m.visibleToggleable(sec)) > 0 {
+			m.active = sec
+			break
+		}
+	}
+}
+
+// cycleTab moves to the next/previous tab with content, wrapping around.
+func (m *model) cycleTab(dir int) {
+	visible := m.visibleTabs()
+	if len(visible) < 2 {
+		return
+	}
+	cur := 0
+	for i, t := range visible {
+		if t == m.activeTab {
+			cur = i
+			break
+		}
+	}
+	next := (cur + dir + len(visible)) % len(visible)
+	m.switchTab(visible[next])
+}
+
 // cursorUp moves the cursor up by one row. At the top of the active
-// section, it walks to the previous non-empty toggleable section and
-// lands on that section's last visible row. Anchored at the very top.
+// section, it walks to the previous non-empty section within the active
+// tab and lands on that section's last visible row. Anchored at the top.
 func (m *model) cursorUp() {
 	if m.cursor[m.active] > 0 {
 		m.cursor[m.active]--
 		return
 	}
-	for sec := m.active - 1; sec >= 0; sec-- {
-		visible := m.visibleToggleable(sec)
+	secs := m.activeTab.sections()
+	pos := sectionIndex(secs, m.active)
+	for i := pos - 1; i >= 0; i-- {
+		visible := m.visibleToggleable(secs[i])
 		if len(visible) > 0 {
-			m.active = sec
-			m.cursor[sec] = len(visible) - 1
+			m.active = secs[i]
+			m.cursor[secs[i]] = len(visible) - 1
 			return
 		}
 	}
-	// Already at the top of the first non-empty section — no-op.
+	// Already at the top of the tab's first non-empty section — no-op.
 }
 
 // cursorDown moves the cursor down by one row. At the bottom of the
-// active section, it walks to the next non-empty toggleable section and
-// lands on that section's first visible row. Anchored at the very bottom.
+// active section, it walks to the next non-empty section within the active
+// tab and lands on that section's first visible row. Anchored at the bottom.
 func (m *model) cursorDown() {
 	visible := m.visibleToggleable(m.active)
 	if m.cursor[m.active] < len(visible)-1 {
 		m.cursor[m.active]++
 		return
 	}
-	for sec := m.active + 1; sec < numToggleableSections; sec++ {
-		if len(m.visibleToggleable(sec)) > 0 {
-			m.active = sec
-			m.cursor[sec] = 0
+	secs := m.activeTab.sections()
+	pos := sectionIndex(secs, m.active)
+	for i := pos + 1; i < len(secs); i++ {
+		if len(m.visibleToggleable(secs[i])) > 0 {
+			m.active = secs[i]
+			m.cursor[secs[i]] = 0
 			return
 		}
 	}
-	// Already at the bottom of the last non-empty section — no-op.
+	// Already at the bottom of the tab's last non-empty section — no-op.
+}
+
+// sectionIndex finds sec's position within secs (0 if absent — callers pass
+// the active tab's own section list, so absence means a stale active section
+// and starting from the front is the safe recovery).
+func sectionIndex(secs []section, sec section) int {
+	for i, s := range secs {
+		if s == sec {
+			return i
+		}
+	}
+	return 0
 }
 
 // isImpliedOnly returns true if the row is in templates or local roles, not
@@ -241,16 +334,6 @@ func setToSortedSlice(s map[string]struct{}) []string {
 	return out
 }
 
-// visibleInMode reports whether a row should appear given the picker mode.
-// Remove mode hides anything not currently installed — you can't drop what
-// isn't there. Install mode shows the whole walked catalog.
-func (m model) visibleInMode(r row) bool {
-	if m.mode == ModeRemove {
-		return isInstalledState(r.state)
-	}
-	return true
-}
-
 // matchesFilter returns true if the row matches the current filter (or no
 // filter is set).
 func (m model) matchesFilter(r row) bool {
@@ -267,14 +350,15 @@ func (m model) matchesFilter(r row) bool {
 	return false
 }
 
-// visibleToggleable returns the filtered, ordered rows for one toggleable
-// section. Used for both rendering and cursor math so they stay in sync.
-func (m model) visibleToggleable(sec section) []row {
+// allRows builds the ordered rows for one toggleable section straight from
+// the catalog, before any mode/filter trimming. visibleToggleable filters
+// these; tabHasContent uses them to keep filter-emptied tabs visible.
+func (m model) allRows(sec section) []row {
 	var out []row
 	switch sec {
 	case sectionBlueprints:
 		for _, bp := range m.catalog.Blueprints.Items {
-			r := row{
+			out = append(out, row{
 				kind:             rowToggleable,
 				section:          sec,
 				id:               bp.ID,
@@ -283,14 +367,11 @@ func (m model) visibleToggleable(sec section) []row {
 				version:          bp.Version,
 				state:            bp.State,
 				installedVersion: bp.InstalledVersion,
-			}
-			if m.matchesFilter(r) && m.visibleInMode(r) {
-				out = append(out, r)
-			}
+			})
 		}
 	case sectionTemplates:
 		for _, t := range m.catalog.Templates {
-			r := row{
+			out = append(out, row{
 				kind:             rowToggleable,
 				section:          sec,
 				id:               t.Name,
@@ -300,14 +381,11 @@ func (m model) visibleToggleable(sec section) []row {
 				state:            t.State,
 				installedVersion: t.InstalledVersion,
 				requiredBy:       t.RequiredBy,
-			}
-			if m.matchesFilter(r) && m.visibleInMode(r) {
-				out = append(out, r)
-			}
+			})
 		}
 	case sectionLocalRoles:
 		for _, lr := range m.catalog.LocalRoles {
-			r := row{
+			out = append(out, row{
 				kind:             rowToggleable,
 				section:          sec,
 				id:               lr.Name,
@@ -318,14 +396,11 @@ func (m model) visibleToggleable(sec section) []row {
 				installedVersion: lr.InstalledVersion,
 				scopes:           lr.Scopes,
 				requiredBy:       lr.RequiredBy,
-			}
-			if m.matchesFilter(r) && m.visibleInMode(r) {
-				out = append(out, r)
-			}
+			})
 		}
 	case sectionLocalCollections:
 		for _, lc := range m.catalog.LocalCollections {
-			r := row{
+			out = append(out, row{
 				kind:             rowToggleable,
 				section:          sec,
 				id:               lc.Name,
@@ -335,10 +410,19 @@ func (m model) visibleToggleable(sec section) []row {
 				state:            lc.State,
 				installedVersion: lc.InstalledVersion,
 				requiredBy:       lc.RequiredBy,
-			}
-			if m.matchesFilter(r) && m.visibleInMode(r) {
-				out = append(out, r)
-			}
+			})
+		}
+	}
+	return out
+}
+
+// visibleToggleable returns the filtered, ordered rows for one toggleable
+// section. Used for both rendering and cursor math so they stay in sync.
+func (m model) visibleToggleable(sec section) []row {
+	var out []row
+	for _, r := range m.allRows(sec) {
+		if m.matchesFilter(r) {
+			out = append(out, r)
 		}
 	}
 	return out

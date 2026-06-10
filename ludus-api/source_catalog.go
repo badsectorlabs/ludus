@@ -27,8 +27,13 @@ type InstallSelection struct {
 // walk found, joined with what is currently installed. State enrichment is
 // computed by ComputeSourceCatalog at request time, not stored.
 type SourceCatalog struct {
-	SourceID               string                 `json:"sourceID"`
-	SourceName             string                 `json:"sourceName"`
+	SourceID   string `json:"sourceID"`
+	SourceName string `json:"sourceName"`
+	// SourceDescription / SourceType / LastSyncedAt are display metadata for
+	// picker headers (CLI TUI, GUI detail page), read off the source record.
+	SourceDescription      string                 `json:"description,omitempty"`
+	SourceType             string                 `json:"sourceType,omitempty"` // "git" | "upload"
+	LastSyncedAt           string                 `json:"lastSyncedAt,omitempty"`
 	Blueprints             []CatalogBlueprint     `json:"blueprints"`
 	Templates              []CatalogItem          `json:"templates"`
 	LocalRoles             []CatalogItem          `json:"localRoles"`
@@ -210,12 +215,15 @@ func localCollectionDescription(dir string) string {
 // loadInstalledArtifacts for the rationale. No writes.
 func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *WalkedSource) *SourceCatalog {
 	c := &SourceCatalog{
-		SourceID:         src.GetString("sourceID"),
-		SourceName:       src.GetString("name"),
-		Blueprints:       []CatalogBlueprint{},
-		Templates:        []CatalogItem{},
-		LocalRoles:       []CatalogItem{},
-		LocalCollections: []CatalogItem{},
+		SourceID:          src.GetString("sourceID"),
+		SourceName:        src.GetString("name"),
+		SourceDescription: src.GetString("description"),
+		SourceType:        src.GetString("type"),
+		LastSyncedAt:      src.GetString("lastSyncedAt"),
+		Blueprints:        []CatalogBlueprint{},
+		Templates:         []CatalogItem{},
+		LocalRoles:        []CatalogItem{},
+		LocalCollections:  []CatalogItem{},
 	}
 	if walked == nil {
 		return c

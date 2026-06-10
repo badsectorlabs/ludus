@@ -2,7 +2,6 @@ package ludusapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
-	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 // SyncResult groups per-artifact outcomes by the source-repo dir the content
@@ -88,10 +86,16 @@ type SyncOptions struct {
 
 	// Selection scopes which walked items get registered/installed. nil means
 	// "install everything walked" — set when the install handler's caller
-	// omits the selection field, and the default for backfilled / pre-existing
-	// source rows. Future syncs honor whatever the source's stored
-	// installSelection is.
+	// omits the selection field. Nothing is persisted: each install acts only
+	// on the selection it was given.
 	Selection *InstallSelection
+
+	// SelectionFromClaims derives the selection from what this source has
+	// already installed (blueprint rows + source_artifacts claims),
+	// intersected with the new walk. Used by upload-archive updates so
+	// pushing new content re-applies what's actually installed rather than
+	// everything the archive ships.
+	SelectionFromClaims bool
 }
 
 // sourceSyncLocks serialises runSourceInstall per source record. Concurrent syncs on
@@ -202,12 +206,6 @@ type RefreshResult struct {
 // record's manifest fields and sync metadata. NO artifact installs, removes,
 // or DB writes for blueprints/templates/roles. Used by POST /sources/{id}/sync
 // and SyncAllSourcesOnStartup so syncing is cheap and observation-only.
-//
-// One-shot legacy migration: when the source record's installSelection is
-// null (pre-upgrade rows that ran under the install-all regime), this path
-// snapshots the current walk into installSelection so the next install has
-// a concrete starting point. After the snapshot lands, every subsequent
-// refresh is fully read-only.
 func runSourceRefresh(app core.App, sourceRecord *core.Record, opts SyncOptions) (*RefreshResult, error) {
 	defer lockSourceSync(sourceRecord.Id)()
 
@@ -221,10 +219,6 @@ func runSourceRefresh(app core.App, sourceRecord *core.Record, opts SyncOptions)
 	sourceRecord.Set("lastSyncStatus", "ok")
 	sourceRecord.Set("lastSyncError", "")
 
-	if loadInstallSelection(sourceRecord) == nil {
-		sourceRecord.Set("installSelection", snapshotWalkedAsSelection(walked))
-	}
-
 	if err := app.Save(sourceRecord); err != nil {
 		return nil, err
 	}
@@ -234,13 +228,17 @@ func runSourceRefresh(app core.App, sourceRecord *core.Record, opts SyncOptions)
 	}, nil
 }
 
-// runSourceInstall is the install path. It refreshes, applies the selection
-// (upserting blueprint rows, registering template/role files, pruning stale
-// claims, installing galaxy roles), and persists the result.
+// runSourceInstall is the install path. It refreshes, then applies the
+// requested selection: upserting blueprint rows, registering template/role
+// files, installing galaxy roles.
 //
-// When opts.Selection is nil the install behaves as "install everything
-// currently walked" — the walked set is snapshotted into installSelection
-// before the apply runs, so future syncs honor a concrete set.
+// Install is additive and stateless: it acts only on the selection it was
+// given and nothing is ever uninstalled here. There is no persisted
+// selection — what's installed is recorded by the claims ledger
+// (source_artifacts + blueprint rows), and removal goes through the
+// individual delete APIs (templates rm, ansible role/collection rm,
+// blueprint rm). opts.Selection == nil means "install everything currently
+// walked".
 func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, sourceRecord *core.Record, opts SyncOptions) (*SyncResult, error) {
 	defer lockSourceSync(sourceRecord.Id)()
 
@@ -249,10 +247,15 @@ func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, s
 		return nil, err
 	}
 
-	if opts.Selection == nil {
+	switch {
+	case opts.SelectionFromClaims:
+		opts.Selection = selectionFromClaims(app, sourceRecord, walked)
+	case opts.Selection == nil:
 		opts.Selection = snapshotWalkedAsSelection(walked)
-	} else if err := validateSelectionAgainstWalk(opts.Selection, walked); err != nil {
-		return nil, err
+	default:
+		if err := validateSelectionAgainstWalk(opts.Selection, walked); err != nil {
+			return nil, err
+		}
 	}
 
 	applySourceManifestToRecord(sourceRecord, walked.Source)
@@ -269,7 +272,6 @@ func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, s
 	res.TemplateResults = registerTemplates(app, sourceRecord, walked, opts)
 	res.LocalAnsibleResults.RoleResults = registerLocalRoles(app, sourceRecord, walked, opts)
 	res.LocalAnsibleResults.CollectionResults = registerLocalCollections(app, sourceRecord, walked, opts)
-	pruneSourceArtifactClaims(app, sourceRecord, walked, opts.Selection, opts.InitiatorIsAdmin, opts.InitiatorProxmoxUsername)
 	if !opts.NoDeps {
 		res.BlueprintResults.AnsibleResults = installUnionedAnsible(e, app, sourceRecord, walked, opts)
 	}
@@ -284,7 +286,6 @@ func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, s
 		sourceRecord.Set("lastSyncStatus", "partial")
 		sourceRecord.Set("lastSyncError", truncateError(strings.Join(failures, "; "), 4000))
 	}
-	sourceRecord.Set("installSelection", opts.Selection)
 	if err := app.Save(sourceRecord); err != nil {
 		return res, err
 	}
@@ -292,9 +293,8 @@ func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, s
 }
 
 // snapshotWalkedAsSelection turns "everything in this walk" into an
-// InstallSelection. Used as the migration shim for legacy source rows that
-// pre-date the "selection always set" contract — first sync after upgrade
-// persists this snapshot, and subsequent syncs honor it.
+// InstallSelection — the expansion of an absent selection ("install
+// everything") and the available-set used to validate explicit ones.
 func snapshotWalkedAsSelection(walked *WalkedSource) *InstallSelection {
 	sel := &InstallSelection{}
 	for _, bp := range walked.Blueprints {
@@ -319,6 +319,60 @@ func snapshotWalkedAsSelection(walked *WalkedSource) *InstallSelection {
 			continue
 		}
 		sel.LocalCollections = append(sel.LocalCollections, gm.Namespace+"."+gm.Name)
+	}
+	return sel
+}
+
+// selectionFromClaims rebuilds "what this source has installed" from the
+// claims ledger — blueprint rows plus template/role/collection
+// source_artifacts — intersected with the walk so content the new archive or
+// ref no longer ships falls away. Used by upload-archive updates to re-apply
+// the actually-installed set against new content.
+func selectionFromClaims(app core.App, src *core.Record, walked *WalkedSource) *InstallSelection {
+	available := snapshotWalkedAsSelection(walked)
+	sel := &InstallSelection{}
+
+	if rows, err := app.FindRecordsByFilter("blueprints",
+		"source = {:s}", "", 0, 0, map[string]any{"s": src.Id}); err == nil {
+		for _, r := range rows {
+			if id := r.GetString("sourceBlueprintID"); slices.Contains(available.Blueprints, id) {
+				sel.Blueprints = append(sel.Blueprints, id)
+			}
+		}
+	}
+
+	listFor := func(kind string) []string {
+		switch kind {
+		case "template":
+			return available.Templates
+		case "local_role":
+			return available.LocalRoles
+		default:
+			return available.LocalCollections
+		}
+	}
+	for _, kind := range []string{"template", "local_role", "local_collection"} {
+		rows, err := app.FindRecordsByFilter("source_artifacts",
+			"source = {:s} && kind = {:k}", "", 0, 0,
+			map[string]any{"s": src.Id, "k": kind})
+		if err != nil {
+			continue
+		}
+		avail := listFor(kind)
+		for _, r := range rows {
+			name := r.GetString("name")
+			if !slices.Contains(avail, name) {
+				continue
+			}
+			switch kind {
+			case "template":
+				sel.Templates = append(sel.Templates, name)
+			case "local_role":
+				sel.LocalRoles = append(sel.LocalRoles, name)
+			case "local_collection":
+				sel.LocalCollections = append(sel.LocalCollections, name)
+			}
+		}
 	}
 	return sel
 }
@@ -430,7 +484,6 @@ func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource
 		return slices.Contains(selection.Blueprints, bpID)
 	}
 
-	seen := map[string]struct{}{}
 	for _, bp := range walked.Blueprints {
 		if bp.Manifest == nil {
 			continue
@@ -438,7 +491,6 @@ func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource
 		if !selectedBP(bp.Manifest.ID) {
 			continue
 		}
-		seen[bp.Manifest.ID] = struct{}{}
 
 		records, err := app.FindRecordsByFilter("blueprints",
 			"source = {:src} && sourceBlueprintID = {:bp}", "", 1, 0,
@@ -489,181 +541,27 @@ func upsertSourceBlueprints(app core.App, src *core.Record, walked *WalkedSource
 		}
 	}
 
-	// Prune rows for blueprints the user no longer wants. A row is kept when
-	// either (a) it's still walked AND selected (the seen set), or (b) the
-	// persisted selection still names it — upstream may have removed the
-	// blueprint, but user intent wins over upstream churn. In install-all
-	// mode (selection == nil), the seen-only check applies and orphan rows
-	// for items removed upstream are pruned as before.
+	// Prune rows only for blueprints the repo no longer ships. An existing row
+	// for a walked-but-not-currently-requested blueprint stays — installs are
+	// additive and act only on what they were asked for; rows are removed by
+	// blueprint rm, not by being left out of a later install.
+	walkedIDs := map[string]struct{}{}
+	for _, bp := range walked.Blueprints {
+		if bp.Manifest != nil {
+			walkedIDs[bp.Manifest.ID] = struct{}{}
+		}
+	}
 	existing, err := app.FindRecordsByFilter("blueprints",
 		"source = {:src}", "", 0, 0, map[string]any{"src": src.Id})
 	if err == nil {
 		for _, rec := range existing {
-			sourceBPID := rec.GetString("sourceBlueprintID")
-			if _, walked := seen[sourceBPID]; walked {
-				continue
-			}
-			if selection != nil && slices.Contains(selection.Blueprints, sourceBPID) {
+			if _, ok := walkedIDs[rec.GetString("sourceBlueprintID")]; ok {
 				continue
 			}
 			_ = app.Delete(rec)
 		}
 	}
 	return nil
-}
-
-// pruneSourceArtifactClaims drops source_artifacts rows for template and
-// local_role names this source no longer wants — either because the user
-// de-selected them, or because upstream removed the directory AND the
-// persisted selection no longer names them. The on-disk files go too: there is
-// no cross-source refcount, so a de-selected name is uninstalled even if
-// another source ships the same name (that source can reinstall it).
-//
-// Galaxy roles and collections are not pruned here: their claims come from
-// blueprint requirements.yml, and installUnionedAnsible already filters by
-// the selected blueprints, so a stale row would imply a blueprint-level
-// inconsistency rather than a template/role one. Left for a follow-up if
-// it becomes a real problem.
-// buildKeptLocalCollections computes the kept-set of collection FQCNs for
-// pruning and reports whether any walked dir had an unreadable galaxy.yml.
-// When hadError is true the caller must NOT prune local_collection rows —
-// a transient read failure must never be treated as a de-selection.
-func buildKeptLocalCollections(walked *WalkedSource, selection *InstallSelection) (kept map[string]struct{}, hadError bool) {
-	kept = map[string]struct{}{}
-	selected := selectionLocalCollections(selection)
-	for _, dir := range walked.LocalCollections {
-		fqcn, err := collectionFQCNForDir(dir)
-		if err != nil {
-			hadError = true
-			continue
-		}
-		if selection != nil && !slices.Contains(selected, fqcn) {
-			continue
-		}
-		kept[fqcn] = struct{}{}
-	}
-	return kept, hadError
-}
-
-func pruneSourceArtifactClaims(app core.App, src *core.Record, walked *WalkedSource, selection *InstallSelection, initiatorIsAdmin bool, initiatorProxmoxUsername string) {
-	keep := func(dirs []string, selected []string, nameFn func(string) string) map[string]struct{} {
-		out := map[string]struct{}{}
-		for _, dir := range dirs {
-			name := nameFn(dir)
-			if selection != nil && !slices.Contains(selected, name) {
-				continue
-			}
-			out[name] = struct{}{}
-		}
-		return out
-	}
-
-	// Templates are keyed by their *-template name (matching the catalog +
-	// ledger); local roles by directory basename; local collections by FQCN
-	// (namespace.name) — the same key Leg E records on the source_artifacts row.
-	keptTemplates := keep(walked.Templates, selectionTemplates(selection), templateNameForDir)
-	keptLocalRoles := keep(walked.LocalRoles, selectionLocalRoles(selection), filepath.Base)
-
-	// For local collections, a transient galaxy.yml read error must abort the
-	// prune rather than silently treating the collection as stale and deleting
-	// it. buildKeptLocalCollections signals this via hadError.
-	keptLocalCollections, collectionError := buildKeptLocalCollections(walked, selection)
-	if collectionError {
-		log.Printf("[blueprint-sources] sync prune: skipping local_collection prune — one or more collection dirs returned an error reading galaxy.yml")
-	}
-
-	dropStaleClaims(app, src, "template", keptTemplates, selectionTemplates(selection), selection != nil, initiatorIsAdmin, initiatorProxmoxUsername)
-	dropStaleClaims(app, src, "local_role", keptLocalRoles, selectionLocalRoles(selection), selection != nil, initiatorIsAdmin, initiatorProxmoxUsername)
-	if !collectionError {
-		dropStaleClaims(app, src, "local_collection", keptLocalCollections, selectionLocalCollections(selection), selection != nil, initiatorIsAdmin, initiatorProxmoxUsername)
-	}
-}
-
-func selectionTemplates(s *InstallSelection) []string {
-	if s == nil {
-		return nil
-	}
-	return s.Templates
-}
-
-func selectionLocalRoles(s *InstallSelection) []string {
-	if s == nil {
-		return nil
-	}
-	return s.LocalRoles
-}
-
-func selectionLocalCollections(s *InstallSelection) []string {
-	if s == nil {
-		return nil
-	}
-	return s.LocalCollections
-}
-
-// dropStaleClaims removes (source, kind, name) rows whose name is neither
-// currently kept nor named in the persisted selection. When the source is
-// in install-all mode (haveSelection=false), the second guard is moot and
-// only the kept set decides.
-//
-// After dropping our row, the on-disk files are removed too. Templates live in
-// the initiator's own per-user packer dir, so removing one only affects that
-// user — no gate. The global-roles dir IS shared instance-wide, so deleting
-// from it stays admin-only (initiatorIsAdmin); a non-admin's role remove
-// touches only the source owner's own per-user roles. There is NO cross-source
-// refcount — uninstall means uninstall, so this deletes the artifact even if
-// another source also ships the same name (that source can reinstall it).
-// Failures from file removal are logged but not propagated — a stranded file
-// is annoying but not corrupting, and we never want a prune error to
-// short-circuit the rest of the sync.
-func dropStaleClaims(app core.App, src *core.Record, kind string, kept map[string]struct{}, selected []string, haveSelection, initiatorIsAdmin bool, initiatorProxmoxUsername string) {
-	existing, err := app.FindRecordsByFilter("source_artifacts",
-		"source = {:s} && kind = {:k}", "", 0, 0,
-		map[string]any{"s": src.Id, "k": kind})
-	if err != nil {
-		return
-	}
-	for _, rec := range existing {
-		name := rec.GetString("name")
-		if _, ok := kept[name]; ok {
-			continue
-		}
-		if haveSelection && slices.Contains(selected, name) {
-			continue
-		}
-		if err := app.Delete(rec); err != nil {
-			continue
-		}
-		switch kind {
-		case "template":
-			// Templates live in the initiator's own per-user packer dir, so a
-			// remove only ever deletes that user's copy — no admin gate. The
-			// templates-collection row is dropped too; if another user still
-			// has the same template, their next `templates list` disk-scan
-			// re-adds it.
-			if rmErr := removeTemplateByName(name, initiatorProxmoxUsername); rmErr != nil {
-				log.Printf("[blueprint-sources] sync prune: remove template %q: %v", name, rmErr)
-				continue
-			}
-			if tplRec, _ := app.FindFirstRecordByData("templates", "name", name); tplRec != nil {
-				_ = app.Delete(tplRec)
-			}
-		case "local_role":
-			// global-roles deletion is admin-only; a non-admin's remove is
-			// confined to the source owner's own per-user roles dir.
-			if rmErr := removeLocalRoleByName(app, name, src, initiatorIsAdmin); rmErr != nil {
-				log.Printf("[blueprint-sources] sync prune: remove local role %q: %v", name, rmErr)
-			}
-		case "local_collection":
-			// global-collections deletion is admin-only; a non-admin's remove is
-			// confined to the source owner's own per-user collections dir. The
-			// artifact row's name IS the FQCN (namespace.name) recorded by Leg E's
-			// registerLocalCollections, so it is forwarded straight to the single
-			// removeLocalCollectionByName wrapper (via the source-scoped helper).
-			if rmErr := removeLocalCollectionForSource(app, name, src, initiatorIsAdmin); rmErr != nil {
-				log.Printf("[blueprint-sources] sync prune: remove local collection %q: %v", name, rmErr)
-			}
-		}
-	}
 }
 
 func relativeToCheckout(checkoutDir, target string) string {
@@ -759,47 +657,4 @@ func SyncAllSourcesOnStartup(app core.App) {
 			sem <- struct{}{}
 		}
 	}()
-}
-
-// loadInstallSelection reads the persisted picker selection off a source
-// record. nil means "no selection on file — install everything" (matches
-// the runSourceInstall filter semantics).
-func loadInstallSelection(src *core.Record) *InstallSelection {
-	return decodeInstallSelectionRaw(src.Get("installSelection"))
-}
-
-// decodeInstallSelectionRaw converts a JSON-field value into an
-// InstallSelection. The PocketBase JSONField surfaces as a few different Go
-// types depending on how it was stored (types.JSONRaw on direct reads,
-// []byte / string on some code paths, nil when unset), so we type-switch
-// instead of relying on cast.ToString — that's been load-bearing behavior
-// across pocketbase versions and we want to lock the read path. Returns nil
-// for any null/empty/parse-error case so callers always get the "install
-// everything" fallback rather than a partial selection.
-func decodeInstallSelectionRaw(raw any) *InstallSelection {
-	var bytes []byte
-	switch v := raw.(type) {
-	case nil:
-		return nil
-	case []byte:
-		bytes = v
-	case string:
-		bytes = []byte(v)
-	case types.JSONRaw:
-		bytes = []byte(v)
-	default:
-		marshaled, err := json.Marshal(v)
-		if err != nil {
-			return nil
-		}
-		bytes = marshaled
-	}
-	if len(bytes) == 0 || string(bytes) == "null" {
-		return nil
-	}
-	var sel InstallSelection
-	if err := json.Unmarshal(bytes, &sel); err != nil {
-		return nil
-	}
-	return &sel
 }

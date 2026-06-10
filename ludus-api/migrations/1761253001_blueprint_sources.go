@@ -112,10 +112,6 @@ func createSourcesCollection(app core.App) error {
 		// lastSyncError), "error" (clone/walk failed before any install).
 		&core.TextField{Name: "lastSyncStatus"},
 		&core.TextField{Name: "lastSyncError"},
-		// installSelection is JSON-encoded *InstallSelection. nil/missing
-		// means "install everything" — the default for a source installed
-		// without an explicit selection, and for any pre-existing row.
-		&core.JSONField{Name: "installSelection", MaxSize: 100_000},
 		&core.AutodateField{Name: "created", OnCreate: true},
 		&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 	)

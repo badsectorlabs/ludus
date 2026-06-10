@@ -215,6 +215,7 @@ func ActionRoleFromInternet(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusConflict, string(cmdOutput))
 	}
 	if roleBody.Action != "install" {
+		releaseSourceClaims(e.App, []string{"local_role", "galaxy_role"}, roleBody.Role)
 		return JSONResult(e, http.StatusCreated, "Successfully removed: "+roleString)
 	} else {
 		return JSONResult(e, http.StatusCreated, "Successfully installed: "+roleString)
@@ -472,6 +473,7 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 		if err := removeLocalCollectionByName(collectionBody.Collection, owner, collectionBody.Global); err != nil {
 			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to remove the ansible collection %s: %s", collectionBody.Collection, err.Error()))
 		}
+		releaseSourceClaims(e.App, []string{"local_collection", "collection"}, collectionBody.Collection)
 		return JSONResult(e, http.StatusCreated, "Successfully removed: "+collectionBody.Collection)
 	}
 

@@ -324,7 +324,7 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 	if flags.Directory == "" && detectSourceArg(arg) == sourceArgUnknown {
 		catalog, ok := tryFetchCatalog(client, arg)
 		if ok {
-			runExistingSourceFlow(client, arg, catalog, flags, mode, sourcepicker.ModeInstall)
+			runExistingSourceFlow(client, arg, catalog, flags, mode)
 			return
 		}
 		logger.Logger.Fatalf("could not interpret %q: expected a git URL, tarball/zip path, or existing sourceID (pass -d for a local directory)", arg)
@@ -349,7 +349,7 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	selection, advanced, committed, proceed, err := chooseSelection(mode, sourcepicker.ModeInstall, flags, registerResp.Catalog)
+	selection, advanced, committed, proceed, err := chooseSelection(mode, flags, registerResp.Catalog)
 	if err != nil {
 		logger.Logger.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	doInstall(client, registerResp.SourceID, selection, advanced, "installed")
+	doInstall(client, registerResp.SourceID, selection, advanced)
 }
 
 // isEmptySelection reports whether nothing was picked — the install path's
@@ -537,7 +537,7 @@ func tryFetchCatalog(client *resty.Client, sourceID string) (dto.SourceCatalogDT
 // runExistingSourceFlow drives selection + install against an already-
 // registered source. Mirrors the post-register branch of runSourceAdd but
 // skips the upload/git work since the source content is already on disk.
-func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.SourceCatalogDTO, flags sourceFlags, mode installMode, intent sourcepicker.Mode) {
+func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.SourceCatalogDTO, flags sourceFlags, mode installMode) {
 	if mode == modeInstallAll {
 		doInstallAll(client, sourceID, cat, sourcepicker.Advanced{
 			Global:  flags.Global,
@@ -548,7 +548,7 @@ func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.Source
 		return
 	}
 
-	selection, advanced, committed, proceed, err := chooseSelection(mode, intent, flags, cat)
+	selection, advanced, committed, proceed, err := chooseSelection(mode, flags, cat)
 	if err != nil {
 		logger.Logger.Fatal(err)
 	}
@@ -557,14 +557,10 @@ func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.Source
 		return
 	}
 	if !proceed {
-		if intent == sourcepicker.ModeRemove {
-			logger.Logger.Info("Nothing selected; nothing to remove.")
-		} else {
-			logger.Logger.Info("Nothing selected; nothing to install.")
-		}
+		logger.Logger.Info("Nothing selected; nothing to install.")
 		return
 	}
-	doInstall(client, sourceID, selection, advanced, installVerbPast(intent))
+	doInstall(client, sourceID, selection, advanced)
 }
 
 // readSourceAddFlags snapshots the package-level flag vars wired onto
@@ -658,17 +654,14 @@ func postSourceRegister(client *resty.Client, arg string, flags sourceFlags) (dt
 	return resp, true, nil
 }
 
-// chooseSelection resolves the selection to POST. intent (install vs remove)
-// only matters for the interactive picker: it drives the picker's mode and
-// how the picked intent set folds against the current install state.
+// chooseSelection resolves the selection to POST.
 //
 // Returns (selection, advanced, committed, proceed, err):
 //   - committed is false only when the user aborted the picker.
 //   - proceed is false when there is nothing to do (no items picked / scripted
 //     selection empty); the caller prints a "nothing selected" notice and
-//     skips the round-trip. A remove that drops every installed item still
-//     proceeds — its empty selection is the server's prune-all signal.
-func chooseSelection(mode installMode, intent sourcepicker.Mode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, bool, error) {
+//     skips the round-trip.
+func chooseSelection(mode installMode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, bool, error) {
 	adv := sourcepicker.Advanced{
 		Global:  flags.Global,
 		Force:   flags.Force,
@@ -686,31 +679,26 @@ func chooseSelection(mode installMode, intent sourcepicker.Mode, flags sourceFla
 		return sel, adv, true, !isEmptySelection(sel), nil
 	case modeInteractive:
 		// The picker opens with nothing checked and returns the user's intent
-		// set (items to install, or to drop). An empty intent means "nothing
-		// to do"; a non-empty intent folds against the current install state
-		// to build the wire selection.
-		picked, advOut, committed, err := sourcepicker.Run(cat, intent, adv)
+		// set (items to install). An empty intent means "nothing to do"; a
+		// non-empty intent folds against the current install state to build
+		// the wire selection.
+		picked, advOut, committed, err := sourcepicker.Run(cat, adv)
 		if err != nil || !committed {
 			return dto.InstallSelectionDTO{}, advOut, committed, false, err
 		}
 		if isEmptySelection(picked) {
 			return dto.InstallSelectionDTO{}, advOut, true, false, nil
 		}
-		return composeInteractiveSelection(intent, cat, picked), advOut, true, true, nil
+		return composeInteractiveSelection(cat, picked), advOut, true, true, nil
 	default:
 		return dto.InstallSelectionDTO{}, adv, false, false, fmt.Errorf("unreachable: mode %v", mode)
 	}
 }
 
-// deriveCurrentSelection rebuilds the source's installed-selection from
-// the catalog's per-item state. composeInteractiveSelection folds the
-// picker's intent set against it (install adds to it, remove subtracts from
-// it). Items in state "installed" or "upgrade_available" count as currently
-// installed; "not_installed" do not. Note: this can drift from the server's persisted installSelection
-// when upstream has removed an item the user previously selected — the
-// orphan won't appear in the catalog walk so we can't surface it here.
-// Acceptable: orphans aren't actionable from this UI anyway (the files
-// they reference no longer exist upstream).
+// deriveCurrentSelection rebuilds the source's installed set from the
+// catalog's per-item state; composeInteractiveSelection adds the picker's
+// intent on top. Items in state "installed" or "upgrade_available" count as
+// currently installed; "not_installed" do not.
 func deriveCurrentSelection(cat dto.SourceCatalogDTO) dto.InstallSelectionDTO {
 	out := dto.InstallSelectionDTO{}
 	for _, bp := range cat.Blueprints.Items {
@@ -740,34 +728,19 @@ func deriveCurrentSelection(cat dto.SourceCatalogDTO) dto.InstallSelectionDTO {
 // for non-admins, so this only affects the picker's display.
 func clientIsAdmin() bool { return true }
 
-// installVerbPast returns the past-tense verb for the result summary, so a
-// removal reports "removed successfully" rather than "installed". The /install
-// endpoint is intent-agnostic (it just reconciles the selection); the verb is
-// the client's view of what the user asked for.
-func installVerbPast(intent sourcepicker.Mode) string {
-	if intent == sourcepicker.ModeRemove {
-		return "removed"
-	}
-	return "installed"
-}
-
-func doInstall(client *resty.Client, sourceID string, sel dto.InstallSelectionDTO, adv sourcepicker.Advanced, verbPast string) {
+func doInstall(client *resty.Client, sourceID string, sel dto.InstallSelectionDTO, adv sourcepicker.Advanced) {
 	postInstall(client, sourceID, dto.InstallRequest{
 		Selection: &sel,
 		Global:    adv.Global,
 		Force:     adv.Force,
 		NoDeps:    adv.NoDeps,
-	}, verbPast)
+	}, "installed")
 }
 
 // doInstallAll is the "install everything currently walked" shortcut used
-// by --all and non-TTY invocations. The server treats an omitted selection
-// as "snapshot the current walk into installSelection," so the persisted
-// state is a concrete list of names and future syncs don't drift with
-// upstream changes.
+// by --all and non-TTY invocations. An omitted selection tells the server
+// to install everything the source ships.
 func doInstallAll(client *resty.Client, sourceID string, _ dto.SourceCatalogDTO, adv sourcepicker.Advanced) {
-	// install-all is only ever an install path (remove builds an explicit
-	// selection), so the verb is fixed.
 	postInstall(client, sourceID, dto.InstallRequest{
 		Global: adv.Global,
 		Force:  adv.Force,
@@ -1067,128 +1040,6 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 	logger.Logger.Infof("Source '%s' ref updated. Run `ludus source sync %s` to apply.", sid, sid)
 }
 
-var sourceRemoveCmd = &cobra.Command{
-	Use:     "remove <sourceID>",
-	Short:   "Remove items from an installed source (or open the picker to manage)",
-	Aliases: []string{"uninstall"},
-	Long: `Drop items from a source's installed selection. The source itself stays
-registered; only the named items get removed. Files unique to this source
-are deleted from disk; items still claimed by another source keep their
-files.
-
-  ludus source remove <id>                              # open the picker showing installed items; check what you want to drop
-  ludus source remove <id> --blueprints A,B             # scripted: drop blueprints A and B from the current selection
-  ludus source remove <id> --templates T1               # scripted: drop template T1
-  ludus source remove <id> --source-roles R1            # scripted: drop local role R1
-  ludus source remove <id> --source-collections ns.col  # scripted: drop local collection ns.col
-  ludus source remove <id> --all                        # scripted: drop every item (the source stays registered)
-
-To DELETE the source entirely (registration + every installed item),
-use 'ludus source rm <id>' instead.`,
-	Args: cobra.ExactArgs(1),
-	Run:  runSourceRemove,
-}
-
-func runSourceRemove(cmd *cobra.Command, args []string) {
-	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-	sid := args[0]
-
-	dropBlueprints := []string(sourceFlagBlueprints)
-	dropTemplates := []string(sourceFlagTemplates)
-	dropLocalRoles := []string(sourceFlagLocalRoles)
-	dropAll := sourceFlagAll
-
-	// No flags: open the picker against the existing source in remove mode.
-	// It shows only installed items, all unchecked; the user checks what to
-	// drop. The picked items are subtracted from the persisted selection.
-	if !dropAll && len(dropBlueprints)+len(dropTemplates)+len(dropLocalRoles) == 0 {
-		catalog, ok := tryFetchCatalog(client, sid)
-		if !ok {
-			logger.Logger.Fatalf("Could not fetch catalog for source %q", sid)
-		}
-		runExistingSourceFlow(client, sid, catalog, sourceFlags{
-			Global: sourceFlagGlobal,
-			Force:  sourceFlagForce,
-		}, modeInteractive, sourcepicker.ModeRemove)
-		return
-	}
-
-	var newSelection dto.InstallSelectionDTO
-	if dropAll {
-		// Explicit empty selection — server-side this is the "uninstall
-		// everything from this source" signal. The wrapping struct itself
-		// has to be present, just with empty arrays.
-		newSelection = dto.InstallSelectionDTO{
-			Blueprints: []string{},
-			Templates:  []string{},
-			LocalRoles: []string{},
-		}
-	} else {
-		// Derive the current installed selection from the catalog (state
-		// = installed or upgrade_available), then subtract the names the
-		// user wants to drop. The result is the post-uninstall selection.
-		catalog, ok := tryFetchCatalog(client, sid)
-		if !ok {
-			logger.Logger.Fatalf("Could not fetch catalog for source %q", sid)
-		}
-		newSelection = dto.InstallSelectionDTO{
-			Blueprints: subtractStrings(installedBlueprintIDs(catalog), dropBlueprints),
-			Templates:  subtractStrings(installedItemNames(catalog.Templates), dropTemplates),
-			LocalRoles: subtractStrings(installedItemNames(catalog.LocalRoles), dropLocalRoles),
-		}
-	}
-
-	postInstall(client, sid, dto.InstallRequest{
-		Selection: &newSelection,
-		Global:    sourceFlagGlobal,
-		Force:     sourceFlagForce,
-	}, "removed")
-}
-
-// installedBlueprintIDs returns the sourceBlueprintID of every catalog
-// blueprint currently installed (or in upgrade-available state).
-func installedBlueprintIDs(cat dto.SourceCatalogDTO) []string {
-	out := make([]string, 0, len(cat.Blueprints.Items))
-	for _, bp := range cat.Blueprints.Items {
-		if bp.State == "installed" || bp.State == "upgrade_available" {
-			out = append(out, bp.ID)
-		}
-	}
-	return out
-}
-
-// installedItemNames returns the name of every catalog item currently
-// installed (or in upgrade-available state).
-func installedItemNames(items []dto.CatalogItemDTO) []string {
-	out := make([]string, 0, len(items))
-	for _, it := range items {
-		if it.State == "installed" || it.State == "upgrade_available" {
-			out = append(out, it.Name)
-		}
-	}
-	return out
-}
-
-// subtractStrings returns base with every element of remove dropped.
-// Order in base is preserved; duplicates in remove are tolerated.
-func subtractStrings(base, remove []string) []string {
-	if len(remove) == 0 {
-		return base
-	}
-	skip := make(map[string]struct{}, len(remove))
-	for _, r := range remove {
-		skip[r] = struct{}{}
-	}
-	out := make([]string, 0, len(base))
-	for _, b := range base {
-		if _, drop := skip[b]; drop {
-			continue
-		}
-		out = append(out, b)
-	}
-	return out
-}
-
 // unionStrings returns the sorted, de-duplicated union of a and b. Used to
 // fold freshly-picked install items into the set already installed so an
 // install never drops an item the user simply left unchecked.
@@ -1212,27 +1063,13 @@ func unionStrings(a, b []string) []string {
 }
 
 // composeInteractiveSelection turns the picker's intent set into the final
-// desired selection to POST, given the catalog's current install state.
-// The interactive picker no longer pre-checks installed items — checking a
-// box expresses intent for the current command, not the desired end-state —
-// so we reconstruct the end-state here:
-//
-//	Install: keep everything currently installed, ADD the picked items.
-//	Remove:  keep everything currently installed, DROP the picked items.
-//
-// Remove that drops every installed item yields an empty-but-present
-// selection (the server's prune-all signal); the caller's intent gate, not
-// this result's emptiness, guards the no-op case.
-func composeInteractiveSelection(mode sourcepicker.Mode, cat dto.SourceCatalogDTO, picked dto.InstallSelectionDTO) dto.InstallSelectionDTO {
+// selection to POST: everything currently installed plus the picked items.
+// The interactive picker doesn't pre-check installed items — checking a box
+// expresses intent for the current command — so folding the current state
+// back in keeps already-installed items registered and refreshed alongside
+// the new picks.
+func composeInteractiveSelection(cat dto.SourceCatalogDTO, picked dto.InstallSelectionDTO) dto.InstallSelectionDTO {
 	current := deriveCurrentSelection(cat)
-	if mode == sourcepicker.ModeRemove {
-		return dto.InstallSelectionDTO{
-			Blueprints:       subtractStrings(current.Blueprints, picked.Blueprints),
-			Templates:        subtractStrings(current.Templates, picked.Templates),
-			LocalRoles:       subtractStrings(current.LocalRoles, picked.LocalRoles),
-			LocalCollections: subtractStrings(current.LocalCollections, picked.LocalCollections),
-		}
-	}
 	return dto.InstallSelectionDTO{
 		Blueprints:       unionStrings(current.Blueprints, picked.Blueprints),
 		Templates:        unionStrings(current.Templates, picked.Templates),
@@ -1250,9 +1087,9 @@ it provided.
 
 Installed templates, roles, and collections are left on disk — templates live
 in your per-user packer dir, and roles/collections may be shared with ranges
-or other blueprints. To uninstall those, use 'ludus source remove' (de-select),
-which now cleans up source roles AND collections, or remove individual items
-with the ansible/templates commands (e.g. 'ludus ansible collection rm').`,
+or other blueprints. To uninstall those, remove individual items with the
+templates/ansible commands ('ludus templates rm', 'ludus ansible role rm',
+'ludus ansible collection rm').`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
@@ -1313,24 +1150,11 @@ func init() {
 	// Rm flags.
 	sourceRmCmd.Flags().BoolVar(&sourceFlagNoPrompt, "no-prompt", false, "skip confirmation prompt")
 
-	// Remove flags. Re-uses sourceFlag* declared above so the picker-style
-	// selection vocabulary is the same on both add and remove. No flags →
-	// opens the picker (managed via runSourceRemove).
-	sourceRemoveCmd.Flags().SortFlags = false
-	sourceRemoveCmd.Flags().Var(&sourceFlagBlueprints, "blueprints", "blueprint IDs to drop from the current selection (CSV or repeated)")
-	sourceRemoveCmd.Flags().Var(&sourceFlagTemplates, "templates", "template names to drop (CSV or repeated)")
-	sourceRemoveCmd.Flags().Var(&sourceFlagLocalRoles, "source-roles", "source role names to drop (CSV or repeated)")
-	sourceRemoveCmd.Flags().Var(&sourceFlagLocalCollections, "source-collections", "source collection FQCNs to drop (CSV or repeated)")
-	sourceRemoveCmd.Flags().BoolVar(&sourceFlagAll, "all", false, "drop every item from this source (the source itself stays registered)")
-	sourceRemoveCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: also affect roles and collections installed instance-wide")
-	sourceRemoveCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "no-op for remove; kept for symmetry with add")
-
 	sourceCmd.AddCommand(sourceAddCmd)
 	sourceCmd.AddCommand(
 		sourceListCmd,
 		sourceSyncCmd,
 		sourceUpdateCmd,
-		sourceRemoveCmd,
 		sourceRmCmd,
 	)
 	rootCmd.AddCommand(sourceCmd)

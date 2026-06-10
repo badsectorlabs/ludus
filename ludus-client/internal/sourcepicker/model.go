@@ -38,11 +38,47 @@ func (s section) title() string {
 	case sectionTemplates:
 		return "Templates"
 	case sectionLocalRoles:
-		return "Source roles"
+		return "Roles"
 	case sectionLocalCollections:
-		return "Source collections"
+		return "Collections"
 	}
 	return ""
+}
+
+// tab is one top-level panel in the tabbed layout. Ansible groups the two
+// vendored-content sections, mirroring the GUI's source detail page.
+type tab int
+
+const (
+	tabBlueprints tab = iota
+	tabTemplates
+	tabAnsible
+	numTabs
+)
+
+func (t tab) title() string {
+	switch t {
+	case tabBlueprints:
+		return "Blueprints"
+	case tabTemplates:
+		return "Templates"
+	case tabAnsible:
+		return "Ansible"
+	}
+	return ""
+}
+
+// sections lists the toggleable sections rendered inside this tab.
+func (t tab) sections() []section {
+	switch t {
+	case tabBlueprints:
+		return []section{sectionBlueprints}
+	case tabTemplates:
+		return []section{sectionTemplates}
+	case tabAnsible:
+		return []section{sectionLocalRoles, sectionLocalCollections}
+	}
+	return nil
 }
 
 // rowKind tells the renderer how to draw a row.
@@ -80,14 +116,15 @@ type row struct {
 // model is the Bubble Tea model backing the picker.
 type model struct {
 	catalog dto.SourceCatalogDTO
-	mode    Mode
 	adv     Advanced
 
 	// picked[section.key()] = set of IDs/names the user has explicitly checked.
 	picked map[string]map[string]struct{}
 
-	// active is the section the cursor is currently in.
-	active section
+	// activeTab is the visible panel; active is the section the cursor is in
+	// (always one of activeTab's sections).
+	activeTab tab
+	active    section
 	// cursor is the index within the active section's toggleable rows.
 	cursor map[section]int
 
@@ -106,10 +143,10 @@ type model struct {
 }
 
 // newModel builds an initial model from the catalog. The picker opens with
-// nothing checked in either mode: a checkbox expresses intent for the current
-// command (install this / drop this), not the current install state — which
-// the per-row indicator shows instead.
-func newModel(catalog dto.SourceCatalogDTO, mode Mode, adv Advanced) model {
+// nothing checked: a checkbox expresses intent for the current command
+// (install this), not the current install state — which the per-row
+// indicator shows instead.
+func newModel(catalog dto.SourceCatalogDTO, adv Advanced) model {
 	ti := textinput.New()
 	ti.Placeholder = "filter..."
 	ti.Prompt = "/"
@@ -122,12 +159,12 @@ func newModel(catalog dto.SourceCatalogDTO, mode Mode, adv Advanced) model {
 		sectionLocalCollections.key(): {},
 	}
 
-	return model{
-		catalog: catalog,
-		mode:    mode,
-		adv:     adv,
-		picked:  picked,
-		active:  sectionBlueprints,
+	m := model{
+		catalog:   catalog,
+		adv:       adv,
+		picked:    picked,
+		activeTab: tabBlueprints,
+		active:    sectionBlueprints,
 		cursor: map[section]int{
 			sectionBlueprints:       0,
 			sectionTemplates:        0,
@@ -136,19 +173,13 @@ func newModel(catalog dto.SourceCatalogDTO, mode Mode, adv Advanced) model {
 		},
 		searchInput: ti,
 	}
-}
-
-// verb is the action word for the current mode, used in the title and footer.
-func (m model) verb() string {
-	if m.mode == ModeRemove {
-		return "remove"
+	// Open on the first tab that actually has content (a source can ship
+	// templates/roles without any blueprints).
+	for t := tab(0); t < numTabs; t++ {
+		if m.tabHasContent(t) {
+			m.switchTab(t)
+			break
+		}
 	}
-	return "install"
-}
-
-// isInstalledState reports whether a catalog state counts as "currently
-// installed" (an upgrade-available item is installed, just at an older
-// version). Remove mode only acts on installed items.
-func isInstalledState(state string) bool {
-	return state == "installed" || state == "upgrade_available"
+	return m
 }

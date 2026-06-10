@@ -373,10 +373,12 @@ A source removed with `ludus source rm` is re-registered on the next restart unl
 |---------|-------------|
 | `ludus source add <url\|tarball\|directory\|existing-sourceID>` | Register a new source or open the picker for an existing one (argument auto-detected) |
 | `ludus source list` | List registered sources |
-| `ludus source sync [<sourceID>]` | Re-pull a git source and re-apply its persisted selection (no-op for upload sources, and a benign no-op for sources that were registered without an install committed) |
+| `ludus source sync [<sourceID>]` | Re-pull a git source's content and refresh its catalog (read-only — installs nothing) |
 | `ludus source update <sourceID> --ref <ref>` | Change a git source's tracked ref |
 | `ludus source update <sourceID> <tarball>` (or `-d <dir>`) | Push new content to an upload source |
-| `ludus source rm <sourceID>` | Remove a source's registration and blueprints (installed templates and roles stay on disk) |
+| `ludus source rm <sourceID>` | Remove a source's registration and blueprints (installed templates, roles, and collections stay on disk) |
+
+Installing is additive — re-running `ludus source add` only ever adds to what's installed, and each install acts only on the items you name. To uninstall, remove items with the per-artifact commands: `ludus blueprint rm <sourceID>/<blueprint>`, `ludus templates rm -n <name>`, `ludus ansible role rm <name>`, or `ludus ansible collection rm <fqcn>`. Each one also releases the source's claim on the artifact, and nothing reinstalls removed items behind your back (re-running `ludus source add <sourceID> --all` reinstates everything).
 
 ### Blueprint Commands (Extended for Sources)
 

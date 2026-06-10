@@ -496,21 +496,16 @@ func DeleteBlueprint(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You do not own this blueprint and cannot delete it")
 	}
 
-	// Guard source-derived blueprints, but only when the source row still
-	// exists — an FK pointing at a deleted row is an orphan that must be
-	// removable directly (the source it belonged to is already gone).
-	if srcID := blueprintRecord.GetString("source"); srcID != "" {
-		if _, srcErr := e.App.FindRecordById("sources", srcID); srcErr == nil {
-			return JSONError(e, http.StatusConflict,
-				"cannot delete a source-derived blueprint; remove or sync the source instead")
-		}
-	}
-
 	blueprintDirPath := blueprintRecord.GetString("blueprintDirPath")
 
 	if err := e.App.Delete(blueprintRecord); err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error deleting blueprint: %v", err))
 	}
+
+	// Source-derived blueprints stay gone: installs act only on the selection
+	// they're given, so nothing recreates the row unless the user names this
+	// blueprint (or installs everything) again. Galaxy deps it pulled in stay
+	// installed (and claimed) until removed via the ansible delete APIs.
 
 	// Clean up the blueprint dir from disk. Errors are logged but not surfaced to
 	// the caller — an orphan dir is tolerable; a failed user-visible delete is not.

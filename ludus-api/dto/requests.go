@@ -241,17 +241,10 @@ type CreateSourceRequest struct {
 
 // InstallRequest is the body for POST /sources/{sourceID}/install.
 //
-// Selection semantics depend on whether the field is present in the JSON
-// body:
-//   - absent (or JSON null)              → server snapshots the current
-//     walk into installSelection (the
-//     "install everything" shortcut)
-//   - present with non-empty arrays      → used as-is; replaces any
-//     previously persisted selection
-//   - present with all-empty arrays      → uninstall everything from this
-//     source; selection commits as
-//     empty and the prune logic
-//     removes all rows/files
+// Install is additive and stateless: the selection is applied as-is and
+// nothing is persisted or uninstalled. Absent (or JSON null) selection means
+// "install everything the source ships"; a present selection installs
+// exactly the named items (validated against the walk).
 //
 // The pointer here is what lets us tell "absent" apart from "present and
 // empty" — Go's json package gives us nil for the former and a non-nil

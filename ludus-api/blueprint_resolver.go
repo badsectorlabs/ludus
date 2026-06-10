@@ -190,11 +190,9 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 	// each other's sections.
 	//
 	// Collection rows are recorded in source_artifacts for display/provenance.
-	// galaxy-declared collections (this branch) are still claim-only rows.
-	// Collections VENDORED by a source (kind="local_collection") are now
-	// lifecycle-managed: ansible-galaxy has no `collection remove`, so Ludus
-	// deletes their directory itself on de-select (see dropStaleClaims +
-	// removeLocalCollectionByName), bringing them to parity with vendored roles.
+	// Removal goes through the ansible collection delete API: ansible-galaxy
+	// has no `collection remove`, so Ludus deletes the directory itself
+	// (removeLocalCollectionByName) and releases the claims.
 	if hasRequirementsCollections(galaxyRequirements) {
 		colResults, err := InstallCollectionsFromRequirementsWithHome(galaxyRequirements, opts.AnsibleHome, opts.ForceRoles)
 		if err != nil && len(colResults) == 0 {
@@ -211,9 +209,8 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 
 	// Subscription roles via the licensed-pipeline helper. Tracked in
 	// source_artifacts with kind="subscription_role" so this source's claim
-	// shows up in provenance listings. Like galaxy roles, subscription roles
-	// aren't swept by source-level removal (pruneSourceArtifactClaims covers
-	// templates and local roles only); their on-disk install is left in place.
+	// shows up in provenance listings. Like galaxy roles, they're removed via
+	// the ansible role delete API, never by source-level operations.
 	//
 	// We install every declared name. A declared name absent from the live
 	// catalog will fail at download time and surface as a per-role error;

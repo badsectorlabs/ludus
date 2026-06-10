@@ -1455,24 +1455,30 @@ post-deploy blueprints-as-admin:
     # cleanup
     - ludus source rm source-template --no-prompt || true
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ciu-src-template --no-prompt || true'
-    # Two distinct verbs, both exercised here:
-    #   `source rm`     — registration-only: drops the source + its blueprints,
-    #                     leaves installed templates/roles on disk.
-    #   `source remove` — the actual uninstall, with NO cross-source refcount:
-    #                     deletes the artifact even if another source still
-    #                     ships the same name (that source can reinstall).
+    # Uninstall model: `source rm` is registration-only (drops the source +
+    # its blueprints); installed artifacts are removed via the individual
+    # delete commands (blueprint rm / ansible role rm / templates rm), which
+    # also release every source's claim. Installs are stateless and act only
+    # on the selection they're given, so nothing resurrects removed items.
     # ci-src is still registered from the add above; ci-src2 ships the same
     # say_hello role + example-debian-12-template template.
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src2 --force
     - ludus source sync ci-src2                                # catalog refresh only — sync never installs or prunes
     - 'ludus blueprint list | grep -q "ci-src2/example"'
-    # `source remove` uninstalls ci-src's items while ci-src2 STILL claims them
-    # — no refcount, so they're deleted anyway. ci-src stays registered.
-    - ludus source remove ci-src --all
-    - 'ludus source list | grep -q "ci-src "'                  # remove ≠ rm: registration stays
-    - '! ludus blueprint list | grep -q "ci-src/example"'      # its blueprints dropped
-    - '! ludus ansible role list | grep -q "say_hello"'        # deleted despite ci-src2's live claim
-    - '! ludus templates list | grep -q "example-debian-12-template"'   # same for the shared template
+    # blueprint rm now works on source-derived blueprints and shrinks the
+    # owning source's selection: a follow-up install of OTHER items must not
+    # resurrect the removed blueprint.
+    - ludus blueprint rm ci-src/example --no-prompt
+    - '! ludus blueprint list | grep -q "ci-src/example "'
+    - ludus source add ci-src --blueprints secondary
+    - '! ludus blueprint list | grep -q "ci-src/example "'     # install is additive; no resurrection
+    - 'ludus blueprint list | grep -q "ci-src/secondary"'
+    # Individual deletes remove the on-disk artifact (no cross-source
+    # refcount on content) and release both sources' claims.
+    - ludus ansible role rm say_hello
+    - '! ludus ansible role list | grep -q "say_hello"'
+    - ludus templates rm -n example-debian-12-template
+    - '! ludus templates list | grep -q "example-debian-12-template"'
     # `source rm` is registration-only — drops ci-src2's record + blueprints.
     - ludus source rm ci-src2 --no-prompt
     - '! ludus source list | grep -q "ci-src2 "'
@@ -1489,48 +1495,33 @@ post-deploy blueprints-as-admin:
     - 'ludus blueprint list | grep -q "ci-src-pick/example"'
     - 'ludus blueprint list | grep -q "ci-src-pick/secondary"'
     - ludus source rm ci-src-pick --no-prompt
-    # --global-roles: admin install scope. Roles land in the instance-wide
+    # --global: admin install scope. Roles land in the instance-wide
     # global-roles dir, not the owner's per-user ansible roles dir.
     - ludus source rm ci-src-global --no-prompt || true
-    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-global --all --global-roles --force
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-global --all --global --force
     - test -d /opt/ludus/resources/global-roles/say_hello
     # The example blueprint pulls a galaxy role (geerlingguy.docker). Under
-    # --global-roles that install runs ansible-galaxy as the service against a
+    # --global that install runs ansible-galaxy as the service against a
     # read-only /home, so it only succeeds when the install is handed a
     # writable ANSIBLE_HOME. Asserting the role landed guards the read-only
     # filesystem regression.
     - test -d /opt/ludus/resources/global-roles/geerlingguy.docker
-    # `source remove` prunes the source's local roles (checking both the global
-    # and per-user paths) but NOT galaxy roles — those are shared instance
-    # resources, removed via `ansible role rm`. So the bundled local role leaves
-    # global-roles; the galaxy role stays.
-    - ludus source remove ci-src-global --all
+    # Globally-installed roles (local and galaxy alike) are removed via
+    # `ansible role rm --global` — there is no source-level uninstall.
+    - ludus ansible role rm say_hello --global
     - '! test -d /opt/ludus/resources/global-roles/say_hello'
-    - test -d /opt/ludus/resources/global-roles/geerlingguy.docker
+    - ludus ansible role rm geerlingguy.docker --global
+    - '! test -d /opt/ludus/resources/global-roles/geerlingguy.docker'
     - ludus source rm ci-src-global --no-prompt
-    # `source remove --all` drops every installed item through the shared
-    # install endpoint while leaving the source registered (unlike `source
-    # rm`). Guards the intent-aware summary — a regression reports "installed
-    # successfully" on a removal — and the empty-selection prune path.
-    - ludus source rm ci-src-remove --no-prompt || true
-    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-remove --all --force
-    - 'ludus blueprint list | grep -q "ci-src-remove/example"'
-    - ludus source remove ci-src-remove --all 2>&1 | tee /tmp/ci-src-remove.out
-    - 'grep -qi "removed successfully" /tmp/ci-src-remove.out'
-    - '! grep -qi "installed successfully" /tmp/ci-src-remove.out'
-    - 'ludus source list | grep -q "ci-src-remove "'
-    - '! ludus blueprint list | grep -q "ci-src-remove/example"'
-    - ludus source rm ci-src-remove --no-prompt
-    # Non-admin safety: a non-admin's `source remove` must never delete the
-    # SHARED global-roles dir — only files in the owner's own per-user scope.
-    # (Templates install per-user, so they're never gated.) Plant a global-roles
-    # entry that no source claims, then have non-admin CIU install + remove a
-    # source shipping the same-named local role: CIU's own copy goes, the shared
-    # global one stays. (Admins are unrestricted — see the ci-src-global block.)
+    # Non-admin safety: a non-admin's role remove must never touch the SHARED
+    # global-roles dir — ansible-galaxy runs against their per-user
+    # ANSIBLE_HOME only. Plant a global-roles entry, have non-admin CIU
+    # install + remove a same-named local role: CIU's own copy goes, the
+    # shared global one stays.
     - ludus source rm ci-src-ciu --no-prompt || true
     - sudo mkdir -p /opt/ludus/resources/global-roles/say_hello
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-ciu --blueprints secondary --source-roles say_hello'
-    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source remove ci-src-ciu --all'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus ansible role rm say_hello'
     - test -d /opt/ludus/resources/global-roles/say_hello   # non-admin remove left the shared global role intact
     - ludus source rm ci-src-ciu --no-prompt
     - sudo rm -rf /opt/ludus/resources/global-roles/say_hello

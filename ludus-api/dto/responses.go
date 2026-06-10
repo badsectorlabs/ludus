@@ -677,8 +677,13 @@ type RegisterSourceResponse struct {
 
 // SourceCatalogDTO mirrors the internal SourceCatalog for the wire.
 type SourceCatalogDTO struct {
-	SourceID         string               `json:"sourceID"`
-	SourceName       string               `json:"sourceName"`
+	SourceID   string `json:"sourceID"`
+	SourceName string `json:"sourceName"`
+	// Description / SourceType / LastSyncedAt are display metadata for picker
+	// headers, read off the source record at catalog time.
+	Description      string               `json:"description,omitempty"`
+	SourceType       string               `json:"sourceType,omitempty"` // "git" | "upload"
+	LastSyncedAt     string               `json:"lastSyncedAt,omitempty"`
 	Blueprints       CatalogBlueprintsDTO `json:"blueprints"`
 	Templates        []CatalogItemDTO     `json:"templates"`
 	LocalRoles       []CatalogItemDTO     `json:"localRoles"`

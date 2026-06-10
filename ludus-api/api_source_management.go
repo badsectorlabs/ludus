@@ -456,7 +456,9 @@ func UpdateSource(e *core.RequestEvent) error {
 		}
 	}
 
-	// New archive bytes on an upload source: re-extract + re-register inline.
+	// New archive bytes on an upload source: re-extract, then re-apply what
+	// this source actually has installed (derived from its claims) against
+	// the new content — not everything the archive ships.
 	if uploadBytes != nil {
 		opts := SyncOptions{
 			Global:                   req.Global,
@@ -465,6 +467,7 @@ func UpdateSource(e *core.RequestEvent) error {
 			InitiatorProxmoxUsername: user.ProxmoxUsername(),
 			Archive:                  uploadBytes,
 			ArchiveFilename:          uploadFilename,
+			SelectionFromClaims:      true,
 		}
 		syncResult, syncErr := runSourceInstall(context.Background(), e, e.App, src, opts)
 		if syncErr != nil {
@@ -481,8 +484,8 @@ func UpdateSource(e *core.RequestEvent) error {
 // provided and its source_artifacts rows. Installed templates, roles, and
 // collections are left on disk — templates live in each installer's per-user
 // packer dir, and roles/collections may be shared with ranges or other
-// blueprints. Remove those individually — `source remove`, or the Ansible /
-// Templates pages — when you actually want them gone.
+// blueprints. Remove those individually via the templates / ansible delete
+// APIs when you actually want them gone.
 func DeleteSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
@@ -503,57 +506,6 @@ func DeleteSource(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
 	return e.JSON(http.StatusOK, dto.DeleteSourceResponse{Status: "deleted"})
-}
-
-func removeTemplateByName(name, proxmoxUsername string) error {
-	if proxmoxUsername == "" {
-		return nil
-	}
-	dir := filepath.Join(ludusInstallPath, "users", proxmoxUsername, "packer", name)
-	return os.RemoveAll(dir)
-}
-
-// removeLocalRoleByName removes a role from the source owner's per-user roles
-// dir, and — only when includeGlobal (admin-initiated) — the shared
-// global-roles dir. Idempotent: missing dirs are ignored.
-func removeLocalRoleByName(app core.App, name string, src *core.Record, includeGlobal bool) error {
-	var candidates []string
-	// The global-roles dir is a shared, admin-scoped path. Only an
-	// admin-initiated remove may delete from it; a non-admin's remove is
-	// confined to the source owner's own per-user roles dir below.
-	if includeGlobal {
-		candidates = append(candidates, filepath.Join(ludusInstallPath, "resources", "global-roles", name))
-	}
-	if owner, err := app.FindRecordById("users", src.GetString("owner")); err == nil {
-		if home := userRolesPath(owner.GetString("proxmoxUsername")); home != "" {
-			candidates = append(candidates, filepath.Join(home, name))
-		}
-	}
-	for _, base := range candidates {
-		_ = os.RemoveAll(base)
-	}
-	return nil
-}
-
-// removeLocalCollectionForSource removes a vendored collection from the source
-// owner's per-user collections dir, and — only when includeGlobal
-// (admin-initiated) — the shared global-collections dir. fqcn is the FQCN
-// (namespace.name) recorded on the local_collection artifact. Both deletes go
-// through removeLocalCollectionByName, the one removal helper in this leg.
-// Idempotent. Mirrors removeLocalRoleByName: both scopes are attempted
-// independently so a global-remove error never suppresses the per-user remove.
-func removeLocalCollectionForSource(app core.App, fqcn string, src *core.Record, includeGlobal bool) error {
-	// global-collections is shared/admin-scoped; only an admin-initiated remove
-	// may delete from it.
-	if includeGlobal {
-		_ = removeLocalCollectionByName(fqcn, "", true)
-	}
-	if owner, err := app.FindRecordById("users", src.GetString("owner")); err == nil {
-		if username := owner.GetString("proxmoxUsername"); username != "" {
-			_ = removeLocalCollectionByName(fqcn, username, false)
-		}
-	}
-	return nil
 }
 
 // sourceRecordToResponse converts a sources PocketBase record to the wire DTO.
@@ -658,10 +610,6 @@ func findSourceByVisibleID(e *core.RequestEvent, sourceID string) (*core.Record,
 // existing on-disk content. No artifact installs, removes, or DB writes for
 // blueprints/templates/roles happen here. To actually apply a change to
 // what's installed from a source, call POST /sources/{sourceID}/install.
-//
-// One-shot legacy migration: if the source row's installSelection is null
-// (pre-upgrade), refresh snapshots the current walk into installSelection
-// so the next install has a concrete starting point.
 func SyncSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
@@ -884,18 +832,17 @@ func GetSourceCatalog(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, toCatalogDTO(catalog))
 }
 
-// InstallSource handles POST /sources/{sourceID}/install. Selection is
-// optional and presence-significant:
+// InstallSource handles POST /sources/{sourceID}/install. Install is
+// additive and stateless — it acts only on the selection in the request and
+// never uninstalls anything. Selection is optional:
 //
-//   - absent → snapshot the current walk into installSelection (install
-//     everything upstream ships)
-//   - present, non-empty → use as-is; replaces any persisted selection
-//   - present, all-empty → "uninstall everything from this source": the
-//     selection is committed as empty and the prune logic clears every
-//     row/file the previous selection had carried
+//   - absent → install everything the walk ships
+//   - present → validated against the walk, then installed as-is
 //
-// Either way the source ends up with a concrete persisted selection, so
-// subsequent syncs are observation-only.
+// Nothing is persisted: what's installed is recorded by the claims ledger
+// (source_artifacts + blueprint rows). Removal goes through the individual
+// delete APIs (templates, ansible role/collection, blueprint); a removed
+// item stays gone until an install names it (or installs everything) again.
 func InstallSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
@@ -958,10 +905,13 @@ func toCatalogDTO(c *SourceCatalog) dto.SourceCatalogDTO {
 		return dto.SourceCatalogDTO{}
 	}
 	out := dto.SourceCatalogDTO{
-		SourceID:   c.SourceID,
-		SourceName: c.SourceName,
-		Templates:  make([]dto.CatalogItemDTO, 0, len(c.Templates)),
-		LocalRoles: make([]dto.CatalogItemDTO, 0, len(c.LocalRoles)),
+		SourceID:     c.SourceID,
+		SourceName:   c.SourceName,
+		Description:  c.SourceDescription,
+		SourceType:   c.SourceType,
+		LastSyncedAt: c.LastSyncedAt,
+		Templates:    make([]dto.CatalogItemDTO, 0, len(c.Templates)),
+		LocalRoles:   make([]dto.CatalogItemDTO, 0, len(c.LocalRoles)),
 	}
 	out.Blueprints.Items = make([]dto.CatalogBlueprintDTO, 0, len(c.Blueprints))
 	for _, bp := range c.Blueprints {

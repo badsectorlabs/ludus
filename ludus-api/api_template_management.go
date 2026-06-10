@@ -1171,5 +1171,7 @@ func DeleteTemplate(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing '%s' (path: %s): %v", templateName, templateDir, err))
 	}
 
+	releaseSourceClaims(e.App, []string{"template"}, templateName)
+
 	return JSONResult(e, http.StatusOK, fmt.Sprintf("Template '%s' removed", templateName))
 }

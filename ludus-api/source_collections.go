@@ -24,7 +24,7 @@ func splitCollectionFQCN(fqcn string) (namespace, name string, err error) {
 // <name>/ for the given FQCN. base is passed in explicitly (not derived from
 // the ludusInstallPath const) so the logic is unit testable;
 // removeLocalCollectionByName resolves the real base. Idempotent: a missing dir
-// is not an error, mirroring removeLocalRoleByName.
+// is not an error.
 func removeCollectionDir(base, fqcn string) error {
 	namespace, name, err := splitCollectionFQCN(fqcn)
 	if err != nil {

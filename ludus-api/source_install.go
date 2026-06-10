@@ -183,6 +183,26 @@ func insertSourceArtifact(app core.App, sourceID, kind, name, version string) {
 	_ = app.Save(r)
 }
 
+// releaseSourceClaims is the bookkeeping half of the individual delete APIs
+// (templates rm, ansible role/collection rm): the artifact is already gone
+// from disk at the call site, so drop every source's claim row for it. The
+// claims ledger is the record of what's installed — releasing the claim is
+// what flips the catalog back to not_installed. Nothing re-applies old
+// selections, so the artifact stays gone until explicitly reinstalled.
+func releaseSourceClaims(app core.App, kinds []string, name string) {
+	for _, kind := range kinds {
+		rows, err := app.FindRecordsByFilter("source_artifacts",
+			"kind = {:k} && name = {:n}", "", 0, 0,
+			map[string]any{"k": kind, "n": name})
+		if err != nil {
+			continue
+		}
+		for _, row := range rows {
+			_ = app.Delete(row)
+		}
+	}
+}
+
 // installTemplateDir validates the packer template in srcDir and copies it into
 // the given user's per-user packer dir, which survives server updates (the
 // embedded global packer dir is backed up and re-extracted on every update).

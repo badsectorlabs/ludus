@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -71,132 +72,200 @@ func styleControls(s string) string {
 	return b.String()
 }
 
-// View renders the picker.
+// View renders the picker: a source header, the tab strip, the active
+// tab's panel windowed to the leftover height, and the footer controls.
 func (m model) View() string {
 	if m.width == 0 {
 		// Pre-resize render: keep it simple, don't try to wrap.
 		return "loading picker..."
 	}
 
-	var b strings.Builder
+	// Top block — source header, optional search line, tab strip.
+	var top strings.Builder
 
-	// Header — the title verb and the delta counter both follow the mode,
-	// so install and remove read distinctly and the counter previews exactly
-	// what [enter] will do.
-	title := fmt.Sprintf("Pick what to %s from %q  %s",
-		strings.ToUpper(m.verb()), m.catalog.SourceName, m.headerCounts())
-	b.WriteString(headerStyle.Render(truncate(title, m.width)))
-	b.WriteString("\n")
+	title := fmt.Sprintf("INSTALL from %s  %s",
+		m.catalog.SourceName, m.headerCounts())
+	top.WriteString(headerStyle.Render(truncate(title, m.width)))
+	top.WriteString("\n")
+	if desc := strings.TrimSpace(m.catalog.Description); desc != "" {
+		top.WriteString(dimStyle.Render(truncate(desc, m.width)))
+		top.WriteString("\n")
+	}
+	if meta := m.sourceMetaLine(); meta != "" {
+		top.WriteString(dimStyle.Render(truncate(meta, m.width)))
+		top.WriteString("\n")
+	}
+	top.WriteString("\n")
 
-	// Keybindings hint. Truncate the plain string first, then style the
-	// keycaps bold — styleControls adds escape codes a later width count
-	// couldn't see through.
-	hint := fmt.Sprintf("/search · [space] toggle · [a] select all · [↑↓] navigate · [tab] jump section · [enter] %s · [q] quit", m.verb())
-	b.WriteString(styleControls(truncate(hint, m.width)))
-	b.WriteString("\n\n")
-
-	// Search input (when active)
 	if m.searching {
-		b.WriteString(m.searchInput.View())
-		b.WriteString("\n\n")
+		top.WriteString(m.searchInput.View())
+		top.WriteString("\n\n")
 	} else if m.filter != "" {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("filter: %s", m.filter)))
-		b.WriteString("\n\n")
+		top.WriteString(dimStyle.Render(fmt.Sprintf("filter: %s", m.filter)))
+		top.WriteString("\n\n")
 	}
 
-	// Blueprints first, with their dependency sections colocated directly
-	// underneath (matching the GUI), then Templates and Source roles.
-	if len(m.visibleToggleable(sectionBlueprints)) > 0 {
-		b.WriteString(m.renderToggleableSection(sectionBlueprints))
-		b.WriteString("\n")
-	}
+	top.WriteString(truncate(m.renderTabStrip(), m.width))
+	top.WriteString("\n\n")
 
-	// Blueprint dependency sections are read-only and only meaningful when
-	// installing (you can't drop an implied role directly — removing its
-	// blueprint prunes it). They sit right under Blueprints.
-	if m.mode == ModeInstall {
-		if len(m.catalog.Blueprints.RequiredRoles) > 0 {
-			b.WriteString(m.renderReadOnlySection("Blueprint roles", readOnlyGalaxyRoles))
-			b.WriteString("\n")
+	// Bottom block — install-time △ legends, then the control bar.
+	var bottom strings.Builder
+	if m.hasUpgradeMismatch() {
+		outcome := dimStyle.Render(" · [f] force to overwrite it")
+		if m.adv.Force {
+			outcome = dimStyle.Render(" · [f] force is on — install will overwrite it")
 		}
-		if len(m.catalog.Blueprints.RequiredCollections) > 0 {
-			b.WriteString(m.renderReadOnlySection("Blueprint collections", readOnlyGalaxyCollections))
-			b.WriteString("\n")
-		}
-		if len(m.catalog.Blueprints.SubscriptionRoles) > 0 {
-			b.WriteString(m.renderReadOnlySection("Subscription roles", readOnlySubscriptionRoles))
-			b.WriteString("\n")
-		}
+		legend := upgradeStyle.Render("△") +
+			dimStyle.Render(fmt.Sprintf(" a selected blueprint needs a newer version than your %s install", m.targetScope())) +
+			outcome
+		bottom.WriteString(truncate(legend, m.width))
+		bottom.WriteString("\n")
 	}
-
-	// Remaining toggleable sections — skip entirely when empty (or the search
-	// filter / remove-mode installed-only rule eliminated them all).
-	for _, sec := range []section{sectionTemplates, sectionLocalRoles, sectionLocalCollections} {
-		if len(m.visibleToggleable(sec)) == 0 {
-			continue
-		}
-		b.WriteString(m.renderToggleableSection(sec))
-		b.WriteString("\n")
+	if m.hasConflictingPins() {
+		legend := upgradeStyle.Render("△") +
+			dimStyle.Render(" conflicting version pins across selected blueprints — ansible-galaxy will install only one; deselect a blueprint to disambiguate")
+		bottom.WriteString(truncate(legend, m.width))
+		bottom.WriteString("\n")
 	}
-
-	// Footer. The △ legends and the force toggle are install-time concerns;
-	// remove mode shows neither.
-	if m.mode == ModeInstall {
-		if m.hasUpgradeMismatch() {
-			outcome := dimStyle.Render(" · [f] force to overwrite it")
-			if m.adv.Force {
-				outcome = dimStyle.Render(" · [f] force is on — install will overwrite it")
-			}
-			legend := upgradeStyle.Render("△") +
-				dimStyle.Render(fmt.Sprintf(" a selected blueprint needs a newer version than your %s install", m.targetScope())) +
-				outcome
-			b.WriteString(truncate(legend, m.width))
-			b.WriteString("\n")
-		}
-		if m.hasConflictingPins() {
-			legend := upgradeStyle.Render("△") +
-				dimStyle.Render(" conflicting version pins across selected blueprints — ansible-galaxy will install only one; deselect a blueprint to disambiguate")
-			b.WriteString(truncate(legend, m.width))
-			b.WriteString("\n")
-		}
-	}
-	// Control bar — bold keycaps + muted labels, and a blank line above so it
-	// reads as a distinct band rather than running into the faint legend.
-	// Built pre-styled (so no truncate — the escape codes would inflate a
-	// width count and clip it); the bar's visible width is bounded and small.
+	// Control bar: the key hint, then the toggle chips. Keycaps bold at full
+	// intensity, labels muted. Hint is truncated as a plain string first —
+	// styleControls adds escape codes a later width count couldn't see through.
+	hint := "/search · [space] toggle · [a] all in tab · [tab] switch · [enter] install · [q] quit"
+	bottom.WriteString("\n")
+	bottom.WriteString(styleControls(truncate(hint, m.width)))
+	bottom.WriteString("\n")
+	// Chips built pre-styled (no truncate — escape codes would inflate a
+	// width count and clip it); the visible width is bounded and small.
 	sep := controlStyle.Render(" · ")
-	footer := keyStyle.Render("[g]") + controlStyle.Render(" global: ") +
-		chipFor(m.adv.Global, m.adv.IsAdmin, globalOnStyle)
-	if m.mode == ModeInstall {
-		footer += sep + keyStyle.Render("[f]") + controlStyle.Render(" force overwrite: ") +
-			chipFor(m.adv.Force, true, forceOnStyle)
-	}
-	footer += sep + keyStyle.Render("[a]") + controlStyle.Render(" select all") +
-		sep + keyStyle.Render("[enter]") + controlStyle.Render(" "+m.verb())
-	b.WriteString("\n")
-	b.WriteString(footer)
-	b.WriteString("\n")
+	chips := keyStyle.Render("[g]") + controlStyle.Render(" global: ") +
+		chipFor(m.adv.Global, m.adv.IsAdmin, globalOnStyle) +
+		sep + keyStyle.Render("[f]") + controlStyle.Render(" force overwrite: ") +
+		chipFor(m.adv.Force, true, forceOnStyle)
+	bottom.WriteString(chips)
+	bottom.WriteString("\n")
 
-	return b.String()
+	// The active panel gets whatever height the fixed blocks leave over.
+	topStr, bottomStr := top.String(), bottom.String()
+	panelHeight := m.height - strings.Count(topStr, "\n") - strings.Count(bottomStr, "\n")
+	lines, cursorLine := m.panelLines()
+	windowed := windowLines(lines, cursorLine, panelHeight)
+
+	return topStr + strings.Join(windowed, "\n") + "\n" + bottomStr
 }
 
-// headerCounts renders the delta the current selection will apply, scaled to
-// the mode: "(N to install · M to upgrade)" or "(N to remove)". Empty pick
-// reads "(nothing selected)".
-func (m model) headerCounts() string {
-	install, upgrade, remove := m.selectionCounts()
+// sourceMetaLine is the header's third line: "git · synced 2h ago" /
+// "upload · uploaded just now". Pieces are skipped when the catalog doesn't
+// carry them (older servers).
+func (m model) sourceMetaLine() string {
 	var parts []string
-	if m.mode == ModeRemove {
-		if remove > 0 {
-			parts = append(parts, fmt.Sprintf("%d to remove", remove))
+	if m.catalog.SourceType != "" {
+		parts = append(parts, m.catalog.SourceType)
+	}
+	if when := relTime(m.catalog.LastSyncedAt); when != "" {
+		verb := "synced"
+		if m.catalog.SourceType == "upload" {
+			verb = "uploaded"
 		}
-	} else {
-		if install > 0 {
-			parts = append(parts, fmt.Sprintf("%d to install", install))
+		parts = append(parts, verb+" "+when)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// renderTabStrip draws the tab bar: each content-bearing tab with its
+// picked/total counts, the active one highlighted. Counts follow the search
+// filter so a global "/" search shows which tabs hold matches.
+func (m model) renderTabStrip() string {
+	var parts []string
+	for _, t := range m.visibleTabs() {
+		total, picked := 0, 0
+		for _, sec := range t.sections() {
+			rows := m.visibleToggleable(sec)
+			total += len(rows)
+			set := m.picked[sec.key()]
+			for _, r := range rows {
+				if _, ok := set[r.id]; ok {
+					picked++
+				}
+			}
 		}
-		if upgrade > 0 {
-			parts = append(parts, fmt.Sprintf("%d to upgrade", upgrade))
+		label := fmt.Sprintf("%s %d/%d", t.title(), picked, total)
+		if t == m.activeTab {
+			parts = append(parts, cursorStyle.Render(label))
+		} else {
+			parts = append(parts, dimStyle.Render(label))
 		}
+	}
+	return "  " + strings.Join(parts, dimStyle.Render(" │ "))
+}
+
+// windowLines clips the panel to height lines around the cursor (kept
+// roughly centered) and overlays dim "more" markers on the clipped edges.
+// The cursor can never land on a marker: a top marker implies offset > 0 so
+// the centered cursor sits below line 0, and a bottom marker implies the
+// window ends before the list does.
+func windowLines(lines []string, cursorLine, height int) []string {
+	if height < 3 {
+		height = 3
+	}
+	if len(lines) <= height {
+		return lines
+	}
+	off := cursorLine - height/2
+	if off < 0 {
+		off = 0
+	}
+	if max := len(lines) - height; off > max {
+		off = max
+	}
+	out := make([]string, height)
+	copy(out, lines[off:off+height])
+	if off > 0 {
+		out[0] = dimStyle.Render(fmt.Sprintf("  ↑ %d more", off))
+	}
+	if rest := len(lines) - (off + height); rest > 0 {
+		out[height-1] = dimStyle.Render(fmt.Sprintf("  ↓ %d more", rest))
+	}
+	return out
+}
+
+// relTime renders a server timestamp as a coarse relative age — the picker
+// header doesn't need precision. Accepts RFC3339 and PocketBase's DateTime
+// string form; anything else (or empty) yields "".
+func relTime(s string) string {
+	if s == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t, err = time.Parse("2006-01-02 15:04:05.000Z", s)
+	}
+	if err != nil {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+	return t.Format("2006-01-02")
+}
+
+// headerCounts renders the delta the current selection will apply:
+// "(N to install · M to upgrade)". Empty pick reads "(nothing selected)".
+func (m model) headerCounts() string {
+	install, upgrade := m.selectionCounts()
+	var parts []string
+	if install > 0 {
+		parts = append(parts, fmt.Sprintf("%d to install", install))
+	}
+	if upgrade > 0 {
+		parts = append(parts, fmt.Sprintf("%d to upgrade", upgrade))
 	}
 	if len(parts) == 0 {
 		return "(nothing selected)"
@@ -280,46 +349,94 @@ func (m model) targetScope() string {
 	return "user"
 }
 
-func (m model) renderToggleableSection(sec section) string {
-	rows := m.visibleToggleable(sec)
-	picked := m.picked[sec.key()]
+// panelLines builds the active tab's content as one line per terminal row,
+// plus the line index the cursor sits on (for windowing). Single-section
+// tabs render rows flush — the tab strip already names them; the Ansible
+// tab labels its two sub-lists. The Blueprints tab appends the read-only
+// dependency sections underneath, exactly as the stacked layout did.
+func (m model) panelLines() ([]string, int) {
+	var lines []string
+	cursorLine := 0
+	secs := m.activeTab.sections()
+	multi := len(secs) > 1
 
-	pickedCount := 0
-	for _, r := range rows {
-		if _, ok := picked[r.id]; ok {
-			pickedCount++
+	anyRows := false
+	for _, sec := range secs {
+		rows := m.visibleToggleable(sec)
+		if len(rows) == 0 {
+			continue
+		}
+		anyRows = true
+		if multi {
+			picked := m.picked[sec.key()]
+			pickedCount := 0
+			for _, r := range rows {
+				if _, ok := picked[r.id]; ok {
+					pickedCount++
+				}
+			}
+			heading := fmt.Sprintf("─ %s (%d/%d) ─", sec.title(), pickedCount, len(rows))
+			if sec == m.active {
+				heading = headerStyle.Render(heading)
+			} else {
+				heading = dimStyle.Render(heading)
+			}
+			lines = append(lines, heading)
+		}
+		secLines, secCursor := m.rowLines(sec, rows)
+		if sec == m.active && secCursor >= 0 {
+			cursorLine = len(lines) + secCursor
+		}
+		lines = append(lines, secLines...)
+		if multi {
+			lines = append(lines, "")
 		}
 	}
-
-	heading := fmt.Sprintf("─ %s (%d/%d) ─", sec.title(), pickedCount, len(rows))
-	if sec == m.active {
-		heading = headerStyle.Render(heading)
-	} else {
-		heading = dimStyle.Render(heading)
+	if !anyRows {
+		lines = append(lines, dimStyle.Render("  (no matches in this tab)"))
 	}
 
-	var b strings.Builder
-	b.WriteString(heading)
-	b.WriteString("\n")
-
-	if len(rows) == 0 {
-		b.WriteString(dimStyle.Render("  (none)\n"))
-		return b.String()
+	// Blueprint dependency sections are read-only: they install with their
+	// blueprint and are removed via the ansible delete commands, not here.
+	if m.activeTab == tabBlueprints {
+		for _, ro := range []struct {
+			title string
+			kind  readOnlyKind
+		}{
+			{"Blueprint roles", readOnlyGalaxyRoles},
+			{"Blueprint collections", readOnlyGalaxyCollections},
+			{"Subscription roles", readOnlySubscriptionRoles},
+		} {
+			s := m.renderReadOnlySection(ro.title, ro.kind)
+			if s == "" {
+				continue
+			}
+			lines = append(lines, "")
+			lines = append(lines, strings.Split(strings.TrimRight(s, "\n"), "\n")...)
+		}
 	}
+	return lines, cursorLine
+}
 
+// rowLines renders one section's toggleable rows, returning the lines and
+// the index (within them) of the cursor row, or -1 when the cursor isn't in
+// this section.
+func (m model) rowLines(sec section, rows []row) ([]string, int) {
+	picked := m.picked[sec.key()]
 	cursorIdx := m.cursor[sec]
 	implied := ExpandImplied(m.catalog, m.currentSelection())
 
+	var lines []string
+	cursorLine := -1
 	for i, r := range rows {
 		var checkbox string
 		isPicked := false
 		if _, ok := picked[r.id]; ok {
 			isPicked = true
 		}
-		// Implied rows ([-]) are an install-mode concept: a template/role
-		// pulled in by a checked blueprint. Remove mode never shows them.
+		// Implied rows ([-]): a template/role pulled in by a checked blueprint.
 		isImplied := false
-		if !isPicked && sec != sectionBlueprints && m.mode == ModeInstall {
+		if !isPicked && sec != sectionBlueprints {
 			switch sec {
 			case sectionTemplates:
 				_, isImplied = implied.Templates[r.id]
@@ -339,6 +456,7 @@ func (m model) renderToggleableSection(sec section) string {
 		cursorMark := "  "
 		if sec == m.active && i == cursorIdx {
 			cursorMark = cursorStyle.Render("> ")
+			cursorLine = len(lines)
 		}
 
 		// State indicator first; append the "← by <blueprint>" trail for
@@ -351,16 +469,15 @@ func (m model) renderToggleableSection(sec section) string {
 		// Layout per row: <cursor 2><checkbox 3><space><label><space><version 18><space><detail>
 		// The label column flexes with terminal width; wraps to a second
 		// line when even the flexed column can't fit the name.
-		writeRow(&b, cursorMark+checkbox+" ", r.label, formatVersion(r.version), detail, m.width)
+		lines = append(lines, rowStrings(cursorMark+checkbox+" ", r.label, formatVersion(r.version), detail, m.width)...)
 
 		// Show the focused row's description as a dim subtitle indented under
 		// the label. Cursor-only keeps the list compact for long catalogs.
 		if sec == m.active && i == cursorIdx && strings.TrimSpace(r.description) != "" {
-			b.WriteString(dimStyle.Render(truncate("      "+r.description, m.width)))
-			b.WriteString("\n")
+			lines = append(lines, dimStyle.Render(truncate("      "+r.description, m.width)))
 		}
 	}
-	return b.String()
+	return lines, cursorLine
 }
 
 func (m model) renderReadOnlySection(title string, kind readOnlyKind) string {
@@ -434,16 +551,16 @@ func (m model) renderReadOnlySection(title string, kind readOnlyKind) string {
 	return b.String()
 }
 
-// writeRow renders one picker row, flexing the label column to terminal
-// width and wrapping the label to a second line when it would otherwise
-// truncate. Continuation indents past the prefix so version/state stay
-// aligned with the first-line layout.
+// rowStrings renders one picker row as terminal lines, flexing the label
+// column to terminal width and wrapping the label to a second line when it
+// would otherwise truncate. Continuation indents past the prefix so
+// version/state stay aligned with the first-line layout.
 //
 //	prefix = "> [x] " or "    · " — printable + style escapes, fixed width
 //	label  = item name
 //	ver    = version string (right-padded to 18 cols when present)
 //	detail = installed state / required-by trail
-func writeRow(b *strings.Builder, prefix, label, ver, detail string, width int) {
+func rowStrings(prefix, label, ver, detail string, width int) []string {
 	const versionCol = 18
 	const minLabel = 20
 	const maxLabel = 60
@@ -456,20 +573,15 @@ func writeRow(b *strings.Builder, prefix, label, ver, detail string, width int) 
 	labelCol := clamp(available, minLabel, maxLabel)
 
 	if lipgloss.Width(label) <= labelCol {
-		line := fmt.Sprintf("%s%-*s %-*s %s", prefix, labelCol, label, versionCol, ver, detail)
-		b.WriteString(line)
-		b.WriteString("\n")
-		return
+		return []string{fmt.Sprintf("%s%-*s %-*s %s", prefix, labelCol, label, versionCol, ver, detail)}
 	}
 
 	// Two-line wrap: full label on line 1, version + detail aligned on line 2.
-	b.WriteString(prefix)
-	b.WriteString(label)
-	b.WriteString("\n")
 	indent := strings.Repeat(" ", prefixWidth)
-	cont := fmt.Sprintf("%s%-*s %-*s %s", indent, labelCol, "", versionCol, ver, detail)
-	b.WriteString(cont)
-	b.WriteString("\n")
+	return []string{
+		prefix + label,
+		fmt.Sprintf("%s%-*s %-*s %s", indent, labelCol, "", versionCol, ver, detail),
+	}
 }
 
 func clamp(v, lo, hi int) int {
@@ -576,16 +688,11 @@ func stateIcon(state string) rune {
 }
 
 // selectionCounts summarizes what committing will do, for the header line.
-// In install mode a checked item counts as an install or an upgrade by its
-// current state (a checked already-installed item is a no-op); in remove
-// mode every checked item is a removal.
-func (m model) selectionCounts() (install, upgrade, remove int) {
+// A checked item counts as an install or an upgrade by its current state
+// (a checked already-installed item is a no-op).
+func (m model) selectionCounts() (install, upgrade int) {
 	classify := func(id, state string, picked map[string]struct{}) {
 		if _, ok := picked[id]; !ok {
-			return
-		}
-		if m.mode == ModeRemove {
-			remove++
 			return
 		}
 		switch state {
