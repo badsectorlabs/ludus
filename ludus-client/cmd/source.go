@@ -284,9 +284,8 @@ The positional argument is classified by shape:
 
 Run without selection flags in a TTY to open the interactive picker. Pass
 --blueprints / --templates / --source-roles / --source-collections for a scripted install. Pass --all
-to install everything. Pass --catalog to walk the source and render its
-catalog without registering anything (tables by default, raw JSON when
-combined with --json).`,
+to install everything. To inspect a registered source's catalog without
+installing, use 'ludus source list <sourceID> --catalog'.`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runSourceAdd,
 }
@@ -305,13 +304,6 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 		arg = args[0]
 	default:
 		logger.Logger.Fatal("source add requires a URL, tarball, or existing sourceID (or -d <dir>)")
-	}
-
-	// --catalog: walk the source (or fetch the existing-source catalog) and
-	// dump the JSON. Registers nothing. Honors -d for explicit directory.
-	if flags.Catalog {
-		runSourceCatalogDump(client, arg, flags)
-		return
 	}
 
 	mode := selectInstallMode(flags, stdinIsTerminal())
@@ -373,48 +365,6 @@ func isEmptySelection(sel dto.InstallSelectionDTO) bool {
 	return len(sel.Blueprints)+len(sel.Templates)+len(sel.LocalRoles)+len(sel.LocalCollections) == 0
 }
 
-// runSourceCatalogDump renders the source's catalog without registering
-// anything. For an already-registered source it hits GET /sources/{id}/catalog;
-// for an unregistered URL/path it registers temporarily, renders, and deletes
-// the row. With --json the output is the raw catalog JSON (pipeable to jq);
-// otherwise we render section-by-section tables.
-func runSourceCatalogDump(client *resty.Client, arg string, flags sourceFlags) {
-	// Already-registered source: just hit /catalog.
-	if flags.Directory == "" && detectSourceArg(arg) == sourceArgUnknown {
-		if cat, ok := tryFetchCatalog(client, arg); ok {
-			emitCatalog(cat)
-			return
-		}
-		logger.Logger.Fatalf("could not interpret %q: pass a git URL, archive path, or existing sourceID (use -d for a local directory)", arg)
-	}
-
-	// Unregistered: register, capture catalog, delete the row to leave no trace.
-	registerResp, ok, err := postSourceRegister(client, arg, flags)
-	if err != nil {
-		logger.Logger.Fatal(err)
-	}
-	if !ok {
-		return // rest layer surfaced the error already
-	}
-	emitCatalog(registerResp.Catalog)
-	// Best-effort cleanup — leaves a registered-but-uninstalled source on
-	// failure, which the user can `rm` manually.
-	rmPath := fmt.Sprintf("/sources/%s", registerResp.SourceID)
-	_, _ = rest.GenericDeleteWithBody(client, buildURLWithRangeAndUserID(rmPath), []byte(`{}`))
-}
-
-func emitCatalog(cat dto.SourceCatalogDTO) {
-	if jsonFormat {
-		body, err := json.MarshalIndent(cat, "", "  ")
-		if err != nil {
-			logger.Logger.Fatal(err)
-		}
-		fmt.Printf("%s\n", body)
-		return
-	}
-	renderCatalogTables(cat)
-}
-
 // renderCatalogTables prints the catalog as tablewriter sections. Each
 // category gets its own heading + table; empty sections are noted in dim
 // text rather than an empty table so the output stays scannable.
@@ -426,11 +376,8 @@ func renderCatalogTables(cat dto.SourceCatalogDTO) {
 	}
 
 	renderBlueprintsTable(cat.Blueprints.Items)
-	renderItemsTable("Templates", cat.Templates, false)
-	renderItemsTable("Source roles", cat.LocalRoles, false)
-	renderItemsTable("Blueprint role requirements", cat.Blueprints.RequiredRoles, true)
-	renderItemsTable("Blueprint collection requirements", cat.Blueprints.RequiredCollections, true)
-	renderItemsTable("Subscription roles", cat.Blueprints.SubscriptionRoles, true)
+	renderItemsTable("Templates", cat.Templates)
+	renderAnsibleTable(cat)
 
 	if len(cat.Blueprints.UndeclaredDependencies) > 0 {
 		fmt.Printf("\nUndeclared dependencies (%d)\n", len(cat.Blueprints.UndeclaredDependencies))
@@ -474,27 +421,49 @@ func renderBlueprintsTable(items []dto.CatalogBlueprintDTO) {
 	t.Render()
 }
 
-// renderItemsTable handles templates / roles / collections. `withRequiredBy`
-// adds a column for the blueprint(s) that pulled the item in (only useful
-// for galaxy/subscription/collection sections). Empty sections are
-// skipped entirely — user only sees what the source actually ships.
-func renderItemsTable(heading string, items []dto.CatalogItemDTO, withRequiredBy bool) {
+// renderItemsTable renders one catalog item list as a table. Empty sections
+// are skipped entirely — user only sees what the source actually ships.
+// No Version column: templates carry no version, and the installed version
+// (when one matters) is surfaced inline by prettyState in the State column.
+func renderItemsTable(heading string, items []dto.CatalogItemDTO) {
 	if len(items) == 0 {
 		return
 	}
 	fmt.Printf("\n%s (%d)\n", heading, len(items))
 	t := tablewriter.NewWriter(os.Stdout)
-	header := []string{"Name", "Version", "State"}
-	if withRequiredBy {
-		header = append(header, "Required by")
-	}
-	t.SetHeader(header)
+	t.SetHeader([]string{"Name", "State"})
 	for _, it := range items {
-		row := []string{it.Name, it.Version, prettyState(it.State, it.InstalledVersion)}
-		if withRequiredBy {
-			row = append(row, strings.Join(it.RequiredBy, ", "))
-		}
-		t.Append(row)
+		t.Append([]string{it.Name, prettyState(it.State, it.InstalledVersion)})
+	}
+	t.Render()
+}
+
+// renderAnsibleTable lists the Ansible content the source vendors — the roles
+// and collections under its ansible/ dir.
+func renderAnsibleTable(cat dto.SourceCatalogDTO) {
+	type ansibleRow struct {
+		kind string
+		item dto.CatalogItemDTO
+	}
+	var rows []ansibleRow
+	for _, it := range cat.LocalRoles {
+		rows = append(rows, ansibleRow{"role", it})
+	}
+	for _, it := range cat.LocalCollections {
+		rows = append(rows, ansibleRow{"collection", it})
+	}
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Printf("\nAnsible (%d)\n", len(rows))
+	t := tablewriter.NewWriter(os.Stdout)
+	t.SetHeader([]string{"Name", "Kind", "State"})
+	for _, r := range rows {
+		t.Append([]string{
+			r.item.Name,
+			r.kind,
+			prettyState(r.item.State, r.item.InstalledVersion),
+		})
 	}
 	t.Render()
 }
@@ -571,7 +540,6 @@ func readSourceAddFlags() sourceFlags {
 		ID:               sourceFlagID,
 		Ref:              sourceFlagRef,
 		Directory:        sourceFlagDirectory,
-		Catalog:          sourceFlagCatalog,
 		All:              sourceFlagAll,
 		Blueprints:       []string(sourceFlagBlueprints),
 		Templates:        []string(sourceFlagTemplates),
@@ -803,14 +771,24 @@ func detectSourceArg(arg string) sourceArgKind {
 }
 
 var sourceListCmd = &cobra.Command{
-	Use:     "list [<sourceID>]",
-	Short:   "List registered sources, or show details for one",
+	Use:   "list [<sourceID>]",
+	Short: "List registered sources, or show details for one",
+	Long: `List registered sources. With a sourceID, show that source's metadata;
+add --catalog to instead see what it ships (blueprints, templates, and
+ansible roles/collections) joined with the current install state.`,
 	Aliases: []string{"ls", "status"},
 	Args:    cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+		detailID := ""
 		if len(args) == 1 {
-			runSourceDetail(client, args[0])
+			detailID = args[0]
+		}
+		if sourceFlagCatalog && detailID == "" {
+			logger.Logger.Fatal("--catalog requires a sourceID: ludus source list <sourceID> --catalog")
+		}
+		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+		if detailID != "" {
+			runSourceDetail(client, detailID)
 			return
 		}
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources"))
@@ -842,12 +820,24 @@ var sourceListCmd = &cobra.Command{
 	},
 }
 
-// runSourceDetail prints metadata followed by the source's catalog (what
-// upstream ships, joined with which items are currently installed). Sync
-// is read-only, so "installed" and "available" can drift between syncs —
-// the State column on each row tells the user which is which and whether
-// an upgrade is waiting.
+// runSourceDetail shows a source's metadata, or — with --catalog — the
+// catalog tables instead (what upstream ships, joined with which items are
+// currently installed; the State column tells the user whether an upgrade is
+// waiting). --json emits the JSON of whichever view was requested.
 func runSourceDetail(client *resty.Client, sourceID string) {
+	if sourceFlagCatalog {
+		catJSON, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/catalog"))
+		if didFailOrWantJSON(ok, catJSON) {
+			return
+		}
+		var cat dto.SourceCatalogDTO
+		if err := json.Unmarshal(catJSON, &cat); err != nil {
+			logger.Logger.Fatal(err)
+		}
+		renderCatalogTables(cat)
+		return
+	}
+
 	srcJSON, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID))
 	if didFailOrWantJSON(ok, srcJSON) {
 		return
@@ -878,13 +868,7 @@ func runSourceDetail(client *resty.Client, sourceID string) {
 		printField("Error", src.LastSyncError)
 	}
 	fmt.Println()
-
-	catalog, ok := tryFetchCatalog(client, sourceID)
-	if !ok {
-		logger.Logger.Warnf("Could not fetch catalog for %q; showing source metadata only.", sourceID)
-		return
-	}
-	renderCatalogTables(catalog)
+	fmt.Printf("Run `ludus source list %s --catalog` to see what this source ships (blueprints, templates, ansible).\n", sourceID)
 }
 
 func printField(label, value string) {
@@ -907,12 +891,16 @@ a new tarball with 'ludus source update' instead.`,
 }
 
 func runSourceSync(cmd *cobra.Command, args []string) {
-	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
-
+	// Validate before InitClient so a malformed argument is rejected without
+	// demanding credentials first.
 	var targets []string
 	if len(args) == 1 {
 		targets = []string{args[0]}
-	} else {
+	}
+
+	client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+	if len(targets) == 0 {
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources"))
 		if !success {
 			logger.Logger.Fatal(string(responseJSON))
@@ -1092,11 +1080,12 @@ templates/ansible commands ('ludus templates rm', 'ludus ansible role rm',
 'ludus ansible collection rm').`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		sid := args[0]
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 		// Skip the prompt automatically when stdin is piped/non-TTY (CI, scripts).
 		// Callers can also force-skip with --no-prompt.
 		if !sourceFlagNoPrompt && stdinIsTerminal() {
-			fmt.Printf("Remove source '%s' and its blueprints? Installed templates, roles, and collections stay on disk. [y/N]: ", args[0])
+			fmt.Printf("Remove source '%s' and its blueprints? Installed templates, roles, and collections stay on disk. [y/N]: ", sid)
 			var resp string
 			_, _ = fmt.Scanln(&resp)
 			if !strings.EqualFold(strings.TrimSpace(resp), "y") {
@@ -1104,12 +1093,12 @@ templates/ansible commands ('ludus templates rm', 'ludus ansible role rm',
 				return
 			}
 		}
-		path := fmt.Sprintf("/sources/%s", args[0])
+		path := fmt.Sprintf("/sources/%s", sid)
 		responseJSON, success := rest.GenericDelete(client, buildURLWithRangeAndUserID(path))
 		if didFailOrWantJSON(success, responseJSON) {
 			return
 		}
-		logger.Logger.Infof("Source %q removed. Its blueprints are gone; installed templates, roles, and collections remain on disk.", args[0])
+		logger.Logger.Infof("Source %q removed. Its blueprints are gone; installed templates, roles, and collections remain on disk.", sid)
 	},
 }
 
@@ -1130,11 +1119,12 @@ func init() {
 	sourceAddCmd.Flags().Var(&sourceFlagLocalRoles, "source-roles", "source role names to install (CSV or repeated)")
 	sourceAddCmd.Flags().Var(&sourceFlagLocalCollections, "source-collections", "source collection FQCNs to install (CSV or repeated)")
 
-	sourceAddCmd.Flags().BoolVar(&sourceFlagCatalog, "catalog", false, "walk the source and render its catalog (tables by default, JSON with --json); registers nothing")
-
 	sourceAddCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: install the source's roles and collections for all users")
 	sourceAddCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "force install: re-extract templates and source roles, and rerun ansible-galaxy with -f for galaxy roles and collections")
 	sourceAddCmd.Flags().BoolVar(&sourceFlagNoDeps, "no-deps", false, "skip installing blueprint galaxy role/collection dependencies; use only what's already on disk")
+
+	// List flags.
+	sourceListCmd.Flags().BoolVar(&sourceFlagCatalog, "catalog", false, "show the source's catalog (blueprints, templates, ansible) instead of its metadata; requires a sourceID")
 
 	// Sync flags (reuses sourceFlagRef, etc. from add).
 	sourceSyncCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: install the source's roles and collections for all users")
