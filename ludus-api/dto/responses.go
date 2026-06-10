@@ -676,22 +676,24 @@ type RegisterSourceResponse struct {
 
 // SourceCatalogDTO mirrors the internal SourceCatalog for the wire.
 type SourceCatalogDTO struct {
-	SourceID               string                    `json:"sourceID"`
-	SourceName             string                    `json:"sourceName"`
-	Blueprints             CatalogBlueprintsDTO      `json:"blueprints"`
-	Templates              []CatalogItemDTO          `json:"templates"`
-	LocalRoles             []CatalogItemDTO          `json:"localRoles"`
-	LocalCollections       []CatalogItemDTO          `json:"localCollections"`
-	SubscriptionRoles      []CatalogItemDTO          `json:"subscriptionRoles"`
-	UndeclaredDependencies []UndeclaredDependencyDTO `json:"undeclaredDependencies,omitempty"`
+	SourceID         string               `json:"sourceID"`
+	SourceName       string               `json:"sourceName"`
+	Blueprints       CatalogBlueprintsDTO `json:"blueprints"`
+	Templates        []CatalogItemDTO     `json:"templates"`
+	LocalRoles       []CatalogItemDTO     `json:"localRoles"`
+	LocalCollections []CatalogItemDTO     `json:"localCollections"`
 }
 
-// CatalogBlueprintsDTO groups the source's blueprints with the role and
-// collection dependency closure those blueprints pull from ansible-galaxy.
+// CatalogBlueprintsDTO groups the source's blueprints with the dependency
+// closure they pull in: galaxy roles/collections and subscription roles
+// unioned across every blueprint's requirements.yml, plus any config.yml role
+// references that aren't declared there.
 type CatalogBlueprintsDTO struct {
-	Items               []CatalogBlueprintDTO `json:"items"`
-	RequiredRoles       []CatalogItemDTO      `json:"requiredRoles"`
-	RequiredCollections []CatalogItemDTO      `json:"requiredCollections"`
+	Items                  []CatalogBlueprintDTO     `json:"items"`
+	RequiredRoles          []CatalogItemDTO          `json:"requiredRoles"`
+	RequiredCollections    []CatalogItemDTO          `json:"requiredCollections"`
+	SubscriptionRoles      []CatalogItemDTO          `json:"subscriptionRoles"`
+	UndeclaredDependencies []UndeclaredDependencyDTO `json:"undeclaredDependencies,omitempty"`
 }
 
 type CatalogBlueprintDTO struct {

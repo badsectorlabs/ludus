@@ -123,7 +123,7 @@ func (m model) View() string {
 			b.WriteString(m.renderReadOnlySection("Blueprint collections", readOnlyGalaxyCollections))
 			b.WriteString("\n")
 		}
-		if len(m.catalog.SubscriptionRoles) > 0 {
+		if len(m.catalog.Blueprints.SubscriptionRoles) > 0 {
 			b.WriteString(m.renderReadOnlySection("Subscription roles", readOnlySubscriptionRoles))
 			b.WriteString("\n")
 		}

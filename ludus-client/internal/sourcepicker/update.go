@@ -365,7 +365,7 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 	case readOnlyGalaxyCollections:
 		src = m.catalog.Blueprints.RequiredCollections
 	case readOnlySubscriptionRoles:
-		src = m.catalog.SubscriptionRoles
+		src = m.catalog.Blueprints.SubscriptionRoles
 	}
 	// m.picked is map[section.key()]map[itemID]struct{} — the blueprints
 	// inner map IS the picked set.

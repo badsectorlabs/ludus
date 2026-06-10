@@ -409,12 +409,12 @@ func renderCatalogTables(cat dto.SourceCatalogDTO) {
 	renderItemsTable("Source roles", cat.LocalRoles, false)
 	renderItemsTable("Blueprint role requirements", cat.Blueprints.RequiredRoles, true)
 	renderItemsTable("Blueprint collection requirements", cat.Blueprints.RequiredCollections, true)
-	renderItemsTable("Subscription roles", cat.SubscriptionRoles, true)
+	renderItemsTable("Subscription roles", cat.Blueprints.SubscriptionRoles, true)
 
-	if len(cat.UndeclaredDependencies) > 0 {
-		fmt.Printf("\nUndeclared dependencies (%d)\n", len(cat.UndeclaredDependencies))
-		payload := make([]undeclaredDependencyPayload, 0, len(cat.UndeclaredDependencies))
-		for _, d := range cat.UndeclaredDependencies {
+	if len(cat.Blueprints.UndeclaredDependencies) > 0 {
+		fmt.Printf("\nUndeclared dependencies (%d)\n", len(cat.Blueprints.UndeclaredDependencies))
+		payload := make([]undeclaredDependencyPayload, 0, len(cat.Blueprints.UndeclaredDependencies))
+		for _, d := range cat.Blueprints.UndeclaredDependencies {
 			payload = append(payload, undeclaredDependencyPayload{
 				BlueprintID:      d.BlueprintID,
 				Role:             d.Role,

@@ -959,11 +959,10 @@ func toCatalogDTO(c *SourceCatalog) dto.SourceCatalogDTO {
 		return dto.SourceCatalogDTO{}
 	}
 	out := dto.SourceCatalogDTO{
-		SourceID:          c.SourceID,
-		SourceName:        c.SourceName,
-		Templates:         make([]dto.CatalogItemDTO, 0, len(c.Templates)),
-		LocalRoles:        make([]dto.CatalogItemDTO, 0, len(c.LocalRoles)),
-		SubscriptionRoles: make([]dto.CatalogItemDTO, 0, len(c.SubscriptionRoles)),
+		SourceID:   c.SourceID,
+		SourceName: c.SourceName,
+		Templates:  make([]dto.CatalogItemDTO, 0, len(c.Templates)),
+		LocalRoles: make([]dto.CatalogItemDTO, 0, len(c.LocalRoles)),
 	}
 	out.Blueprints.Items = make([]dto.CatalogBlueprintDTO, 0, len(c.Blueprints))
 	for _, bp := range c.Blueprints {
@@ -985,8 +984,8 @@ func toCatalogDTO(c *SourceCatalog) dto.SourceCatalogDTO {
 	out.LocalCollections = catalogItemsToDTO(c.LocalCollections)
 	out.Blueprints.RequiredRoles = catalogItemsToDTO(c.GalaxyRoles)
 	out.Blueprints.RequiredCollections = catalogItemsToDTO(c.GalaxyCollections)
-	out.SubscriptionRoles = catalogItemsToDTO(c.SubscriptionRoles)
-	out.UndeclaredDependencies = undeclaredDepsToDTO(c.UndeclaredDependencies)
+	out.Blueprints.SubscriptionRoles = catalogItemsToDTO(c.SubscriptionRoles)
+	out.Blueprints.UndeclaredDependencies = undeclaredDepsToDTO(c.UndeclaredDependencies)
 	return out
 }
 
