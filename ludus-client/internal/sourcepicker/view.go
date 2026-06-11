@@ -25,13 +25,19 @@ var (
 )
 
 var (
-	headerStyle    = lipgloss.NewStyle().Bold(true)
-	cursorStyle    = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	dimStyle       = lipgloss.NewStyle().Faint(true)
-	pickedStyle    = lipgloss.NewStyle().Foreground(accentColor)
-	upgradeStyle   = lipgloss.NewStyle().Foreground(warnColor)
-	implyStyle     = lipgloss.NewStyle().Foreground(accentColor)
-	installedStyle = lipgloss.NewStyle().Foreground(installedColor)
+	headerStyle = lipgloss.NewStyle().Bold(true)
+	// titleStyle is the source-name banner. Terminals have no font sizes, so
+	// "larger" is approximated with the boldest weight plus the accent color.
+	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	cursorStyle  = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	dimStyle     = lipgloss.NewStyle().Faint(true)
+	pickedStyle  = lipgloss.NewStyle().Foreground(accentColor)
+	upgradeStyle = lipgloss.NewStyle().Foreground(warnColor)
+	implyStyle   = lipgloss.NewStyle().Foreground(accentColor)
+	// willInstallStyle is the chip on dependencies the current selection
+	// would pull in.
+	willInstallStyle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	installedStyle   = lipgloss.NewStyle().Foreground(installedColor)
 	// Footer chip styles. The "on" color encodes severity: gold for the
 	// benign scope flip (global), orange for the actually-risky
 	// toggle (force overwrite) so the eye treats them differently. Off
@@ -87,13 +93,13 @@ func (m model) View() string {
 	// Top block — source header, optional search line, tab strip.
 	var top strings.Builder
 
-	title := fmt.Sprintf("INSTALL from %s  %s",
-		m.catalog.SourceName, m.headerCounts())
-	top.WriteString(headerStyle.Render(truncate(title, m.width)))
+	top.WriteString(titleStyle.Render(truncate(m.catalog.SourceName, m.width)))
 	top.WriteString("\n")
 	if desc := strings.TrimSpace(m.catalog.Description); desc != "" {
-		top.WriteString(dimStyle.Render(truncate(desc, m.width)))
-		top.WriteString("\n")
+		for _, dl := range wrapClamp(desc, (m.width*4)/5, 3) {
+			top.WriteString(dl)
+			top.WriteString("\n")
+		}
 	}
 	if meta := m.sourceMetaLine(); meta != "" {
 		top.WriteString(dimStyle.Render(truncate(meta, m.width)))
@@ -158,22 +164,19 @@ func (m model) View() string {
 	return topStr + strings.Join(windowed, "\n") + "\n" + bottomStr
 }
 
-// sourceMetaLine is the header's third line: "git · synced 2h ago" /
-// "upload · uploaded just now". Pieces are skipped when the catalog doesn't
-// carry them (older servers).
+// sourceMetaLine is the header's third line: "Synced 2h ago" /
+// "Uploaded just now". Empty when the catalog doesn't carry a sync time
+// (older servers).
 func (m model) sourceMetaLine() string {
-	var parts []string
-	if m.catalog.SourceType != "" {
-		parts = append(parts, m.catalog.SourceType)
+	when := relTime(m.catalog.LastSyncedAt)
+	if when == "" {
+		return ""
 	}
-	if when := relTime(m.catalog.LastSyncedAt); when != "" {
-		verb := "synced"
-		if m.catalog.SourceType == "upload" {
-			verb = "uploaded"
-		}
-		parts = append(parts, verb+" "+when)
+	verb := "Synced"
+	if m.catalog.SourceType == "upload" {
+		verb = "Uploaded"
 	}
-	return strings.Join(parts, " · ")
+	return verb + " " + when
 }
 
 // renderTabStrip draws the tab bar: each content-bearing tab with its
@@ -259,23 +262,6 @@ func relTime(s string) string {
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
 	return t.Format("2006-01-02")
-}
-
-// headerCounts renders the delta the current selection will apply:
-// "(N to install · M to upgrade)". Empty pick reads "(nothing selected)".
-func (m model) headerCounts() string {
-	install, upgrade := m.selectionCounts()
-	var parts []string
-	if install > 0 {
-		parts = append(parts, fmt.Sprintf("%d to install", install))
-	}
-	if upgrade > 0 {
-		parts = append(parts, fmt.Sprintf("%d to upgrade", upgrade))
-	}
-	if len(parts) == 0 {
-		return "(nothing selected)"
-	}
-	return "(" + strings.Join(parts, " · ") + ")"
 }
 
 // chipFor renders an on/off chip for one footer toggle. onStyle lets each
@@ -408,9 +394,9 @@ func (m model) panelLines() ([]string, int) {
 			title string
 			kind  readOnlyKind
 		}{
-			{"Blueprint roles", readOnlyGalaxyRoles},
-			{"Blueprint collections", readOnlyGalaxyCollections},
-			{"Subscription roles", readOnlySubscriptionRoles},
+			{"ROLES", readOnlyGalaxyRoles},
+			{"COLLECTIONS", readOnlyGalaxyCollections},
+			{"SUBSCRIPTION ROLES", readOnlySubscriptionRoles},
 		} {
 			s := m.renderReadOnlySection(ro.title, ro.kind)
 			if s == "" {
@@ -464,11 +450,9 @@ func (m model) rowLines(sec section, rows []row) ([]string, int) {
 			cursorLine = len(lines)
 		}
 
-		// State indicator first; append the "← by <blueprint>" trail for
-		// implied rows so the user sees what pulled them in.
 		detail := renderState(r)
 		if isImplied && len(r.requiredBy) > 0 {
-			detail += "  " + implyStyle.Render("← "+requiredByString(r.requiredBy))
+			detail += "  " + requiredByTrail(r.requiredBy)
 		}
 
 		// Layout per row: <cursor 2><checkbox 3><space><label><space><version 18><space><detail>
@@ -479,7 +463,9 @@ func (m model) rowLines(sec section, rows []row) ([]string, int) {
 		// Show the focused row's description as a dim subtitle indented under
 		// the label. Cursor-only keeps the list compact for long catalogs.
 		if sec == m.active && i == cursorIdx && strings.TrimSpace(r.description) != "" {
-			lines = append(lines, dimStyle.Render(truncate("      "+r.description, m.width)))
+			for _, dl := range wrapClamp(r.description, max(10, ((m.width*4)/5-6)*4/5), 5) {
+				lines = append(lines, dimStyle.Render(truncate("      "+dl, m.width)))
+			}
 		}
 	}
 	return lines, cursorLine
@@ -496,62 +482,55 @@ func (m model) renderReadOnlySection(title string, kind readOnlyKind) string {
 			impliedCount++
 		}
 	}
-	// Align the state column by padding names to the widest in the section
-	// (capped). Read-only rows pack onto one line — name, version, state,
-	// then the "← by <blueprint>" trail — and truncate to width rather than
-	// wrapping, since role names plus a parent trail easily exceed a narrow
-	// terminal.
+	// Column layout per the GUI: name (with its pin glued on), a WILL INSTALL
+	// chip column, then the "← <parent> +N" trail. Names pad to the widest in
+	// the section so chips and trails align; installed scoped roles show no
+	// chip — their state lives in the per-scope sublines.
+	nameFor := func(r row) string {
+		n := r.label
+		if v := formatVersion(r.version); v != "" {
+			if r.conflictingPins {
+				v = "△ " + v
+			}
+			n += " " + v
+		}
+		return n
+	}
 	nameCol := 0
 	for _, r := range rows {
-		if w := lipgloss.Width(r.label); w > nameCol {
+		if w := lipgloss.Width(nameFor(r)); w > nameCol {
 			nameCol = w
 		}
 	}
-	if nameCol > 45 {
-		nameCol = 45
+	if nameCol > 60 {
+		nameCol = 60
 	}
+	const chipCol = 12 // width of "WILL INSTALL"
 
-	heading := dimStyle.Render(fmt.Sprintf("─ %s (%d required) ─", title, impliedCount))
+	heading := fmt.Sprintf("%s %d", title, impliedCount)
 	var b strings.Builder
 	b.WriteString(heading)
 	b.WriteString("\n")
 	for _, r := range rows {
-		if len(r.scopes) > 0 {
-			// Scoped role: a header line (name + required pin + trail), then a
-			// subrow per scope showing that scope's version and whether it
-			// matches — so "global stale / user fine" is legible at a glance.
-			line := "    · " + fmt.Sprintf("%-*s", nameCol, r.label)
-			if v := formatVersion(r.version); v != "" {
-				if r.conflictingPins {
-					v = upgradeStyle.Render("△ " + v)
-				}
-				line += "  " + dimStyle.Render("needs ") + v
-			}
-			if len(r.requiredBy) > 0 {
-				line += "  " + implyStyle.Render("← "+requiredByString(r.requiredBy))
-			}
-			b.WriteString(truncate(line, m.width))
-			b.WriteString("\n")
-			for _, s := range r.scopes {
-				b.WriteString(truncate(m.renderScopeSubrow(s, r.version), m.width))
-				b.WriteString("\n")
-			}
-			continue
+		name := nameFor(r)
+		chip := ""
+		switch {
+		case r.state == "not_installed":
+			chip = willInstallStyle.Render("WILL INSTALL")
+		case len(r.scopes) == 0:
+			chip = renderState(r)
 		}
-		// Unscoped (collections): single inline line.
-		line := "    · " + fmt.Sprintf("%-*s", nameCol, r.label)
-		if v := formatVersion(r.version); v != "" {
-			if r.conflictingPins {
-				v = upgradeStyle.Render("△ " + v)
-			}
-			line += "  " + v
-		}
-		line += "  " + renderState(r)
-		if len(r.requiredBy) > 0 {
-			line += "  " + implyStyle.Render("← "+requiredByString(r.requiredBy))
+		line := "    · " + name + strings.Repeat(" ", max(0, nameCol-lipgloss.Width(name))) +
+			"  " + chip + strings.Repeat(" ", max(0, chipCol-lipgloss.Width(chip)))
+		if t := requiredByTrail(r.requiredBy); t != "" {
+			line += "  " + t
 		}
 		b.WriteString(truncate(line, m.width))
 		b.WriteString("\n")
+		for _, s := range r.scopes {
+			b.WriteString(truncate(m.renderScopeSubrow(s, r.version), m.width))
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }
@@ -692,52 +671,18 @@ func stateIcon(state string) rune {
 	}
 }
 
-// selectionCounts summarizes what committing will do, for the header line.
-// A checked item counts as an install or an upgrade by its current state
-// (a checked already-installed item is a no-op).
-func (m model) selectionCounts() (install, upgrade int) {
-	classify := func(id, state string, picked map[string]struct{}) {
-		if _, ok := picked[id]; !ok {
-			return
-		}
-		switch state {
-		case "upgrade_available":
-			upgrade++
-		case "installed":
-			// no-op: already installed, checking it changes nothing
-		default:
-			install++
-		}
-	}
-	bpSet := m.picked[sectionBlueprints.key()]
-	for _, bp := range m.catalog.Blueprints.Items {
-		classify(bp.ID, bp.State, bpSet)
-	}
-	tSet := m.picked[sectionTemplates.key()]
-	for _, t := range m.catalog.Templates {
-		classify(t.Name, t.State, tSet)
-	}
-	lrSet := m.picked[sectionLocalRoles.key()]
-	for _, lr := range m.catalog.LocalRoles {
-		classify(lr.Name, lr.State, lrSet)
-	}
-	return
-}
-
-// requiredByString renders the parent name(s) that pulled a read-only row
-// in. Caller is responsible for trimming requiredBy to only the currently-
-// picked parents (see readOnlyRows). With many parents, show the first
-// two and tack on "+N" so long chains don't dominate the line.
-func requiredByString(requiredBy []string) string {
+// requiredByTrail renders the pulling blueprints inline: the first picked
+// parent plus a "+N" overflow count. Caller is responsible for trimming
+// requiredBy to only the currently-picked parents (see readOnlyRows).
+func requiredByTrail(requiredBy []string) string {
 	if len(requiredBy) == 0 {
 		return ""
 	}
-	const maxVisible = 2
-	if len(requiredBy) <= maxVisible {
-		return strings.Join(requiredBy, ", ")
+	s := "← " + requiredBy[0]
+	if len(requiredBy) > 1 {
+		s += fmt.Sprintf(" +%d", len(requiredBy)-1)
 	}
-	return fmt.Sprintf("%s +%d",
-		strings.Join(requiredBy[:maxVisible], ", "), len(requiredBy)-maxVisible)
+	return s
 }
 
 // truncate clips s to width display cells, appending an ellipsis if it had to
@@ -751,6 +696,21 @@ func truncate(s string, width int) string {
 		return s
 	}
 	return ansi.Truncate(s, width, "…")
+}
+
+// wrapClamp word-wraps s to width and clamps the result to maxLines, marking
+// an overflow by ellipsizing the last kept line.
+func wrapClamp(s string, width, maxLines int) []string {
+	if width <= 0 || maxLines <= 0 {
+		return nil
+	}
+	lines := strings.Split(ansi.Wordwrap(s, width, ""), "\n")
+	if len(lines) <= maxLines {
+		return lines
+	}
+	lines = lines[:maxLines]
+	lines[maxLines-1] = truncate(lines[maxLines-1]+"…", width)
+	return lines
 }
 
 // searchBoxContentWidth is the inner width of the search-bar box for a given
