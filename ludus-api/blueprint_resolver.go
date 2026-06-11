@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -67,6 +68,13 @@ func isRoleInstalledForUser(user *models.User, name string) bool {
 	if user == nil {
 		return false
 	}
+	// A name with three or more dot-separated segments
+	// (namespace.collection.role) is a role bundled inside an ansible
+	// collection, not a standalone role dir — ansible installs the collection,
+	// and the role lives under it. Its install state is the collection's.
+	if parts := strings.Split(name, "."); len(parts) >= 3 {
+		return isCollectionInstalledForUser(user, parts[0], parts[1])
+	}
 	dirs := []string{
 		fmt.Sprintf("%s/resources/global-roles/%s", ludusInstallPath, name),
 	}
@@ -75,6 +83,28 @@ func isRoleInstalledForUser(user *models.User, name string) bool {
 	}
 	for _, dir := range dirs {
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// isCollectionInstalledForUser reports whether the ansible collection
+// namespace.name is present in the global collections base or the user's
+// ansible home(s) — the same locations and presence test the source catalog
+// uses (readInstalledCollectionVersion accepts a galaxy.yml or MANIFEST.json).
+func isCollectionInstalledForUser(user *models.User, namespace, name string) bool {
+	if base := globalCollectionsPath(); base != "" {
+		if _, ok := readInstalledCollectionVersion(filepath.Join(base, "ansible_collections", namespace, name)); ok {
+			return true
+		}
+	}
+	for _, home := range candidateAnsibleHomes(user.ProxmoxUsername()) {
+		if home == "" {
+			continue
+		}
+		dir := filepath.Join(home, "collections", "ansible_collections", namespace, name)
+		if _, ok := readInstalledCollectionVersion(dir); ok {
 			return true
 		}
 	}
