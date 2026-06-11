@@ -405,8 +405,39 @@ func addLocalRoleFromDirectory(_ core.App, dir, ownerProxmoxUsername string, glo
 		log.Printf("source role %q ships without meta/main.yml — synthesized a minimal stub at %s", name, destDir)
 	}
 
+	// A vendored role usually carries its version only in git metadata (the
+	// release tag at the submodule pin), which the copy leaves behind — so
+	// resolve it against the checkout and materialize it as meta/version.yml
+	// in the copy. That makes the installed copy self-describing and feeds
+	// the .galaxy_install_info receipt written below, which is what
+	// `ansible-galaxy role list` and the catalog's per-scope versions read.
+	// Only stamped when this call actually copied the content: a preserved
+	// pre-existing dir may hold an older version than the checkout resolves.
+	if !existedAlready {
+		if v := localRoleVersion(dir); v != "" {
+			if err := writeRoleVersionYmlIfMissing(destDir, v); err != nil {
+				return fmt.Errorf("writing version.yml for %s: %w", name, err)
+			}
+		}
+	}
+
 	_, _ = reflectRoleVersionToGalaxyInfo(destDir)
 	return nil
+}
+
+// writeRoleVersionYmlIfMissing records a resolved role version as
+// meta/version.yml in an installed copy. An author-shipped file is never
+// overwritten.
+func writeRoleVersionYmlIfMissing(roleDir, version string) error {
+	metaDir := filepath.Join(roleDir, "meta")
+	path := filepath.Join(metaDir, "version.yml")
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(metaDir, 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte("version: "+version+"\n"), 0644)
 }
 
 // synthesizeRoleMetaIfMissing writes a minimal meta/main.yml stub when the

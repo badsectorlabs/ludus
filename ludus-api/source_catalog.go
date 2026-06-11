@@ -300,6 +300,7 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 		c.LocalRoles = append(c.LocalRoles, CatalogItem{
 			Name:             name,
 			Description:      localRoleDescription(dir),
+			Version:          localRoleVersion(dir),
 			State:            state,
 			InstalledVersion: installedVer,
 			Global:           installed["local_role/"+name].Global,
@@ -611,7 +612,8 @@ func candidateAnsibleHomes(proxmoxUsername string) []string {
 // the globalRolePath base, "user" otherwise) and the version read from that
 // path's meta/.galaxy_install_info — plus whether any copy is global. A role
 // can occupy more than one path at once, at different versions, so each is
-// reported separately. (Local roles carry no version, so Version is empty.)
+// reported separately. (Local roles installed before install receipts were
+// written for them have no .galaxy_install_info, so Version is empty.)
 func roleScopes(rolePaths []string, name, globalRolePath string) (installs []ScopeInstall, global bool) {
 	for _, base := range rolePaths {
 		if info, err := os.Stat(filepath.Join(base, name)); err == nil && info.IsDir() {
@@ -630,7 +632,9 @@ func roleScopes(rolePaths []string, name, globalRolePath string) (installs []Sco
 }
 
 // artifactState returns (state, installedVersion) for a single named artifact.
-// walkedVersion is empty for templates and local roles (they carry no version).
+// walkedVersion is empty for templates (no version concept) and deliberately
+// empty for local roles and vendored collections — their shipped version is
+// surfaced for display but not enforced as a pin.
 // For galaxy roles and collections it can be either a concrete version
 // ("1.2.0") or a constraint pulled from a blueprint's requirements.yml
 // (">=1.2.0", "<2.0.0", etc.) — when the installed version satisfies the

@@ -636,3 +636,75 @@ func readGalaxyInstalledVersion(rolesPath, name string) string {
 	}
 	return ""
 }
+
+// localRoleVersion resolves a vendored role's version for the catalog and
+// install receipts. The author's meta/version.yml always wins — it is the
+// Ludus convention for versioning roles that aren't published to Galaxy, and
+// it survives tarball uploads. Otherwise, when the role dir is its own git
+// work tree (a submodule), the exact release tag at the pinned commit — the
+// same place ansible-galaxy's role versions come from (Galaxy registers a
+// repo's tags as versions at import time). A plain vendored dir or an
+// off-tag pin resolves to "": an untagged commit is not a release.
+func localRoleVersion(dir string) string {
+	if v := roleVersionYml(dir); v != "" {
+		return v
+	}
+	return exactGitTagVersion(dir)
+}
+
+// roleVersionYml leniently reads meta/version.yml's version field; "" when
+// the file is missing or malformed. (reflectRoleVersionToGalaxyInfo keeps
+// its own strict parse — the role-add API surfaces malformed files as
+// errors, while a catalog walk must not fail on one bad role.)
+func roleVersionYml(roleDir string) string {
+	data, err := os.ReadFile(filepath.Join(roleDir, "meta", "version.yml"))
+	if err != nil {
+		return ""
+	}
+	var doc map[string]string
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc["version"])
+}
+
+// exactGitTagVersion returns the release tag at dir's pinned commit, or "".
+// Guarded to dirs that are their own git work tree (submodules): a plain
+// vendored dir would resolve to the source repo itself, stamping the
+// bundle's tag onto every role. Off-tag pins return "" — mirroring Galaxy,
+// which only ever versions tags. A leading "v" is stripped (v1.6.0 → 1.6.0).
+func exactGitTagVersion(dir string) string {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	top, err := gitOutput(absDir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(top); err == nil {
+		top = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(absDir); err == nil {
+		absDir = resolved
+	}
+	if top != absDir {
+		return ""
+	}
+	tag, err := gitOutput(absDir, "describe", "--tags", "--exact-match", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(tag, "v")
+}
+
+// gitOutput runs git -C dir with the given args and returns trimmed stdout.
+func gitOutput(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = gitEnvWithSafeDirectory()
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
