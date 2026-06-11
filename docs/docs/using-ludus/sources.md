@@ -230,47 +230,12 @@ Like roles, collections install per-user by default; an admin can pass `--global
 
 ### Blueprints
 
-Each `blueprints/<id>/` directory holds one blueprint. Two files are required when the directory exists:
+Each `blueprints/<id>/` directory holds one blueprint in the standard on-disk format: `blueprint.yml` (display metadata) and `range-config.yml` are required, plus `requirements.yml` when the blueprint has galaxy or subscription dependencies. See [Blueprints: Directory Structure](./blueprints.md#directory-structure) for the file formats.
 
-`blueprint.yml` holds display metadata. Ludus reads `range-config.yml` to surface which templates and roles a blueprint references on the blueprint detail page.
+Two rules are specific to sources:
 
-```yaml
-manifest_version: 1
-id: my-lab
-name: "My Lab"
-description: "Short tagline"               # shown in the catalog and picker
-version: 1.0.0
-tags: [ad, workshop]
-min_ludus_version: 2.1.2
-config: range-config.yml
-```
-
-`range-config.yml` is a standard Ludus range config, the same format `ludus range config get` returns. See [Range Config](configuration.mdx).
-
-`requirements.yml` is the manifest for the ansible roles and collections a blueprint depends on. Every role referenced under `roles:` in `range-config.yml` must appear here (or as a directory under the source's `ansible/roles/`).
-
-```yaml
-roles:
-  - name: geerlingguy.docker
-    version: 7.4.4                                  # pin a galaxy role
-  - name: badsectorlabs.ludus_adcs                  # off-galaxy: name + src
-    src: https://github.com/badsectorlabs/ludus_adcs
-    version: v1.2.0
-
-collections:                                        # required for any 3-part
-  - name: community.crypto                          # FQCN role like
-    version: 2.16.0                                 # community.crypto.openssl_certificate
-  - name: my.collection                             # off-galaxy collection
-    source: https://github.com/foo/my-collection.git # NOTE: collections use
-    type: git                                       # `source:` not `src:`
-    version: main
-
-subscription_roles:                                 # license-gated roles served
-  - ludus_ghosts_client                             # from the Ludus catalog
-  - name: ludus_adcs                                
-```
-
-Subscription role bytes never travel with a source; only the names. The importing instance's license must cover them. See the [Private Role Catalog](../enterprise/subscription-roles/roles-overview.md).
+- Every role referenced under `roles:` in a blueprint's `range-config.yml` must be declared in its `requirements.yml` **or** vendored as a directory under the source's `ansible/roles/` (collections likewise under `ansible/collections/`). Vendored copies win: they install from the source's pinned content and are never re-fetched from galaxy.
+- Subscription role bytes never travel with a source; only the names declared under `subscription_roles:`. The importing instance's license must cover them. See the [Private Role Catalog](../enterprise/subscription-roles/roles-overview.md).
 
 ### `source.yml` at repo root
 
