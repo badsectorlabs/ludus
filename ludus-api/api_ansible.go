@@ -683,11 +683,21 @@ func GetRoleVars(e *core.RequestEvent) error {
 }
 
 // copyDir recursively copies a directory from src to dst. Symlinks are
-// rejected outright as a defense-in-depth measure.
+// rejected outright as a defense-in-depth measure. Git metadata is skipped:
+// a submodule checkout carries a .git gitlink file whose target only exists
+// inside the source checkout, so copying it would plant a dangling reference
+// in the installed copy.
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+
+		if info.Name() == ".git" {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		if info.Mode()&os.ModeSymlink != 0 {
