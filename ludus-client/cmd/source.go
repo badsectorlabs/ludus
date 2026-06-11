@@ -777,7 +777,9 @@ func postInstall(client *resty.Client, sourceID string, body dto.InstallRequest,
 }
 
 func isSourceURL(s string) bool {
-	if u, err := neturl.Parse(s); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
+	// git:// is git's read-only smart-protocol transport (git daemon),
+	// used by internal/airgapped mirrors.
+	if u, err := neturl.Parse(s); err == nil && (u.Scheme == "http" || u.Scheme == "https" || u.Scheme == "git") {
 		return true
 	}
 	return strings.HasPrefix(s, "git@")
