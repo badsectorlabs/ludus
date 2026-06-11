@@ -1753,37 +1753,6 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /vm/{vmID}:
-    delete:
-      summary: Destroy VM
-      deprecated: false
-      description: Halt and destroy a VM
-      operationId: destroyVM
-      tags: []
-      parameters:
-        - name: vmID
-          in: path
-          description: The Proxmox VMID to destroy
-          required: true
-          example: '123'
-          schema:
-            type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: string
-                required:
-                  - result
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
   /ranges/create:
     post:
       summary: Create a new range
@@ -5173,127 +5142,9 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /vm/console/ticket:
-    get:
-      summary: Get Console Websocket Ticket
-      deprecated: false
-      description: >-
-        Generates a one-time VNC ticket for a specific VM if the calling user
-        has access
-      operationId: getConsoleWebsocketTicket
-      tags: []
-      parameters:
-        - name: VMID
-          in: query
-          description: The ID of the Virtual Machine
-          required: true
-          example: 120
-          schema:
-            type: integer
-        - name: userID
-          in: query
-          description: userID of the user to impersonate (admin only)
-          required: false
-          example: JD
-          schema:
-            type: string
-        - name: x-api-key
-          in: header
-          description: ''
-          required: false
-          example: '{{ SO_API_KEY}}'
-          schema:
-            type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  ticket:
-                    type: string
-                    description: The one-time use ticket for VNC connection
-                  password:
-                    type: string
-                    description: The VNC password (if applicable)
-                  port:
-                    type: integer
-                    description: The VNC port on the node
-                required:
-                  - ticket
-                  - password
-                  - port
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /vm/console/view:
-    get:
-      summary: Connect to VM Console WebSocket
-      deprecated: false
-      description: >-
-        Upgrades the connection to a WebSocket for VNC streaming. Requires a
-        valid ticket obtained from `/vm/console/ticket`
-      operationId: vmConsoleWebsocketHandler
-      tags: []
-      parameters:
-        - name: ticket
-          in: query
-          description: The one-time ticket obtained from the ticket API
-          required: true
-          schema:
-            type: string
-      responses:
-        '101':
-          description: ''
-          headers: {}
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema:
-                title: ''
-                type: object
-                properties:
-                  error:
-                    type: string
-                required:
-                  - error
-          headers: {}
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema:
-                title: ''
-                type: object
-                properties:
-                  error:
-                    type: string
-                required:
-                  - error
-          headers: {}
-        '502':
-          description: ''
-          content:
-            application/json:
-              schema:
-                title: ''
-                type: object
-                properties:
-                  error:
-                    type: string
-                required:
-                  - error
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
   /blueprints:
     get:
-      summary: List accessible blueprints
+      summary: List blueprints
       deprecated: false
       description: Returns all blueprints the current user can access.
       operationId: listBlueprints
@@ -5380,63 +5231,6 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /blueprints/{blueprintID}:
-    get:
-      summary: Get blueprint detail
-      deprecated: false
-      description: >
-        Returns the full blueprint record plus computed dependency status. Works
-        for both local blueprints (id = blueprintID) and source-blueprints (id =
-        "sourceID/sourceBlueprintID").
-      operationId: getBlueprintDetail
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Blueprint detail
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BlueprintDetail'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    delete:
-      summary: Delete blueprint
-      deprecated: false
-      description: Deletes a blueprint by ID.
-      operationId: deleteBlueprint
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Blueprint deleted
-          content:
-            application/json:
-              schema:
-                type: object
-                properties: {}
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
   /blueprints/{blueprintID}/copy:
     post:
       summary: Copy blueprint
@@ -5465,6 +5259,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BlueprintCreatedResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}:
+    delete:
+      summary: Delete blueprint
+      deprecated: false
+      description: Deletes a blueprint by ID.
+      operationId: deleteBlueprint
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    get:
+      summary: Get blueprint detail
+      deprecated: false
+      description: >
+        Returns the full blueprint record plus computed dependency status. Works
+        for both local blueprints (id = blueprintID) and source-blueprints (id =
+        "<sourceID>/<sourceBlueprintID>").
+      operationId: getBlueprintDetail
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintDetail'
           headers: {}
       security:
         - JWT: []
@@ -6245,199 +6096,7 @@ paths:
                     example: You are not an admin and cannot set group quotas
           headers: {}
       security: []
-  /sources/{sourceID}:
-    patch:
-      summary: Update source
-      deprecated: false
-      description: >
-        Update a source. The body is always `multipart/form-data` so it can
-        carry an `archive` file when needed. For git sources, set `ref` to
-        change the tracked revision. For upload sources, send `archive` to
-        replace the source content — the new tarball is extracted and
-        re-registered inline. Other source-level fields are authoritative from
-        `source.yml` and refresh on the next sync.
-      operationId: updateSource
-      tags:
-        - Sources
-      parameters:
-        - name: sourceID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                archive:
-                  type: string
-                  format: binary
-                  description: >-
-                    New tarball for upload-type sources. Ignored on git-type
-                    sources.
-                  example: ''
-                ref:
-                  type: string
-                  description: New git ref. Ignored on upload-type sources.
-                  example: ''
-                globalRoles:
-                  type: boolean
-                  description: Admin only. Install role artifacts instance-wide.
-                  example: ''
-                force:
-                  type: boolean
-                  description: >-
-                    Overwrite already-installed templates and galaxy/local
-                    roles.
-                  example: ''
-        required: true
-      responses:
-        '200':
-          description: Source updated.
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/SourceResponse'
-                  - $ref: '#/components/schemas/SyncResultResponse'
-                description: >
-                  Returns `SyncResultResponse` when an `archive` was supplied
-                  (the upload triggers an inline sync), `SourceResponse`
-                  otherwise.
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    delete:
-      summary: Delete source
-      deprecated: false
-      description: >
-        Deletes a source. Registration-only: removes the source and the
-        blueprints it provided. Templates, roles, and collections it installed
-        are shared instance resources and remain on disk — remove those
-        individually (the Ansible / Templates pages, or `source remove`) if you
-        want them gone.
-      operationId: deleteSource
-      tags:
-        - Sources
-      parameters:
-        - name: sourceID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Source deleted
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - status
-                properties:
-                  status:
-                    type: string
-                    example: deleted
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    get:
-      summary: Get source
-      deprecated: false
-      description: Returns a single source by ID.
-      operationId: getSource
-      tags:
-        - Sources
-      parameters:
-        - name: sourceID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Source
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SourceResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /sources/{sourceID}/sync:
-    post:
-      summary: Sync source
-      deprecated: false
-      description: >
-        Refresh-only: re-pull a git-backed source's working tree and update the
-        catalog view. No artifact installs, removes, or DB writes for
-        blueprints/templates/roles happen here. To apply upstream changes,
-        commit a fresh selection via POST /sources/{sourceID}/install. Returns
-        400 for upload-type sources; push new content via PATCH
-        /sources/{sourceID} instead.
-      operationId: syncSource
-      tags:
-        - Sources
-      parameters:
-        - name: sourceID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SyncSourceRequest'
-      responses:
-        '200':
-          description: Sync result.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SyncResultResponse'
-          headers: {}
-        '400':
-          description: Source is upload-type; sync is git-only.
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
   /sources:
-    get:
-      summary: List sources
-      deprecated: false
-      description: Returns all sources the current user can access.
-      operationId: listSources
-      tags:
-        - Sources
-      parameters: []
-      responses:
-        '200':
-          description: List of sources
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SourceResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
     post:
       summary: Create source
       deprecated: false
@@ -6469,37 +6128,45 @@ paths:
                 ref:
                   type: string
                   example: ''
-                globalRoles:
+                global:
                   type: boolean
                   example: ''
-                forceRoles:
-                  type: boolean
-                  example: ''
-                dryRun:
+                force:
                   type: boolean
                   example: ''
                 archive:
                   type: string
                   format: binary
                   example: ''
+            examples: {}
       responses:
         '200':
-          description: >-
-            Dry-run plan (returned when dryRun is true; the source is not
-            persisted).
+          description: ''
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DryRunPlan'
+                $ref: '#/components/schemas/RegisterSourceResponse'
           headers: {}
-        '202':
-          description: >-
-            Source created; sync runs asynchronously (returned when dryRun is
-            false).
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    get:
+      summary: List sources
+      deprecated: false
+      description: Returns all sources the current user can access. Admins see all.
+      operationId: listSources
+      tags:
+        - Sources
+      parameters: []
+      responses:
+        '200':
+          description: List of sources
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JobAcceptedResponse'
+                type: array
+                items:
+                  $ref: '#/components/schemas/SourceResponse'
           headers: {}
       security:
         - JWT: []
@@ -6509,10 +6176,9 @@ paths:
       summary: Get source catalog
       deprecated: false
       description: >-
-        Returns the on-disk source's current contents — blueprints, templates,
-        source-bundled roles, and required galaxy/subscription roles — with each
-        item annotated by its install state for this source. Drives the
-        interactive picker on every open.
+        Returns the on-disk source's contents — blueprints, templates, and
+        bundled ansible roles and collections—with metadata like install state
+        and dependencies.
       operationId: getSourceCatalog
       tags:
         - Sources
@@ -6537,13 +6203,16 @@ paths:
         - ApiKeyAuth: []
   /sources/{sourceID}/install:
     post:
-      summary: Install items from a source
+      summary: Install items from source
       deprecated: false
       description: >-
-        Applies a selection of blueprints/templates/source-roles to a registered
-        source. Galaxy and subscription roles are pulled in automatically by the
-        selected blueprints' requirements. Selection is persisted on the source
-        record and honored by subsequent syncs.
+        Installs a selection of blueprints/templates/ansible items to a
+        registered source. Selection is persisted on the source record and
+        honored by subsequent syncs.
+
+
+        Required ansible roles and collections, defined in a blueprint's
+        manifest, are pulled automatically by installing a blueprint.
       operationId: installSource
       tags:
         - Sources
@@ -6559,7 +6228,55 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InstallRequest'
+              type: object
+              properties:
+                selection:
+                  type: object
+                  properties:
+                    blueprints:
+                      type: array
+                      description: sourceBlueprintID values to install.
+                      items:
+                        type: string
+                    templates:
+                      type: array
+                      description: Template names to install.
+                      items:
+                        type: string
+                    localRoles:
+                      type: array
+                      description: Source-bundled role names to install.
+                      items:
+                        type: string
+                    localCollections:
+                      type: array
+                      description: >-
+                        Source-bundled collection FQCNs (namespace.name) to
+                        install.
+                      items:
+                        type: string
+                  description: >-
+                    Persisted picker selection on a source record. Items added
+                    upstream later do NOT auto-extend this set; the user has to
+                    re-install to widen the selection.
+                global:
+                  type: boolean
+                  description: >-
+                    Admin only. Install the source's roles and collections for
+                    all users.
+                force:
+                  type: boolean
+                  description: >-
+                    Force install: rm-and-recopy templates and reinstall ansible
+                    items; pass `-f` to ansible-galaxy for galaxy roles and
+                    galaxy collections so already-installed artifacts of the
+                    same name are overwritten.
+                noDeps:
+                  type: boolean
+                  description: >-
+                    Skip installing the selected blueprints' ansible role and
+                    collection dependencies
+            examples: {}
       responses:
         '200':
           description: Sync result.
@@ -6574,16 +6291,18 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /sources/{sourceID}/collections:
-    get:
-      summary: List source collections
+  /sources/{sourceID}/sync:
+    post:
+      summary: Sync source
       deprecated: false
-      description: >-
-        Lists Ansible collections declared by this source's blueprints.
-        ansible-galaxy has no `collection remove` subcommand, so source purge
-        leaves the on-disk install in place — the row is a claim, not a
-        lifecycle anchor.
-      operationId: listSourceCollections
+      description: >
+        Refresh-only: re-pull a git-backed source's working tree and update the
+        catalog view. No artifact installs, removes, or DB writes for
+        blueprints/templates/roles happen here. To apply upstream changes,
+        commit a fresh selection via POST /sources/{sourceID}/install. Returns
+        400 for upload-type sources; push new content via PATCH
+        /sources/{sourceID} instead.
+      operationId: syncSource
       tags:
         - Sources
       parameters:
@@ -6596,20 +6315,152 @@ paths:
             type: string
       responses:
         '200':
-          description: Source collections
+          description: Sync result.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ListSourceCollectionsResponseItem'
+                $ref: '#/components/schemas/SyncResultResponse'
+          headers: {}
+        '400':
+          description: Source is upload-type; sync is git-only.
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}:
+    patch:
+      summary: Update source
+      deprecated: false
+      description: >
+        Update a source. The body is always `multipart/form-data` so it can
+        carry an `archive` file when needed.
+      operationId: updateSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                archive:
+                  type: string
+                  format: binary
+                  description: >-
+                    New tarball for upload-type sources. Ignored on git-type
+                    sources.
+                  example: ''
+                ref:
+                  type: string
+                  description: New git ref. Ignored on upload-type sources.
+                  example: ''
+                global:
+                  type: boolean
+                  description: >-
+                    Admin only. Install the source's roles and collections for
+                    all users.
+                  example: ''
+                force:
+                  type: boolean
+                  description: >-
+                    Overwrite already-installed templates and galaxy/local
+                    roles.
+                  example: ''
+                url:
+                  description: Remote url for git-type sources.
+                  example: ''
+                  type: string
+            examples: {}
+        required: true
+      responses:
+        '200':
+          description: Source updated.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SourceResponse'
+                  - $ref: '#/components/schemas/SyncResultResponse'
+                description: >
+                  Returns `SyncResultResponse` when an `archive` was supplied
+                  (the upload triggers an inline sync), `SourceResponse`
+                  otherwise.
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    get:
+      summary: Get source metadata
+      deprecated: false
+      description: Returns a single source by ID.
+      operationId: getSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Delete source
+      deprecated: false
+      description: >-
+        Deregisters the source: drops the record, its blueprints, and its
+        install-claim rows. Installed templates, roles, and collections stay on
+        disk — remove them via their own delete endpoints.
+      operationId: deleteSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    example: deleted
           headers: {}
       security:
         - JWT: []
         - ApiKeyAuth: []
   /sources/{sourceID}/blueprints:
     get:
-      summary: List blueprints in a source
+      summary: List source blueprints
       deprecated: false
       description: Lists cached blueprint metadata for a single source.
       operationId: listSourceBlueprints
@@ -6632,60 +6483,6 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SourceBlueprintListItem'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /sources/blueprints:
-    get:
-      summary: List all source blueprints
-      deprecated: false
-      description: Lists cached blueprint metadata across all accessible sources.
-      operationId: listAllSourceBlueprints
-      tags:
-        - Sources
-      parameters: []
-      responses:
-        '200':
-          description: All source blueprints
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SourceBlueprintListItem'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /sources/blueprints/{id}/manifest:
-    get:
-      summary: Get source blueprint manifest
-      deprecated: false
-      description: >
-        Returns the parsed blueprint.yml manifest for a source-blueprint,
-        identified by the slug-prefixed display ID
-        (<sourceID>/<sourceBlueprintID>).
-      operationId: getSourceBlueprintManifest
-      tags:
-        - Sources
-      parameters:
-        - name: id
-          in: path
-          description: 'Slug-prefixed blueprint ID: <sourceID>/<sourceBlueprintID>'
-          required: true
-          example: bsl/goad
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Manifest
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-                properties: {}
           headers: {}
       security:
         - JWT: []
@@ -6747,6 +6544,184 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ListSourceRolesResponseItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/collections:
+    get:
+      summary: List source collections
+      deprecated: false
+      description: Lists Ansible collections declared by this source's blueprints.
+      operationId: listSourceCollections
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source collections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ListSourceCollectionsResponseItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /vm/{vmID}:
+    delete:
+      summary: Destroy VM
+      deprecated: false
+      description: Halt and destroy a VM
+      operationId: destroyVM
+      tags: []
+      parameters:
+        - name: vmID
+          in: path
+          description: The Proxmox VMID to destroy
+          required: true
+          example: '123'
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                required:
+                  - result
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /vm/console/ticket:
+    get:
+      summary: Get Console Websocket Ticket
+      deprecated: false
+      description: >-
+        Generates a one-time VNC ticket for a specific VM if the calling user
+        has access
+      operationId: getConsoleWebsocketTicket
+      tags: []
+      parameters:
+        - name: VMID
+          in: query
+          description: The ID of the Virtual Machine
+          required: true
+          example: 120
+          schema:
+            type: integer
+        - name: userID
+          in: query
+          description: userID of the user to impersonate (admin only)
+          required: false
+          example: JD
+          schema:
+            type: string
+        - name: x-api-key
+          in: header
+          description: ''
+          required: false
+          example: '{{ SO_API_KEY}}'
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket:
+                    type: string
+                    description: The one-time use ticket for VNC connection
+                  password:
+                    type: string
+                    description: The VNC password (if applicable)
+                  port:
+                    type: integer
+                    description: The VNC port on the node
+                required:
+                  - ticket
+                  - password
+                  - port
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /vm/console/view:
+    get:
+      summary: Connect to VM Console WebSocket
+      deprecated: false
+      description: >-
+        Upgrades the connection to a WebSocket for VNC streaming. Requires a
+        valid ticket obtained from `/vm/console/ticket`
+      operationId: vmConsoleWebsocketHandler
+      tags: []
+      parameters:
+        - name: ticket
+          in: query
+          description: The one-time ticket obtained from the ticket API
+          required: true
+          schema:
+            type: string
+      responses:
+        '101':
+          description: ''
+          headers: {}
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                title: ''
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+          headers: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                title: ''
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+          headers: {}
+        '502':
+          description: ''
+          content:
+            application/json:
+              schema:
+                title: ''
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
           headers: {}
       security:
         - JWT: []
@@ -6819,8 +6794,11 @@ components:
     InstallBlueprintDepsRequest:
       type: object
       properties:
-        globalRoles:
+        global:
           type: boolean
+          description: >-
+            Admin only. Install the source's roles and collections for all
+            users.
         forceRoles:
           type: boolean
     JobAcceptedResponse:
@@ -6897,7 +6875,6 @@ components:
         - id
         - sourceID
         - name
-        - kind
         - type
         - ownerUserID
       properties:
@@ -6917,15 +6894,6 @@ components:
           type: string
         license:
           type: string
-        kind:
-          type: string
-          description: >-
-            Source kind discriminator distinct from `type`. Values: "git",
-            "upload", "local".
-          enum:
-            - git
-            - upload
-            - local
         type:
           type: string
           enum:
@@ -6961,8 +6929,11 @@ components:
       properties:
         ref:
           type: string
-        globalRoles:
+        global:
           type: boolean
+          description: >-
+            Admin only. Install the source's roles and collections for all
+            users.
         force:
           type: boolean
     DeleteSourceRequest:
@@ -6999,21 +6970,37 @@ components:
         templateResults:
           type: array
           items:
-            type: object
-            properties: {}
-        localRoleResults:
-          type: array
-          items:
-            type: object
-            properties: {}
-        roleResults:
-          type: array
-          items:
-            type: object
-            properties: {}
-        dryRun:
+            $ref: '#/components/schemas/ArtifactResult'
+        localAnsibleResults:
           type: object
-          properties: {}
+          description: >-
+            Registration outcomes for ansible content vendored by the source
+            (its ansible/roles/ and ansible/collections/ dirs).
+          properties:
+            roleResults:
+              type: array
+              items:
+                $ref: '#/components/schemas/ArtifactResult'
+            collectionResults:
+              type: array
+              items:
+                $ref: '#/components/schemas/ArtifactResult'
+        blueprintResults:
+          type: object
+          description: Outcomes for the blueprints' galaxy dependency closure.
+          properties:
+            ansibleResults:
+              type: array
+              description: >-
+                Galaxy roles, collections, and subscription roles installed for
+                the source's blueprints. Each item's `type` says which kind it
+                is.
+              items:
+                $ref: '#/components/schemas/AnsibleInstallResult'
+            undeclaredDependencies:
+              type: array
+              items:
+                $ref: '#/components/schemas/UndeclaredDependency'
     ArtifactResult:
       type: object
       required:
@@ -7767,10 +7754,6 @@ components:
           items:
             type: string
     SyncResultResponse:
-      description: >-
-        Wire shape returned when a sync runs inline (PATCH /sources/{sourceID}
-        with archive, or POST /sources/{sourceID}/sync). Tags the source and
-        embeds the per-artifact result lists.
       allOf:
         - type: object
           required:
@@ -7813,8 +7796,8 @@ components:
         copy, import). `result` is the message ("Blueprint
         created/copied/imported successfully"); `blueprintID` is the
         slug-prefixed public ID; `id` is the PocketBase record ID (emitted by
-        importBlueprint); `roleResults` reports the outcome of each role install
-        kicked off as part of the create.
+        importBlueprint); `ansibleResults` reports the outcome of each galaxy
+        role/collection install kicked off as part of the create.
       type: object
       required:
         - blueprintID
@@ -7826,10 +7809,10 @@ components:
         id:
           type: string
           description: PocketBase record ID; emitted by importBlueprint.
-        roleResults:
+        ansibleResults:
           type: array
           items:
-            $ref: '#/components/schemas/BlueprintCreatedResponseRoleResult'
+            $ref: '#/components/schemas/BlueprintCreatedResponseAnsibleResult'
     BlueprintCreatedResponseRoleResult:
       type: object
       required:
@@ -7860,12 +7843,9 @@ components:
     InstallSelection:
       type: object
       description: >-
-        Persisted picker selection on a source record — the concrete set of
-        names that every future sync honors. Always set after the first
-        successful install: callers either supplied a non-empty selection
-        directly, or the server snapshotted the walk at install-time. Items
-        added upstream later do NOT auto-extend this set; the user has to
-        re-install to widen the selection.
+        Persisted picker selection on a source record. Items added upstream
+        later do NOT auto-extend this set; the user has to re-install to widen
+        the selection.
       properties:
         blueprints:
           type: array
@@ -7882,34 +7862,32 @@ components:
           description: Source-bundled role names to install.
           items:
             type: string
+        localCollections:
+          type: array
+          description: Source-bundled collection FQCNs (namespace.name) to install.
+          items:
+            type: string
     InstallRequest:
       type: object
-      description: >-
-        Body for POST /sources/{sourceID}/install. `selection` is optional —
-        when omitted or empty, the server snapshots the current walk and
-        persists it as the source's installSelection. A non-empty selection is
-        used as-is and replaces any previously persisted selection.
       properties:
         selection:
           $ref: '#/components/schemas/InstallSelection'
-        globalRoles:
+        global:
           type: boolean
-          description: Admin only. Install roles instance-wide.
+          description: >-
+            Admin only. Install the source's roles and collections for all
+            users.
         force:
           type: boolean
           description: >-
-            Force install: rm-and-recopy templates and source-bundled local
-            roles; pass `-f` to ansible-galaxy for galaxy roles and galaxy
-            collections so already-installed artifacts of the same name are
-            overwritten. Does NOT alter the selection or pull in dependencies
-            the caller didn't already select.
+            Force install: rm-and-recopy templates and reinstall ansible items;
+            pass `-f` to ansible-galaxy for galaxy roles and galaxy collections
+            so already-installed artifacts of the same name are overwritten.
         noDeps:
           type: boolean
           description: >-
-            Skip installing the selected blueprints' galaxy role and collection
-            dependencies — no reaching out to ansible-galaxy; only deps already
-            present on disk are used. Default false: deps install, since a
-            blueprint needs them to deploy.
+            Skip installing the selected blueprints' ansible role and collection
+            dependencies
     RegisterSourceResponse:
       type: object
       description: >-
@@ -7937,51 +7915,36 @@ components:
         - blueprints
         - templates
         - localRoles
-        - galaxyRoles
-        - galaxyCollections
-        - subscriptionRoles
+        - localCollections
       properties:
         sourceID:
           type: string
         sourceName:
           type: string
+        description:
+          type: string
+        sourcetype:
+          type: string
+        lastSyncedAt:
+          type: string
         blueprints:
-          type: array
-          items:
-            $ref: '#/components/schemas/CatalogBlueprint'
+          $ref: '#/components/schemas/CatalogBlueprints'
         templates:
           type: array
           items:
             $ref: '#/components/schemas/CatalogItem'
         localRoles:
           type: array
-          description: Source-bundled Ansible roles (the source's roles/ dir).
+          description: Source-bundled Ansible roles (the source's ansible/roles/ dir).
           items:
             $ref: '#/components/schemas/CatalogItem'
-        galaxyRoles:
-          type: array
-          description: Galaxy roles declared by any blueprint's requirements.yml.
-          items:
-            $ref: '#/components/schemas/CatalogItem'
-        galaxyCollections:
-          type: array
-          description: Galaxy collections declared by any blueprint's requirements.yml.
-          items:
-            $ref: '#/components/schemas/CatalogItem'
-        subscriptionRoles:
+        localCollections:
           type: array
           description: >-
-            Ludus subscription roles declared by any blueprint's
-            requirements.yml (license-gated install pipeline).
+            Source-bundled Ansible collections (the source's
+            ansible/collections/ dir).
           items:
             $ref: '#/components/schemas/CatalogItem'
-        undeclaredDependencies:
-          type: array
-          description: >-
-            Range-config role references the picker found but couldn't cover via
-            requirements.yml or a source-bundled local role.
-          items:
-            $ref: '#/components/schemas/UndeclaredDependency'
     CatalogBlueprint:
       type: object
       description: >-
@@ -8022,21 +7985,17 @@ components:
           type: array
           items:
             type: string
-        requiredGalaxyRoles:
+        requiredRoles:
           type: array
           items:
             type: string
-        requiredGalaxyCollections:
+        requiredCollections:
           type: array
           items:
             type: string
     CatalogItem:
       type: object
-      description: >-
-        One template / role / collection in a SourceCatalog. `requiredBy` lists
-        the parent blueprint IDs that pulled it in. `versionByBlueprint` carries
-        per-blueprint version pins for galaxy roles/collections so consumers can
-        detect divergent pins across selected blueprints.
+      description: One template, role, or collection in a SourceCatalog.
       required:
         - name
         - state
@@ -8046,11 +8005,15 @@ components:
         description:
           type: string
           description: >-
-            Human description for source-bundled items — packer template.yml or
-            a role's meta/main.yml galaxy_info. Optional; absent for
+            From the item's source metadata (template description variable, role
+            meta/main.yml, collection galaxy.yml). Absent for
             galaxy/subscription items.
         version:
           type: string
+          description: >-
+            Required version or constraint for galaxy deps; shipped galaxy.yml
+            version for vendored collections. Absent for templates and local
+            roles (versionless).
         state:
           type: string
           enum:
@@ -8062,18 +8025,16 @@ components:
         global:
           type: boolean
           description: >-
-            For an installed role, whether it lives in the system-wide
-            global-roles path (true) or the owner's per-user roles path (false).
-            Drives the role-remove flow. Always false/absent for templates and
-            collections.
+            True when an installed role or vendored collection has a copy in the
+            system-wide global path. Absent for templates and
+            galaxy/subscription items.
         scopes:
           type: array
           description: >-
-            Every installed copy of a role: the scope it lives in
-            ("global"/"user"), the on-disk version there, and its state against
-            the required pin. A role can have entries for both scopes at
-            different versions. Absent for non-role kinds and not-installed
-            roles.
+            Installed copies of a role or vendored collection: scope
+            ("global"/"user"), on-disk version, and state against the required
+            pin. Both scopes can be occupied at different versions. Absent for
+            templates, galaxy deps, and not-installed items.
           items:
             type: object
             properties:
@@ -8089,15 +8050,13 @@ components:
         type:
           type: string
           description: >-
-            Install type for a collection. "git" when sourced from a git repo
-            (in which case `name` holds the repo URL); absent for a normal
-            galaxy collection.
+            "git" for a collection sourced from a git repo (`name` holds the
+            repo URL). Absent otherwise.
         fqcn:
           type: string
           description: >-
-            Resolved namespace.name for a git collection (whose `name` holds the
-            repo URL). Absent when not a git collection or the FQCN can't be
-            inferred from the URL.
+            Resolved namespace.name for a git collection. Absent when not a git
+            collection or not inferable from the URL.
         requiredBy:
           type: array
           description: Blueprint IDs that require this item.
@@ -8105,9 +8064,7 @@ components:
             type: string
         versionByBlueprint:
           type: object
-          description: >-
-            Per-blueprint pinned version for galaxy roles/collections, keyed by
-            blueprint ID. Empty when no blueprint pins a version.
+          description: Pinned version per blueprint ID, for galaxy roles/collections.
           additionalProperties:
             type: string
           properties: {}
@@ -8137,6 +8094,90 @@ components:
             Populated when kind is missing_collection. The collection parent of
             an FQCN role reference whose parent collection isn't declared in
             requirements.yml.
+    AnsibleInstallResult:
+      type: object
+      description: >-
+        Result of installing one galaxy artifact for a blueprint. `type`
+        distinguishes role / collection / subscription_role — they all flow
+        through the same ansible-galaxy install path.
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        ok:
+          type: boolean
+        error:
+          type: string
+        type:
+          type: string
+          enum:
+            - role
+            - collection
+            - subscription_role
+    BlueprintCreatedResponseAnsibleResult:
+      type: object
+      required:
+        - name
+        - ok
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        ok:
+          type: boolean
+        error:
+          type: string
+        type:
+          type: string
+          enum:
+            - role
+            - collection
+            - subscription_role
+    CatalogBlueprints:
+      type: object
+      description: >-
+        The source's blueprints plus the dependency closure they pull in: galaxy
+        roles/collections and subscription roles unioned across every
+        blueprint's requirements.yml, plus any config.yml role references that
+        aren't declared there.
+      required:
+        - items
+        - requiredRoles
+        - requiredCollections
+        - subscriptionRoles
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogBlueprint'
+        requiredRoles:
+          type: array
+          description: Galaxy roles declared by any blueprint's requirements.yml.
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        requiredCollections:
+          type: array
+          description: Galaxy collections declared by any blueprint's requirements.yml.
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        subscriptionRoles:
+          type: array
+          description: >-
+            Ludus subscription roles declared by any blueprint's
+            requirements.yml (license-gated install pipeline).
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        undeclaredDependencies:
+          type: array
+          description: >-
+            Range-config role references the picker found but couldn't cover via
+            requirements.yml or a source-bundled local role.
+          items:
+            $ref: '#/components/schemas/UndeclaredDependency'
   responses: {}
   securitySchemes:
     ApiKeyAuth:
