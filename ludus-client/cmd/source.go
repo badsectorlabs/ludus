@@ -927,25 +927,24 @@ func runSourceDetail(client *resty.Client, sourceID string) {
 			t.Append([]string{label, value})
 		}
 	}
-	row("Source ID", src.SourceID)
 	row("Name", src.Name)
-	row("Description", src.Description)
-	row("Type", src.Type)
-	if src.Type == "git" {
-		row("URL", src.URL)
-		row("Ref", src.Ref)
-	}
 	row("Authors", strings.Join(src.Authors, ", "))
-	row("License", src.License)
-	row("Homepage", src.Homepage)
-	row("Owner", src.OwnerUserID)
-	if src.Type == "upload" {
-		row("Uploaded", src.LastSyncedAt)
+	row("Description", src.Description)
+	if src.Type == "git" {
+		row("Git URL", src.URL)
+		row("Ref", src.Ref)
+		row("Last Sync", src.LastSyncedAt)
 	} else {
-		row("Last updated", src.LastSyncedAt)
+		row("Uploaded", src.LastSyncedAt)
 	}
-	row("Status", src.LastSyncStatus)
-	row("Error", src.LastSyncError)
+	row("Errors", src.LastSyncError)
+	row("Homepage", src.Homepage)
+	row("License", src.License)
+	// Owner is only worth a row for admins (non-admins own what they see);
+	// when whoami can't answer, default to showing it.
+	if isAdmin, ok := clientIsAdmin(client); isAdmin || !ok {
+		row("Owner", src.OwnerUserID)
+	}
 	t.Render()
 
 	fmt.Printf("\nRun `ludus source list %s --catalog` to see what this source ships (blueprints, templates, ansible).\n", sourceID)
