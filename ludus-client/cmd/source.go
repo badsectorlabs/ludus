@@ -333,18 +333,16 @@ func runSourceAdd(cmd *cobra.Command, args []string) {
 	}
 
 	if mode == modeInstallAll {
-		// Show admin capability unless whoami positively says non-admin.
-		isAdmin, ok := clientIsAdmin(client)
 		doInstallAll(client, registerResp.SourceID, registerResp.Catalog, sourcepicker.Advanced{
 			Global:  flags.Global,
 			Force:   flags.Force,
-			IsAdmin: isAdmin || !ok,
+			IsAdmin: true, // picker display only — the server gates --global
 			NoDeps:  flags.NoDeps,
 		})
 		return
 	}
 
-	selection, advanced, committed, proceed, err := chooseSelection(client, mode, flags, registerResp.Catalog)
+	selection, advanced, committed, proceed, err := chooseSelection(mode, flags, registerResp.Catalog)
 	if err != nil {
 		logger.Logger.Fatal(err)
 	}
@@ -541,18 +539,16 @@ func tryFetchCatalog(client *resty.Client, sourceID string) (dto.SourceCatalogDT
 // skips the upload/git work since the source content is already on disk.
 func runExistingSourceFlow(client *resty.Client, sourceID string, cat dto.SourceCatalogDTO, flags sourceFlags, mode installMode) {
 	if mode == modeInstallAll {
-		// Show admin capability unless whoami positively says non-admin.
-		isAdmin, ok := clientIsAdmin(client)
 		doInstallAll(client, sourceID, cat, sourcepicker.Advanced{
 			Global:  flags.Global,
 			Force:   flags.Force,
-			IsAdmin: isAdmin || !ok,
+			IsAdmin: true, // picker display only — the server gates --global
 			NoDeps:  flags.NoDeps,
 		})
 		return
 	}
 
-	selection, advanced, committed, proceed, err := chooseSelection(client, mode, flags, cat)
+	selection, advanced, committed, proceed, err := chooseSelection(mode, flags, cat)
 	if err != nil {
 		logger.Logger.Fatal(err)
 	}
@@ -664,13 +660,11 @@ func postSourceRegister(client *resty.Client, arg string, flags sourceFlags) (dt
 //   - proceed is false when there is nothing to do (no items picked / scripted
 //     selection empty); the caller prints a "nothing selected" notice and
 //     skips the round-trip.
-func chooseSelection(client *resty.Client, mode installMode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, bool, error) {
-	// Show admin capability unless whoami positively says non-admin.
-	isAdmin, whoamiOK := clientIsAdmin(client)
+func chooseSelection(mode installMode, flags sourceFlags, cat dto.SourceCatalogDTO) (dto.InstallSelectionDTO, sourcepicker.Advanced, bool, bool, error) {
 	adv := sourcepicker.Advanced{
 		Global:  flags.Global,
 		Force:   flags.Force,
-		IsAdmin: isAdmin || !whoamiOK,
+		IsAdmin: true, // picker display only — the server gates --global
 		NoDeps:  flags.NoDeps,
 	}
 	switch mode {
