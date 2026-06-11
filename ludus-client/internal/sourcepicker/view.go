@@ -45,6 +45,10 @@ var (
 	// distinct band rather than blending into the contextual △ warnings.
 	keyStyle     = lipgloss.NewStyle().Bold(true)
 	controlStyle = lipgloss.NewStyle().Foreground(offColor)
+	// Search-bar chrome: a bordered box so the filter reads as a search bar.
+	// Accent border while typing; muted grey once the filter is committed.
+	searchBoxStyle     = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(accentColor).Padding(0, 1)
+	searchBoxIdleStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(offColor).Padding(0, 1)
 )
 
 // keyTokenRe matches the actionable tokens in a control hint — bracketed
@@ -98,10 +102,11 @@ func (m model) View() string {
 	top.WriteString("\n")
 
 	if m.searching {
-		top.WriteString(m.searchInput.View())
+		top.WriteString(searchBoxStyle.Width(searchBoxContentWidth(m.width)).Render(m.searchInput.View()))
 		top.WriteString("\n\n")
 	} else if m.filter != "" {
-		top.WriteString(dimStyle.Render(fmt.Sprintf("filter: %s", m.filter)))
+		committed := "🔍 " + dimStyle.Render(truncate(m.filter, max(0, searchBoxContentWidth(m.width)-6)))
+		top.WriteString(searchBoxIdleStyle.Width(searchBoxContentWidth(m.width)).Render(committed))
 		top.WriteString("\n\n")
 	}
 
@@ -746,4 +751,10 @@ func truncate(s string, width int) string {
 		return s
 	}
 	return ansi.Truncate(s, width, "…")
+}
+
+// searchBoxContentWidth is the inner width of the search-bar box for a given
+// terminal width — about a third of the container, floored for small panes.
+func searchBoxContentWidth(w int) int {
+	return max(20, min(w-2, w/3))
 }

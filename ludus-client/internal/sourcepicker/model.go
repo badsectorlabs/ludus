@@ -148,8 +148,9 @@ type model struct {
 // indicator shows instead.
 func newModel(catalog dto.SourceCatalogDTO, adv Advanced) model {
 	ti := textinput.New()
-	ti.Placeholder = "filter..."
-	ti.Prompt = "/"
+	ti.Placeholder = "search..."
+	ti.Prompt = "🔍 "
+	ti.PromptStyle = cursorStyle
 	ti.CharLimit = 64
 
 	picked := map[string]map[string]struct{}{

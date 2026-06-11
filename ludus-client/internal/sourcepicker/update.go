@@ -20,6 +20,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Keep the input's visible span inside the search-bar box (padding,
+		// prompt, cursor cell); the value scrolls horizontally past it.
+		m.searchInput.Width = max(8, searchBoxContentWidth(msg.Width)-7)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -45,6 +48,16 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filter = strings.ToLower(strings.TrimSpace(m.searchInput.Value()))
 		m.searchInput.Blur()
 		m.clampCursors()
+		return m, nil
+	case tea.KeyDown:
+		// Commit the filter like enter, then jump to the first row of the open
+		// tab so the next keystroke navigates the results.
+		m.searching = false
+		m.filter = strings.ToLower(strings.TrimSpace(m.searchInput.Value()))
+		m.searchInput.Blur()
+		m.clampCursors()
+		m.switchTab(m.activeTab) // re-resolve the first non-empty section under the new filter
+		m.cursor[m.active] = 0
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -79,8 +92,17 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.switchTab(t)
 		}
 		return m, nil
-	case "up", "k":
+	case "k":
 		m.cursorUp()
+		return m, nil
+	case "up":
+		// At the top of the tab, up ascends into the search bar — the mirror
+		// of down committing the filter back into the list. Only the arrow
+		// key ascends: a held "k" must not start typing into the input.
+		if !m.cursorUp() {
+			m.searching = true
+			m.searchInput.Focus()
+		}
 		return m, nil
 	case "down", "j":
 		m.cursorDown()
@@ -235,11 +257,12 @@ func (m *model) cycleTab(dir int) {
 
 // cursorUp moves the cursor up by one row. At the top of the active
 // section, it walks to the previous non-empty section within the active
-// tab and lands on that section's last visible row. Anchored at the top.
-func (m *model) cursorUp() {
+// tab and lands on that section's last visible row. Returns false when
+// already anchored at the top of the tab.
+func (m *model) cursorUp() bool {
 	if m.cursor[m.active] > 0 {
 		m.cursor[m.active]--
-		return
+		return true
 	}
 	secs := m.activeTab.sections()
 	pos := sectionIndex(secs, m.active)
@@ -248,10 +271,11 @@ func (m *model) cursorUp() {
 		if len(visible) > 0 {
 			m.active = secs[i]
 			m.cursor[secs[i]] = len(visible) - 1
-			return
+			return true
 		}
 	}
-	// Already at the top of the tab's first non-empty section — no-op.
+	// Already at the top of the tab's first non-empty section.
+	return false
 }
 
 // cursorDown moves the cursor down by one row. At the bottom of the
@@ -335,17 +359,33 @@ func setToSortedSlice(s map[string]struct{}) []string {
 }
 
 // matchesFilter returns true if the row matches the current filter (or no
-// filter is set).
+// filter is set). Every whitespace-separated term of the filter must
+// fuzzy-match the row's id, label, or description.
 func (m model) matchesFilter(r row) bool {
 	if m.filter == "" {
 		return true
 	}
-	q := m.filter
-	if strings.Contains(strings.ToLower(r.id), q) {
-		return true
+	for _, term := range strings.Fields(m.filter) {
+		if !fuzzyMatch(term, r.id) && !fuzzyMatch(term, r.label) && !fuzzyMatch(term, r.description) {
+			return false
+		}
 	}
-	if strings.Contains(strings.ToLower(r.label), q) {
-		return true
+	return true
+}
+
+// fuzzyMatch reports whether term reads as an in-order subsequence of s
+// (fzf-style), ignoring case. term must already be lowercase — the filter is
+// lowercased on commit.
+func fuzzyMatch(term, s string) bool {
+	t := []rune(term)
+	i := 0
+	for _, r := range strings.ToLower(s) {
+		if r == t[i] {
+			i++
+			if i == len(t) {
+				return true
+			}
+		}
 	}
 	return false
 }
