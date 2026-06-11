@@ -1,29 +1,21 @@
 ---
 sidebar_position: 3
 title: "📦 Sources"
-description: "Register Packer templates, Ansible roles and collections, and blueprints from a git repo, tarball, or local directory"
+description: "Install blueprints, Packer templates, and/or Ansible roles and collections from a git repo, tarball, or local directory"
 keywords: [sources, sharing, blueprints, ansible, collections, packer, git]
 ---
 
 # 📦 Sources
 
-A source is a versioned bundle of Packer templates, Ansible roles and collections, and blueprints, served from a git repo, tarball, or local directory. `ludus source add` registers it and opens an interactive picker for what to install.
+A source is a versioned bundle of blueprints, Packer templates, and Ansible roles and collections. `ludus source add` registers it and opens an interactive installer.
 
 ```bash
-# Register and pick what to install (interactive)
+# Pick what to install
 ludus source add https://github.com/badsectorlabs/ludus-source-bsl
 
-# Or install everything from the source non-interactively
-ludus source add https://github.com/badsectorlabs/ludus-source-bsl --all
+# Script an install
+ludus source add https://github.com/badsectorlabs/ludus-source-bsl --blueprints goad
 
-# Build any required templates that aren't built yet
-ludus templates build
-
-# Apply one of the source's blueprints to your range
-ludus blueprint apply badsectorlabs-ludus-source-bsl/goad
-
-# Deploy
-ludus range deploy
 ```
 
 :::tip Publishing your own
@@ -34,8 +26,6 @@ Fork the [Ludus Source Template](https://github.com/badsectorlabs/ludus-source-t
 
 ## What's in a Source Repo
 
-A source can include Packer templates, Ansible roles and collections, and blueprints — any combination, as long as it ships at least one.
-
 ```
 my-source-repo/
 ├── README.md
@@ -43,19 +33,17 @@ my-source-repo/
 ├── templates/                       # Packer template configs
 │   └── win-server-2025/
 ├── ansible/
-│   ├── roles/                       # local Ansible roles
+│   ├── roles/                       # Ansible roles
 │   │   └── shared_role/
-│   └── collections/                 # local Ansible collections
+│   └── collections/                 # Ansible collections
 │       └── my_namespace.my_collection/
 └── blueprints/                      # one directory per blueprint
     └── goad/
         ├── blueprint.yml            # display metadata
         ├── range-config.yml         # the range config
-        ├── requirements.yml         # galaxy roles, collections, subscription_roles
+        ├── requirements.yml         # required ansible roles, collections, or ludus subscription roles
         └── thumbnail.png
 ```
-
-Local roles live under `ansible/roles/` and local collections under `ansible/collections/`; a collection directory is any dir with a `galaxy.yml`.
 
 ## Submodules
 
@@ -88,16 +76,13 @@ Templates are registered but not built; run `ludus templates build` separately.
 
 Slug-prefixed IDs (`badsectorlabs-ludus-source-bsl/goad`) keep blueprints from different sources separate. If two sources both ship `goad`, they appear as `badsectorlabs-ludus-source-bsl/goad` and `secteam-workshop-labs/goad`. Apply by full prefix.
 
-### Fork to Edit
-
-`apply` writes a source blueprint's config into your range. Edit it via `ludus range config get/set`, then save it as a new blueprint:
+### Fork to Edit Source Blueprints
 
 ```bash
 # terminal-command-local
-ludus blueprint apply badsectorlabs-ludus-source-bsl/goad
-# ... edit via ludus range config get/set ...
-ludus blueprint create --id my-goad --from-range <rangeID>
-ludus blueprint apply my-goad
+ludus blueprint create --from-blueprint badsectorlabs-ludus-source-bsl/goad --id scratch-pad
+ludus blueprint config edit scratch-pad
+ludus blueprint apply scratch-pad
 ludus range deploy
 ```
 
@@ -111,8 +96,6 @@ ludus source add https://github.com/foo/ludus-role-pack --all
 # Roles installed for your user; no apply step.
 ```
 
-Templates work the same way; run `ludus templates build` to produce VM images.
-
 ### Pick or Extend What's Installed
 
 Run `source add <existing-sourceID>` to open the picker against a source you already registered. Useful for installing additional items later, or for finishing a source whose picker you closed without committing.
@@ -125,17 +108,6 @@ ludus source add badsectorlabs-ludus-source-bsl --all              # install eve
 ```
 
 Re-adding the same git URL is idempotent — Ludus re-pulls and refreshes the catalog without touching what's already installed. Re-adding the same sourceID with a different URL returns `409`; pick a different sourceID, or repoint the existing source with `ludus source set-url <sourceID> <git-url>`.
-
-### Retry a Partial Source Add
-
-If `source add` fails partway, retry just one blueprint's deps:
-
-```bash
-# terminal-command-local
-ludus blueprint install badsectorlabs-ludus-source-bsl/goad
-```
-
-Works on any blueprint you can see, whether it's local or from a source.
 
 ### Private Git Repos
 
@@ -188,7 +160,7 @@ variable "icon_path" {
 }
 ```
 
-`description` is the one-line summary shown when browsing the source (`ludus source list` and the GUI picker). `icon_path` is a relative path to an image bundled in the template dir — a square, transparent PNG (256×256 works well) — shown on the template's card, with an OS glyph as the fallback. Packer requires a variable's `default` to be a literal, so both stay static strings.
+`description` is the one-line summary shown when browsing the source via the TUI and GUI installers. `icon_path` is a relative path to an image bundled in the template dir — a square, transparent PNG (256×256 works well) — shown on the template's card, with an OS glyph as the fallback. Packer requires a variable's `default` to be a literal, so both stay static strings.
 
 Templates install per-user and persist across server updates. Each is keyed by the `*-template` name in its `.pkr.hcl` — the name `ludus templates list` reports — so re-installing a name you already have is a no-op, and a name that collides with a built-in template is rejected.
 
@@ -203,14 +175,16 @@ ansible/roles/my_helper/
 ├── tasks/main.yml           # the role's tasks
 ├── defaults/main.yml        # default variables
 ├── handlers/main.yml        # handlers
+├── meta/version.yml         # optional: defines the display version for the role in Ludus (overrides git tag detection)
 └── meta/main.yml            # role metadata; galaxy_info.description shows in the catalog
+
 ```
 
 Ludus reads each role's `meta/main.yml` `galaxy_info.description` and shows it as the role's description in the catalog and picker.
 
-Reference roles by directory name (`my_helper`) under `roles:` in any blueprint's `range-config.yml`. If a local role shares a name with a galaxy role, Ludus skips the galaxy install and uses the local role.
+Reference roles by directory name (`my_helper`) under `roles:` in any blueprint's `range-config.yml`. If a local role shares a name with a galaxy role, Ludus skips the galaxy / subscription role install and uses the local role.
 
-Roles install per-user by default; admins can use `--global` on `source add` to install instance-wide.
+Roles install per-user by default; admins can install globally via the TUI or use the `--global` flag on a scripted `source add`.
 
 ### Ansible collections
 
@@ -224,9 +198,9 @@ ansible/collections/my_namespace.my_collection/
 └── playbooks/
 ```
 
-The collection's identity is the `namespace.name` from its `galaxy.yml` — not the directory name. Ludus reads `galaxy.yml` for the version and `description` (shown in the catalog and picker) and installs it under the namespaced collections path, where a blueprint references its content by fully-qualified name (`my_namespace.my_collection.some_module`).
+The collection's identity is the `namespace.name` from its `galaxy.yml` — not the directory name. Ludus reads `galaxy.yml` for the version and `description` (shown in the catalog and picker) and installs it under the namespaced collections path, where a blueprint or range config references collection roles with fully-qualified names (`my_namespace.my_collection.some_module`).
 
-Like roles, collections install per-user by default; an admin can pass `--global` on `source add` to install them instance-wide.
+Like roles, collections install per-user by default; admins can install globally via the TUI or use the `--global` flag on a scripted `source add`.
 
 ### Blueprints
 
