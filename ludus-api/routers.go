@@ -1042,20 +1042,6 @@ var routes = PocketBaseRoutes{
 		ListSourceCollections,
 	},
 
-	{
-		"ListAllSourceBlueprints",
-		http.MethodGet,
-		"/sources/blueprints",
-		ListAllSourceBlueprints,
-	},
-
-	{
-		"GetSourceBlueprintManifest",
-		http.MethodGet,
-		"/sources/blueprints/{id}/manifest",
-		GetSourceBlueprintManifest,
-	},
-
 	// Migration routes
 	{
 		"MigrateSQLiteToPocketBase",

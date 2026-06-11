@@ -16,13 +16,6 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// reservedSourceIDs collides with literal-segment routes registered under
-// /sources/. A sourceID equal to any of these would shadow the route and
-// make the source unreachable via /sources/{sourceID}.
-var reservedSourceIDs = map[string]bool{
-	"blueprints": true,
-}
-
 // maxSourceArchiveBytes caps the size of an uploaded source archive at the multipart
 // parser layer. Must stay aligned with the FileField MaxSize on the sources collection
 // (see migrations/1761253001_create_sources_collection.go) so the parser-layer reject
@@ -102,11 +95,6 @@ func CreateSource(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest,
 			fmt.Sprintf("sourceID %q does not match %s", sourceID, dto.SourceIDRegex.String()))
 	}
-	if reservedSourceIDs[sourceID] {
-		return JSONError(e, http.StatusBadRequest,
-			fmt.Sprintf("sourceID %q is reserved; pick another", sourceID))
-	}
-
 	existing, _ := e.App.FindRecordsByFilter("sources",
 		"owner = {:o} && sourceID = {:s}", "", 1, 0,
 		map[string]any{"o": user.Id, "s": sourceID})
@@ -279,7 +267,7 @@ func deriveSourceIDFromRequest(req *dto.CreateSourceRequest, e *core.RequestEven
 	basename = regexp.MustCompile(`[^a-z0-9_-]+`).ReplaceAllString(basename, "-")
 	basename = regexp.MustCompile(`-+`).ReplaceAllString(basename, "-")
 	basename = strings.Trim(basename, "-")
-	if basename == "" || !dto.SourceIDRegex.MatchString(basename) || reservedSourceIDs[basename] {
+	if basename == "" || !dto.SourceIDRegex.MatchString(basename) {
 		return "", fmt.Errorf("could not auto-derive sourceID; provide an explicit sourceID override")
 	}
 	return basename, nil
@@ -625,73 +613,6 @@ func ListSourceBlueprints(e *core.RequestEvent) error {
 		out = append(out, sourceBlueprintToListItem(src, r))
 	}
 	return e.JSON(http.StatusOK, out)
-}
-
-func ListAllSourceBlueprints(e *core.RequestEvent) error {
-	user, err := requireUser(e)
-	if err != nil {
-		return err
-	}
-
-	var (
-		sources []*core.Record
-		srcErr  error
-	)
-	if user.IsAdmin() {
-		sources, srcErr = e.App.FindRecordsByFilter("sources", "", "+sourceID", 0, 0, nil)
-	} else {
-		sources, srcErr = e.App.FindRecordsByFilter("sources",
-			"owner = {:u}", "+sourceID", 0, 0,
-			map[string]any{"u": user.Id})
-	}
-	if srcErr != nil {
-		return JSONError(e, http.StatusInternalServerError, srcErr.Error())
-	}
-
-	out := []dto.SourceBlueprintListItem{}
-	for _, src := range sources {
-		bps, _ := e.App.FindRecordsByFilter("blueprints",
-			"source = {:s}", "+sourceBlueprintID", 0, 0, map[string]any{"s": src.Id})
-		for _, bp := range bps {
-			out = append(out, sourceBlueprintToListItem(src, bp))
-		}
-	}
-	return e.JSON(http.StatusOK, out)
-}
-
-func GetSourceBlueprintManifest(e *core.RequestEvent) error {
-	id := e.Request.PathValue("id")
-	parts := strings.SplitN(id, "/", 2)
-	if len(parts) != 2 {
-		return JSONError(e, http.StatusBadRequest, "id must be in form <sourceID>/<blueprintID>")
-	}
-	src, err := findSourceByVisibleID(e, parts[0])
-	if err != nil {
-		return err
-	}
-	bps, ferr := e.App.FindRecordsByFilter("blueprints",
-		"source = {:s} && sourceBlueprintID = {:b}", "", 1, 0,
-		map[string]any{"s": src.Id, "b": parts[1]})
-	if ferr != nil || len(bps) == 0 {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("source-blueprint %q not found", id))
-	}
-	bp := bps[0]
-	configBytes, _ := readBlueprintConfigBytes(bp)
-	templates, roles, _ := InferFromRangeConfig(configBytes)
-	return e.JSON(http.StatusOK, map[string]any{
-		"sourceBlueprintID":  bp.GetString("sourceBlueprintID"),
-		"name":               bp.GetString("name"),
-		"description":        bp.GetString("description"),
-		"version":            bp.GetString("version"),
-		"authors":            anySliceToStrings(src.Get("authors")),
-		"homepage":           src.GetString("homepage"),
-		"license":            src.GetString("license"),
-		"tags":               anySliceToStrings(bp.Get("tags")),
-		"min_ludus_version":  bp.GetString("min_ludus_version"),
-		"inferred_templates": templates,
-		"inferred_roles":     roles,
-		"requirements_yaml":  bp.GetString("requirements_yaml"),
-	})
 }
 
 func sourceBlueprintToListItem(src, bp *core.Record) dto.SourceBlueprintListItem {
