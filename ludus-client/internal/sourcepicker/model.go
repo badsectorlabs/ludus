@@ -106,11 +106,15 @@ type row struct {
 	// different versions. Empty for non-role kinds and not-installed roles.
 	scopes     []dto.ScopeInstallDTO
 	requiredBy []string // for read-only and implied-template rows
-	// conflictingPins is true when two or more selected blueprints pinned
+	// conflictingPins is true when two or more responsible blueprints pinned
 	// this role/collection at different versions. The version string in that
 	// case is the joined "v1 / v2" rendering; the picker shows a △ so the
 	// user knows ansible-galaxy will only install one of them.
 	conflictingPins bool
+	// selectedBy is true for a read-only dep row pulled in by a CURRENTLY
+	// SELECTED blueprint — the rows the next install acts on. Deps of merely
+	// installed blueprints render as steady state with no delta chip.
+	selectedBy bool
 }
 
 // model is the Bubble Tea model backing the picker.

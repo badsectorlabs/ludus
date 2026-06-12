@@ -311,8 +311,9 @@ func sectionIndex(secs []section, sec section) int {
 	return 0
 }
 
-// isImpliedOnly returns true if the row is in templates or local roles, not
-// explicitly picked, and pulled in by a selected blueprint.
+// isImpliedOnly returns true if the row is in templates, local roles, or
+// local collections, not explicitly picked, and pulled in by a selected
+// blueprint.
 func (m model) isImpliedOnly(r row) bool {
 	if r.kind != rowToggleable {
 		return false
@@ -330,6 +331,9 @@ func (m model) isImpliedOnly(r row) bool {
 		return ok
 	case sectionLocalRoles:
 		_, ok := implied.LocalRoles[r.id]
+		return ok
+	case sectionLocalCollections:
+		_, ok := implied.LocalCollections[r.id]
 		return ok
 	}
 	return false
@@ -449,6 +453,7 @@ func (m model) allRows(sec section) []row {
 				version:          lc.Version,
 				state:            lc.State,
 				installedVersion: lc.InstalledVersion,
+				scopes:           lc.Scopes,
 				requiredBy:       lc.RequiredBy,
 			})
 		}
@@ -478,9 +483,12 @@ const (
 )
 
 // readOnlyRows returns the rows for a read-only section, filtered to items
-// pulled in by the currently selected blueprints. Roles/collections required
-// only by unselected blueprints are omitted — they're not going to install,
-// so showing them is noise.
+// pulled in by the picked blueprints: the current selection plus blueprints
+// already installed (their deps are the steady-state surface, mirroring the
+// GUI's required-deps section). Deps required only by blueprints that are
+// neither selected nor installed are omitted — they're not going to install,
+// so showing them is noise. selectedBy marks the rows the next install acts
+// on; deps of merely installed blueprints carry no delta.
 func (m model) readOnlyRows(kind readOnlyKind) []row {
 	var src []dto.CatalogItemDTO
 	switch kind {
@@ -492,8 +500,17 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 		src = m.catalog.Blueprints.SubscriptionRoles
 	}
 	// m.picked is map[section.key()]map[itemID]struct{} — the blueprints
-	// inner map IS the picked set.
-	picked := m.picked[sectionBlueprints.key()]
+	// inner map IS the selected set.
+	selected := m.picked[sectionBlueprints.key()]
+	picked := map[string]struct{}{}
+	for id := range selected {
+		picked[id] = struct{}{}
+	}
+	for _, bp := range m.catalog.Blueprints.Items {
+		if bp.State == "installed" || bp.State == "upgrade_available" {
+			picked[bp.ID] = struct{}{}
+		}
+	}
 
 	// Map blueprint ID → display name so the trail says "by GOAD" not
 	// "by goad-light". requiredBy on a catalog item carries IDs.
@@ -504,9 +521,10 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 
 	var out []row
 	for _, item := range src {
-		// Trim requiredBy to just the parents the user actually picked; if
-		// none of them are picked, drop the row entirely.
+		// Trim requiredBy to just the picked parents; if none of them are
+		// picked, drop the row entirely.
 		var byPicked []string
+		selectedBy := false
 		// Collect the distinct version pins from the picked blueprints. When
 		// the picked set is empty for an item, the row is dropped. When two
 		// or more picked blueprints pinned the same item at DIFFERENT
@@ -520,6 +538,9 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 		for _, parent := range item.RequiredBy {
 			if _, ok := picked[parent]; !ok {
 				continue
+			}
+			if _, ok := selected[parent]; ok {
+				selectedBy = true
 			}
 			name := nameByID[parent]
 			if name == "" {
@@ -551,21 +572,99 @@ func (m model) readOnlyRows(kind readOnlyKind) []row {
 			version = strings.Join(distinctPins, " / ")
 			conflict = true
 		}
+		// Git collections carry the repo URL in Name; show the resolved FQCN
+		// when we have it so the row reads like a collection, not a URL.
+		label := item.Name
+		if item.Fqcn != "" {
+			label = item.Fqcn
+		}
 		r := row{
-			kind:            rowReadOnly,
-			id:              item.Name,
-			label:           item.Name,
-			version:         version,
-			state:           item.State,
-			scopes:          item.Scopes, // nil for collections → no scope shown
-			requiredBy:      byPicked,
-			conflictingPins: conflict,
+			kind:             rowReadOnly,
+			id:               item.Name,
+			label:            label,
+			version:          version,
+			state:            item.State,
+			installedVersion: item.InstalledVersion,
+			scopes:           item.Scopes, // nil for collections → no scope shown
+			requiredBy:       byPicked,
+			conflictingPins:  conflict,
+			selectedBy:       selectedBy,
 		}
 		if m.matchesFilter(r) {
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// depScopeAction reports what the next install would DO to a read-only dep
+// row IN THE SCOPE THIS INSTALL WRITES TO (the [g] toggle: global or user).
+// The action is per-scope because that's how installs land — a stale copy in
+// a scope this install won't touch isn't something it changes:
+//
+//	"install"           — a selected blueprint pulls it in and the target
+//	                      scope has no copy (additive)
+//	"reinstall"         — the target scope has a current copy, but force is on,
+//	                      so the install overwrites it in place
+//	"upgrade"           — the target scope copy is stale and force is on, so
+//	                      the install replaces it with the pinned version
+//	"upgrade-available" — same, but force is off: a plain install skips the
+//	                      existing copy, so the upgrade is offered, not staged
+//	""                  — steady state: no selected parent, already current
+//	                      with force off, or deps suppressed (--no-deps)
+//
+// Force is the crux of the user-visible behavior: with it on, even a
+// version- and scope-matching dep is reinstalled, so the chip must reflect
+// that rather than reading as a no-op.
+func (m model) depScopeAction(r row) string {
+	if m.adv.NoDeps || !r.selectedBy {
+		return ""
+	}
+	target := m.targetScope()
+	for _, s := range r.scopes {
+		if s.Scope != target {
+			continue
+		}
+		if s.State == "upgrade_available" {
+			if m.adv.Force {
+				return "upgrade"
+			}
+			return "upgrade-available"
+		}
+		if m.adv.Force {
+			return "reinstall"
+		}
+		return ""
+	}
+	// No copy in the target scope. For a scoped row that's an additive
+	// install to the target scope. A row with no scope data at all (installed
+	// nowhere, or an unscoped kind) falls back to aggregate state.
+	if len(r.scopes) == 0 {
+		switch r.state {
+		case "upgrade_available":
+			if m.adv.Force {
+				return "upgrade"
+			}
+			return "upgrade-available"
+		case "installed":
+			if m.adv.Force {
+				return "reinstall"
+			}
+			return ""
+		}
+	}
+	return "install"
+}
+
+// depCountsAsChange reports whether a standard install actually changes this
+// dep. install/reinstall/upgrade all mutate the target scope (reinstall and
+// upgrade only arise when force is on); upgrade-available does not.
+func (m model) depCountsAsChange(r row) bool {
+	switch m.depScopeAction(r) {
+	case "install", "reinstall", "upgrade":
+		return true
+	}
+	return false
 }
 
 // clampCursors keeps every section cursor within its visible-row range so

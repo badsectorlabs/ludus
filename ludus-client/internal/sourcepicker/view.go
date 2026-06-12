@@ -35,8 +35,10 @@ var (
 	upgradeStyle = lipgloss.NewStyle().Foreground(warnColor)
 	implyStyle   = lipgloss.NewStyle().Foreground(accentColor)
 	// willInstallStyle is the chip on dependencies the current selection
-	// would pull in.
+	// would pull in; willUpgradeStyle marks the ones a force install would
+	// bump in place.
 	willInstallStyle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	willUpgradeStyle = lipgloss.NewStyle().Bold(true).Foreground(warnColor)
 	installedStyle   = lipgloss.NewStyle().Foreground(installedColor)
 	// Footer chip styles. The "on" color encodes severity: gold for the
 	// benign scope flip (global), orange for the actually-risky
@@ -134,7 +136,7 @@ func (m model) View() string {
 	}
 	if m.hasConflictingPins() {
 		legend := upgradeStyle.Render("△") +
-			dimStyle.Render(" conflicting version pins across selected blueprints — ansible-galaxy will install only one; deselect a blueprint to disambiguate")
+			dimStyle.Render(" conflicting version pins across the responsible blueprints — ansible-galaxy will install only one; drop a blueprint to disambiguate")
 		bottom.WriteString(truncate(legend, m.width))
 		bottom.WriteString("\n")
 	}
@@ -298,31 +300,18 @@ func (m model) hasConflictingPins() bool {
 }
 
 // hasUpgradeMismatch is true when a dependency pulled in by a CURRENTLY
-// SELECTED blueprint has an installed version that doesn't match its pin (in
-// any scope). readOnlyRows is already filtered to picked blueprints, so this
-// only fires when the user's selection actually requires a version they don't
-// have — not for stale deps of blueprints they haven't chosen.
+// SELECTED blueprint has a stale copy in the scope this install writes to —
+// exactly the rows whose delta is "upgrade". Deps of merely installed
+// blueprints never fire this: the next install doesn't touch them.
 func (m model) hasUpgradeMismatch() bool {
-	target := m.targetScope()
 	for _, kind := range []readOnlyKind{
 		readOnlyGalaxyRoles,
 		readOnlyGalaxyCollections,
 		readOnlySubscriptionRoles,
 	} {
 		for _, r := range m.readOnlyRows(kind) {
-			if len(r.scopes) > 0 {
-				// Only the scope this install will write to matters: a stale
-				// copy in a scope we won't touch (e.g. global is behind but
-				// [g] is off, so install targets the up-to-date user path)
-				// isn't something force would fix here.
-				for _, s := range r.scopes {
-					if s.Scope == target && s.State == "upgrade_available" {
-						return true
-					}
-				}
-			} else if r.state == "upgrade_available" {
-				// Unscoped (collections) install to one place regardless of
-				// the [g] toggle, so a stale one is always force-relevant.
+			switch m.depScopeAction(r) {
+			case "upgrade", "upgrade-available":
 				return true
 			}
 		}
@@ -387,21 +376,10 @@ func (m model) panelLines() ([]string, int) {
 		lines = append(lines, dimStyle.Render("  (no matches in this tab)"))
 	}
 
-	// Blueprint dependency sections are read-only: they install with their
+	// The blueprint dependency section is read-only: deps install with their
 	// blueprint and are removed via the ansible delete commands, not here.
 	if m.activeTab == tabBlueprints {
-		for _, ro := range []struct {
-			title string
-			kind  readOnlyKind
-		}{
-			{"ROLES", readOnlyGalaxyRoles},
-			{"COLLECTIONS", readOnlyGalaxyCollections},
-			{"SUBSCRIPTION ROLES", readOnlySubscriptionRoles},
-		} {
-			s := m.renderReadOnlySection(ro.title, ro.kind)
-			if s == "" {
-				continue
-			}
+		if s := m.renderDepsSection(); s != "" {
 			lines = append(lines, "")
 			lines = append(lines, strings.Split(strings.TrimRight(s, "\n"), "\n")...)
 		}
@@ -425,7 +403,8 @@ func (m model) rowLines(sec section, rows []row) ([]string, int) {
 		if _, ok := picked[r.id]; ok {
 			isPicked = true
 		}
-		// Implied rows ([-]): a template/role pulled in by a checked blueprint.
+		// Implied rows ([-]): a template/role/collection pulled in by a
+		// checked blueprint.
 		isImplied := false
 		if !isPicked && sec != sectionBlueprints {
 			switch sec {
@@ -433,6 +412,8 @@ func (m model) rowLines(sec section, rows []row) ([]string, int) {
 				_, isImplied = implied.Templates[r.id]
 			case sectionLocalRoles:
 				_, isImplied = implied.LocalRoles[r.id]
+			case sectionLocalCollections:
+				_, isImplied = implied.LocalCollections[r.id]
 			}
 		}
 		switch {
@@ -471,21 +452,67 @@ func (m model) rowLines(sec section, rows []row) ([]string, int) {
 	return lines, cursorLine
 }
 
-func (m model) renderReadOnlySection(title string, kind readOnlyKind) string {
-	rows := m.readOnlyRows(kind)
-	if len(rows) == 0 {
+// renderDepsSection draws the read-only dependency closure under the
+// blueprints list, modeled on the GUI's "Ansible dependencies" section: one
+// header carrying the row total and the count of changes the next install
+// would make, then Roles (galaxy + subscription) and Collections subheadings.
+// Each row gets a delta chip — WILL INSTALL / WILL UPGRADE / UPGRADE
+// AVAILABLE — only when a SELECTED blueprint pulls it in; deps of merely
+// installed blueprints render as steady state.
+func (m model) renderDepsSection() string {
+	roles := append(m.readOnlyRows(readOnlyGalaxyRoles), m.readOnlyRows(readOnlySubscriptionRoles)...)
+	collections := m.readOnlyRows(readOnlyGalaxyCollections)
+	total := len(roles) + len(collections)
+	if total == 0 {
 		return ""
 	}
-	impliedCount := 0
-	for _, r := range rows {
-		if len(r.requiredBy) > 0 {
-			impliedCount++
+
+	pending := 0
+	for _, r := range roles {
+		if m.depCountsAsChange(r) {
+			pending++
 		}
 	}
-	// Column layout per the GUI: name (with its pin glued on), a WILL INSTALL
-	// chip column, then the "← <parent> +N" trail. Names pad to the widest in
-	// the section so chips and trails align; installed scoped roles show no
-	// chip — their state lives in the per-scope sublines.
+	for _, r := range collections {
+		if m.depCountsAsChange(r) {
+			pending++
+		}
+	}
+
+	heading := fmt.Sprintf("ANSIBLE DEPENDENCIES %d", total)
+	if pending > 0 {
+		change := "changes"
+		if pending == 1 {
+			change = "change"
+		}
+		heading += dimStyle.Render(" · ") + willInstallStyle.Render(fmt.Sprintf("%d %s on install", pending, change))
+	}
+
+	var b strings.Builder
+	b.WriteString(truncate(heading, m.width))
+	b.WriteString("\n")
+	if len(roles) > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ROLES %d", len(roles))))
+		b.WriteString("\n")
+		m.writeDepRows(&b, roles)
+	}
+	if len(collections) > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  COLLECTIONS %d", len(collections))))
+		b.WriteString("\n")
+		m.writeDepRows(&b, collections)
+	}
+	return b.String()
+}
+
+// writeDepRows renders one subheading's dep rows. The top line is the name
+// with its pin and the "← <parent> +N" trail; the install state — and what
+// the next install will do to it — lives in the per-scope sublines below.
+// Each installed scope shows its copy; the scope this install targets has its
+// subline rewritten in place when the install would reinstall/upgrade it
+// (force), and a "WILL INSTALL" subline is added when the target scope has no
+// copy yet (additive). A row installed nowhere, with nothing pending, falls
+// back to a single steady-state line.
+func (m model) writeDepRows(b *strings.Builder, rows []row) {
 	nameFor := func(r row) string {
 		n := r.label
 		if v := formatVersion(r.version); v != "" {
@@ -505,34 +532,91 @@ func (m model) renderReadOnlySection(title string, kind readOnlyKind) string {
 	if nameCol > 60 {
 		nameCol = 60
 	}
-	const chipCol = 12 // width of "WILL INSTALL"
 
-	heading := fmt.Sprintf("%s %d", title, impliedCount)
-	var b strings.Builder
-	b.WriteString(heading)
-	b.WriteString("\n")
 	for _, r := range rows {
+		sublines := m.depScopeSublines(r)
+
 		name := nameFor(r)
-		chip := ""
-		switch {
-		case r.state == "not_installed":
-			chip = willInstallStyle.Render("WILL INSTALL")
-		case len(r.scopes) == 0:
-			chip = renderState(r)
+		line := "    · " + name
+		// With no per-scope sublines (installed nowhere, nothing pending),
+		// keep the steady state inline so the row isn't stateless.
+		if len(sublines) == 0 {
+			line += strings.Repeat(" ", max(0, nameCol-lipgloss.Width(name))) + "  " + renderState(r)
 		}
-		line := "    · " + name + strings.Repeat(" ", max(0, nameCol-lipgloss.Width(name))) +
-			"  " + chip + strings.Repeat(" ", max(0, chipCol-lipgloss.Width(chip)))
 		if t := requiredByTrail(r.requiredBy); t != "" {
 			line += "  " + t
 		}
 		b.WriteString(truncate(line, m.width))
 		b.WriteString("\n")
-		for _, s := range r.scopes {
-			b.WriteString(truncate(m.renderScopeSubrow(s, r.version), m.width))
+		for _, sl := range sublines {
+			b.WriteString(truncate(sl, m.width))
 			b.WriteString("\n")
 		}
 	}
-	return b.String()
+}
+
+// depScopeSublines builds the per-scope lines under a dep row: one per
+// installed copy, with the targeted scope's line rewritten to the pending
+// action, plus a synthetic "WILL INSTALL" line when the target scope has no
+// copy yet. Returns nil when there's nothing to show per-scope (no installed
+// copies and no pending action) so the caller can fall back to an inline
+// state.
+func (m model) depScopeSublines(r row) []string {
+	action := m.depScopeAction(r)
+	target := m.targetScope()
+
+	var out []string
+	for _, s := range r.scopes {
+		if s.Scope == target && action != "" && action != "install" {
+			out = append(out, m.renderDepActionSubrow(s.Scope, s.Version, action, r.version))
+			continue
+		}
+		out = append(out, m.renderScopeSubrow(s, r.version))
+	}
+	if action == "install" {
+		// Additive: the target scope has no copy yet.
+		out = append(out, m.renderDepActionSubrow(target, "", "install", r.version))
+	}
+	return out
+}
+
+// renderDepActionSubrow renders one scope subline annotated with the pending
+// install action. installedVer is the version currently on disk in that scope
+// (empty for an additive install); pin is the version the action moves to.
+func (m model) renderDepActionSubrow(scope, installedVer, action, pin string) string {
+	var status string
+	switch action {
+	case "install":
+		status = willInstallStyle.Render("WILL INSTALL")
+		if v := formatVersion(pin); v != "" {
+			status += " " + dimStyle.Render(v)
+		}
+	case "reinstall":
+		status = installedStyle.Render("● " + dispVersion(installedVer))
+		status += dimStyle.Render(" · ") + willInstallStyle.Render("WILL REINSTALL")
+	case "upgrade":
+		status = upgradeStyle.Render("△ " + dispVersion(installedVer))
+		status += dimStyle.Render(" · ") + willUpgradeStyle.Render("WILL UPGRADE")
+		if v := formatVersion(pin); v != "" {
+			status += " " + dimStyle.Render("→ "+v)
+		}
+	default: // upgrade-available
+		status = upgradeStyle.Render("△ " + dispVersion(installedVer))
+		if v := formatVersion(pin); v != "" {
+			status += dimStyle.Render(" (needs " + v + ")")
+		}
+		status += dimStyle.Render(" · ") + upgradeStyle.Render("UPGRADE AVAILABLE")
+	}
+	return fmt.Sprintf("        %-8s %s", scope, status)
+}
+
+// dispVersion formats a scope's on-disk version for a subrow, falling back to
+// an em dash when unknown.
+func dispVersion(v string) string {
+	if f := formatVersion(v); f != "" {
+		return f
+	}
+	return "—"
 }
 
 // rowStrings renders one picker row as terminal lines, flexing the label
@@ -578,20 +662,24 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-// renderState draws the row's color-coded install indicator: a green dot for
-// installed, an amber arrow for an available upgrade, a muted hollow dot for
-// not-installed. Installed role rows also carry a scope tag — a CSV when the
-// role lives in more than one scope (e.g. "global, user").
+// renderState draws the row's install indicator. A row carrying per-scope
+// installs renders one tag per copy — (status icon, scope, that copy's
+// version) — mirroring the GUI's scope chips and this picker's dep sublines,
+// so an item installed both globally and per-user reads as two tags:
+//
+//	● global v1.6.0 · ● user v1.6.0
+//
+// Scope-less rows (templates, blueprints, anything not installed) keep the
+// single color-coded state: green dot installed, amber arrow for an
+// available upgrade, muted hollow dot for not-installed.
 func renderState(r row) string {
+	if len(r.scopes) > 0 {
+		return renderScopeTags(r.scopes)
+	}
 	icon := string(stateIcon(r.state))
-	scope := scopesLabel(r)
 	switch r.state {
 	case "installed":
-		out := installedStyle.Render(icon + " installed")
-		if scope != "" {
-			out += dimStyle.Render(" " + scope)
-		}
-		return out
+		return installedStyle.Render(icon + " installed")
 	case "upgrade_available":
 		// State of the world only: what's installed and what's required.
 		// "needs vX" is the mismatch message; what a force-install would DO
@@ -605,23 +693,29 @@ func renderState(r row) string {
 		if r.version != "" {
 			out += dimStyle.Render(" (needs " + formatVersion(r.version) + ")")
 		}
-		if scope != "" {
-			out += dimStyle.Render(" " + scope)
-		}
 		return out
 	default: // not_installed / "" / unknown
 		return dimStyle.Render(icon + " not installed")
 	}
 }
 
-// scopesLabel joins an installed role's scope names into a CSV ("global",
-// "user", or "global, user"). Empty for non-role and not-installed rows.
-func scopesLabel(r row) string {
-	names := make([]string, 0, len(r.scopes))
-	for _, s := range r.scopes {
-		names = append(names, s.Scope)
+// renderScopeTags renders one tag per installed copy: the status icon, the
+// scope it lives in, and the version on disk there. △ marks a copy whose
+// per-scope state is stale against the pin; ● one that satisfies it.
+func renderScopeTags(scopes []dto.ScopeInstallDTO) string {
+	parts := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		style, icon := installedStyle, "●"
+		if s.State == "upgrade_available" {
+			style, icon = upgradeStyle, "△"
+		}
+		tag := style.Render(icon + " " + s.Scope)
+		if v := formatVersion(s.Version); v != "" {
+			tag += dimStyle.Render(" " + v)
+		}
+		parts = append(parts, tag)
 	}
-	return strings.Join(names, ", ")
+	return strings.Join(parts, dimStyle.Render(" · "))
 }
 
 // renderScopeSubrow renders one per-scope line under a scoped dependency row:
