@@ -588,42 +588,35 @@ func (m model) depScopeSublines(r row) []string {
 }
 
 // renderDepActionSubrow renders one scope subline annotated with the pending
-// install action. installedVer is the version currently on disk in that scope
-// (empty for an additive install); pin is the version the action moves to.
+// install action. The scope's current copy leads in the shared scope-tag
+// pattern (a dim hollow ○ when the install is additive and no copy exists
+// yet); installedVer is the version currently on disk in that scope; pin is
+// the version the action moves to.
 func (m model) renderDepActionSubrow(scope, installedVer, action, pin string) string {
-	var status string
+	var line string
 	switch action {
 	case "install":
-		status = willInstallStyle.Render("WILL INSTALL")
+		line = dimStyle.Render("○ "+scope+" · ") + willInstallStyle.Render("WILL INSTALL")
 		if v := formatVersion(pin); v != "" {
-			status += " " + dimStyle.Render(v)
+			line += " " + dimStyle.Render(v)
 		}
 	case "reinstall":
-		status = installedStyle.Render("● " + dispVersion(installedVer))
-		status += dimStyle.Render(" · ") + willInstallStyle.Render("WILL REINSTALL")
+		line = renderScopeTag(dto.ScopeInstallDTO{Scope: scope, Version: installedVer, State: "installed"})
+		line += dimStyle.Render(" · ") + willInstallStyle.Render("WILL REINSTALL")
 	case "upgrade":
-		status = upgradeStyle.Render("△ " + dispVersion(installedVer))
-		status += dimStyle.Render(" · ") + willUpgradeStyle.Render("WILL UPGRADE")
+		line = renderScopeTag(dto.ScopeInstallDTO{Scope: scope, Version: installedVer, State: "upgrade_available"})
+		line += dimStyle.Render(" · ") + willUpgradeStyle.Render("WILL UPGRADE")
 		if v := formatVersion(pin); v != "" {
-			status += " " + dimStyle.Render("→ "+v)
+			line += " " + dimStyle.Render("→ "+v)
 		}
 	default: // upgrade-available
-		status = upgradeStyle.Render("△ " + dispVersion(installedVer))
+		line = renderScopeTag(dto.ScopeInstallDTO{Scope: scope, Version: installedVer, State: "upgrade_available"})
 		if v := formatVersion(pin); v != "" {
-			status += dimStyle.Render(" (needs " + v + ")")
+			line += dimStyle.Render(" (needs " + v + ")")
 		}
-		status += dimStyle.Render(" · ") + upgradeStyle.Render("UPGRADE AVAILABLE")
+		line += dimStyle.Render(" · ") + upgradeStyle.Render("UPGRADE AVAILABLE")
 	}
-	return fmt.Sprintf("        %-8s %s", scope, status)
-}
-
-// dispVersion formats a scope's on-disk version for a subrow, falling back to
-// an em dash when unknown.
-func dispVersion(v string) string {
-	if f := formatVersion(v); f != "" {
-		return f
-	}
-	return "—"
+	return "        " + line
 }
 
 // rowStrings renders one picker row as terminal lines, flexing the label
@@ -712,37 +705,35 @@ func renderState(r row) string {
 func renderScopeTags(scopes []dto.ScopeInstallDTO) string {
 	parts := make([]string, 0, len(scopes))
 	for _, s := range scopes {
-		style, icon := installedStyle, "●"
-		if s.State == "upgrade_available" {
-			style, icon = upgradeStyle, "△"
-		}
-		tag := style.Render(icon + " " + s.Scope)
-		if v := formatVersion(s.Version); v != "" {
-			tag += dimStyle.Render(" " + v)
-		}
-		parts = append(parts, tag)
+		parts = append(parts, renderScopeTag(s))
 	}
 	return strings.Join(parts, dimStyle.Render(" · "))
 }
 
-// renderScopeSubrow renders one per-scope line under a scoped dependency row:
-// the scope, the version installed there, and whether it satisfies the pin.
-// △ + "(needs vX)" flags a stale scope; ● marks one that already matches.
-func (m model) renderScopeSubrow(s dto.ScopeInstallDTO, pin string) string {
-	ver := formatVersion(s.Version)
-	if ver == "" {
-		ver = "—"
-	}
-	var status string
+// renderScopeTag is one installed copy in the shared pattern — icon and scope
+// in the state color, the on-disk version dim: "● global v1.6.0". Ansible-tab
+// rows join these inline; the deps section stacks them one per subline.
+func renderScopeTag(s dto.ScopeInstallDTO) string {
+	style, icon := installedStyle, "●"
 	if s.State == "upgrade_available" {
-		status = upgradeStyle.Render("△ " + ver)
-		if pin != "" {
-			status += dimStyle.Render(" (needs " + formatVersion(pin) + ")")
-		}
-	} else {
-		status = installedStyle.Render("● " + ver)
+		style, icon = upgradeStyle, "△"
 	}
-	return fmt.Sprintf("        %-8s %s", s.Scope, status)
+	tag := style.Render(icon + " " + s.Scope)
+	if v := formatVersion(s.Version); v != "" {
+		tag += dimStyle.Render(" " + v)
+	}
+	return tag
+}
+
+// renderScopeSubrow renders one per-scope line under a scoped dependency row
+// in the shared scope-tag pattern, with "(needs vX)" appended when the copy
+// is stale against the pin.
+func (m model) renderScopeSubrow(s dto.ScopeInstallDTO, pin string) string {
+	out := "        " + renderScopeTag(s)
+	if s.State == "upgrade_available" && pin != "" {
+		out += dimStyle.Render(" (needs " + formatVersion(pin) + ")")
+	}
+	return out
 }
 
 // formatVersion prefixes "v" for semver-ish values (those starting with a
