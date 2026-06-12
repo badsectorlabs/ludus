@@ -9,11 +9,6 @@ keywords: [sources, sharing, blueprints, ansible, collections, packer, git]
 
 A source is a versioned bundle of blueprints, Packer templates, and Ansible roles and collections. `ludus source add` registers it and opens an interactive installer.
 
-:::warning
-
-Packer templates and Ansible roles run on the Ludus host as the `ludus` user — with your Proxmox credentials in scope. Consider reviewing the repo before installing resources or pinning an immutable commit with `--ref <commit-sha>`.
-:::
-
 ```bash
 # Pick what to install
 ludus source add https://github.com/badsectorlabs/ludus-source-bsl
@@ -22,12 +17,6 @@ ludus source add https://github.com/badsectorlabs/ludus-source-bsl
 ludus source add https://github.com/badsectorlabs/ludus-source-bsl --blueprints goad
 
 ```
-
-:::tip Publishing your own
-
-Fork the [Ludus Source Template](https://github.com/badsectorlabs/ludus-source-template) to start your own.
-
-:::
 
 ## What's in a Source Repo
 
@@ -49,6 +38,12 @@ my-source-repo/
         ├── requirements.yml         # required ansible roles, collections, or ludus subscription roles
         └── thumbnail.png
 ```
+
+:::warning Secure code execution
+
+Packer templates and Ansible roles run on the Ludus host as the `ludus` user — with your Proxmox credentials in scope. Consider reviewing the repo before installing resources or pinning an immutable commit with `--ref <commit-sha>`.
+
+:::
 
 ## Submodules
 
@@ -138,6 +133,12 @@ Caveats:
 - The systemd unit applies `ProtectHome=read-only`, so the service can read `/home/ludus/` but cannot write to it. Set up credentials from a root shell, not from inside the service.
 
 ## Authoring a Source
+
+:::tip Publishing your own
+
+Fork the [Ludus Source Template](https://github.com/badsectorlabs/ludus-source-template) to start your own.
+
+:::
 
 ### Packer templates
 
