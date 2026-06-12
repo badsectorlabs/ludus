@@ -314,6 +314,16 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 	// galaxy.yml, NOT the dir basename, so it matches the source_artifacts claim
 	// and the local_collection/<FQCN> install-state key. A dir whose galaxy.yml
 	// is missing/invalid carries no resolvable identity and is skipped.
+	// RequiredBy lists blueprints whose requirements.yml declares this FQCN.
+	collectionRequiredBy := map[string][]string{}
+	for bpID, refs := range blueprintRefs {
+		for _, name := range refs.GalaxyCollections {
+			collectionRequiredBy[name] = appendUnique(collectionRequiredBy[name], bpID)
+		}
+	}
+	for name := range collectionRequiredBy {
+		sort.Strings(collectionRequiredBy[name])
+	}
 	for _, dir := range walked.LocalCollections {
 		data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
 		if err != nil {
@@ -333,6 +343,7 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 			InstalledVersion: installedVer,
 			Global:           installed["local_collection/"+fqcn].Global,
 			Scopes:           annotateScopeStates(installed["local_collection/"+fqcn].Scopes, ""),
+			RequiredBy:       nilIfEmpty(collectionRequiredBy[fqcn]),
 		})
 	}
 
@@ -393,27 +404,10 @@ func loadInstalledArtifacts(e *core.RequestEvent, walked *WalkedSource) map[stri
 		viewerProxmoxUsername = u.ProxmoxUsername()
 	}
 
-	rolePaths := candidateRolePaths(viewerProxmoxUsername)
-	subRolePaths := []string{globalRolesPath()}
-	ansibleHomes := candidateAnsibleHomes(viewerProxmoxUsername)
-
-	// Disk-backed kinds (roles, collections, subscription roles) are split
-	// into a helper that doesn't depend on Proxmox or PocketBase.
-	for k, v := range loadInstalledFromDisk(walked, rolePaths, subRolePaths, ansibleHomes, globalRolesPath()) {
-		out[k] = v
-	}
-
-	// Local collections — install state from ansible_collections/<ns>/<name>/MANIFEST.json.
-	// Check both per-user/subscription homes and the global collections base.
-	for k, installs := range localCollectionScopes(walked, ansibleHomes, globalCollectionsPath()) {
-		global := false
-		for _, s := range installs {
-			if s.Scope == "global" {
-				global = true
-			}
-		}
-		out[k] = installedArtifact{Version: installs[0].Version, Global: global, Scopes: installs}
-	}
+	// Disk-backed kinds (roles, collections, subscription roles) come from one
+	// inventory scan — the same scan GET /ansible lists — joined against the
+	// names the walked source declares.
+	joinWalkedWithInventory(out, walked, loadAnsibleInventory(viewerProxmoxUsername))
 
 	// A template counts as installed (for this viewer) when its *-template name
 	// is present in the viewer's packer — detected by NAME, not folder, so a
@@ -433,25 +427,21 @@ func loadInstalledArtifacts(e *core.RequestEvent, walked *WalkedSource) map[stri
 	return out
 }
 
-// loadInstalledFromDisk performs the filesystem half of loadInstalledArtifacts:
-// stat role dirs in `rolePaths` (for local + galaxy roles) and `subRolePaths`
-// (for subscription roles), and read collection manifests under each entry
-// of `ansibleHomes`. Templates are NOT covered here — they live on Proxmox.
-//
-// globalRolePath identifies which base in rolePaths counts as "global" — a
-// role found there is global-scoped, anything else is per-user.
-func loadInstalledFromDisk(walked *WalkedSource, rolePaths, subRolePaths, ansibleHomes []string, globalRolePath string) map[string]installedArtifact {
-	out := map[string]installedArtifact{}
-	if walked == nil {
-		return out
-	}
-
-	// Local roles — directory presence under any role path. No version
-	// concept for source-shipped local roles.
+// joinWalkedWithInventory fills `out` with the install state of every
+// disk-backed artifact the walked source declares — local + galaxy +
+// subscription roles, vendored + required collections — looked up against one
+// inventory scan. Templates are NOT covered here; they live on Proxmox.
+func joinWalkedWithInventory(out map[string]installedArtifact, walked *WalkedSource, inv ansibleInventory) {
+	// Local roles: a vendored role answers to its dir basename (the name a
+	// source install copies it under) AND its galaxy identity from meta (the
+	// name `ansible-galaxy install <ns>.<name>` lands the same content under)
+	// — the dual-identity rule vendored collections already get via their
+	// galaxy.yml FQCN. Without the alias, a role installed from galaxy reads
+	// not_installed here while the ansible list shows it.
 	for _, dir := range walked.LocalRoles {
 		name := filepath.Base(dir)
-		if installs, global := roleScopes(rolePaths, name, globalRolePath); len(installs) > 0 {
-			out["local_role/"+name] = installedArtifact{Global: global, Scopes: installs}
+		if art, ok := inv.roleArtifact(false, name, roleGalaxyName(dir, name)); ok {
+			out["local_role/"+name] = art
 		}
 	}
 
@@ -478,29 +468,26 @@ func loadInstalledFromDisk(walked *WalkedSource, rolePaths, subRolePaths, ansibl
 		}
 	}
 
+	// Exact install-name match only for requirements: ansible-galaxy
+	// (re)installs a requirement unless a dir with that exact name exists, and
+	// range configs resolve roles by dir name — an aliased copy under another
+	// name satisfies neither.
 	for name := range galaxyNames {
-		if installs, global := roleScopes(rolePaths, name, globalRolePath); len(installs) > 0 {
-			out["galaxy_role/"+name] = installedArtifact{
-				Version: installs[0].Version,
-				Global:  global,
-				Scopes:  installs,
-			}
+		if art, ok := inv.roleArtifact(false, name); ok {
+			out["galaxy_role/"+name] = art
 		}
 	}
 
+	// Subscription roles only count when installed globally — the licensed
+	// pipeline's destination.
 	for name := range subNames {
-		if installs, global := roleScopes(subRolePaths, name, globalRolePath); len(installs) > 0 {
-			out["subscription_role/"+name] = installedArtifact{
-				Version: installs[0].Version,
-				Global:  global,
-				Scopes:  installs,
-			}
+		if art, ok := inv.roleArtifact(true, name); ok {
+			out["subscription_role/"+name] = art
 		}
 	}
 
-	// Collections: the on-disk MANIFEST lives at
-	// ansible_collections/<namespace>/<name>/. For a galaxy collection the
-	// requirements `name` IS the FQCN. For a git collection it's the repo
+	// Collections are identified by FQCN everywhere. For a galaxy collection
+	// the requirements `name` IS the FQCN; for a git collection it's the repo
 	// URL, so derive the FQCN — keying the result by the requirements name
 	// either way so artifactState (which looks up by that name) lines up.
 	for reqName, c := range collectionEntries {
@@ -511,44 +498,13 @@ func loadInstalledFromDisk(walked *WalkedSource, rolePaths, subRolePaths, ansibl
 				continue // can't resolve FQCN → can't confirm install on disk
 			}
 		}
-		for _, home := range ansibleHomes {
-			if v := readGalaxyInstalledCollectionVersion(home, lookup); v != "" {
-				out["collection/"+reqName] = installedArtifact{Version: v}
-				break
-			}
+		if art, ok := inv.collectionArtifact(lookup); ok {
+			out["collection/"+reqName] = art
 		}
 	}
 
-	return out
-}
-
-// localCollectionScopes reports, per source-bundled collection, every
-// installed copy with its scope and on-disk version. A copy exists where
-// ansible_collections/<ns>/<name>/MANIFEST.json is present. Vendored
-// collections install per-user by default and globally with --global, so —
-// like roles — both scopes can be occupied at once, at different versions.
-//
-// globalCollectionBase is the system-wide base (globalCollectionsPath()),
-// reported as scope "global". Its MANIFEST lives at
-// <globalCollectionBase>/ansible_collections/<ns>/<name>/MANIFEST.json with
-// NO additional "collections/" prefix, so it is read directly rather than
-// through readGalaxyInstalledCollectionVersion.
-//
-// ansibleHomes are per-user (or subscription) roots, reported as scope
-// "user", where the MANIFEST lives at
-// <home>/collections/ansible_collections/<ns>/<name>/MANIFEST.json —
-// readGalaxyInstalledCollectionVersion handles that "collections/" prefix.
-//
-// The FQCN (<namespace>.<name>) is read from the source dir's galaxy.yml and
-// is the canonical identity: the map is keyed "local_collection/<FQCN>" so it
-// lines up with the catalog item's Name and the artifactState lookup (NOT the
-// on-disk dir basename). Split out so the disk check is testable without a
-// request event.
-func localCollectionScopes(walked *WalkedSource, ansibleHomes []string, globalCollectionBase string) map[string][]ScopeInstall {
-	out := map[string][]ScopeInstall{}
-	if walked == nil {
-		return out
-	}
+	// Local (vendored) collections, keyed by the FQCN from the source dir's
+	// galaxy.yml — the catalog item's identity — never the dir basename.
 	for _, dir := range walked.LocalCollections {
 		data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
 		if err != nil {
@@ -559,40 +515,10 @@ func localCollectionScopes(walked *WalkedSource, ansibleHomes []string, globalCo
 			continue
 		}
 		fqcn := gm.Namespace + "." + gm.Name
-		var installs []ScopeInstall
-		if globalCollectionBase != "" {
-			dir := filepath.Join(globalCollectionBase, "ansible_collections", gm.Namespace, gm.Name)
-			if v, ok := readInstalledCollectionVersion(dir); ok {
-				installs = append(installs, ScopeInstall{Scope: "global", Version: v})
-			}
-		}
-		for _, home := range ansibleHomes {
-			if home == "" {
-				continue
-			}
-			dir := filepath.Join(home, "collections", "ansible_collections", gm.Namespace, gm.Name)
-			if v, ok := readInstalledCollectionVersion(dir); ok {
-				installs = append(installs, ScopeInstall{Scope: "user", Version: v})
-				break
-			}
-		}
-		if len(installs) > 0 {
-			out["local_collection/"+fqcn] = installs
+		if art, ok := inv.collectionArtifact(fqcn); ok {
+			out["local_collection/"+fqcn] = art
 		}
 	}
-	return out
-}
-
-// candidateRolePaths returns the role-install destinations the catalog
-// checks for presence. Global path first (where subscription roles + roles
-// installed with --global land), then the user's own path (where per-user
-// galaxy roles land).
-func candidateRolePaths(proxmoxUsername string) []string {
-	paths := []string{globalRolesPath()}
-	if p := userRolesPath(proxmoxUsername); p != "" {
-		paths = append(paths, p)
-	}
-	return paths
 }
 
 // candidateAnsibleHomes lists ansible-home roots where collections may
@@ -605,30 +531,6 @@ func candidateAnsibleHomes(proxmoxUsername string) []string {
 	}
 	homes = append(homes, filepath.Join(ludusInstallPath, "resources", ".ansible-subscription"))
 	return homes
-}
-
-// roleScopes inspects rolePaths for an installed role of the given name and
-// returns one ScopeInstall per path it lives under — its scope ("global" for
-// the globalRolePath base, "user" otherwise) and the version read from that
-// path's meta/.galaxy_install_info — plus whether any copy is global. A role
-// can occupy more than one path at once, at different versions, so each is
-// reported separately. (Local roles installed before install receipts were
-// written for them have no .galaxy_install_info, so Version is empty.)
-func roleScopes(rolePaths []string, name, globalRolePath string) (installs []ScopeInstall, global bool) {
-	for _, base := range rolePaths {
-		if info, err := os.Stat(filepath.Join(base, name)); err == nil && info.IsDir() {
-			scope := "user"
-			if base == globalRolePath {
-				scope = "global"
-				global = true
-			}
-			installs = append(installs, ScopeInstall{
-				Scope:   scope,
-				Version: readGalaxyInstalledVersion(base, name),
-			})
-		}
-	}
-	return installs, global
 }
 
 // artifactState returns (state, installedVersion) for a single named artifact.

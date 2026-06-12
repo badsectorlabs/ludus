@@ -1,9 +1,6 @@
 package ludusapi
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"ludusapi/dto"
@@ -53,99 +50,42 @@ func validateCollectionAction(action string) error {
 	}
 }
 
-// GetRolesAndCollections - retrieves the available Ansible roles and collections for the user
+// GetRolesAndCollections - retrieves the installed Ansible roles and
+// collections for the user.
 func GetRolesAndCollections(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
-	cmd := exec.Command("ansible-galaxy", "role", "list") // no --format json for roles...
-	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_ROLES_PATH=%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_COLLECTIONS_PATH=%s/users/%s/.ansible/collections:%s/resources/global-collections", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath))
 
-	var stdoutBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = io.Discard
-	err := cmd.Run()
-	roleOutput := stdoutBuf.Bytes()
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, "Unable to get the ansible roles: "+err.Error()+"; Output was: "+string(roleOutput))
-	}
-
-	// Create a scanner to read the input
-	scanner := bufio.NewScanner(bytes.NewReader(roleOutput))
-
-	// Slice to store the roles
 	var ansibleItems []AnsibleItem
-	// bool to store if we are a user or global role
-	isGlobalRole := false
-
-	// Process each line
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		// Skip non-role lines
-		if !strings.HasPrefix(line, "- ") {
-			if strings.Contains(line, fmt.Sprintf("# %s/resources/global-roles", ludusInstallPath)) {
-				isGlobalRole = true
+	roles := scanInstalledRoles(userRolesPath(user.ProxmoxUsername()), globalRolesPath())
+	collections := scanInstalledCollections(candidateAnsibleHomes(user.ProxmoxUsername()), globalCollectionsPath())
+	// User scope first, then global — the order ansible-galaxy's path
+	// sections presented before this read from the shared scan.
+	for _, scope := range []string{"user", "global"} {
+		for _, r := range roles {
+			if r.Scope != scope {
+				continue
 			}
-			continue
-		}
-
-		// Split the line into role name and version
-		parts := strings.SplitN(line[2:], ", ", 2)
-		if len(parts) != 2 {
-			logger.Error("Invalid line format: " + line)
-			continue
-		}
-
-		roleName := strings.TrimSpace(parts[0])
-		roleVersion := strings.TrimSpace(parts[1])
-
-		// Append to slice
-		ansibleItems = append(ansibleItems, AnsibleItem{
-			Name:    roleName,
-			Version: roleVersion,
-			Type:    "role",
-			Global:  isGlobalRole,
-		})
-	}
-
-	// Check for errors during scanning
-	if err := scanner.Err(); err != nil {
-		logger.Error("Error reading input: " + err.Error())
-	}
-
-	// Collections
-	collectionCmd := exec.Command("ansible-galaxy", "collection", "list", "--format", "json")
-	collectionCmd.Env = os.Environ()
-	collectionCmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
-	var collectionStdout bytes.Buffer
-	collectionCmd.Stdout = &collectionStdout
-	collectionCmd.Stderr = io.Discard
-	err = collectionCmd.Run()
-	collectionOutput := collectionStdout.Bytes()
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, "Unable to get the ansible collections: "+err.Error())
-	}
-
-	// Unmarshal the JSON into a suitable Go data structure
-	var data map[string]map[string]map[string]string
-	err = json.Unmarshal(collectionOutput, &data)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, "Unable to parse ansible collections JSON: "+err.Error())
-	}
-
-	// Iterate through the data
-	for path, modules := range data {
-		if strings.Contains(path, ".ansible") {
-			for name, module := range modules {
-				ansibleModule := AnsibleItem{
-					Name:    name,
-					Version: module["version"],
-					Type:    "collection",
-				}
-				ansibleItems = append(ansibleItems, ansibleModule)
+			version := r.Version
+			if version == "" {
+				version = "(unknown version)" // what ansible-galaxy prints for a receipt-less role
 			}
+			ansibleItems = append(ansibleItems, AnsibleItem{
+				Name:    r.Name,
+				Version: version,
+				Type:    "role",
+				Global:  scope == "global",
+			})
+		}
+		for _, c := range collections {
+			if c.Scope != scope {
+				continue
+			}
+			ansibleItems = append(ansibleItems, AnsibleItem{
+				Name:    c.FQCN,
+				Version: c.Version,
+				Type:    "collection",
+				Global:  scope == "global",
+			})
 		}
 	}
 
