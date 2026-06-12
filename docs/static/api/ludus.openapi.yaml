@@ -5146,7 +5146,7 @@ paths:
     get:
       summary: List blueprints
       deprecated: false
-      description: Returns all blueprints the current user can access.
+      description: Returns all blueprints the current user can access. Admins see all.
       operationId: listBlueprints
       tags:
         - Blueprint Management
@@ -5259,63 +5259,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BlueprintCreatedResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/{blueprintID}:
-    delete:
-      summary: Delete blueprint
-      deprecated: false
-      description: Deletes a blueprint by ID.
-      operationId: deleteBlueprint
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Blueprint deleted
-          content:
-            application/json:
-              schema:
-                type: object
-                properties: {}
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    get:
-      summary: Get blueprint detail
-      deprecated: false
-      description: >
-        Returns the full blueprint record plus computed dependency status. Works
-        for both local blueprints (id = blueprintID) and source-blueprints (id =
-        "<sourceID>/<sourceBlueprintID>").
-      operationId: getBlueprintDetail
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Blueprint detail
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BlueprintDetail'
           headers: {}
       security:
         - JWT: []
@@ -5457,12 +5400,12 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /blueprints/{blueprintID}/share/groups:
-    post:
-      summary: Share blueprint with groups
+  /blueprints/{blueprintID}/access/users:
+    get:
+      summary: List blueprint access users
       deprecated: false
-      description: Shares a blueprint with one or more groups.
-      operationId: shareBlueprintWithGroups
+      description: Lists users who can access this blueprint and how they inherit access.
+      operationId: listBlueprintAccessUsers
       tags:
         - Blueprint Management
       parameters:
@@ -5473,51 +5416,15 @@ paths:
           example: ''
           schema:
             type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkShareBlueprintWithGroupsRequest'
-        required: true
       responses:
         '200':
-          description: Bulk share result
+          description: Blueprint access users
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    delete:
-      summary: Unshare blueprint from groups
-      deprecated: false
-      description: Removes blueprint sharing from one or more groups.
-      operationId: unshareBlueprintWithGroups
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkUnshareBlueprintWithGroupsRequest'
-        required: true
-      responses:
-        '200':
-          description: Bulk unshare result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+                type: array
+                items:
+                  $ref: '#/components/schemas/BlueprintAccessUserItem'
           headers: {}
       security:
         - JWT: []
@@ -5587,35 +5494,6 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /blueprints/{blueprintID}/access/users:
-    get:
-      summary: List blueprint access users
-      deprecated: false
-      description: Lists users who can access this blueprint and how they inherit access.
-      operationId: listBlueprintAccessUsers
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Blueprint access users
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/BlueprintAccessUserItem'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
   /blueprints/{blueprintID}/access/groups:
     get:
       summary: List blueprint access groups
@@ -5645,14 +5523,80 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /blueprints/{blueprintID}/export:
-    get:
-      summary: Export blueprint
+  /blueprints/{blueprintID}/share/groups:
+    post:
+      summary: Share blueprint with groups
       deprecated: false
-      description: >-
-        Streams a .tar.gz archive of the blueprint bundle (range-config,
-        manifest, bundled roles/templates).
-      operationId: exportBlueprint
+      description: Shares a blueprint with one or more groups.
+      operationId: shareBlueprintWithGroups
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkShareBlueprintWithGroupsRequest'
+        required: true
+      responses:
+        '200':
+          description: Bulk share result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Unshare blueprint from groups
+      deprecated: false
+      description: Removes blueprint sharing from one or more groups.
+      operationId: unshareBlueprintWithGroups
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUnshareBlueprintWithGroupsRequest'
+        required: true
+      responses:
+        '200':
+          description: Bulk unshare result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}:
+    get:
+      summary: Get blueprint detail
+      deprecated: false
+      description: >
+        Returns the full blueprint record plus computed dependency status. Works
+        for both local blueprints (id = blueprintID) and source-blueprints (id =
+        "<sourceID>/<sourceBlueprintID>").
+      operationId: getBlueprintDetail
       tags:
         - Blueprint Management
       parameters:
@@ -5665,12 +5609,38 @@ paths:
             type: string
       responses:
         '200':
-          description: Bundle archive
+          description: Blueprint detail
           content:
-            application/gzip:
+            application/json:
               schema:
-                type: string
-                format: binary
+                $ref: '#/components/schemas/BlueprintDetail'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Delete blueprint
+      deprecated: false
+      description: Deletes a blueprint by ID.
+      operationId: deleteBlueprint
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
           headers: {}
       security:
         - JWT: []
@@ -5704,6 +5674,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BlueprintCreatedResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/export:
+    get:
+      summary: Export blueprint
+      deprecated: false
+      description: >-
+        Streams a .tar.gz archive of the blueprint bundle (range-config,
+        manifest, dependencies).
+      operationId: exportBlueprint
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bundle archive
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
           headers: {}
       security:
         - JWT: []
@@ -7923,8 +7923,11 @@ components:
           type: string
         description:
           type: string
-        sourcetype:
+        sourceType:
           type: string
+          enum:
+            - git
+            - upload
         lastSyncedAt:
           type: string
         blueprints:
