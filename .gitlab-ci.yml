@@ -1610,11 +1610,11 @@ post-deploy sources-as-admin:
     - 'ludus blueprint list | grep "ci-src-vendrole/vendored_role" >/dev/null'
     # Installed under the namespaced name, with the vendored copy's version.
     - 'ludus ansible role list | grep "acme.vendored_demo" >/dev/null'
-    - test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/acme.vendored_demo
+    - sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/acme.vendored_demo
     - ludus source list ci-src-vendrole --catalog --json | jq -e '[.blueprints.requiredRoles[] | select(.name=="acme.vendored_demo") | .state] == ["installed"]'
     - ludus source list ci-src-vendrole --catalog --json | jq -e '[.blueprints.requiredRoles[] | select(.name=="acme.vendored_demo") | .scopes[] | "\(.scope):\(.version)"] == ["user:2.0.0"]'
     # No bare-name copy is left behind — the requirement drives the namespaced install only.
-    - '! test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/vendored_demo'
+    - '! sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/vendored_demo'
     - ludus ansible role rm acme.vendored_demo
     - '! ludus ansible role list | grep "acme.vendored_demo" >/dev/null'
     - ludus source rm ci-src-vendrole --no-prompt
