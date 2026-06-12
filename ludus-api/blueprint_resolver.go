@@ -149,8 +149,15 @@ type ResolverOpts struct {
 	// this source ships locally (ansible/roles, ansible/collections). Their
 	// pinned local copies win, so they are stripped from the requirements.yml
 	// before the Galaxy install so a fetch doesn't overwrite the pin.
+	// VendoredRoleNames holds both the bare dir names and the published galaxy
+	// identities of vendored roles (a requirement can name either).
 	VendoredRoleNames       map[string]bool
 	VendoredCollectionFQCNs map[string]bool
+	// VendoredRoleGalaxy maps a vendored role's published galaxy identity
+	// (<namespace>.<role> from meta) to its source directory. A requirement
+	// naming one of these keys installs the vendored copy under that namespaced
+	// name instead of fetching from Galaxy.
+	VendoredRoleGalaxy map[string]string
 }
 
 // installRolesForBlueprint installs every dependency declared in the
@@ -190,6 +197,12 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 			return out
 		}
 	}
+
+	// Vendored roles whose published galaxy identity a requirement names install
+	// from the pinned local copy (under that namespaced name) — never fetched
+	// from Galaxy, since filterRequirements stripped them above. Done before the
+	// galaxy fetch so a partial-install ordering matches the rest of the deps.
+	out = append(out, installVendoredGalaxyRoles(app, walked, opts)...)
 
 	if hasRequirementsRoles(galaxyRequirements) {
 		rolesPath := ""
@@ -257,6 +270,44 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 		}
 	}
 
+	return out
+}
+
+// installVendoredGalaxyRoles installs, for each role this blueprint requires by
+// a published galaxy identity that the source also vendors locally, the local
+// copy under that namespaced name. This is the role analogue of vendored
+// collections: the source's pinned copy is authoritative, so the requirement
+// is satisfied offline instead of fetched from Galaxy. The same name is also
+// recorded as a galaxy_role claim, exactly as a Galaxy fetch would, so the
+// catalog and `ansible role list` read it as installed.
+//
+// Idempotent re-runs (same role required by multiple blueprints, or a re-sync)
+// re-resolve to the same destination; addLocalRoleFromDirectory preserves an
+// existing copy when force is off.
+func installVendoredGalaxyRoles(app core.App, walked WalkedBlueprint, opts ResolverOpts) []AnsibleInstallResult {
+	if len(opts.VendoredRoleGalaxy) == 0 {
+		return nil
+	}
+	required, _, _ := declaredFromRequirements(walked.RequirementsYAML)
+	var out []AnsibleInstallResult
+	for _, name := range required {
+		dir, ok := opts.VendoredRoleGalaxy[name]
+		if !ok {
+			continue
+		}
+		res := AnsibleInstallResult{Type: AnsibleResultRole, Name: name}
+		if err := addLocalRoleFromDirectory(app, dir, name, opts.ProxmoxUser, opts.Global, opts.ForceRoles); err != nil {
+			res.OK = false
+			res.Error = err.Error()
+		} else {
+			res.OK = true
+			res.Version = localRoleVersion(dir)
+			if opts.SourceRecordID != "" {
+				insertSourceArtifact(app, opts.SourceRecordID, "galaxy_role", name, res.Version)
+			}
+		}
+		out = append(out, res)
+	}
 	return out
 }
 

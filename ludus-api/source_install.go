@@ -2,6 +2,7 @@ package ludusapi
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -97,7 +98,7 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 		if opts.Selection != nil && !slices.Contains(opts.Selection.LocalRoles, name) {
 			continue
 		}
-		if err := addLocalRoleFromDirectory(app, dir, installProxmoxUsername, opts.Global, opts.Force); err != nil {
+		if err := addLocalRoleFromDirectory(app, dir, name, installProxmoxUsername, opts.Global, opts.Force); err != nil {
 			results = append(results, ArtifactResult{Name: name, OK: false, Message: err.Error()})
 			continue
 		}
@@ -346,13 +347,22 @@ func templateNameInGlobalPacker(hclName string) bool {
 }
 
 // addLocalRoleFromDirectory copies a role dir into either the global-roles
-// path (when global=true) or the owner's per-user roles dir. force=true
-// overwrites. ownerProxmoxUsername is required for non-global installs.
-// When the destination already exists and force=false, the existing files
-// are preserved and we return nil so the caller can still record the
-// source's claim — multiple sources owning the same name is allowed.
-func addLocalRoleFromDirectory(_ core.App, dir, ownerProxmoxUsername string, global, force bool) error {
-	name := filepath.Base(dir)
+// path (when global=true) or the owner's per-user roles dir, installing it
+// under installName (the directory the role lands in). force=true overwrites.
+// ownerProxmoxUsername is required for non-global installs. When the
+// destination already exists and force=false, the existing files are preserved
+// and we return nil so the caller can still record the source's claim —
+// multiple sources owning the same name is allowed.
+//
+// installName is usually the source dir basename, but a vendored role a
+// blueprint requires by its published <namespace>.<role> identity is installed
+// under THAT name (see installVendoredGalaxyRoles), so a namespaced range-config
+// reference resolves to the local copy instead of a Galaxy fetch.
+func addLocalRoleFromDirectory(_ core.App, dir, installName, ownerProxmoxUsername string, global, force bool) error {
+	name := installName
+	if name == "" {
+		name = filepath.Base(dir)
+	}
 
 	var destDir string
 	if global {
@@ -477,20 +487,26 @@ func installUnionedAnsible(e *core.RequestEvent, app core.App, src *core.Record,
 
 	// Names this source vendors locally win over the same names in any
 	// blueprint's requirements.yml — strip them from the galaxy resolution so
-	// the pinned local copy is authoritative. Roles key on directory basename;
-	// collections key on FQCN (<namespace>.<name>) read from galaxy.yml.
+	// the pinned local copy is authoritative. A role is matched two ways: by
+	// directory basename (a requirement naming the bare role), and by its
+	// published galaxy identity from meta (a requirement naming
+	// <namespace>.<role> — the common case, since sources vendor under a bare
+	// dir name but publish/require the namespaced one). Collections key on FQCN.
+	//
+	// The galaxy-identity matches also drive installVendoredGalaxyRoles, which
+	// installs the vendored copy under the namespaced name — without it, the
+	// stripped requirement would simply go uninstalled.
 	vendoredRoles := map[string]bool{}
+	vendoredRoleGalaxy := map[string]string{}
 	for _, dir := range walked.LocalRoles {
-		vendoredRoles[filepath.Base(dir)] = true
-	}
-	vendoredCollections := map[string]bool{}
-	for _, dir := range walked.LocalCollections {
-		if data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml")); err == nil {
-			if gm, perr := ParseGalaxyManifest(data); perr == nil && gm.Namespace != "" && gm.Name != "" {
-				vendoredCollections[gm.Namespace+"."+gm.Name] = true
-			}
+		base := filepath.Base(dir)
+		vendoredRoles[base] = true
+		if gname := roleGalaxyName(dir, base); gname != "" && gname != base {
+			vendoredRoles[gname] = true
+			vendoredRoleGalaxy[gname] = dir
 		}
 	}
+	vendoredCollections := vendoredCollectionFQCNs(walked)
 
 	var out []AnsibleInstallResult
 	for _, bp := range walked.Blueprints {
@@ -504,9 +520,25 @@ func installUnionedAnsible(e *core.RequestEvent, app core.App, src *core.Record,
 			AnsibleHome:             userAnsibleHome(installProxmoxUser),
 			SourceRecordID:          src.Id,
 			VendoredRoleNames:       vendoredRoles,
+			VendoredRoleGalaxy:      vendoredRoleGalaxy,
 			VendoredCollectionFQCNs: vendoredCollections,
 		})
 		out = append(out, results...)
+	}
+	return out
+}
+
+// vendoredCollectionFQCNs returns the set of collections this source bundles
+// under ansible/collections/, keyed by FQCN (<namespace>.<name>) read from
+// each dir's galaxy.yml. Dirs without a resolvable identity are skipped.
+func vendoredCollectionFQCNs(walked *WalkedSource) map[string]bool {
+	out := map[string]bool{}
+	for _, dir := range walked.LocalCollections {
+		if data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml")); err == nil {
+			if gm, perr := ParseGalaxyManifest(data); perr == nil && gm.Namespace != "" && gm.Name != "" {
+				out[gm.Namespace+"."+gm.Name] = true
+			}
+		}
 	}
 	return out
 }
@@ -606,7 +638,61 @@ func addLocalCollectionFromDirectory(_ core.App, dir, baseCollectionsPath string
 			return "", fmt.Errorf("copying collection %s to %s: %w", dir, destDir, err)
 		}
 	}
+
+	// `ansible-galaxy collection list` only enumerates directories with a
+	// MANIFEST.json — the receipt a galaxy install writes, which a verbatim
+	// copy doesn't carry. Synthesize a minimal one so the vendored install is
+	// visible to ansible-galaxy and every reader agrees on the same receipt.
+	// Runs for preserved pre-existing copies too, healing older installs.
+	if synthesized, err := synthesizeCollectionManifestIfMissing(destDir); err != nil {
+		return "", fmt.Errorf("writing MANIFEST.json for %s: %w", fqcn, err)
+	} else if synthesized {
+		log.Printf("vendored collection %q ships without MANIFEST.json — synthesized a minimal one at %s", fqcn, destDir)
+	}
 	return fqcn, nil
+}
+
+// synthesizeCollectionManifestIfMissing writes a minimal MANIFEST.json for an
+// installed collection that has none. collection_info comes from the installed
+// copy's galaxy.yml so a preserved older install describes itself, not the
+// newer source checkout. Returns true if a manifest was written.
+func synthesizeCollectionManifestIfMissing(collectionDir string) (bool, error) {
+	manifestPath := filepath.Join(collectionDir, "MANIFEST.json")
+	if _, err := os.Stat(manifestPath); err == nil {
+		return false, nil
+	}
+	data, err := os.ReadFile(filepath.Join(collectionDir, "galaxy.yml"))
+	if err != nil {
+		return false, fmt.Errorf("reading galaxy.yml: %w", err)
+	}
+	gm, err := ParseGalaxyManifest(data)
+	if err != nil {
+		return false, err
+	}
+	if gm.Namespace == "" || gm.Name == "" {
+		return false, fmt.Errorf("galaxy.yml in %s must define both namespace and name", collectionDir)
+	}
+	version := gm.Version
+	if version == "" {
+		version = "*" // ansible's own placeholder for unversioned installs
+	}
+	manifest := map[string]any{
+		"collection_info": map[string]any{
+			"namespace":   gm.Namespace,
+			"name":        gm.Name,
+			"version":     version,
+			"description": gm.Description,
+		},
+		"format": 1,
+	}
+	out, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(manifestPath, append(out, '\n'), 0644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // getSubscriptionCatalogNames returns nil for unlicensed (community)

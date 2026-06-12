@@ -258,6 +258,7 @@ func runSourceInstall(ctx context.Context, e *core.RequestEvent, app core.App, s
 			return nil, err
 		}
 	}
+	expandSelectionWithBlueprintDeps(opts.Selection, walked)
 
 	applySourceManifestToRecord(sourceRecord, walked.Source)
 	if err := app.Save(sourceRecord); err != nil {
@@ -321,6 +322,60 @@ func snapshotWalkedAsSelection(walked *WalkedSource) *InstallSelection {
 		sel.LocalCollections = append(sel.LocalCollections, gm.Namespace+"."+gm.Name)
 	}
 	return sel
+}
+
+// expandSelectionWithBlueprintDeps widens sel so every selected blueprint
+// brings the source-shipped artifacts it requires: templates and local roles
+// referenced by its range-config, plus vendored roles and collections matching
+// its requirements.yml entries. The galaxy resolution strips vendored names on
+// the assumption the local copy is authoritative (filterRequirements), so a
+// blueprint selected without its vendored deps would otherwise get neither the
+// galaxy copy nor the local one. Blueprints are never added — install stays
+// additive on exactly the blueprints requested.
+func expandSelectionWithBlueprintDeps(sel *InstallSelection, walked *WalkedSource) {
+	if sel == nil || len(sel.Blueprints) == 0 {
+		return
+	}
+
+	shippedTemplates := map[string]bool{}
+	for _, dir := range walked.Templates {
+		shippedTemplates[templateNameForDir(dir)] = true
+	}
+	localRoleNames := map[string]bool{}
+	for _, dir := range walked.LocalRoles {
+		localRoleNames[filepath.Base(dir)] = true
+	}
+	vendoredCollections := vendoredCollectionFQCNs(walked)
+
+	for _, bp := range walked.Blueprints {
+		if bp.Manifest == nil || !slices.Contains(sel.Blueprints, bp.Manifest.ID) {
+			continue
+		}
+		refs := parseBlueprintConfigRefs(bp, localRoleNames)
+		for _, name := range refs.Templates {
+			if shippedTemplates[name] {
+				sel.Templates = appendUnique(sel.Templates, name)
+			}
+		}
+		for _, name := range refs.LocalRoles {
+			sel.LocalRoles = appendUnique(sel.LocalRoles, name)
+		}
+
+		var doc RequirementsDoc
+		if len(bp.RequirementsYAML) > 0 {
+			_ = unmarshalRequirements(bp.RequirementsYAML, &doc)
+		}
+		for _, r := range doc.Roles {
+			if localRoleNames[r.Name] {
+				sel.LocalRoles = appendUnique(sel.LocalRoles, r.Name)
+			}
+		}
+		for _, c := range doc.Collections {
+			if vendoredCollections[c.Name] {
+				sel.LocalCollections = appendUnique(sel.LocalCollections, c.Name)
+			}
+		}
+	}
 }
 
 // selectionFromClaims rebuilds "what this source has installed" from the
