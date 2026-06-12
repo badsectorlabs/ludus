@@ -9,6 +9,11 @@ keywords: [sources, sharing, blueprints, ansible, collections, packer, git]
 
 A source is a versioned bundle of blueprints, Packer templates, and Ansible roles and collections. `ludus source add` registers it and opens an interactive installer.
 
+:::warning
+
+Packer templates and Ansible roles run on the Ludus host as the `ludus` user — with your Proxmox credentials in scope. Consider reviewing the repo before installing resources or pinning an immutable commit with `--ref <commit-sha>`.
+:::
+
 ```bash
 # Pick what to install
 ludus source add https://github.com/badsectorlabs/ludus-source-bsl
