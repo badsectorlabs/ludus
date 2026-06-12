@@ -4,3 +4,4 @@ version: 1.0.0
 description: Vendored collection fixture — declared by the example blueprint so CI can assert a blueprint-only install pulls it in.
 authors:
   - Ludus CI
+readme: readme.md
