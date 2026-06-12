@@ -16,7 +16,7 @@ type Advanced struct {
 	Force   bool
 	IsAdmin bool
 	// NoDeps skips installing the selected blueprints' galaxy role/collection
-	// dependencies. Carried through the picker unchanged (no footer toggle).
+	// dependencies. Seeded by --no-deps; toggleable from the footer ([d]).
 	NoDeps bool
 }
 

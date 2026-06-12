@@ -1654,6 +1654,22 @@ post-deploy sources-as-admin:
     - test -d /opt/ludus/resources/global-roles/say_hello   # non-admin remove left the shared global role intact
     - ludus source rm ci-src-ciu --no-prompt
     - sudo rm -rf /opt/ludus/resources/global-roles/say_hello
+    # --no-deps: blueprints register and source-local content still installs,
+    # but the galaxy dependency install is skipped — only what's already on
+    # disk is used. example declares geerlingguy.docker, so its absence after
+    # a --no-deps install (and presence after a plain re-add of the same
+    # source) is the dep-skip proof.
+    - ludus source rm ci-src-nodeps --no-prompt || true
+    - ludus ansible role rm geerlingguy.docker || true
+    - '! ludus ansible role list | grep "geerlingguy.docker" >/dev/null'
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-nodeps --no-deps --force
+    - 'ludus source list | grep "ci-src-nodeps " >/dev/null'
+    - 'ludus blueprint list | grep "ci-src-nodeps/example" >/dev/null'
+    - 'ludus ansible role list | grep "say_hello" >/dev/null'              # local role still installed
+    - '! ludus ansible role list | grep "geerlingguy.docker" >/dev/null'   # galaxy dep skipped
+    - ludus source add ci-src-nodeps
+    - 'ludus ansible role list | grep "geerlingguy.docker" >/dev/null'     # same source with deps on — the skip assert was not vacuous
+    - ludus source rm ci-src-nodeps --no-prompt
 
 post-deploy ranges-as-admin:
   stage: test

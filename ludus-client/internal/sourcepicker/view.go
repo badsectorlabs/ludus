@@ -41,12 +41,13 @@ var (
 	willUpgradeStyle = lipgloss.NewStyle().Bold(true).Foreground(warnColor)
 	installedStyle   = lipgloss.NewStyle().Foreground(installedColor)
 	// Footer chip styles. The "on" color encodes severity: gold for the
-	// benign scope flip (global), orange for the actually-risky
-	// toggle (force overwrite) so the eye treats them differently. Off
-	// stays a neutral grey for both.
-	globalOnStyle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	forceOnStyle  = lipgloss.NewStyle().Bold(true).Foreground(warnColor)
-	offChipStyle  = lipgloss.NewStyle().Foreground(offColor)
+	// benign scope flip (global), orange for the actually-risky toggles
+	// (force overwrite, skip deps) so the eye treats them differently. Off
+	// stays a neutral grey for all.
+	globalOnStyle   = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	forceOnStyle    = lipgloss.NewStyle().Bold(true).Foreground(warnColor)
+	skipDepsOnStyle = lipgloss.NewStyle().Bold(true).Foreground(warnColor)
+	offChipStyle    = lipgloss.NewStyle().Foreground(offColor)
 	// Control-bar styles (the top hint + bottom footer). Keycaps are bold at
 	// full intensity so they pop; the surrounding labels stay a readable muted
 	// grey. Both sit above the faint legend, so the control bar reads as a
@@ -134,7 +135,8 @@ func (m model) View() string {
 		bottom.WriteString(truncate(legend, m.width))
 		bottom.WriteString("\n")
 	}
-	if m.hasConflictingPins() {
+	// Pin ambiguity only matters when deps actually install.
+	if !m.adv.NoDeps && m.hasConflictingPins() {
 		legend := upgradeStyle.Render("△") +
 			dimStyle.Render(" conflicting version pins across the responsible blueprints — ansible-galaxy will install only one; drop a blueprint to disambiguate")
 		bottom.WriteString(truncate(legend, m.width))
@@ -153,7 +155,9 @@ func (m model) View() string {
 	chips := keyStyle.Render("[g]") + controlStyle.Render(" global: ") +
 		chipFor(m.adv.Global, m.adv.IsAdmin, globalOnStyle) +
 		sep + keyStyle.Render("[f]") + controlStyle.Render(" force overwrite: ") +
-		chipFor(m.adv.Force, true, forceOnStyle)
+		chipFor(m.adv.Force, true, forceOnStyle) +
+		sep + keyStyle.Render("[d]") + controlStyle.Render(" skip deps: ") +
+		chipFor(m.adv.NoDeps, true, skipDepsOnStyle)
 	bottom.WriteString(chips)
 	bottom.WriteString("\n")
 
@@ -480,7 +484,10 @@ func (m model) renderDepsSection() string {
 	}
 
 	heading := fmt.Sprintf("ANSIBLE DEPENDENCIES %d", total)
-	if pending > 0 {
+	if m.adv.NoDeps {
+		heading += dimStyle.Render(" · ") + skipDepsOnStyle.Render("skipped") +
+			dimStyle.Render(" — [d] skip deps is on")
+	} else if pending > 0 {
 		change := "changes"
 		if pending == 1 {
 			change = "change"

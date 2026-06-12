@@ -124,6 +124,9 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		m.adv.Force = !m.adv.Force
 		return m, nil
+	case "d":
+		m.adv.NoDeps = !m.adv.NoDeps
+		return m, nil
 	}
 	return m, nil
 }
