@@ -1670,6 +1670,8 @@ post-deploy sources-as-admin:
     - ludus source add ci-src-nodeps
     - 'ludus ansible role list | grep "geerlingguy.docker" >/dev/null'     # same source with deps on — the skip assert was not vacuous
     - ludus source rm ci-src-nodeps --no-prompt
+    # Clean up haning template
+    - ludus templates rm -n example-debian-12-template
 
 post-deploy ranges-as-admin:
   stage: test
@@ -1902,6 +1904,7 @@ post-deploy templates-as-admin:
     when: script_failure
   script:
     - *ci-setup-admin
+    - ludus range power off -n all
     - *template-tests
 
 ################
