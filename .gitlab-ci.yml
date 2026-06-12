@@ -1810,6 +1810,7 @@ post-deploy ranges-as-admin:
     - ludus power on -n CIA-router-debian11-x64
     - timeout 180 bash -c 'until [[ $(ludus range list --json | jq -r ".VMs[] | select(.name == \"CIA-router-debian11-x64\") | .poweredOn") == "true" ]]; do sleep 5; done'
     # Deploy a simple range, then delete it to verify deleting a range with VMs works
+    - ludus power off -n all -r CIA # power off range CIA as it is not used again
     - ludus range create -n "CIA Test Range" -r CIA-test
     - ludus range config set -f /opt/ludus/ci/configs/small-range.yml -r CIA-test
     - ludus range deploy -r CIA-test
