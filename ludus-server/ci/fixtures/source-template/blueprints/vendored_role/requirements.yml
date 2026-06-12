@@ -1,0 +1,7 @@
+# acme.vendored_demo is vendored under the source's ansible/roles/ (bare dir
+# name vendored_demo, galaxy identity acme.vendored_demo from its meta). The
+# local copy wins over galaxy resolution, so installing this blueprint must
+# install the vendored copy under the namespaced name — acme.vendored_demo
+# is not a real Galaxy role, so any fetch would fail.
+roles:
+  - name: acme.vendored_demo

@@ -7,9 +7,11 @@ roles:
   - name: geerlingguy.docker
     version: 7.4.4
 
-# collections:
-#   - name: community.crypto
-#     version: 2.16.0
+# ludusci.ci_utils is vendored under the source's ansible/collections/, so the
+# local copy wins over galaxy resolution — installing this blueprint must pull
+# in the vendored copy.
+collections:
+  - name: ludusci.ci_utils
 
 # subscription_roles:
 #   - ludus_ghosts_client

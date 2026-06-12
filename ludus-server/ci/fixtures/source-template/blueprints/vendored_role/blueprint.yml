@@ -1,0 +1,10 @@
+# blueprint.yml: display metadata for one blueprint.
+
+manifest_version: 1
+id: vendored_role
+name: "Vendored Galaxy Role"
+description: "Requires acme.vendored_demo by its galaxy identity; satisfied by the source's vendored copy."
+version: 0.1.0
+config: range-config.yml
+
+tags: [example]

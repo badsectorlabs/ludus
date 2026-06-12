@@ -1332,21 +1332,11 @@ post-deploy blueprints-as-admin:
       when: never
     - changes:
       - ludus-client/cmd/blueprint.go
-      - ludus-client/cmd/source.go
-      - ludus-client/cmd/source_mode.go
-      - ludus-client/internal/sourcepicker/**.go
       - ludus-api/api_blueprint_management.go
-      - ludus-api/api_source_management.go
       - ludus-api/blueprint_dir.go
       - ludus-api/blueprint_resolver.go
       - ludus-api/blueprint_access.go
       - ludus-api/range_config_write.go
-      - ludus-api/source_catalog.go
-      - ludus-api/source_install.go
-      - ludus-api/source_roles.go
-      - ludus-api/source_sync.go
-      - ludus-api/source_walker.go
-      - ludus-server/ci/fixtures/source-template/**
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1363,8 +1353,6 @@ post-deploy blueprints-as-admin:
     - ludus blueprint rm ci-bp-copy --no-prompt || true
     - ludus blueprint rm ci-bp-scratch --no-prompt || true
     - ludus blueprint rm ci-bp-roundtrip --no-prompt || true
-    - ludus source rm ci-src --no-prompt || true
-    - ludus source rm ci-src2 --no-prompt || true
     # Create, list, fetch config, copy, apply, and remove as admin
     - ludus blueprint create --id ci-bp-main --name "CI Blueprint Main" --description "created in CI" --from-range CIA
     - ludus blueprint list | grep ci-bp-main
@@ -1416,6 +1404,66 @@ post-deploy blueprints-as-admin:
     - '! ludus blueprint list | grep ci-bp-copy'
     - ludus blueprint rm ci-bp-main --no-prompt || true
     - '! ludus blueprint list | grep ci-bp-main'
+
+post-deploy sources-as-admin:
+  stage: test
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - build all
+    - job: post-deploy blueprints-as-admin
+      optional: true
+  dependencies:
+    - build all
+  rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[sources tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/source.go
+      - ludus-client/cmd/source_mode.go
+      - ludus-client/internal/sourcepicker/**.go
+      # Blueprint files are shared with the blueprints job on purpose: source
+      # installs upsert blueprint rows, blueprint rm shrinks a source's
+      # selection, and installRolesForBlueprint is the shared install engine.
+      - ludus-api/api_blueprint_management.go
+      - ludus-api/blueprint_resolver.go
+      - ludus-api/api_source_management.go
+      - ludus-api/source_catalog.go
+      - ludus-api/source_install.go
+      - ludus-api/source_roles.go
+      - ludus-api/source_sync.go
+      - ludus-api/source_walker.go
+      - ludus-server/ci/fixtures/source-template/**
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
+  timeout: 45m
+  retry:
+    max: 2
+    when: script_failure
+  script:
+    - *ci-setup-admin
+    # Pre-clean the sources this job re-registers so a stale snapshot doesn't
+    # trip up the source add calls below.
+    - ludus source rm ci-src --no-prompt || true
+    - ludus source rm ci-src2 --no-prompt || true
     # Sources — registered from a bundled fixture so CI never depends on a remote repo.
     # The fixture ships a blueprint, a shared packer template, and a shared local ansible role.
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --force
@@ -1495,6 +1543,77 @@ post-deploy blueprints-as-admin:
     - 'ludus blueprint list | grep -q "ci-src-pick/example"'
     - 'ludus blueprint list | grep -q "ci-src-pick/secondary"'
     - ludus source rm ci-src-pick --no-prompt
+    # Regression: a blueprint-only selection implies the blueprint's required
+    # source-shipped artifacts. example's range-config references the bundled
+    # template, and its requirements.yml declares the vendored collection —
+    # which the galaxy resolution strips in favor of the local copy, so the
+    # implied local install is the only path that delivers it. secondary's
+    # range-config references the bundled local role.
+    - ludus source rm ci-src-impl --no-prompt || true
+    - ludus ansible collection rm ludusci.ci_utils || true
+    - ludus templates rm -n example-debian-12-template || true
+    - '! ludus templates list | grep -q "example-debian-12-template"'
+    - '! sudo find /opt/ludus/users/continuous-integration-admin -path "*/ansible_collections/ludusci/ci_utils/galaxy.yml" | grep -q .'
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-impl --blueprints example
+    - 'ludus blueprint list | grep -q "ci-src-impl/example"'
+    - 'ludus templates list | grep -q "example-debian-12-template"'
+    - 'sudo find /opt/ludus/users/continuous-integration-admin -path "*/ansible_collections/ludusci/ci_utils/galaxy.yml" | grep -q .'
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localCollections[] | select(.name=="ludusci.ci_utils") | .state] == ["installed"]'
+    # Every view agrees on the install: the read-only deps view, and
+    # ansible-galaxy itself — the vendored install synthesizes a minimal
+    # MANIFEST.json receipt so `collection list` can enumerate it.
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.blueprints.requiredCollections[] | select(.name=="ludusci.ci_utils") | .state] == ["installed"]'
+    # The required-collection row carries a per-scope breakdown like roles do,
+    # so the picker can show a scope-wise sublist instead of a flat chip.
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.blueprints.requiredCollections[] | select(.name=="ludusci.ci_utils") | .scopes[].scope] == ["user"]'
+    - 'ludus ansible collection list | grep -q "ludusci.ci_utils"'
+    # Legacy compat: installs that predate the synthesized receipt carry only
+    # galaxy.yml — the catalog must still read them as installed.
+    - sudo rm /opt/ludus/users/continuous-integration-admin/.ansible/collections/ansible_collections/ludusci/ci_utils/MANIFEST.json
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localCollections[] | select(.name=="ludusci.ci_utils") | .state] == ["installed"]'
+    - ludus ansible role rm say_hello || true
+    - '! ludus ansible role list | grep -q "say_hello"'
+    - ludus source add ci-src-impl --blueprints secondary
+    - 'ludus ansible role list | grep -q "say_hello"'
+    # Regression: role install-state is identity-aware. Installing a vendored
+    # role from galaxy lands it under its namespaced galaxy name
+    # (<author>.<role_name> from meta — here ludus.say_hello), not the bare
+    # dir name the source ships. The catalog must read the source's say_hello
+    # as that installed copy — scope and version included — so the catalog and
+    # `ansible role list` agree, the same way a vendored collection's
+    # galaxy.yml FQCN drives its state regardless of dir name.
+    - ludus ansible role rm say_hello
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="say_hello") | .state] == ["not_installed"]'
+    - sudo cp -r /opt/ludus/ci/fixtures/source-template/ansible/roles/say_hello /opt/ludus/users/continuous-integration-admin/.ansible/roles/ludus.say_hello
+    - >-
+      sudo sh -c 'printf "install_date: \"\"\nversion: 9.9.9\n" > /opt/ludus/users/continuous-integration-admin/.ansible/roles/ludus.say_hello/meta/.galaxy_install_info'
+    - 'ludus ansible role list | grep -q "ludus.say_hello"'
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="say_hello") | .scopes[] | "\(.scope):\(.version)"] == ["user:9.9.9"]'
+    - sudo rm -rf /opt/ludus/users/continuous-integration-admin/.ansible/roles/ludus.say_hello
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="say_hello") | .state] == ["not_installed"]'
+    - ludus source rm ci-src-impl --no-prompt
+    # Regression: a blueprint requiring a vendored role by its PUBLISHED galaxy
+    # identity installs the local copy, not a Galaxy fetch. vendored_role
+    # declares `acme.vendored_demo`, vendored under the bare dir vendored_demo
+    # (galaxy identity acme.vendored_demo from meta). acme.vendored_demo is not
+    # a real Galaxy role, so the install only succeeds via the vendored copy —
+    # success is the proof. Before the fix, the namespaced requirement was not
+    # recognized as vendored and the Galaxy fetch failed.
+    - ludus source rm ci-src-vendrole --no-prompt || true
+    - ludus ansible role rm acme.vendored_demo || true
+    - '! ludus ansible role list | grep -q "acme.vendored_demo"'
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-vendrole --blueprints vendored_role
+    - 'ludus blueprint list | grep -q "ci-src-vendrole/vendored_role"'
+    # Installed under the namespaced name, with the vendored copy's version.
+    - 'ludus ansible role list | grep -q "acme.vendored_demo"'
+    - test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/acme.vendored_demo
+    - ludus source list ci-src-vendrole --catalog --json | jq -e '[.blueprints.requiredRoles[] | select(.name=="acme.vendored_demo") | .state] == ["installed"]'
+    - ludus source list ci-src-vendrole --catalog --json | jq -e '[.blueprints.requiredRoles[] | select(.name=="acme.vendored_demo") | .scopes[] | "\(.scope):\(.version)"] == ["user:2.0.0"]'
+    # No bare-name copy is left behind — the requirement drives the namespaced install only.
+    - '! test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/vendored_demo'
+    - ludus ansible role rm acme.vendored_demo
+    - '! ludus ansible role list | grep -q "acme.vendored_demo"'
+    - ludus source rm ci-src-vendrole --no-prompt
     # --global: admin install scope. Roles land in the instance-wide
     # global-roles dir, not the owner's per-user ansible roles dir.
     - ludus source rm ci-src-global --no-prompt || true
@@ -1506,12 +1625,18 @@ post-deploy blueprints-as-admin:
     # writable ANSIBLE_HOME. Asserting the role landed guards the read-only
     # filesystem regression.
     - test -d /opt/ludus/resources/global-roles/geerlingguy.docker
+    # A vendored role required by its galaxy identity installs globally too,
+    # from the local copy under the namespaced name (acme.vendored_demo is not
+    # a real Galaxy role, so --global success proves the vendored path).
+    - test -d /opt/ludus/resources/global-roles/acme.vendored_demo
     # Globally-installed roles (local and galaxy alike) are removed via
     # `ansible role rm --global` — there is no source-level uninstall.
     - ludus ansible role rm say_hello --global
     - '! test -d /opt/ludus/resources/global-roles/say_hello'
     - ludus ansible role rm geerlingguy.docker --global
     - '! test -d /opt/ludus/resources/global-roles/geerlingguy.docker'
+    - ludus ansible role rm acme.vendored_demo --global
+    - '! test -d /opt/ludus/resources/global-roles/acme.vendored_demo'
     - ludus source rm ci-src-global --no-prompt
     # Non-admin safety: a non-admin's role remove must never touch the SHARED
     # global-roles dir — ansible-galaxy runs against their per-user
@@ -1532,7 +1657,12 @@ post-deploy ranges-as-admin:
     - ludus-proxmox-runner-parallel
   needs:
     - build all
+    # Both predecessors stay listed: optional needs drop out of the DAG when
+    # changes-rules filter a job from the pipeline, so needing only the
+    # sources job would let this run concurrently with the blueprints job.
     - job: post-deploy blueprints-as-admin
+      optional: true
+    - job: post-deploy sources-as-admin
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -2707,6 +2837,8 @@ release post-deploy-admin-vm:
     - job: post-deploy groups-as-admin
       optional: true
     - job: post-deploy blueprints-as-admin
+      optional: true
+    - job: post-deploy sources-as-admin
       optional: true
     - job: post-deploy ranges-as-admin
       optional: true
