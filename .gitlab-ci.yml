@@ -1464,6 +1464,10 @@ post-deploy sources-as-admin:
     # trip up the source add calls below.
     - ludus source rm ci-src --no-prompt || true
     - ludus source rm ci-src2 --no-prompt || true
+    # Retry hygiene: the legacy-compat block below plants a bare-named role
+    # dir and cleans it up; a retry that lands between the two must not
+    # inherit it — the "no bare-name dir" asserts depend on a clean slate.
+    - sudo rm -rf /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
     # Sources — registered from a bundled fixture so CI never depends on a remote repo.
     # The fixture ships a blueprint, a shared packer template, and a shared local ansible role.
     # Table asserts use `grep pat >/dev/null`, not `grep -q`: -q exits at the
@@ -1475,7 +1479,12 @@ post-deploy sources-as-admin:
     - 'ludus blueprint list | grep "ci-src/example" >/dev/null'
     - 'ludus blueprint list | grep "ci-src/secondary" >/dev/null' # both fixture blueprints installed via install-all default
     - 'ludus templates list | grep "example-debian-12-template" >/dev/null'
-    - 'ludus ansible role list | grep "say_hello" >/dev/null'
+    # Regression: a directly-installed source role registers under its galaxy
+    # identity from meta (here ludus.say_hello), never the bare dir name — so
+    # `ansible role list` and namespaced range-config references agree.
+    - 'ludus ansible role list | grep "ludus.say_hello" >/dev/null'
+    - sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/ludus.say_hello
+    - '! sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello'
     - ludus blueprint info ci-src/example | tee /tmp/ci-src-example.info
     - 'grep -q "Authors:" /tmp/ci-src-example.info'
     # Negative-path: a non-owner can't delete an admin-created source. CIU is created on demand here since this job runs admin-only setup.
@@ -1527,7 +1536,7 @@ post-deploy sources-as-admin:
     - 'ludus blueprint list | grep "ci-src/secondary" >/dev/null'
     # Individual deletes remove the on-disk artifact (no cross-source
     # refcount on content) and release both sources' claims.
-    - ludus ansible role rm say_hello
+    - ludus ansible role rm ludus.say_hello
     - '! ludus ansible role list | grep "say_hello" >/dev/null'
     - ludus templates rm -n example-debian-12-template
     - '! ludus templates list | grep "example-debian-12-template" >/dev/null'
@@ -1538,12 +1547,12 @@ post-deploy sources-as-admin:
     # Scripted selective install: pick one blueprint + its template + the
     # bundled local role; secondary is intentionally left out.
     - ludus source rm ci-src-pick --no-prompt || true
-    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-pick --blueprints example --templates example-debian-12-template --source-roles say_hello
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-pick --blueprints example --templates example-debian-12-template --source-roles ludus.say_hello
     - 'ludus blueprint list | grep "ci-src-pick/example" >/dev/null'
     - '! ludus blueprint list | grep "ci-src-pick/secondary" >/dev/null'
     # Idempotent re-add: same sourceID + wider selection picks up the
     # previously skipped blueprint without disturbing already-installed ones.
-    - ludus source add ci-src-pick --blueprints example,secondary --templates example-debian-12-template --source-roles say_hello
+    - ludus source add ci-src-pick --blueprints example,secondary --templates example-debian-12-template --source-roles ludus.say_hello
     - 'ludus blueprint list | grep "ci-src-pick/example" >/dev/null'
     - 'ludus blueprint list | grep "ci-src-pick/secondary" >/dev/null'
     - ludus source rm ci-src-pick --no-prompt
@@ -1575,26 +1584,25 @@ post-deploy sources-as-admin:
     # galaxy.yml — the catalog must still read them as installed.
     - sudo rm /opt/ludus/users/continuous-integration-admin/.ansible/collections/ansible_collections/ludusci/ci_utils/MANIFEST.json
     - ludus source list ci-src-impl --catalog --json | jq -e '[.localCollections[] | select(.name=="ludusci.ci_utils") | .state] == ["installed"]'
-    - ludus ansible role rm say_hello || true
+    - ludus ansible role rm ludus.say_hello || true
     - '! ludus ansible role list | grep "say_hello" >/dev/null'
     - ludus source add ci-src-impl --blueprints secondary
-    - 'ludus ansible role list | grep "say_hello" >/dev/null'
-    # Regression: role install-state is identity-aware. Installing a vendored
-    # role from galaxy lands it under its namespaced galaxy name
-    # (<author>.<role_name> from meta — here ludus.say_hello), not the bare
-    # dir name the source ships. The catalog must read the source's say_hello
-    # as that installed copy — scope and version included — so the catalog and
-    # `ansible role list` agree, the same way a vendored collection's
-    # galaxy.yml FQCN drives its state regardless of dir name.
-    - ludus ansible role rm say_hello
-    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="say_hello") | .state] == ["not_installed"]'
-    - sudo cp -r /opt/ludus/ci/fixtures/source-template/ansible/roles/say_hello /opt/ludus/users/continuous-integration-admin/.ansible/roles/ludus.say_hello
-    - >-
-      sudo sh -c 'printf "install_date: \"\"\nversion: 9.9.9\n" > /opt/ludus/users/continuous-integration-admin/.ansible/roles/ludus.say_hello/meta/.galaxy_install_info'
     - 'ludus ansible role list | grep "ludus.say_hello" >/dev/null'
-    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="say_hello") | .scopes[] | "\(.scope):\(.version)"] == ["user:9.9.9"]'
-    - sudo rm -rf /opt/ludus/users/continuous-integration-admin/.ansible/roles/ludus.say_hello
-    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="say_hello") | .state] == ["not_installed"]'
+    # Regression: a local role's catalog identity is its namespaced galaxy
+    # name (<author>.<role_name> from meta — here ludus.say_hello), matching
+    # the name installs land under. A copy sitting under the BARE dir name
+    # (a pre-standardization install, or a roles-path drop-in) must still
+    # read as that item — scope and version included — the same alias rule
+    # vendored collections get via their galaxy.yml FQCN.
+    - ludus ansible role rm ludus.say_hello
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="ludus.say_hello") | .state] == ["not_installed"]'
+    - sudo cp -r /opt/ludus/ci/fixtures/source-template/ansible/roles/say_hello /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
+    - >-
+      sudo sh -c 'printf "install_date: \"\"\nversion: 9.9.9\n" > /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello/meta/.galaxy_install_info'
+    - 'ludus ansible role list | grep "say_hello" >/dev/null'
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="ludus.say_hello") | .scopes[] | "\(.scope):\(.version)"] == ["user:9.9.9"]'
+    - sudo rm -rf /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="ludus.say_hello") | .state] == ["not_installed"]'
     - ludus source rm ci-src-impl --no-prompt
     # Regression: a blueprint requiring a vendored role by its PUBLISHED galaxy
     # identity installs the local copy, not a Galaxy fetch. vendored_role
@@ -1622,7 +1630,8 @@ post-deploy sources-as-admin:
     # global-roles dir, not the owner's per-user ansible roles dir.
     - ludus source rm ci-src-global --no-prompt || true
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-global --all --global --force
-    - test -d /opt/ludus/resources/global-roles/say_hello
+    - test -d /opt/ludus/resources/global-roles/ludus.say_hello
+    - '! test -d /opt/ludus/resources/global-roles/say_hello'   # identity-named install — no bare-name dir
     # The example blueprint pulls a galaxy role (geerlingguy.docker). Under
     # --global that install runs ansible-galaxy as the service against a
     # read-only /home, so it only succeeds when the install is handed a
@@ -1635,8 +1644,8 @@ post-deploy sources-as-admin:
     - test -d /opt/ludus/resources/global-roles/acme.vendored_demo
     # Globally-installed roles (local and galaxy alike) are removed via
     # `ansible role rm --global` — there is no source-level uninstall.
-    - ludus ansible role rm say_hello --global
-    - '! test -d /opt/ludus/resources/global-roles/say_hello'
+    - ludus ansible role rm ludus.say_hello --global
+    - '! test -d /opt/ludus/resources/global-roles/ludus.say_hello'
     - ludus ansible role rm geerlingguy.docker --global
     - '! test -d /opt/ludus/resources/global-roles/geerlingguy.docker'
     - ludus ansible role rm acme.vendored_demo --global
@@ -1648,12 +1657,12 @@ post-deploy sources-as-admin:
     # install + remove a same-named local role: CIU's own copy goes, the
     # shared global one stays.
     - ludus source rm ci-src-ciu --no-prompt || true
-    - sudo mkdir -p /opt/ludus/resources/global-roles/say_hello
-    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-ciu --blueprints secondary --source-roles say_hello'
-    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus ansible role rm say_hello'
-    - test -d /opt/ludus/resources/global-roles/say_hello   # non-admin remove left the shared global role intact
+    - sudo mkdir -p /opt/ludus/resources/global-roles/ludus.say_hello
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-ciu --blueprints secondary --source-roles ludus.say_hello'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus ansible role rm ludus.say_hello'
+    - test -d /opt/ludus/resources/global-roles/ludus.say_hello   # non-admin remove left the shared global role intact
     - ludus source rm ci-src-ciu --no-prompt
-    - sudo rm -rf /opt/ludus/resources/global-roles/say_hello
+    - sudo rm -rf /opt/ludus/resources/global-roles/ludus.say_hello
     # --no-deps: blueprints register and source-local content still installs,
     # but the galaxy dependency install is skipped — only what's already on
     # disk is used. example declares geerlingguy.docker, so its absence after
@@ -1665,7 +1674,7 @@ post-deploy sources-as-admin:
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-nodeps --no-deps --force
     - 'ludus source list | grep "ci-src-nodeps " >/dev/null'
     - 'ludus blueprint list | grep "ci-src-nodeps/example" >/dev/null'
-    - 'ludus ansible role list | grep "say_hello" >/dev/null'              # local role still installed
+    - 'ludus ansible role list | grep "ludus.say_hello" >/dev/null'        # local role still installed
     - '! ludus ansible role list | grep "geerlingguy.docker" >/dev/null'   # galaxy dep skipped
     - ludus source add ci-src-nodeps
     - 'ludus ansible role list | grep "geerlingguy.docker" >/dev/null'     # same source with deps on — the skip assert was not vacuous

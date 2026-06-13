@@ -290,14 +290,12 @@ func hasRequirementsCollections(requirementsYAML []byte) bool {
 //
 // Per-shape rules:
 //   - bare name (`myrole`) or 2-part (`org.repo`): must appear under `roles:`
-//     or as a directory under the source's `roles/`.
+//     or answer to a role under the source's `roles/` — by dir basename or
+//     by the role's galaxy identity from meta (the name installs land under).
 //   - 3-part FQCN (`namespace.collection.role`): the parent collection
 //     (`namespace.collection`) must appear under `collections:`.
 func findUndeclaredDependencies(walked *WalkedSource) []UndeclaredDependency {
-	localRoles := map[string]bool{}
-	for _, dir := range walked.LocalRoles {
-		localRoles[filepath.Base(dir)] = true
-	}
+	localRoles := localRoleNamesByRef(walked)
 	var out []UndeclaredDependency
 	for _, bp := range walked.Blueprints {
 		declaredRoles, declaredCollections := parseDeclaredRequirements(bp.RequirementsYAML)
@@ -325,7 +323,8 @@ func findUndeclaredDependencies(walked *WalkedSource) []UndeclaredDependency {
 			bpID = bp.Manifest.ID
 		}
 		for _, ref := range refs {
-			if localRoles[ref] || declaredRoles[ref] || declaredSubscription[ref] {
+			_, isLocal := localRoles[ref]
+			if isLocal || declaredRoles[ref] || declaredSubscription[ref] {
 				continue
 			}
 			parts := strings.Split(ref, ".")

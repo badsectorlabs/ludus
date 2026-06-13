@@ -308,7 +308,7 @@ func snapshotWalkedAsSelection(walked *WalkedSource) *InstallSelection {
 		sel.Templates = append(sel.Templates, templateNameForDir(dir))
 	}
 	for _, dir := range walked.LocalRoles {
-		sel.LocalRoles = append(sel.LocalRoles, filepath.Base(dir))
+		sel.LocalRoles = append(sel.LocalRoles, localRoleName(dir))
 	}
 	for _, dir := range walked.LocalCollections {
 		data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
@@ -341,10 +341,7 @@ func expandSelectionWithBlueprintDeps(sel *InstallSelection, walked *WalkedSourc
 	for _, dir := range walked.Templates {
 		shippedTemplates[templateNameForDir(dir)] = true
 	}
-	localRoleNames := map[string]bool{}
-	for _, dir := range walked.LocalRoles {
-		localRoleNames[filepath.Base(dir)] = true
-	}
+	localRoleNames := localRoleNamesByRef(walked)
 	vendoredCollections := vendoredCollectionFQCNs(walked)
 
 	for _, bp := range walked.Blueprints {
@@ -366,8 +363,8 @@ func expandSelectionWithBlueprintDeps(sel *InstallSelection, walked *WalkedSourc
 			_ = unmarshalRequirements(bp.RequirementsYAML, &doc)
 		}
 		for _, r := range doc.Roles {
-			if localRoleNames[r.Name] {
-				sel.LocalRoles = appendUnique(sel.LocalRoles, r.Name)
+			if canonical := localRoleNames[r.Name]; canonical != "" {
+				sel.LocalRoles = appendUnique(sel.LocalRoles, canonical)
 			}
 		}
 		for _, c := range doc.Collections {

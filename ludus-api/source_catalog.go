@@ -120,6 +120,20 @@ type blueprintConfigRefs struct {
 	GalaxyCollections []string
 }
 
+// localRoleNamesByRef maps every name a config or requirements entry may use
+// for a vendored role — the dir basename or the published galaxy identity —
+// to the role's canonical identity (localRoleName), so either authoring style
+// resolves to the one name installs and claims register under.
+func localRoleNamesByRef(walked *WalkedSource) map[string]string {
+	out := make(map[string]string, len(walked.LocalRoles)*2)
+	for _, dir := range walked.LocalRoles {
+		name := localRoleName(dir)
+		out[filepath.Base(dir)] = name
+		out[name] = name
+	}
+	return out
+}
+
 // parseBlueprintConfigRefs extracts all artifact references for one blueprint:
 //   - Templates and roles from the range-config file (via InferFromRangeConfig).
 //   - Galaxy roles and subscription roles from requirements.yml
@@ -128,8 +142,10 @@ type blueprintConfigRefs struct {
 // Roles that appear in requirements.yml under subscription_roles are
 // subscription roles; roles under roles: are galaxy roles. Roles referenced in
 // the config but not in requirements.yml and not local are left to the caller
-// (findUndeclaredDependencies handles that separately).
-func parseBlueprintConfigRefs(bp WalkedBlueprint, localRoleNames map[string]bool) blueprintConfigRefs {
+// (findUndeclaredDependencies handles that separately). localRoleNames maps
+// either name of a vendored role to its canonical identity
+// (localRoleNamesByRef); matched refs are recorded under the canonical name.
+func parseBlueprintConfigRefs(bp WalkedBlueprint, localRoleNames map[string]string) blueprintConfigRefs {
 	var refs blueprintConfigRefs
 
 	galaxyRoles, galaxyCollections, subRoles := declaredFromRequirements(bp.RequirementsYAML)
@@ -152,8 +168,8 @@ func parseBlueprintConfigRefs(bp WalkedBlueprint, localRoleNames map[string]bool
 
 			for _, role := range roleRefs {
 				switch {
-				case localRoleNames[role]:
-					refs.LocalRoles = appendUnique(refs.LocalRoles, role)
+				case localRoleNames[role] != "":
+					refs.LocalRoles = appendUnique(refs.LocalRoles, localRoleNames[role])
 				case subSet[role]:
 					// subscription roles referenced in config covered by requirements.yml
 				case galaxySet[role]:
@@ -233,11 +249,7 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 
 	installed := loadInstalledArtifacts(e, walked)
 
-	// Build a set of local role names for parseBlueprintConfigRefs.
-	localRoleNames := make(map[string]bool, len(walked.LocalRoles))
-	for _, dir := range walked.LocalRoles {
-		localRoleNames[filepath.Base(dir)] = true
-	}
+	localRoleNames := localRoleNamesByRef(walked)
 
 	// Single pass: compute refs for every blueprint to avoid double disk reads.
 	blueprintRefs := make(map[string]blueprintConfigRefs, len(walked.Blueprints))
@@ -283,8 +295,10 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 		})
 	}
 
-	// Local roles — one CatalogItem per source-root roles/ dir. RequiredBy lists
-	// blueprints whose config references this role.
+	// Local roles — one CatalogItem per source-root roles/ dir, named by the
+	// role's canonical identity (galaxy name from meta when present, dir
+	// basename otherwise) to match the install dir, the claim, and `ansible
+	// role list`. RequiredBy lists blueprints whose config references this role.
 	localRoleRequiredBy := map[string][]string{}
 	for bpID, refs := range blueprintRefs {
 		for _, name := range refs.LocalRoles {
@@ -295,7 +309,7 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 		sort.Strings(localRoleRequiredBy[name])
 	}
 	for _, dir := range walked.LocalRoles {
-		name := filepath.Base(dir)
+		name := localRoleName(dir)
 		state, installedVer := artifactState(installed, "local_role", name, "")
 		c.LocalRoles = append(c.LocalRoles, CatalogItem{
 			Name:             name,
@@ -432,15 +446,14 @@ func loadInstalledArtifacts(e *core.RequestEvent, walked *WalkedSource) map[stri
 // subscription roles, vendored + required collections — looked up against one
 // inventory scan. Templates are NOT covered here; they live on Proxmox.
 func joinWalkedWithInventory(out map[string]installedArtifact, walked *WalkedSource, inv ansibleInventory) {
-	// Local roles: a vendored role answers to its dir basename (the name a
-	// source install copies it under) AND its galaxy identity from meta (the
-	// name `ansible-galaxy install <ns>.<name>` lands the same content under)
-	// — the dual-identity rule vendored collections already get via their
-	// galaxy.yml FQCN. Without the alias, a role installed from galaxy reads
-	// not_installed here while the ansible list shows it.
+	// Local roles: keyed by the canonical identity (localRoleName — the name
+	// installs now land under), with the dir basename kept as an alias so a
+	// copy installed under the bare name (a pre-standardization install, or a
+	// role whose meta yields no galaxy identity) still reads installed instead
+	// of not_installed while the ansible list shows it.
 	for _, dir := range walked.LocalRoles {
-		name := filepath.Base(dir)
-		if art, ok := inv.roleArtifact(false, name, roleGalaxyName(dir, name)); ok {
+		name := localRoleName(dir)
+		if art, ok := inv.roleArtifact(false, name, filepath.Base(dir)); ok {
 			out["local_role/"+name] = art
 		}
 	}

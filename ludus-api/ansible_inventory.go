@@ -284,6 +284,20 @@ func roleGalaxyName(roleDir, basename string) string {
 	return ns + "." + name
 }
 
+// localRoleName is the canonical identity of a source-vendored role dir: its
+// published galaxy identity when meta yields one, the dir basename otherwise.
+// The role analogue of a collection's galaxy.yml FQCN — install dirs, claims,
+// catalog items, and selections all register a local role under this name, so
+// `ansible role list` and namespaced range-config references agree with how
+// ansible-galaxy itself would land the role.
+func localRoleName(dir string) string {
+	base := filepath.Base(dir)
+	if gname := roleGalaxyName(dir, base); gname != "" {
+		return gname
+	}
+	return base
+}
+
 // isGalaxyToken accepts strings shaped like a galaxy namespace or role name:
 // letters, digits, underscores, hyphens — no spaces or dots, so a human
 // author ("Jane Doe") never masquerades as a namespace.

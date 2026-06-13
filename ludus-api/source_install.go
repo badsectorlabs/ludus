@@ -94,7 +94,10 @@ func registerLocalRoles(app core.App, src *core.Record, walked *WalkedSource, op
 		installProxmoxUsername = opts.InitiatorProxmoxUsername
 	}
 	for _, dir := range walked.LocalRoles {
-		name := filepath.Base(dir)
+		// A role's identity is its galaxy name from meta when it has one (the
+		// FQCN rule collections get from galaxy.yml), so the install dir, the
+		// claim, and `ansible role list` all carry the author namespace.
+		name := localRoleName(dir)
 		if opts.Selection != nil && !slices.Contains(opts.Selection.LocalRoles, name) {
 			continue
 		}
@@ -354,10 +357,11 @@ func templateNameInGlobalPacker(hclName string) bool {
 // and we return nil so the caller can still record the source's claim —
 // multiple sources owning the same name is allowed.
 //
-// installName is usually the source dir basename, but a vendored role a
-// blueprint requires by its published <namespace>.<role> identity is installed
-// under THAT name (see installVendoredGalaxyRoles), so a namespaced range-config
-// reference resolves to the local copy instead of a Galaxy fetch.
+// installName is the role's canonical identity — its published
+// <namespace>.<role> galaxy name when meta yields one, the source dir
+// basename otherwise (localRoleName) — so a namespaced range-config or
+// requirements reference resolves to the local copy exactly as it would to
+// a Galaxy fetch (see also installVendoredGalaxyRoles).
 func addLocalRoleFromDirectory(_ core.App, dir, installName, ownerProxmoxUsername string, global, force bool) error {
 	name := installName
 	if name == "" {
