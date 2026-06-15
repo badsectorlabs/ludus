@@ -35,6 +35,10 @@ ludus ansible role add -d ./ludus_child_domain
 # Add a role for another user/range (as an admin)
 #terminal-command-local
 ludus ansible role add badsectorlabs.luds_adcs --user USER2
+
+# Add a role globally for all users (admin only)
+#terminal-command-local
+ludus ansible role add badsectorlabs.ludus_adcs --global
 ```
 
 Roles added from a directory will be listed as the directory name, regardless of what is in `meta/main.yml`. This is how `ansible-galaxy` works when installing roles.
@@ -65,7 +69,7 @@ You can define any variables that will be passed to the role with `role_vars` as
 
 ## Ansible Collections
 
-Ansible collections bundle modules, roles, and plugins under a namespaced name (`namespace.name`). Like roles, collections install per-user, and any collection on [Ansible Galaxy](https://galaxy.ansible.com/ui/standalone/collections/) works with Ludus.
+Ansible collections bundle modules, roles, and plugins under a namespaced name (`namespace.name`). Like roles, collections install per-user by default, and any collection on [Ansible Galaxy](https://galaxy.ansible.com/ui/standalone/collections/) works with Ludus. Admins can install a collection instance-wide for all users with `--global`.
 
 Manage them with `ludus ansible collection` (alias `collections`):
 
@@ -73,6 +77,10 @@ Manage them with `ludus ansible collection` (alias `collections`):
 # Add from Ansible Galaxy (pin a version with --version)
 #terminal-command-local
 ludus ansible collection add community.windows
+
+# Add globally for all users (admin only)
+#terminal-command-local
+ludus ansible collection add community.windows --global
 
 # Add from a .tar.gz collection artifact URL
 #terminal-command-local

@@ -169,18 +169,8 @@ func InstallRolesFromRequirementsWithHome(requirementsYAML []byte, rolesPath, an
 	}
 	tmp.Close()
 
-	args := []string{"role", "install", "-r", tmp.Name()}
-	if force {
-		args = append(args, "-f")
-	}
-	if rolesPath != "" {
-		args = append(args, "--roles-path", rolesPath)
-	}
-	cmd := exec.Command("ansible-galaxy", args...)
+	cmd := galaxyInstallCmd(galaxyRole, []string{"role", "install"}, []string{"-r", tmp.Name()}, force, rolesPath, ansibleHome)
 	cmd.Dir = filepath.Dir(tmp.Name())
-	if ansibleHome != "" {
-		cmd.Env = append(os.Environ(), "ANSIBLE_HOME="+ansibleHome)
-	}
 	out, err := cmd.CombinedOutput()
 
 	results := parseGalaxyInstallOutput(string(out))
@@ -196,7 +186,7 @@ func InstallRolesFromRequirementsWithHome(requirementsYAML []byte, rolesPath, an
 // install location so collections land alongside roles instead of in the
 // systemd-protected /home default. Returns one result per collection touched;
 // callers should treat the result list the same way they treat role results.
-func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansibleHome string, force bool) ([]AnsibleInstallResult, error) {
+func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, collectionsPath, ansibleHome string, force bool) ([]AnsibleInstallResult, error) {
 	if !hasRequirementsCollections(requirementsYAML) {
 		return nil, nil
 	}
@@ -210,15 +200,8 @@ func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansible
 	}
 	tmp.Close()
 
-	args := []string{"collection", "install", "-r", tmp.Name()}
-	if force {
-		args = append(args, "-f")
-	}
-	cmd := exec.Command("ansible-galaxy", args...)
+	cmd := galaxyInstallCmd(galaxyCollection, []string{"collection", "install"}, []string{"-r", tmp.Name()}, force, collectionsPath, ansibleHome)
 	cmd.Dir = filepath.Dir(tmp.Name())
-	if ansibleHome != "" {
-		cmd.Env = append(os.Environ(), "ANSIBLE_HOME="+ansibleHome)
-	}
 	out, err := cmd.CombinedOutput()
 
 	results := parseGalaxyCollectionInstallOutput(string(out))
@@ -245,8 +228,15 @@ func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansible
 			// Prefer the on-disk version from MANIFEST.json over the declared
 			// pin: requirements.yml often omits the version (or uses a range
 			// like ">=1.2.0" that isn't a real version), but ansible-galaxy
-			// has already resolved it to a concrete release on disk.
-			version := readGalaxyInstalledCollectionVersion(ansibleHome, c.Name)
+			// has already resolved it to a concrete release on disk. Read from
+			// the base actually targeted: the global base when collectionsPath
+			// is set, else the per-user home.
+			var version string
+			if collectionsPath != "" {
+				version = readGalaxyInstalledCollectionVersionFromBase(collectionsPath, c.Name)
+			} else {
+				version = readGalaxyInstalledCollectionVersion(ansibleHome, c.Name)
+			}
 			if version == "" {
 				version = c.Version
 			}
@@ -559,10 +549,21 @@ func parseRequestedVersions(data []byte) map[string]string {
 }
 
 // readGalaxyInstalledCollectionVersion returns the version recorded in
-// MANIFEST.json for an installed Ansible collection, or "" if the file is
-// missing or unreadable.
+// MANIFEST.json for a collection installed under the per-user ansible home, or
+// "" if the file is missing or unreadable.
 func readGalaxyInstalledCollectionVersion(ansibleHome, name string) string {
 	if ansibleHome == "" {
+		return ""
+	}
+	return readGalaxyInstalledCollectionVersionFromBase(filepath.Join(ansibleHome, "collections"), name)
+}
+
+// readGalaxyInstalledCollectionVersionFromBase reads the MANIFEST.json version
+// of an installed collection from a collections base — the directory that
+// directly contains ansible_collections/ (a per-user "<home>/collections" or
+// the shared global-collections path). Returns "" if missing or unreadable.
+func readGalaxyInstalledCollectionVersionFromBase(base, name string) string {
+	if base == "" {
 		return ""
 	}
 	dot := strings.Index(name, ".")
@@ -570,7 +571,7 @@ func readGalaxyInstalledCollectionVersion(ansibleHome, name string) string {
 		return ""
 	}
 	v, _ := readCollectionManifestVersion(filepath.Join(
-		ansibleHome, "collections", "ansible_collections",
+		base, "ansible_collections",
 		name[:dot], name[dot+1:], "MANIFEST.json",
 	))
 	return v

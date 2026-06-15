@@ -229,8 +229,9 @@ var collectionAddCmd = &cobra.Command{
 		requestBody := fmt.Sprintf(`{
 				"collection": "%s",
 				"force": %s,
-				"version": "%s"
-			  }`, args[0], strconv.FormatBool(ansibleForce), ansibleVersion)
+				"version": "%s",
+				"global": %s
+			  }`, args[0], strconv.FormatBool(ansibleForce), ansibleVersion, strconv.FormatBool(ansibleGlobal))
 
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/ansible/collection"), requestBody)
 
@@ -244,6 +245,7 @@ var collectionAddCmd = &cobra.Command{
 func setupCollectionAddCmd(command *cobra.Command) {
 	command.Flags().BoolVarP(&ansibleForce, "force", "f", false, "force the collection to be added")
 	command.Flags().StringVar(&ansibleVersion, "version", "", "the collection version to install")
+	command.Flags().BoolVarP(&ansibleGlobal, "global", "g", false, "install the collection for all users")
 }
 
 var collectionRemoveCmd = &cobra.Command{

@@ -73,9 +73,10 @@ type InstallCollectionRequest struct {
 	// Action is "install" (default when empty) or "remove". ansible-galaxy has
 	// no `collection remove`, so a remove deletes the on-disk collection dir.
 	Action string `json:"action,omitempty"`
-	// Global selects the shared global-collections path for a remove; otherwise
-	// the caller's per-user collections path. Ignored for install (galaxy
-	// installs land per the ANSIBLE_HOME env).
+	// Global selects the shared global-collections path; otherwise the caller's
+	// per-user collections path. On remove it points the directory deletion at
+	// the right scope; on install it passes --collections-path so the bytes
+	// land in the global base instead of the per-user ANSIBLE_HOME default.
 	Global bool `json:"global,omitempty"`
 }
 type InstallRoleRequest struct {

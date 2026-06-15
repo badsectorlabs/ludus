@@ -237,7 +237,11 @@ func installRolesForBlueprint(e *core.RequestEvent, app core.App, walked WalkedB
 	// has no `collection remove`, so Ludus deletes the directory itself
 	// (removeLocalCollectionByName) and releases the claims.
 	if hasRequirementsCollections(galaxyRequirements) {
-		colResults, err := InstallCollectionsFromRequirementsWithHome(galaxyRequirements, opts.AnsibleHome, opts.ForceRoles)
+		collectionsPath := ""
+		if opts.Global {
+			collectionsPath = globalCollectionsPath()
+		}
+		colResults, err := InstallCollectionsFromRequirementsWithHome(galaxyRequirements, collectionsPath, opts.AnsibleHome, opts.ForceRoles)
 		if err != nil && len(colResults) == 0 {
 			out = append(out, AnsibleInstallResult{Type: AnsibleResultCollection, OK: false, Error: err.Error()})
 		}
