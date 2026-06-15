@@ -50,8 +50,8 @@ stages:
       echo "binaries/ not found; downloading build all artifacts from this pipeline"
 
       build_job_id="$(
-        curl --fail --silent --show-error \
-          --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        curl --fail --silent --show-error --globoff \
+          --header "PRIVATE-TOKEN: ${JOB_READ_PAT}" \
           "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/pipelines/${CI_PIPELINE_ID}/jobs?scope[]=success&per_page=100" \
         | jq -r '[.[] | select(.name == "build all")][0].id // empty'
       )"
