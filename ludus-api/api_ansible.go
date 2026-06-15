@@ -115,6 +115,10 @@ func ActionRoleFromInternet(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not authorized to perform this ansible action")
 	}
 
+	if roleBody.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "Only administrators can perform global ansible actions")
+	}
+
 	var roleString = roleBody.Role
 	if roleBody.Version != "" {
 		roleString = fmt.Sprintf("%s,%s", roleBody.Role, roleBody.Version)
@@ -219,6 +223,10 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 	global, err := strconv.ParseBool(globalStr)
 	if err != nil {
 		return JSONError(e, http.StatusBadRequest, "Invalid boolean value for 'global': "+err.Error())
+	}
+
+	if global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "Only administrators can perform global ansible actions")
 	}
 
 	// Retrieve the file
@@ -384,10 +392,11 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, err.Error())
 	}
 
+	if collectionBody.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "Only administrators can perform global ansible actions")
+	}
+
 	if collectionBody.Action == "remove" {
-		if collectionBody.Global && !user.IsAdmin() {
-			return JSONError(e, http.StatusForbidden, "Only administrators can remove globally-installed collections")
-		}
 		if isCoreCollection(collectionBody.Collection) {
 			return JSONError(e, http.StatusBadRequest, "You cannot remove this core Ludus collection as it is required for Ludus to function")
 		}
@@ -461,6 +470,10 @@ func InstallSubscriptionRoles(e *core.RequestEvent) error {
 
 	if !user.IsAdmin() && ServerConfiguration.PreventUserAnsibleAdd {
 		return JSONError(e, http.StatusForbidden, "You are not authorized to perform this ansible action")
+	}
+
+	if requestBody.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "Only administrators can perform global ansible actions")
 	}
 
 	var success []string
