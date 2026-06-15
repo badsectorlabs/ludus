@@ -75,11 +75,10 @@ type CatalogItem struct {
 	Version          string `json:"version,omitempty"`
 	State            string `json:"state"`
 	InstalledVersion string `json:"installedVersion,omitempty"`
-	// Global reports, for an installed role, whether it lives in the
-	// system-wide global-roles path (true) or the owner's per-user roles
-	// path (false). Drives the role-remove flow: ansible-galaxy must be
-	// pointed at the right path or it reports "not installed, skipping".
-	// Meaningless (always false) for templates and collections.
+	// Global reports, for an installed role or collection, whether it lives in
+	// the system-wide global path (true) or the owner's per-user path (false).
+	// Drives the remove flow: the install/delete must be pointed at the right
+	// path or it reports "not installed, skipping". Always false for templates.
 	Global bool `json:"global,omitempty"`
 	// Scopes lists every installed copy of a role or vendored collection with
 	// its scope, on-disk version, and per-scope state vs the pin. An artifact

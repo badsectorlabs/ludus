@@ -196,8 +196,8 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		// Set the ansible home to the user's ansible directory
 		execute.WithEnvVar("ANSIBLE_HOME", fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername())),
 		execute.WithEnvVar("ANSIBLE_SSH_CONTROL_PATH_DIR", fmt.Sprintf("%s/users/%s/.ansible/cp", ludusInstallPath, user.ProxmoxUsername())),
-		execute.WithEnvVar("ANSIBLE_ROLES_PATH", fmt.Sprintf("%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath)),
-		execute.WithEnvVar("ANSIBLE_COLLECTIONS_PATH", fmt.Sprintf("%s/users/%s/.ansible/collections:%s/resources/global-collections", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath)),
+		execute.WithEnvVar("ANSIBLE_ROLES_PATH", ansibleRolesSearchPath(user.ProxmoxUsername())),
+		execute.WithEnvVar("ANSIBLE_COLLECTIONS_PATH", ansibleCollectionsSearchPath(user.ProxmoxUsername())),
 		// Inject vars for the proxmox.py dynamic inventory script
 		execute.WithEnvVar("PROXMOX_NODE", ServerConfiguration.ProxmoxNode),
 		execute.WithEnvVar("PROXMOX_INVALID_CERT", strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert)),
@@ -494,8 +494,8 @@ func checkRoleExists(e *core.RequestEvent, roleName string) (bool, error) {
 	cmd := exec.Command("ansible-galaxy", "role", "list") // no --format json for roles...
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_ROLES_PATH=%s/users/%s/.ansible/roles:%s/resources/global-roles", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_COLLECTIONS_PATH=%s/users/%s/.ansible/collections:%s/resources/global-collections", ludusInstallPath, user.ProxmoxUsername(), ludusInstallPath))
+	cmd.Env = append(cmd.Env, "ANSIBLE_ROLES_PATH="+ansibleRolesSearchPath(user.ProxmoxUsername()))
+	cmd.Env = append(cmd.Env, "ANSIBLE_COLLECTIONS_PATH="+ansibleCollectionsSearchPath(user.ProxmoxUsername()))
 	var stdoutBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = io.Discard
@@ -776,4 +776,69 @@ func computeTargetNodes(e *core.RequestEvent, rangeID string) (string, map[strin
 
 	logger.Debug(fmt.Sprintf("Computed target nodes for range %s: default=%s, per-vm=%v", rangeID, defaultTargetNode, vmTargetNodes))
 	return defaultTargetNode, vmTargetNodes
+}
+
+// ansibleRolesSearchPath / ansibleCollectionsSearchPath build the
+// ANSIBLE_ROLES_PATH / ANSIBLE_COLLECTIONS_PATH values for a playbook run: the
+// user's own scope first, then the shared global scope. ansible resolves first
+// match wins, so a user's own copy shadows the global one. Defined once here
+// rather than hand-rolled at each call site. (Galaxy installs don't use these —
+// they target a scope with --roles-path / --collections-path instead.)
+func ansibleRolesSearchPath(proxmoxUsername string) string {
+	return userRolesPath(proxmoxUsername) + ":" + globalRolesPath()
+}
+
+func ansibleCollectionsSearchPath(proxmoxUsername string) string {
+	return userCollectionsPath(proxmoxUsername) + ":" + globalCollectionsPath()
+}
+
+// galaxyArtifact selects the per-type conventions for an ansible-galaxy install:
+// which install-path flag to use, and whether a global install must also export
+// ANSIBLE_COLLECTIONS_PATH.
+type galaxyArtifact int
+
+const (
+	galaxyRole galaxyArtifact = iota
+	galaxyCollection
+)
+
+func (a galaxyArtifact) pathFlag() string {
+	if a == galaxyCollection {
+		return "--collections-path"
+	}
+	return "--roles-path"
+}
+
+// galaxyInstallCmd assembles the `ansible-galaxy` install invocation shared by
+// every install site. base is the subcommand prefix ({"role","install"},
+// {"collection","install"}, or {action} for the legacy role install/remove
+// form); target is what's being installed (an FQCN/URL, or {"-r", file}).
+//
+// When scopePath is non-empty the install is global: it is written there via the
+// artifact's path flag, and for collections scopePath is also exported as
+// ANSIBLE_COLLECTIONS_PATH so ansible-galaxy treats the global directory as a
+// configured search path instead of warning that it sits outside the search path
+// (roles emit no such warning, so they never need it). ansibleHome, when set,
+// pins ANSIBLE_HOME to keep galaxy off the systemd-protected /home default.
+//
+// Callers set cmd.Dir themselves where the working directory matters (tar / -r installs).
+func galaxyInstallCmd(artifact galaxyArtifact, base, target []string, force bool, scopePath, ansibleHome string) *exec.Cmd {
+	args := make([]string, 0, len(base)+len(target)+3)
+	args = append(args, base...)
+	args = append(args, target...)
+	if force {
+		args = append(args, "-f")
+	}
+	if scopePath != "" {
+		args = append(args, artifact.pathFlag(), scopePath)
+	}
+	cmd := exec.Command("ansible-galaxy", args...)
+	cmd.Env = os.Environ()
+	if ansibleHome != "" {
+		cmd.Env = append(cmd.Env, "ANSIBLE_HOME="+ansibleHome)
+	}
+	if scopePath != "" && artifact == galaxyCollection {
+		cmd.Env = append(cmd.Env, "ANSIBLE_COLLECTIONS_PATH="+scopePath)
+	}
+	return cmd
 }

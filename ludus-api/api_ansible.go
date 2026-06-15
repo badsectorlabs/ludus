@@ -7,7 +7,6 @@ import (
 	"ludusapi/models"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -132,18 +131,11 @@ func ActionRoleFromInternet(e *core.RequestEvent) error {
 	// Make sure the role string is escaped
 	roleString = shellescape.Quote(roleString)
 
-	var cmd *exec.Cmd
-	if roleBody.Global && roleBody.Force {
-		cmd = exec.Command("ansible-galaxy", roleBody.Action, roleString, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
-	} else if roleBody.Global {
-		cmd = exec.Command("ansible-galaxy", roleBody.Action, roleString, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
-	} else if roleBody.Force {
-		cmd = exec.Command("ansible-galaxy", roleBody.Action, roleString, "-f")
-	} else {
-		cmd = exec.Command("ansible-galaxy", roleBody.Action, roleString)
+	scopePath := ""
+	if roleBody.Global {
+		scopePath = globalRolesPath()
 	}
-	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
+	cmd := galaxyInstallCmd(galaxyRole, []string{roleBody.Action}, []string{roleString}, roleBody.Force, scopePath, userAnsibleHome(user.ProxmoxUsername()))
 	cmdOutput, err := cmd.CombinedOutput()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to %s the ansible role %s: %s; Output was: %s", roleBody.Action, roleString, err.Error(), string(cmdOutput)))
@@ -261,19 +253,12 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 	os.Rename(roleTarPath, newPath)
 	defer os.Remove(newPath)
 
-	var cmd *exec.Cmd
-	if global && force {
-		cmd = exec.Command("ansible-galaxy", "role", "install", roleName, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
-	} else if global {
-		cmd = exec.Command("ansible-galaxy", "role", "install", roleName, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
-	} else if force {
-		cmd = exec.Command("ansible-galaxy", "role", "install", roleName, "-f")
-	} else {
-		cmd = exec.Command("ansible-galaxy", "role", "install", roleName)
+	scopePath := ""
+	if global {
+		scopePath = globalRolesPath()
 	}
+	cmd := galaxyInstallCmd(galaxyRole, []string{"role", "install"}, []string{roleName}, force, scopePath, userAnsibleHome(user.ProxmoxUsername()))
 	cmd.Dir = fmt.Sprintf("%s/users/%s/.ansible/tmp", ludusInstallPath, user.ProxmoxUsername()) // If you try to install a tar'd role with the full path, it will fail to extract. Bug in ansible-galaxy?
-	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 	cmdOutput, err := cmd.CombinedOutput()
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to install the ansible role %s: %s; Output was: %s", roleTarPath, err.Error(), string(cmdOutput)))
@@ -426,25 +411,29 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 	// Make sure the collection string is escaped
 	collectionString = shellescape.Quote(collectionString)
 
-	var cmd *exec.Cmd
-	if collectionBody.Force {
-		cmd = exec.Command("ansible-galaxy", "collection", "install", collectionString, "-f")
-	} else {
-		cmd = exec.Command("ansible-galaxy", "collection", "install", collectionString)
+	scopePath := ""
+	if collectionBody.Global {
+		scopePath = globalCollectionsPath()
 	}
-	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
+	cmd := galaxyInstallCmd(galaxyCollection, []string{"collection", "install"}, []string{collectionString}, collectionBody.Force, scopePath, userAnsibleHome(user.ProxmoxUsername()))
 	cmdOutput, err := cmd.CombinedOutput()
+	output := string(cmdOutput)
 	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to install the ansible collection %s: %s; Output was: %s", collectionString, err.Error(), string(cmdOutput)))
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to install the ansible collection %s: %s; Output was: %s", collectionString, err.Error(), output))
 	}
-	if strings.Contains(string(cmdOutput), "[WARNING]") {
-		return JSONError(e, http.StatusInternalServerError, string(cmdOutput))
-	}
-	if strings.Contains(string(cmdOutput), "Nothing to do. All requested collections are already installed. If you want to reinstall them, consider using `--force`.") {
+	// Judge the outcome by galaxy's result markers, not by scanning for
+	// [WARNING]: a successful install can still print advisory warnings (e.g. a
+	// version-compat note about an unrelated collection already in the search
+	// path), and those must not be treated as failures. Output with neither the
+	// no-op nor the success marker falls through to the error below, so genuine
+	// problems are still surfaced.
+	if strings.Contains(output, "Nothing to do. All requested collections are already installed") {
 		return JSONError(e, http.StatusConflict, "Collection already installed. Collections from https://docs.ansible.com/ansible/latest/collections/index.html are installed globally. If you want to reinstall it, consider using `--force`.")
 	}
-	return JSONResult(e, http.StatusCreated, "Successfully installed: "+collectionString)
+	if strings.Contains(output, "was installed successfully") {
+		return JSONResult(e, http.StatusCreated, "Successfully installed: "+collectionString)
+	}
+	return JSONError(e, http.StatusInternalServerError, output)
 }
 
 func GetSubscriptionRoles(e *core.RequestEvent) error {
@@ -513,19 +502,12 @@ func InstallSubscriptionRoles(e *core.RequestEvent) error {
 		defer os.Remove(fmt.Sprintf("%s/%s", tempDir, escapedRoleName))
 
 		// Install the role using ansible-galaxy (globally or per-user based on request)
-		var cmd *exec.Cmd
-		if requestBody.Global && requestBody.Force {
-			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName, "-f", "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
-		} else if requestBody.Global {
-			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName, "--roles-path", fmt.Sprintf("%s/resources/global-roles", ludusInstallPath))
-		} else if requestBody.Force {
-			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName, "-f")
-		} else {
-			cmd = exec.Command("ansible-galaxy", "role", "install", escapedRoleName)
+		scopePath := ""
+		if requestBody.Global {
+			scopePath = globalRolesPath()
 		}
+		cmd := galaxyInstallCmd(galaxyRole, []string{"role", "install"}, []string{escapedRoleName}, requestBody.Force, scopePath, userAnsibleHome(user.ProxmoxUsername()))
 		cmd.Dir = tempDir // ansible-galaxy needs to be run from the directory containing the tar file
-		cmd.Env = os.Environ()
-		cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
 		cmdOutput, err := cmd.CombinedOutput()
 		if err != nil && !strings.Contains(string(cmdOutput), "was installed successfully") {
 			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{

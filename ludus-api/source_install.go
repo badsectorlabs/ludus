@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -753,11 +752,8 @@ func installSubscriptionRoleByName(e *core.RequestEvent, name, ansibleHome strin
 	}
 	defer os.Remove(namedPath)
 
-	globalRolesPath := filepath.Join(ludusInstallPath, "resources", "global-roles")
-	cmd := exec.Command("ansible-galaxy", "role", "install", name,
-		"--roles-path", globalRolesPath)
+	cmd := galaxyInstallCmd(galaxyRole, []string{"role", "install"}, []string{name}, false, globalRolesPath(), ansibleHome)
 	cmd.Dir = tempDir
-	cmd.Env = append(os.Environ(), "ANSIBLE_HOME="+ansibleHome)
 	output, err := cmd.CombinedOutput()
 	if err != nil && !strings.Contains(string(output), "was installed successfully") {
 		return fmt.Errorf("ansible-galaxy install %q failed: %s: %w", name, strings.TrimSpace(string(output)), err)
