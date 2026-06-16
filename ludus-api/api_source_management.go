@@ -2,6 +2,7 @@ package ludusapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"ludusapi/dto"
@@ -14,15 +15,6 @@ import (
 
 	"github.com/pocketbase/pocketbase/core"
 )
-
-var sourceSlugRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*$`)
-
-// reservedSourceIDs collides with literal-segment routes registered under
-// /sources/. A sourceID equal to any of these would shadow the route and
-// make the source unreachable via /sources/{sourceID}.
-var reservedSourceIDs = map[string]bool{
-	"blueprints": true,
-}
 
 // maxSourceArchiveBytes caps the size of an uploaded source archive at the multipart
 // parser layer. Must stay aligned with the FileField MaxSize on the sources collection
@@ -74,7 +66,7 @@ func CreateSource(e *core.RequestEvent) error {
 		req.Type = strings.TrimSpace(e.Request.FormValue("type"))
 		req.URL = strings.TrimSpace(e.Request.FormValue("url"))
 		req.Ref = strings.TrimSpace(e.Request.FormValue("ref"))
-		req.GlobalRoles = e.Request.FormValue("globalRoles") == "true"
+		req.Global = e.Request.FormValue("global") == "true"
 		req.Force = e.Request.FormValue("force") == "true"
 	} else {
 		if err := e.BindBody(&req); err != nil {
@@ -82,8 +74,8 @@ func CreateSource(e *core.RequestEvent) error {
 		}
 	}
 
-	if req.GlobalRoles && !user.IsAdmin() {
-		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
+	if req.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "global requires admin caller")
 	}
 
 	if req.Type != "git" && req.Type != "upload" {
@@ -91,6 +83,7 @@ func CreateSource(e *core.RequestEvent) error {
 	}
 
 	sourceID := strings.TrimSpace(req.ID)
+	explicitID := sourceID != ""
 	var err error
 	if sourceID == "" {
 		sourceID, err = deriveSourceIDFromRequest(&req, e)
@@ -98,15 +91,10 @@ func CreateSource(e *core.RequestEvent) error {
 			return JSONError(e, http.StatusBadRequest, err.Error())
 		}
 	}
-	if !sourceSlugRegex.MatchString(sourceID) {
+	if !dto.SourceIDRegex.MatchString(sourceID) {
 		return JSONError(e, http.StatusBadRequest,
-			fmt.Sprintf("sourceID %q does not match %s", sourceID, sourceSlugRegex.String()))
+			fmt.Sprintf("sourceID %q does not match %s", sourceID, dto.SourceIDRegex.String()))
 	}
-	if reservedSourceIDs[sourceID] {
-		return JSONError(e, http.StatusBadRequest,
-			fmt.Sprintf("sourceID %q is reserved; pick another", sourceID))
-	}
-
 	existing, _ := e.App.FindRecordsByFilter("sources",
 		"owner = {:o} && sourceID = {:s}", "", 1, 0,
 		map[string]any{"o": user.Id, "s": sourceID})
@@ -126,7 +114,7 @@ func CreateSource(e *core.RequestEvent) error {
 		}
 		if req.Type == "git" && req.URL != "" && req.URL != existing[0].GetString("url") {
 			return JSONError(e, http.StatusConflict,
-				fmt.Sprintf("source %q already exists pointing at %s; choose a different source ID, or remove it and register again to point at a new URL",
+				fmt.Sprintf("source %q already exists pointing at %s; choose a different source ID, or update the existing source's url",
 					sourceID, existing[0].GetString("url")))
 		}
 		// Register-only re-walk: fetch fresh content (for git, re-clone; for
@@ -149,6 +137,20 @@ func CreateSource(e *core.RequestEvent) error {
 			SourceID: existing[0].GetString("sourceID"),
 			Catalog:  toCatalogDTO(catalog),
 		})
+	}
+
+	// sourceID must be globally unique, not just per-owner. The same-owner case
+	// is handled above, so any remaining collision is with another owner. Reject
+	// it and have the caller pick a different id — matching how templates, users,
+	// and blueprints handle id collisions (no auto-rename).
+	if taken, _ := e.App.FindRecordsByFilter("sources",
+		"sourceID = {:s}", "", 1, 0, map[string]any{"s": sourceID}); len(taken) > 0 {
+		if explicitID {
+			return JSONError(e, http.StatusConflict,
+				fmt.Sprintf("source id %q is already in use; choose a different id", sourceID))
+		}
+		return JSONError(e, http.StatusConflict,
+			fmt.Sprintf("auto-derived source id %q is already in use; provide an explicit source id", sourceID))
 	}
 
 	collection, err := e.App.FindCollectionByNameOrId("sources")
@@ -192,7 +194,7 @@ func CreateSource(e *core.RequestEvent) error {
 	}
 
 	opts := SyncOptions{
-		GlobalRoles:     req.GlobalRoles,
+		Global:          req.Global,
 		Force:           req.Force,
 		Archive:         uploadBytes,
 		ArchiveFilename: uploadFilename,
@@ -233,10 +235,9 @@ func sourceSyncResponse(sourceID string, res *SyncResult) map[string]any {
 		"sourceID": sourceID,
 	}
 	if res != nil {
-		embedArtifactResults(out, res.TemplateResults, res.LocalRoleResults, res.RoleResults)
-		if len(res.UndeclaredDependencies) > 0 {
-			out["undeclaredDependencies"] = res.UndeclaredDependencies
-		}
+		out["templateResults"] = res.TemplateResults
+		out["localAnsibleResults"] = res.LocalAnsibleResults
+		out["blueprintResults"] = res.BlueprintResults
 	}
 	return out
 }
@@ -266,7 +267,7 @@ func deriveSourceIDFromRequest(req *dto.CreateSourceRequest, e *core.RequestEven
 	basename = regexp.MustCompile(`[^a-z0-9_-]+`).ReplaceAllString(basename, "-")
 	basename = regexp.MustCompile(`-+`).ReplaceAllString(basename, "-")
 	basename = strings.Trim(basename, "-")
-	if basename == "" || !sourceSlugRegex.MatchString(basename) || reservedSourceIDs[basename] {
+	if basename == "" || !dto.SourceIDRegex.MatchString(basename) {
 		return "", fmt.Errorf("could not auto-derive sourceID; provide an explicit sourceID override")
 	}
 	return basename, nil
@@ -360,7 +361,7 @@ func ListSources(e *core.RequestEvent) error {
 
 	out := make([]dto.SourceResponse, 0, len(records))
 	for _, r := range records {
-		out = append(out, sourceRecordToResponseWithKind(e.App, r))
+		out = append(out, sourceRecordToResponseWithOwner(e.App, r))
 	}
 	return e.JSON(http.StatusOK, out)
 }
@@ -370,7 +371,7 @@ func GetSource(e *core.RequestEvent) error {
 	if err != nil {
 		return err // already a JSONError
 	}
-	return e.JSON(http.StatusOK, sourceRecordToResponseWithKind(e.App, src))
+	return e.JSON(http.StatusOK, sourceRecordToResponseWithOwner(e.App, src))
 }
 
 // UpdateSource handles PATCH /sources/{sourceID}. Body is multipart
@@ -409,7 +410,8 @@ func UpdateSource(e *core.RequestEvent) error {
 			return JSONError(e, http.StatusBadRequest, fmt.Sprintf("failed to parse multipart form: %v", err))
 		}
 		req.Ref = strings.TrimSpace(e.Request.FormValue("ref"))
-		req.GlobalRoles = e.Request.FormValue("globalRoles") == "true"
+		req.URL = strings.TrimSpace(e.Request.FormValue("url"))
+		req.Global = e.Request.FormValue("global") == "true"
 		req.Force = e.Request.FormValue("force") == "true"
 		uploadBytes, uploadFilename, _ = readMultipartArchive(e, "archive")
 	} else if e.Request.ContentLength > 0 {
@@ -418,8 +420,8 @@ func UpdateSource(e *core.RequestEvent) error {
 		}
 	}
 
-	if req.GlobalRoles && !user.IsAdmin() {
-		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
+	if req.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "global requires admin caller")
 	}
 	if uploadBytes != nil && src.GetString("type") != "upload" {
 		return JSONError(e, http.StatusBadRequest,
@@ -429,27 +431,42 @@ func UpdateSource(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest,
 			"ref is only meaningful for git-type sources")
 	}
+	if req.URL != "" && src.GetString("type") != "git" {
+		return JSONError(e, http.StatusBadRequest,
+			"url is only meaningful for git-type sources")
+	}
 
-	refChanged := false
+	changed := false
 	if req.Ref != "" && req.Ref != src.GetString("ref") {
 		src.Set("ref", req.Ref)
-		refChanged = true
+		changed = true
 	}
-	if refChanged {
+	if req.URL != "" && req.URL != src.GetString("url") {
+		// The checkout's origin still points at the old URL and
+		// CloneOrUpdateGit only fetches an existing checkout — drop it so
+		// the next sync re-clones from the new remote.
+		src.Set("url", req.URL)
+		_ = os.RemoveAll(SourceCheckoutDir(src.Id))
+		changed = true
+	}
+	if changed {
 		if err := e.App.Save(src); err != nil {
 			return JSONError(e, http.StatusInternalServerError, err.Error())
 		}
 	}
 
-	// New archive bytes on an upload source: re-extract + re-register inline.
+	// New archive bytes on an upload source: re-extract, then re-apply what
+	// this source actually has installed (derived from its claims) against
+	// the new content — not everything the archive ships.
 	if uploadBytes != nil {
 		opts := SyncOptions{
-			GlobalRoles:              req.GlobalRoles,
+			Global:                   req.Global,
 			Force:                    req.Force,
 			InitiatorIsAdmin:         user.IsAdmin(),
 			InitiatorProxmoxUsername: user.ProxmoxUsername(),
 			Archive:                  uploadBytes,
 			ArchiveFilename:          uploadFilename,
+			SelectionFromClaims:      true,
 		}
 		syncResult, syncErr := runSourceInstall(context.Background(), e, e.App, src, opts)
 		if syncErr != nil {
@@ -458,7 +475,7 @@ func UpdateSource(e *core.RequestEvent) error {
 		return e.JSON(http.StatusOK, sourceSyncResponse(src.GetString("sourceID"), syncResult))
 	}
 
-	return e.JSON(http.StatusOK, sourceRecordToResponseWithKind(e.App, src))
+	return e.JSON(http.StatusOK, sourceRecordToResponseWithOwner(e.App, src))
 }
 
 // DeleteSource handles DELETE /sources/{sourceID}. Registration-only: it
@@ -466,8 +483,8 @@ func UpdateSource(e *core.RequestEvent) error {
 // provided and its source_artifacts rows. Installed templates, roles, and
 // collections are left on disk — templates live in each installer's per-user
 // packer dir, and roles/collections may be shared with ranges or other
-// blueprints. Remove those individually — `source remove`, or the Ansible /
-// Templates pages — when you actually want them gone.
+// blueprints. Remove those individually via the templates / ansible delete
+// APIs when you actually want them gone.
 func DeleteSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
@@ -490,39 +507,9 @@ func DeleteSource(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, dto.DeleteSourceResponse{Status: "deleted"})
 }
 
-func removeTemplateByName(name, proxmoxUsername string) error {
-	if proxmoxUsername == "" {
-		return nil
-	}
-	dir := filepath.Join(ludusInstallPath, "users", proxmoxUsername, "packer", name)
-	return os.RemoveAll(dir)
-}
-
-// removeLocalRoleByName removes a role from the source owner's per-user roles
-// dir, and — only when includeGlobal (admin-initiated) — the shared
-// global-roles dir. Idempotent: missing dirs are ignored.
-func removeLocalRoleByName(app core.App, name string, src *core.Record, includeGlobal bool) error {
-	var candidates []string
-	// The global-roles dir is a shared, admin-scoped path. Only an
-	// admin-initiated remove may delete from it; a non-admin's remove is
-	// confined to the source owner's own per-user roles dir below.
-	if includeGlobal {
-		candidates = append(candidates, filepath.Join(ludusInstallPath, "resources", "global-roles", name))
-	}
-	if owner, err := app.FindRecordById("users", src.GetString("owner")); err == nil {
-		if home := userRolesPath(owner.GetString("proxmoxUsername")); home != "" {
-			candidates = append(candidates, filepath.Join(home, name))
-		}
-	}
-	for _, base := range candidates {
-		_ = os.RemoveAll(base)
-	}
-	return nil
-}
-
 // sourceRecordToResponse converts a sources PocketBase record to the wire DTO.
-// Kind is left as the zero value; use sourceRecordToResponseWithKind when the
-// caller can pay the extra DB queries.
+// OwnerUserID holds the raw owner record id; use sourceRecordToResponseWithOwner
+// when the caller can pay the extra DB query to translate it.
 func sourceRecordToResponse(r *core.Record) dto.SourceResponse {
 	return dto.SourceResponse{
 		ID:             r.Id,
@@ -535,51 +522,15 @@ func sourceRecordToResponse(r *core.Record) dto.SourceResponse {
 		Type:           r.GetString("type"),
 		URL:            r.GetString("url"),
 		Ref:            r.GetString("ref"),
-		OwnerUserID:    r.GetString("owner"), // record-id placeholder; WithKind translates
+		OwnerUserID:    r.GetString("owner"), // record-id placeholder; WithOwner translates
 		LastSyncedAt:   r.GetString("lastSyncedAt"),
 		LastSyncStatus: r.GetString("lastSyncStatus"),
 		LastSyncError:  r.GetString("lastSyncError"),
 	}
 }
 
-// computeSourceKind returns a "+" joined string of artifact kinds shipped by a
-// source: any nonempty subset of {"templates", "roles", "collections",
-// "blueprints"}. Returns "(empty)" when the source has none.
-func computeSourceKind(app core.App, srcID string) string {
-	hasBP, _ := app.FindRecordsByFilter("blueprints", "source = {:s}", "", 1, 0,
-		map[string]any{"s": srcID})
-	hasTpl, _ := app.FindRecordsByFilter("source_artifacts",
-		"source = {:s} && kind = 'template'", "", 1, 0,
-		map[string]any{"s": srcID})
-	hasRole, _ := app.FindRecordsByFilter("source_artifacts",
-		"source = {:s} && (kind = 'local_role' || kind = 'galaxy_role')", "", 1, 0,
-		map[string]any{"s": srcID})
-	hasCol, _ := app.FindRecordsByFilter("source_artifacts",
-		"source = {:s} && kind = 'collection'", "", 1, 0,
-		map[string]any{"s": srcID})
-
-	parts := []string{}
-	if len(hasTpl) > 0 {
-		parts = append(parts, "templates")
-	}
-	if len(hasRole) > 0 {
-		parts = append(parts, "roles")
-	}
-	if len(hasCol) > 0 {
-		parts = append(parts, "collections")
-	}
-	if len(hasBP) > 0 {
-		parts = append(parts, "blueprints")
-	}
-	if len(parts) == 0 {
-		return "(empty)"
-	}
-	return strings.Join(parts, "+")
-}
-
-func sourceRecordToResponseWithKind(app core.App, r *core.Record) dto.SourceResponse {
+func sourceRecordToResponseWithOwner(app core.App, r *core.Record) dto.SourceResponse {
 	resp := sourceRecordToResponse(r)
-	resp.Kind = computeSourceKind(app, r.Id)
 	if owner, err := app.FindRecordById("users", r.GetString("owner")); err == nil {
 		if userID := owner.GetString("userID"); userID != "" {
 			resp.OwnerUserID = userID
@@ -588,52 +539,31 @@ func sourceRecordToResponseWithKind(app core.App, r *core.Record) dto.SourceResp
 	return resp
 }
 
-// findSourceByVisibleID looks up a source by its user-facing sourceID, scoped to
-// what the caller can see (owner / shared / admin). Returns a JSONError-wrapped
-// error suitable for direct return from handlers.
+// findSourceByVisibleID looks up a source by its user-facing sourceID, scoped
+// to what the caller can see (owner / admin). sourceID is globally unique, so
+// at most one record ever matches.
 func findSourceByVisibleID(e *core.RequestEvent, sourceID string) (*core.Record, error) {
 	user, ok := e.Get("user").(*models.User)
 	if !ok || user == nil {
 		return nil, JSONError(e, http.StatusUnauthorized, "unauthenticated")
 	}
-	// PocketBase enforces uniqueness on (owner, sourceID), not sourceID alone,
-	// so two users may legitimately have a source with the same id. Pull up to
-	// 2 rows so we can detect collisions and force the caller to disambiguate
-	// rather than silently picking one — that path was a real authorization
-	// hazard for admin queries.
-	//
-	// Admin scoping: an admin acting on their own behalf can target any user's
-	// source (the cross-tenant path below). When the request carried an
-	// explicit `?userID=X` impersonation (which the middleware already used to
-	// swap `user` to X), treat the call as scoped to that user — otherwise an
-	// admin impersonating another admin still hits the cross-tenant branch and
-	// the disambiguation hint becomes a dead end.
+	// An admin acting on their own behalf can target any owner's source. An
+	// explicit ?userID=X impersonation (middleware already swapped `user` to X)
+	// scopes to that user.
 	impersonating := e.Request.URL.Query().Get("userID") != ""
 	var records []*core.Record
 	var err error
 	if user.IsAdmin() && !impersonating {
 		records, err = e.App.FindRecordsByFilter("sources",
-			"sourceID = {:s}", "+owner", 2, 0,
-			map[string]any{"s": sourceID})
+			"sourceID = {:s}", "", 1, 0, map[string]any{"s": sourceID})
 	} else {
 		records, err = e.App.FindRecordsByFilter("sources",
-			"sourceID = {:s} && owner = {:u}", "+owner", 2, 0,
+			"sourceID = {:s} && owner = {:u}", "", 1, 0,
 			map[string]any{"s": sourceID, "u": user.Id})
 	}
 	if err != nil || len(records) == 0 {
 		return nil, JSONError(e, http.StatusNotFound, fmt.Sprintf("source %q not found", sourceID))
 	}
-	if len(records) > 1 {
-		owners := make([]string, 0, len(records))
-		for _, r := range records {
-			owners = append(owners, resolveOwnerUserID(e, r.GetString("owner")))
-		}
-		return nil, JSONError(e, http.StatusConflict,
-			fmt.Sprintf("multiple sources match %q (owners: %s); re-run with -u <ownerID> to disambiguate",
-				sourceID, strings.Join(owners, ", ")))
-	}
-	// For non-admins, prefer the owned row when both an owned and a shared
-	// copy match (impossible in current schema but the +owner sort is stable).
 	return records[0], nil
 }
 
@@ -643,10 +573,6 @@ func findSourceByVisibleID(e *core.RequestEvent, sourceID string) (*core.Record,
 // existing on-disk content. No artifact installs, removes, or DB writes for
 // blueprints/templates/roles happen here. To actually apply a change to
 // what's installed from a source, call POST /sources/{sourceID}/install.
-//
-// One-shot legacy migration: if the source row's installSelection is null
-// (pre-upgrade), refresh snapshots the current walk into installSelection
-// so the next install has a concrete starting point.
 func SyncSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
@@ -668,7 +594,7 @@ func SyncSource(e *core.RequestEvent) error {
 	// No install side-effects to report, but undeclared-dep warnings still
 	// matter — they tell the user what would be missing if they ran install.
 	return e.JSON(http.StatusOK, sourceSyncResponse(src.GetString("sourceID"), &SyncResult{
-		UndeclaredDependencies: refresh.UndeclaredDependencies,
+		BlueprintResults: BlueprintResults{UndeclaredDependencies: refresh.UndeclaredDependencies},
 	}))
 }
 
@@ -687,73 +613,6 @@ func ListSourceBlueprints(e *core.RequestEvent) error {
 		out = append(out, sourceBlueprintToListItem(src, r))
 	}
 	return e.JSON(http.StatusOK, out)
-}
-
-func ListAllSourceBlueprints(e *core.RequestEvent) error {
-	user, err := requireUser(e)
-	if err != nil {
-		return err
-	}
-
-	var (
-		sources []*core.Record
-		srcErr  error
-	)
-	if user.IsAdmin() {
-		sources, srcErr = e.App.FindRecordsByFilter("sources", "", "+sourceID", 0, 0, nil)
-	} else {
-		sources, srcErr = e.App.FindRecordsByFilter("sources",
-			"owner = {:u}", "+sourceID", 0, 0,
-			map[string]any{"u": user.Id})
-	}
-	if srcErr != nil {
-		return JSONError(e, http.StatusInternalServerError, srcErr.Error())
-	}
-
-	out := []dto.SourceBlueprintListItem{}
-	for _, src := range sources {
-		bps, _ := e.App.FindRecordsByFilter("blueprints",
-			"source = {:s}", "+sourceBlueprintID", 0, 0, map[string]any{"s": src.Id})
-		for _, bp := range bps {
-			out = append(out, sourceBlueprintToListItem(src, bp))
-		}
-	}
-	return e.JSON(http.StatusOK, out)
-}
-
-func GetSourceBlueprintManifest(e *core.RequestEvent) error {
-	id := e.Request.PathValue("id")
-	parts := strings.SplitN(id, "/", 2)
-	if len(parts) != 2 {
-		return JSONError(e, http.StatusBadRequest, "id must be in form <sourceID>/<blueprintID>")
-	}
-	src, err := findSourceByVisibleID(e, parts[0])
-	if err != nil {
-		return err
-	}
-	bps, ferr := e.App.FindRecordsByFilter("blueprints",
-		"source = {:s} && sourceBlueprintID = {:b}", "", 1, 0,
-		map[string]any{"s": src.Id, "b": parts[1]})
-	if ferr != nil || len(bps) == 0 {
-		return JSONError(e, http.StatusNotFound, fmt.Sprintf("source-blueprint %q not found", id))
-	}
-	bp := bps[0]
-	configBytes, _ := readBlueprintConfigBytes(bp)
-	templates, roles, _ := InferFromRangeConfig(configBytes)
-	return e.JSON(http.StatusOK, map[string]any{
-		"sourceBlueprintID":  bp.GetString("sourceBlueprintID"),
-		"name":               bp.GetString("name"),
-		"description":        bp.GetString("description"),
-		"version":            bp.GetString("version"),
-		"authors":            anySliceToStrings(src.Get("authors")),
-		"homepage":           src.GetString("homepage"),
-		"license":            src.GetString("license"),
-		"tags":               anySliceToStrings(bp.Get("tags")),
-		"min_ludus_version":  bp.GetString("min_ludus_version"),
-		"inferred_templates": templates,
-		"inferred_roles":     roles,
-		"requirements_yaml":  bp.GetString("requirements_yaml"),
-	})
 }
 
 func sourceBlueprintToListItem(src, bp *core.Record) dto.SourceBlueprintListItem {
@@ -797,9 +656,10 @@ func ListSourceTemplates(e *core.RequestEvent) error {
 
 // ListSourceCollections handles GET /sources/{sourceID}/collections.
 // Returns Ansible collections this source's blueprints declared in their
-// requirements.yml. ansible-galaxy has no remove subcommand, so removing a
-// source leaves the on-disk install in place — the row here is a claim,
-// not a lifecycle anchor.
+// requirements.yml. galaxy-declared collections are claim-only rows; a source
+// that VENDORS a collection (local_collection) has it cleaned up on de-select
+// like a vendored role (ansible-galaxy has no remove subcommand, so Ludus rm's
+// the directory directly).
 func ListSourceCollections(e *core.RequestEvent) error {
 	src, err := findSourceByVisibleID(e, e.Request.PathValue("sourceID"))
 	if err != nil {
@@ -868,18 +728,17 @@ func GetSourceCatalog(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, toCatalogDTO(catalog))
 }
 
-// InstallSource handles POST /sources/{sourceID}/install. Selection is
-// optional and presence-significant:
+// InstallSource handles POST /sources/{sourceID}/install. Install is
+// additive and stateless — it acts only on the selection in the request and
+// never uninstalls anything. Selection is optional:
 //
-//   - absent → snapshot the current walk into installSelection (install
-//     everything upstream ships)
-//   - present, non-empty → use as-is; replaces any persisted selection
-//   - present, all-empty → "uninstall everything from this source": the
-//     selection is committed as empty and the prune logic clears every
-//     row/file the previous selection had carried
+//   - absent → install everything the walk ships
+//   - present → validated against the walk, then installed as-is
 //
-// Either way the source ends up with a concrete persisted selection, so
-// subsequent syncs are observation-only.
+// Nothing is persisted: what's installed is recorded by the claims ledger
+// (source_artifacts + blueprint rows). Removal goes through the individual
+// delete APIs (templates, ansible role/collection, blueprint); a removed
+// item stays gone until an install names it (or installs everything) again.
 func InstallSource(e *core.RequestEvent) error {
 	user, err := requireUser(e)
 	if err != nil {
@@ -897,12 +756,12 @@ func InstallSource(e *core.RequestEvent) error {
 	if err := e.BindBody(&req); err != nil {
 		return JSONError(e, http.StatusBadRequest, fmt.Sprintf("invalid request: %v", err))
 	}
-	if req.GlobalRoles && !user.IsAdmin() {
-		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
+	if req.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "global requires admin caller")
 	}
 
 	opts := SyncOptions{
-		GlobalRoles:              req.GlobalRoles,
+		Global:                   req.Global,
 		Force:                    req.Force,
 		NoDeps:                   req.NoDeps,
 		InitiatorIsAdmin:         user.IsAdmin(),
@@ -912,22 +771,26 @@ func InstallSource(e *core.RequestEvent) error {
 		// Caller supplied selection (even if empty). Honor it verbatim;
 		// empty arrays are the explicit "uninstall everything" signal.
 		opts.Selection = &InstallSelection{
-			Blueprints: req.Selection.Blueprints,
-			Templates:  req.Selection.Templates,
-			LocalRoles: req.Selection.LocalRoles,
+			Blueprints:       req.Selection.Blueprints,
+			Templates:        req.Selection.Templates,
+			LocalRoles:       req.Selection.LocalRoles,
+			LocalCollections: req.Selection.LocalCollections,
 		}
 	}
 	// opts.Selection stays nil only when the caller omitted the selection
 	// field entirely. runSourceInstall interprets that as "snapshot the walk."
 	result, syncErr := runSourceInstall(context.Background(), e, e.App, src, opts)
 	if syncErr != nil {
+		if errors.Is(syncErr, errSelectionNotAvailable) {
+			return JSONError(e, http.StatusBadRequest, syncErr.Error())
+		}
 		return JSONError(e, http.StatusInternalServerError, syncErr.Error())
 	}
 	return e.JSON(http.StatusOK, sourceSyncResponse(src.GetString("sourceID"), result))
 }
 
 func isEmptySelection(s dto.InstallSelectionDTO) bool {
-	return len(s.Blueprints) == 0 && len(s.Templates) == 0 && len(s.LocalRoles) == 0
+	return len(s.Blueprints) == 0 && len(s.Templates) == 0 && len(s.LocalRoles) == 0 && len(s.LocalCollections) == 0
 }
 
 // toCatalogDTO copies an internal SourceCatalog onto the wire DTO. Trivial
@@ -938,35 +801,36 @@ func toCatalogDTO(c *SourceCatalog) dto.SourceCatalogDTO {
 		return dto.SourceCatalogDTO{}
 	}
 	out := dto.SourceCatalogDTO{
-		SourceID:          c.SourceID,
-		SourceName:        c.SourceName,
-		Blueprints:        make([]dto.CatalogBlueprintDTO, 0, len(c.Blueprints)),
-		Templates:         make([]dto.CatalogItemDTO, 0, len(c.Templates)),
-		LocalRoles:        make([]dto.CatalogItemDTO, 0, len(c.LocalRoles)),
-		GalaxyRoles:       make([]dto.CatalogItemDTO, 0, len(c.GalaxyRoles)),
-		GalaxyCollections: make([]dto.CatalogItemDTO, 0, len(c.GalaxyCollections)),
-		SubscriptionRoles: make([]dto.CatalogItemDTO, 0, len(c.SubscriptionRoles)),
+		SourceID:     c.SourceID,
+		SourceName:   c.SourceName,
+		Description:  c.SourceDescription,
+		SourceType:   c.SourceType,
+		LastSyncedAt: c.LastSyncedAt,
+		Templates:    make([]dto.CatalogItemDTO, 0, len(c.Templates)),
+		LocalRoles:   make([]dto.CatalogItemDTO, 0, len(c.LocalRoles)),
 	}
+	out.Blueprints.Items = make([]dto.CatalogBlueprintDTO, 0, len(c.Blueprints))
 	for _, bp := range c.Blueprints {
-		out.Blueprints = append(out.Blueprints, dto.CatalogBlueprintDTO{
-			ID:                        bp.ID,
-			Name:                      bp.Name,
-			Description:               bp.Description,
-			Version:                   bp.Version,
-			State:                     bp.State,
-			InstalledVersion:          bp.InstalledVersion,
-			RequiredTemplates:         bp.RequiredTemplates,
-			RequiredLocalRoles:        bp.RequiredLocalRoles,
-			RequiredGalaxyRoles:       bp.RequiredGalaxyRoles,
-			RequiredGalaxyCollections: bp.RequiredGalaxyCollections,
+		out.Blueprints.Items = append(out.Blueprints.Items, dto.CatalogBlueprintDTO{
+			ID:                  bp.ID,
+			Name:                bp.Name,
+			Description:         bp.Description,
+			Version:             bp.Version,
+			State:               bp.State,
+			InstalledVersion:    bp.InstalledVersion,
+			RequiredTemplates:   bp.RequiredTemplates,
+			RequiredLocalRoles:  bp.RequiredLocalRoles,
+			RequiredRoles:       bp.RequiredGalaxyRoles,
+			RequiredCollections: bp.RequiredGalaxyCollections,
 		})
 	}
 	out.Templates = catalogItemsToDTO(c.Templates)
 	out.LocalRoles = catalogItemsToDTO(c.LocalRoles)
-	out.GalaxyRoles = catalogItemsToDTO(c.GalaxyRoles)
-	out.GalaxyCollections = catalogItemsToDTO(c.GalaxyCollections)
-	out.SubscriptionRoles = catalogItemsToDTO(c.SubscriptionRoles)
-	out.UndeclaredDependencies = undeclaredDepsToDTO(c.UndeclaredDependencies)
+	out.LocalCollections = catalogItemsToDTO(c.LocalCollections)
+	out.Blueprints.RequiredRoles = catalogItemsToDTO(c.GalaxyRoles)
+	out.Blueprints.RequiredCollections = catalogItemsToDTO(c.GalaxyCollections)
+	out.Blueprints.SubscriptionRoles = catalogItemsToDTO(c.SubscriptionRoles)
+	out.Blueprints.UndeclaredDependencies = undeclaredDepsToDTO(c.UndeclaredDependencies)
 	return out
 }
 

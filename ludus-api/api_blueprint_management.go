@@ -496,21 +496,16 @@ func DeleteBlueprint(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You do not own this blueprint and cannot delete it")
 	}
 
-	// Guard source-derived blueprints, but only when the source row still
-	// exists — an FK pointing at a deleted row is an orphan that must be
-	// removable directly (the source it belonged to is already gone).
-	if srcID := blueprintRecord.GetString("source"); srcID != "" {
-		if _, srcErr := e.App.FindRecordById("sources", srcID); srcErr == nil {
-			return JSONError(e, http.StatusConflict,
-				"cannot delete a source-derived blueprint; remove or sync the source instead")
-		}
-	}
-
 	blueprintDirPath := blueprintRecord.GetString("blueprintDirPath")
 
 	if err := e.App.Delete(blueprintRecord); err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error deleting blueprint: %v", err))
 	}
+
+	// Source-derived blueprints stay gone: installs act only on the selection
+	// they're given, so nothing recreates the row unless the user names this
+	// blueprint (or installs everything) again. Galaxy deps it pulled in stay
+	// installed (and claimed) until removed via the ansible delete APIs.
 
 	// Clean up the blueprint dir from disk. Errors are logged but not surfaced to
 	// the caller — an orphan dir is tolerable; a failed user-visible delete is not.
@@ -610,7 +605,7 @@ func CreateBlueprint(e *core.RequestEvent) error {
 			AnsibleHome: ansibleHomeForUser(user),
 		})
 		applyRoleResultsToStatus(e.App, bp, roles)
-		resp.RoleResults = roleResultsToDTO(roles)
+		resp.AnsibleResults = roleResultsToDTO(roles)
 	}
 	return e.JSON(http.StatusCreated, resp)
 }
@@ -694,7 +689,7 @@ func CreateBlueprintFromRange(e *core.RequestEvent) error {
 			AnsibleHome: ansibleHomeForUser(user),
 		})
 		applyRoleResultsToStatus(e.App, blueprintRecord, roles)
-		resp.RoleResults = roleResultsToDTO(roles)
+		resp.AnsibleResults = roleResultsToDTO(roles)
 	}
 	return e.JSON(http.StatusCreated, resp)
 }
@@ -1548,8 +1543,8 @@ func InstallBlueprintDeps(e *core.RequestEvent) error {
 
 	var req dto.InstallBlueprintDepsRequest
 	_ = e.BindBody(&req) // body is optional; defaults leave req zero-valued
-	if req.GlobalRoles && !user.IsAdmin() {
-		return JSONError(e, http.StatusForbidden, "globalRoles requires admin caller")
+	if req.Global && !user.IsAdmin() {
+		return JSONError(e, http.StatusForbidden, "global requires admin caller")
 	}
 
 	bpRec, err := findLocalBlueprintByID(e, id, user)
@@ -1574,7 +1569,7 @@ func InstallBlueprintDeps(e *core.RequestEvent) error {
 	}
 	results := installRolesForBlueprint(e, e.App, walked, ResolverOpts{
 		ForceRoles:     req.ForceRoles,
-		GlobalRoles:    req.GlobalRoles,
+		Global:         req.Global,
 		ProxmoxUser:    user.ProxmoxUsername(),
 		AnsibleHome:    ansibleHomeForUser(user),
 		SourceRecordID: sourceRecordID,
@@ -1584,8 +1579,8 @@ func InstallBlueprintDeps(e *core.RequestEvent) error {
 	markInstallStatusFromFailures(e.App, statusRec, failures)
 
 	return e.JSON(http.StatusOK, map[string]any{
-		"blueprintID": id,
-		"roleResults": results,
+		"blueprintID":    id,
+		"ansibleResults": results,
 	})
 }
 
@@ -1777,13 +1772,13 @@ func ImportBlueprint(e *core.RequestEvent) error {
 	committedTmp = true
 
 	bp.Set("blueprintDirPath", finalDir)
-	if walked.Manifest.Thumbnail != "" {
+	if walked.Manifest.ThumbnailPath != "" {
 		// Resolve against finalDir and confirm the result stays inside it.
 		// The extractor already rejects unsafe tarball entries, but the
-		// manifest's `thumbnail:` field is just a string we trusted — a
+		// manifest's `thumbnail_path:` field is just a string we trusted — a
 		// malicious blueprint.yml could point at /etc/passwd or use
 		// ../../ traversal to escape the blueprint dir.
-		thumbPath, pErr := filepath.Abs(filepath.Join(finalDir, walked.Manifest.Thumbnail))
+		thumbPath, pErr := filepath.Abs(filepath.Join(finalDir, walked.Manifest.ThumbnailPath))
 		absFinal, aErr := filepath.Abs(finalDir)
 		if pErr == nil && aErr == nil && strings.HasPrefix(thumbPath, absFinal+string(filepath.Separator)) {
 			if file, ferr := filesystem.NewFileFromPath(thumbPath); ferr == nil {
@@ -1808,7 +1803,7 @@ func ImportBlueprint(e *core.RequestEvent) error {
 			AnsibleHome: ansibleHomeForUser(user),
 		})
 		applyRoleResultsToStatus(e.App, bp, roles)
-		resp.RoleResults = roleResultsToDTO(roles)
+		resp.AnsibleResults = roleResultsToDTO(roles)
 	}
 	return e.JSON(http.StatusCreated, resp)
 }
@@ -1899,7 +1894,7 @@ func ExportBlueprint(e *core.RequestEvent) error {
 			}
 		}
 		if thumbnailWritten != "" {
-			manifest.Thumbnail = thumbnailWritten
+			manifest.ThumbnailPath = thumbnailWritten
 		}
 	}
 

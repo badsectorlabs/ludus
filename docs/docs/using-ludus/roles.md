@@ -35,6 +35,10 @@ ludus ansible role add -d ./ludus_child_domain
 # Add a role for another user/range (as an admin)
 #terminal-command-local
 ludus ansible role add badsectorlabs.luds_adcs --user USER2
+
+# Add a role globally for all users (admin only)
+#terminal-command-local
+ludus ansible role add badsectorlabs.ludus_adcs --global
 ```
 
 Roles added from a directory will be listed as the directory name, regardless of what is in `meta/main.yml`. This is how `ansible-galaxy` works when installing roles.
@@ -62,6 +66,38 @@ ludus:
 ```
 
 You can define any variables that will be passed to the role with `role_vars` as seen above. Note that all variable in `role_vars` will be passed to all roles.
+
+## Ansible Collections
+
+Ansible collections bundle modules, roles, and plugins under a namespaced name (`namespace.name`). Like roles, collections install per-user by default, and any collection on [Ansible Galaxy](https://galaxy.ansible.com/ui/standalone/collections/) works with Ludus. Admins can install a collection instance-wide for all users with `--global`.
+
+Manage them with `ludus ansible collection` (alias `collections`):
+
+```bash
+# Add from Ansible Galaxy (pin a version with --version)
+#terminal-command-local
+ludus ansible collection add community.windows
+
+# Add globally for all users (admin only)
+#terminal-command-local
+ludus ansible collection add community.windows --global
+
+# Add from a .tar.gz collection artifact URL
+#terminal-command-local
+ludus ansible collection add https://example.com/my_namespace-my_collection-1.0.0.tar.gz
+
+# List your installed collections
+#terminal-command-local
+ludus ansible collection list
+
+# Remove a collection by its FQCN (namespace.name). ansible-galaxy has no
+# "collection remove", so Ludus deletes the collection's directory. Admins can
+# add --global to remove an instance-wide copy.
+#terminal-command-local
+ludus ansible collection rm community.windows
+```
+
+Roles bundled in a collection can be used in a range config — reference them in the `roles:` key by their fully-qualified name (e.g. `badsectorlabs.ludus_windows_utils.ludus_ad_password_policy`).
 
 ## Ludus Specific Roles
 

@@ -263,6 +263,44 @@ Each blueprint is stored on disk as a small directory holding its range config a
 └── thumbnail.png      # optional display thumbnail
 ```
 
+`blueprint.yml` holds display metadata. Locally created blueprints keep this in the database; the file appears in exports and is hand-written when authoring a blueprint for a [source](./sources.md).
+
+```yaml
+manifest_version: 1
+id: my-lab
+name: "My Lab"
+description: "Short tagline"               # shown in the catalog and picker
+version: 1.0.0
+tags: [ad, workshop]
+min_ludus_version: 2.1.2
+config: range-config.yml
+```
+
+`range-config.yml` is a standard Ludus [range config](../configuration.mdx) — the same format `ludus range config get` returns. Ludus reads it to surface which templates and roles the blueprint references on the blueprint detail page.
+
+`requirements.yml` declares the galaxy roles and collections the blueprint depends on, so any instance it lands on can install them. When Ludus creates a blueprint from a range config, it writes this file for you — pinning each galaxy role at its installed version and recording subscription roles by name. When editing by hand, every role referenced under `roles:` in `range-config.yml` must be declared here.
+
+```yaml
+roles:
+  - name: geerlingguy.docker
+    version: 7.4.4                                  # pin a galaxy role
+  - name: badsectorlabs.ludus_adcs                  # off-galaxy: name + src
+    src: https://github.com/badsectorlabs/ludus_adcs
+    version: v1.2.0
+
+collections:                                        # required for any 3-part
+  - name: community.crypto                          # FQCN role like
+    version: 2.16.0                                 # community.crypto.openssl_certificate
+  - name: my.collection                             # off-galaxy collection
+    source: https://github.com/foo/my-collection.git # NOTE: collections use
+    type: git                                       # `source:` not `src:`
+    version: main
+
+subscription_roles:                                 # license-gated roles served
+  - ludus_ghosts_client                             # from the Ludus catalog
+  - name: ludus_adcs
+```
+
 ### Export and import
 
 Export a blueprint and move it to another instance:

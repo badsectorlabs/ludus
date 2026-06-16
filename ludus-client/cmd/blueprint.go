@@ -23,14 +23,14 @@ type blueprintInstallPayload struct {
 	BlueprintID      string                  `json:"blueprintID"`
 	TemplateResults  []artifactResultPayload `json:"templateResults"`
 	LocalRoleResults []artifactResultPayload `json:"localRoleResults"`
-	RoleResults      []roleResultPayload     `json:"roleResults"`
+	AnsibleResults   []ansibleResultPayload  `json:"ansibleResults"`
 }
 
 // printBlueprintInstallFailures emits one log line per failed artifact for a
 // blueprint install/create/import. label is what to print when there are no
 // failures (e.g. "Blueprint 'goad'").
 func printBlueprintInstallFailures(label string, p blueprintInstallPayload) {
-	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, p.RoleResults)
+	failures := collectArtifactFailureLines(p.TemplateResults, p.LocalRoleResults, nil, p.AnsibleResults)
 	printArtifactOutcome(label, "dependencies installed", "install completed with errors", failures)
 }
 
@@ -38,10 +38,10 @@ var (
 	blueprintID          string
 	blueprintName        string
 	blueprintDescription string
-	blueprintFromRange  string
-	blueprintFromBP     string
-	blueprintFromImport string
-	blueprintConfigFile string
+	blueprintFromRange   string
+	blueprintFromBP      string
+	blueprintFromImport  string
+	blueprintConfigFile  string
 	blueprintTargetRange string
 	blueprintForce       bool
 	blueprintNoPrompt    bool
@@ -653,7 +653,7 @@ func init() {
 
 	blueprintCmd.AddCommand(blueprintInfoCmd)
 
-	blueprintInstallCmd.Flags().BoolVar(&installFlagGlobalRoles, "global-roles", false, "admin only: install roles instance-wide")
+	blueprintInstallCmd.Flags().BoolVar(&installFlagGlobal, "global", false, "admin only: install the source's roles and collections for all users")
 	blueprintInstallCmd.Flags().BoolVar(&installFlagForceRoles, "force-roles", false, "overwrite already-installed roles")
 	blueprintCmd.AddCommand(blueprintInstallCmd)
 
@@ -675,7 +675,6 @@ func init() {
 
 	rootCmd.AddCommand(blueprintCmd)
 }
-
 
 var blueprintInfoCmd = &cobra.Command{
 	Use:     "info <id>",
@@ -757,10 +756,9 @@ func printBlueprintInfo(d map[string]any) {
 	}
 }
 
-
 var (
-	installFlagGlobalRoles bool
-	installFlagForceRoles  bool
+	installFlagGlobal     bool
+	installFlagForceRoles bool
 )
 
 var blueprintInstallCmd = &cobra.Command{
@@ -775,8 +773,8 @@ Works on local blueprints (e.g. 'my-lab') OR slug-prefixed source-blueprints (e.
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 		body, _ := json.Marshal(dto.InstallBlueprintDepsRequest{
-			GlobalRoles: installFlagGlobalRoles,
-			ForceRoles:  installFlagForceRoles,
+			Global:     installFlagGlobal,
+			ForceRoles: installFlagForceRoles,
 		})
 		path := fmt.Sprintf("/blueprints/%s/install", neturl.PathEscape(args[0]))
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(path), string(body))
@@ -791,7 +789,6 @@ Works on local blueprints (e.g. 'my-lab') OR slug-prefixed source-blueprints (e.
 		printBlueprintInstallFailures(fmt.Sprintf("Blueprint '%s'", resp.BlueprintID), resp)
 	},
 }
-
 
 var (
 	updateFlagVersion     string
@@ -844,7 +841,6 @@ field. For interactive editing of the YAML config, use 'ludus blueprint config e
 		logger.Logger.Infof("Blueprint '%s' updated", args[0])
 	},
 }
-
 
 var blueprintExportOut string
 
@@ -931,7 +927,6 @@ func runBlueprintImport(client *resty.Client, tarPath string) {
 		}
 	}
 }
-
 
 var blueprintEditEditor string
 
@@ -1029,4 +1024,3 @@ func runBlueprintConfigEdit(bpID string) {
 	}
 	handleGenericResult(responseJSON)
 }
-

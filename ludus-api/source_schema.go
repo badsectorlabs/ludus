@@ -2,6 +2,7 @@ package ludusapi
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -12,12 +13,14 @@ import (
 )
 
 // SupportedManifestVersion is the highest blueprint.yml / source.yml
-// manifest_version this Ludus understands. Bump on breaking schema changes.
+// manifest_version this Ludus understands. manifest_version is
+// optional and defaults to 1 (only v1 exists today); a future breaking schema
+// bumps this constant and starts requiring the new version explicitly.
 const SupportedManifestVersion = 1
 
 // blueprintManifestIDRegex permits up to two slashes so authors can scope IDs
 // into folders (e.g. "windows/dc"). The slug-prefixed display id stays
-// unambiguous because sourceSlugRegex (api_source_management.go) disallows slashes.
+// unambiguous because dto.SourceIDRegex disallows slashes.
 var blueprintManifestIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*(\/[A-Za-z0-9_\-]+){0,2}$`)
 
 // BlueprintManifest is the parsed shape of a blueprint.yml. Authors, license,
@@ -29,7 +32,7 @@ type BlueprintManifest struct {
 	Description     string   `yaml:"description"`
 	Version         string   `yaml:"version"`
 	Tags            []string `yaml:"tags,omitempty"`
-	Thumbnail       string   `yaml:"thumbnail,omitempty"`
+	ThumbnailPath   string   `yaml:"thumbnail_path,omitempty"`
 	Config          string   `yaml:"config"`
 	MinLudusVersion string   `yaml:"min_ludus_version,omitempty"`
 }
@@ -40,7 +43,7 @@ func ParseBlueprintManifest(data []byte) (*BlueprintManifest, error) {
 		return nil, fmt.Errorf("blueprint.yml is not valid YAML: %w", err)
 	}
 	if m.ManifestVersion == 0 {
-		return nil, fmt.Errorf("manifest_version is required in blueprint.yml")
+		m.ManifestVersion = 1
 	}
 	if m.ManifestVersion > SupportedManifestVersion {
 		return nil, fmt.Errorf("manifest_version %d is not supported by this Ludus (supports up to %d)", m.ManifestVersion, SupportedManifestVersion)
@@ -71,8 +74,8 @@ func ParseBlueprintManifest(data []byte) (*BlueprintManifest, error) {
 	if err := validateRelativePath("config", m.Config); err != nil {
 		return nil, err
 	}
-	if m.Thumbnail != "" {
-		if err := validateRelativePath("thumbnail", m.Thumbnail); err != nil {
+	if m.ThumbnailPath != "" {
+		if err := validateRelativePath("thumbnail_path", m.ThumbnailPath); err != nil {
 			return nil, err
 		}
 	}
@@ -85,7 +88,7 @@ func validateRelativePath(label, p string) error {
 	}
 	cleaned := filepath.Clean(p)
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") || cleaned == "." || strings.HasPrefix(cleaned, "/") {
-		return fmt.Errorf("%s path must resolve inside blueprint dir, got %q", label, p)
+		return fmt.Errorf("%s path must resolve inside the bundle dir, got %q", label, p)
 	}
 	return nil
 }
@@ -108,35 +111,12 @@ func ParseSourceManifest(data []byte) (*SourceManifest, error) {
 		return nil, fmt.Errorf("source.yml is not valid YAML: %w", err)
 	}
 	if s.ManifestVersion == 0 {
-		return nil, fmt.Errorf("manifest_version is required in source.yml")
+		s.ManifestVersion = 1
 	}
 	if s.ManifestVersion > SupportedManifestVersion {
 		return nil, fmt.Errorf("manifest_version %d is not supported by this Ludus (supports up to %d)", s.ManifestVersion, SupportedManifestVersion)
 	}
 	return &s, nil
-}
-
-// TemplateManifest is the parsed shape of an optional template.yml in a
-// source's templates/<name>/ dir. Packer templates carry no native
-// description, so this manifest supplies one for the catalog. Only
-// description is meaningful today; manifest_version gates future schema.
-type TemplateManifest struct {
-	ManifestVersion int    `yaml:"manifest_version"`
-	Description     string `yaml:"description,omitempty"`
-}
-
-func ParseTemplateManifest(data []byte) (*TemplateManifest, error) {
-	var m TemplateManifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("template.yml is not valid YAML: %w", err)
-	}
-	if m.ManifestVersion == 0 {
-		return nil, fmt.Errorf("manifest_version is required in template.yml")
-	}
-	if m.ManifestVersion > SupportedManifestVersion {
-		return nil, fmt.Errorf("manifest_version %d is not supported by this Ludus (supports up to %d)", m.ManifestVersion, SupportedManifestVersion)
-	}
-	return &m, nil
 }
 
 // roleMetaMain is the partial shape of an Ansible role's meta/main.yml we read
@@ -155,6 +135,50 @@ func roleDescriptionFromMeta(data []byte) string {
 		return ""
 	}
 	return strings.TrimSpace(m.GalaxyInfo.Description)
+}
+
+// GalaxyManifest is the partial shape of an Ansible collection's galaxy.yml we
+// read to derive its FQCN (<namespace>.<name>), version, and a human
+// description for the catalog. Mirrors roleMetaMain/roleDescriptionFromMeta
+// for collections.
+type GalaxyManifest struct {
+	Namespace   string `yaml:"namespace"`
+	Name        string `yaml:"name"`
+	Version     string `yaml:"version"`
+	Description string `yaml:"description"`
+}
+
+// ParseGalaxyManifest unmarshals a collection's galaxy.yml. Returns an error
+// only on malformed YAML — missing fields are left empty for the caller to
+// validate (addLocalCollectionFromDirectory rejects an empty namespace/name).
+func ParseGalaxyManifest(data []byte) (*GalaxyManifest, error) {
+	var m GalaxyManifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("galaxy.yml is not valid YAML: %w", err)
+	}
+	return &m, nil
+}
+
+// collectionFQCNForDir reads <dir>/galaxy.yml and returns the canonical
+// "<namespace>.<name>" FQCN for the collection. It is the single resolver for
+// deriving a collection's identity from its on-disk directory — later tasks
+// and install code call this instead of inlining galaxy.yml reads.
+func collectionFQCNForDir(dir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+	if err != nil {
+		return "", fmt.Errorf("galaxy.yml: %w", err)
+	}
+	gm, err := ParseGalaxyManifest(data)
+	if err != nil {
+		return "", err
+	}
+	if gm.Namespace == "" {
+		return "", fmt.Errorf("galaxy.yml: namespace is required")
+	}
+	if gm.Name == "" {
+		return "", fmt.Errorf("galaxy.yml: name is required")
+	}
+	return gm.Namespace + "." + gm.Name, nil
 }
 
 // rangeConfigVM is a partial type matching only the fields InferFromRangeConfig

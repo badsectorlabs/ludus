@@ -1,7 +1,6 @@
 package ludusapi
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,20 +17,27 @@ import (
 // source record as JSON. nil/missing means "install everything" — preserves
 // backward-compatible sync behavior for pre-existing rows.
 type InstallSelection struct {
-	Blueprints []string `json:"blueprints"`
-	Templates  []string `json:"templates"`
-	LocalRoles []string `json:"localRoles"`
+	Blueprints       []string `json:"blueprints"`
+	Templates        []string `json:"templates"`
+	LocalRoles       []string `json:"localRoles"`
+	LocalCollections []string `json:"localCollections"`
 }
 
 // SourceCatalog is the picker-facing view of a registered source: what the
 // walk found, joined with what is currently installed. State enrichment is
 // computed by ComputeSourceCatalog at request time, not stored.
 type SourceCatalog struct {
-	SourceID               string                 `json:"sourceID"`
-	SourceName             string                 `json:"sourceName"`
+	SourceID   string `json:"sourceID"`
+	SourceName string `json:"sourceName"`
+	// SourceDescription / SourceType / LastSyncedAt are display metadata for
+	// picker headers (CLI TUI, GUI detail page), read off the source record.
+	SourceDescription      string                 `json:"description,omitempty"`
+	SourceType             string                 `json:"sourceType,omitempty"` // "git" | "upload"
+	LastSyncedAt           string                 `json:"lastSyncedAt,omitempty"`
 	Blueprints             []CatalogBlueprint     `json:"blueprints"`
 	Templates              []CatalogItem          `json:"templates"`
 	LocalRoles             []CatalogItem          `json:"localRoles"`
+	LocalCollections       []CatalogItem          `json:"localCollections"`
 	GalaxyRoles            []CatalogItem          `json:"galaxyRoles"`
 	GalaxyCollections      []CatalogItem          `json:"galaxyCollections"`
 	SubscriptionRoles      []CatalogItem          `json:"subscriptionRoles"`
@@ -51,12 +57,12 @@ type CatalogBlueprint struct {
 	RequiredGalaxyCollections []string `json:"requiredGalaxyCollections,omitempty"`
 }
 
-// ScopeInstall is one installed copy of a role: which scope it lives in
-// ("global"/"user"), the version on disk there, and its state against the
-// required pin ("installed" when it satisfies, "upgrade_available" on a
-// mismatch). A role can have more than one — global and per-user copies can
-// sit at different versions. State is empty at the disk-scan layer and filled
-// once the catalog knows the pin.
+// ScopeInstall is one installed copy of a role or vendored collection: which
+// scope it lives in ("global"/"user"), the version on disk there, and its
+// state against the required pin ("installed" when it satisfies,
+// "upgrade_available" on a mismatch). An artifact can have more than one —
+// global and per-user copies can sit at different versions. State is empty at
+// the disk-scan layer and filled once the catalog knows the pin.
 type ScopeInstall struct {
 	Scope   string `json:"scope"`
 	Version string `json:"version,omitempty"`
@@ -69,16 +75,16 @@ type CatalogItem struct {
 	Version          string `json:"version,omitempty"`
 	State            string `json:"state"`
 	InstalledVersion string `json:"installedVersion,omitempty"`
-	// Global reports, for an installed role, whether it lives in the
-	// system-wide global-roles path (true) or the owner's per-user roles
-	// path (false). Drives the role-remove flow: ansible-galaxy must be
-	// pointed at the right path or it reports "not installed, skipping".
-	// Meaningless (always false) for templates and collections.
+	// Global reports, for an installed role or collection, whether it lives in
+	// the system-wide global path (true) or the owner's per-user path (false).
+	// Drives the remove flow: the install/delete must be pointed at the right
+	// path or it reports "not installed, skipping". Always false for templates.
 	Global bool `json:"global,omitempty"`
-	// Scopes lists every installed copy of a role with its scope, on-disk
-	// version, and per-scope state vs the pin. A role can occupy both global
-	// and user at different versions. Drives the per-scope subrows and the
-	// per-scope remove submenu. nil for non-role kinds and not-installed roles.
+	// Scopes lists every installed copy of a role or vendored collection with
+	// its scope, on-disk version, and per-scope state vs the pin. An artifact
+	// can occupy both global and user at different versions. Drives the
+	// per-scope subrows and the per-scope remove submenu. nil for templates,
+	// galaxy deps, and not-installed items.
 	Scopes []ScopeInstall `json:"scopes,omitempty"`
 	// Type is the requirements.yml install type for a collection — "git"
 	// when the collection is sourced from a git repo (Name holds the repo
@@ -113,6 +119,20 @@ type blueprintConfigRefs struct {
 	GalaxyCollections []string
 }
 
+// localRoleNamesByRef maps every name a config or requirements entry may use
+// for a vendored role — the dir basename or the published galaxy identity —
+// to the role's canonical identity (localRoleName), so either authoring style
+// resolves to the one name installs and claims register under.
+func localRoleNamesByRef(walked *WalkedSource) map[string]string {
+	out := make(map[string]string, len(walked.LocalRoles)*2)
+	for _, dir := range walked.LocalRoles {
+		name := localRoleName(dir)
+		out[filepath.Base(dir)] = name
+		out[name] = name
+	}
+	return out
+}
+
 // parseBlueprintConfigRefs extracts all artifact references for one blueprint:
 //   - Templates and roles from the range-config file (via InferFromRangeConfig).
 //   - Galaxy roles and subscription roles from requirements.yml
@@ -121,8 +141,10 @@ type blueprintConfigRefs struct {
 // Roles that appear in requirements.yml under subscription_roles are
 // subscription roles; roles under roles: are galaxy roles. Roles referenced in
 // the config but not in requirements.yml and not local are left to the caller
-// (findUndeclaredDependencies handles that separately).
-func parseBlueprintConfigRefs(bp WalkedBlueprint, localRoleNames map[string]bool) blueprintConfigRefs {
+// (findUndeclaredDependencies handles that separately). localRoleNames maps
+// either name of a vendored role to its canonical identity
+// (localRoleNamesByRef); matched refs are recorded under the canonical name.
+func parseBlueprintConfigRefs(bp WalkedBlueprint, localRoleNames map[string]string) blueprintConfigRefs {
 	var refs blueprintConfigRefs
 
 	galaxyRoles, galaxyCollections, subRoles := declaredFromRequirements(bp.RequirementsYAML)
@@ -145,8 +167,8 @@ func parseBlueprintConfigRefs(bp WalkedBlueprint, localRoleNames map[string]bool
 
 			for _, role := range roleRefs {
 				switch {
-				case localRoleNames[role]:
-					refs.LocalRoles = appendUnique(refs.LocalRoles, role)
+				case localRoleNames[role] != "":
+					refs.LocalRoles = appendUnique(refs.LocalRoles, localRoleNames[role])
 				case subSet[role]:
 					// subscription roles referenced in config covered by requirements.yml
 				case galaxySet[role]:
@@ -168,21 +190,10 @@ func appendUnique(slice []string, s string) []string {
 	return append(slice, s)
 }
 
-// templateDescription reads the optional template.yml in a source's
-// templates/<name>/ dir for a human description. Best-effort: a missing file
-// means no description; a malformed one is logged and treated as none, never
-// failing the catalog (descriptions are optional metadata).
+// templateDescription reads a template's human description from the static
+// `description` variable in its packer file. Returns "" when unset.
 func templateDescription(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, "template.yml"))
-	if err != nil {
-		return ""
-	}
-	m, err := ParseTemplateManifest(data)
-	if err != nil {
-		log.Printf("[blueprint-sources] ignoring malformed template.yml in %s: %v", dir, err)
-		return ""
-	}
-	return strings.TrimSpace(m.Description)
+	return packerVarFromDir(dir, "description")
 }
 
 // localRoleDescription reads a source-bundled role's meta/main.yml (or
@@ -199,17 +210,36 @@ func localRoleDescription(dir string) string {
 	return roleDescriptionFromMeta(data)
 }
 
+// localCollectionDescription reads a source-bundled collection's galaxy.yml
+// for its description. Best-effort — a collection whose galaxy.yml is missing
+// or has no description carries none. Mirrors localRoleDescription.
+func localCollectionDescription(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+	if err != nil {
+		return ""
+	}
+	gm, err := ParseGalaxyManifest(data)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(gm.Description)
+}
+
 // ComputeSourceCatalog joins a walked source with installed-artifact state to
 // produce the picker-facing catalog view. State is read from the live system
 // (filesystem + Proxmox), not from the source_artifacts ledger — see
 // loadInstalledArtifacts for the rationale. No writes.
 func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *WalkedSource) *SourceCatalog {
 	c := &SourceCatalog{
-		SourceID:   src.GetString("sourceID"),
-		SourceName: src.GetString("name"),
-		Blueprints: []CatalogBlueprint{},
-		Templates:  []CatalogItem{},
-		LocalRoles: []CatalogItem{},
+		SourceID:          src.GetString("sourceID"),
+		SourceName:        src.GetString("name"),
+		SourceDescription: src.GetString("description"),
+		SourceType:        src.GetString("type"),
+		LastSyncedAt:      src.GetString("lastSyncedAt"),
+		Blueprints:        []CatalogBlueprint{},
+		Templates:         []CatalogItem{},
+		LocalRoles:        []CatalogItem{},
+		LocalCollections:  []CatalogItem{},
 	}
 	if walked == nil {
 		return c
@@ -218,11 +248,7 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 
 	installed := loadInstalledArtifacts(e, walked)
 
-	// Build a set of local role names for parseBlueprintConfigRefs.
-	localRoleNames := make(map[string]bool, len(walked.LocalRoles))
-	for _, dir := range walked.LocalRoles {
-		localRoleNames[filepath.Base(dir)] = true
-	}
+	localRoleNames := localRoleNamesByRef(walked)
 
 	// Single pass: compute refs for every blueprint to avoid double disk reads.
 	blueprintRefs := make(map[string]blueprintConfigRefs, len(walked.Blueprints))
@@ -268,8 +294,10 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 		})
 	}
 
-	// Local roles — one CatalogItem per source-root roles/ dir. RequiredBy lists
-	// blueprints whose config references this role.
+	// Local roles — one CatalogItem per source-root roles/ dir, named by the
+	// role's canonical identity (galaxy name from meta when present, dir
+	// basename otherwise) to match the install dir, the claim, and `ansible
+	// role list`. RequiredBy lists blueprints whose config references this role.
 	localRoleRequiredBy := map[string][]string{}
 	for bpID, refs := range blueprintRefs {
 		for _, name := range refs.LocalRoles {
@@ -280,16 +308,55 @@ func ComputeSourceCatalog(e *core.RequestEvent, src *core.Record, walked *Walked
 		sort.Strings(localRoleRequiredBy[name])
 	}
 	for _, dir := range walked.LocalRoles {
-		name := filepath.Base(dir)
+		name := localRoleName(dir)
 		state, installedVer := artifactState(installed, "local_role", name, "")
 		c.LocalRoles = append(c.LocalRoles, CatalogItem{
 			Name:             name,
 			Description:      localRoleDescription(dir),
+			Version:          localRoleVersion(dir),
 			State:            state,
 			InstalledVersion: installedVer,
 			Global:           installed["local_role/"+name].Global,
 			Scopes:           annotateScopeStates(installed["local_role/"+name].Scopes, ""),
 			RequiredBy:       nilIfEmpty(localRoleRequiredBy[name]),
+		})
+	}
+
+	// Local collections — one CatalogItem per source-root ansible/collections/
+	// dir. The item's identity is the FQCN (<namespace>.<name>) read from
+	// galaxy.yml, NOT the dir basename, so it matches the source_artifacts claim
+	// and the local_collection/<FQCN> install-state key. A dir whose galaxy.yml
+	// is missing/invalid carries no resolvable identity and is skipped.
+	// RequiredBy lists blueprints whose requirements.yml declares this FQCN.
+	collectionRequiredBy := map[string][]string{}
+	for bpID, refs := range blueprintRefs {
+		for _, name := range refs.GalaxyCollections {
+			collectionRequiredBy[name] = appendUnique(collectionRequiredBy[name], bpID)
+		}
+	}
+	for name := range collectionRequiredBy {
+		sort.Strings(collectionRequiredBy[name])
+	}
+	for _, dir := range walked.LocalCollections {
+		data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+		if err != nil {
+			continue
+		}
+		gm, perr := ParseGalaxyManifest(data)
+		if perr != nil || gm.Namespace == "" || gm.Name == "" {
+			continue
+		}
+		fqcn := gm.Namespace + "." + gm.Name
+		state, installedVer := artifactState(installed, "local_collection", fqcn, "")
+		c.LocalCollections = append(c.LocalCollections, CatalogItem{
+			Name:             fqcn,
+			Description:      localCollectionDescription(dir),
+			Version:          gm.Version,
+			State:            state,
+			InstalledVersion: installedVer,
+			Global:           installed["local_collection/"+fqcn].Global,
+			Scopes:           annotateScopeStates(installed["local_collection/"+fqcn].Scopes, ""),
+			RequiredBy:       nilIfEmpty(collectionRequiredBy[fqcn]),
 		})
 	}
 
@@ -350,15 +417,10 @@ func loadInstalledArtifacts(e *core.RequestEvent, walked *WalkedSource) map[stri
 		viewerProxmoxUsername = u.ProxmoxUsername()
 	}
 
-	rolePaths := candidateRolePaths(viewerProxmoxUsername)
-	subRolePaths := []string{globalRolesPath()}
-	ansibleHomes := candidateAnsibleHomes(viewerProxmoxUsername)
-
-	// Disk-backed kinds (roles, collections, subscription roles) are split
-	// into a helper that doesn't depend on Proxmox or PocketBase.
-	for k, v := range loadInstalledFromDisk(walked, rolePaths, subRolePaths, ansibleHomes, globalRolesPath()) {
-		out[k] = v
-	}
+	// Disk-backed kinds (roles, collections, subscription roles) come from one
+	// inventory scan — the same scan GET /ansible lists — joined against the
+	// names the walked source declares.
+	joinWalkedWithInventory(out, walked, loadAnsibleInventory(viewerProxmoxUsername))
 
 	// A template counts as installed (for this viewer) when its *-template name
 	// is present in the viewer's packer — detected by NAME, not folder, so a
@@ -378,25 +440,20 @@ func loadInstalledArtifacts(e *core.RequestEvent, walked *WalkedSource) map[stri
 	return out
 }
 
-// loadInstalledFromDisk performs the filesystem half of loadInstalledArtifacts:
-// stat role dirs in `rolePaths` (for local + galaxy roles) and `subRolePaths`
-// (for subscription roles), and read collection manifests under each entry
-// of `ansibleHomes`. Templates are NOT covered here — they live on Proxmox.
-//
-// globalRolePath identifies which base in rolePaths counts as "global" — a
-// role found there is global-scoped, anything else is per-user.
-func loadInstalledFromDisk(walked *WalkedSource, rolePaths, subRolePaths, ansibleHomes []string, globalRolePath string) map[string]installedArtifact {
-	out := map[string]installedArtifact{}
-	if walked == nil {
-		return out
-	}
-
-	// Local roles — directory presence under any role path. No version
-	// concept for source-shipped local roles.
+// joinWalkedWithInventory fills `out` with the install state of every
+// disk-backed artifact the walked source declares — local + galaxy +
+// subscription roles, vendored + required collections — looked up against one
+// inventory scan. Templates are NOT covered here; they live on Proxmox.
+func joinWalkedWithInventory(out map[string]installedArtifact, walked *WalkedSource, inv ansibleInventory) {
+	// Local roles: keyed by the canonical identity (localRoleName — the name
+	// installs now land under), with the dir basename kept as an alias so a
+	// copy installed under the bare name (a pre-standardization install, or a
+	// role whose meta yields no galaxy identity) still reads installed instead
+	// of not_installed while the ansible list shows it.
 	for _, dir := range walked.LocalRoles {
-		name := filepath.Base(dir)
-		if installs, global := roleScopes(rolePaths, name, globalRolePath); len(installs) > 0 {
-			out["local_role/"+name] = installedArtifact{Global: global, Scopes: installs}
+		name := localRoleName(dir)
+		if art, ok := inv.roleArtifact(false, name, filepath.Base(dir)); ok {
+			out["local_role/"+name] = art
 		}
 	}
 
@@ -423,29 +480,26 @@ func loadInstalledFromDisk(walked *WalkedSource, rolePaths, subRolePaths, ansibl
 		}
 	}
 
+	// Exact install-name match only for requirements: ansible-galaxy
+	// (re)installs a requirement unless a dir with that exact name exists, and
+	// range configs resolve roles by dir name — an aliased copy under another
+	// name satisfies neither.
 	for name := range galaxyNames {
-		if installs, global := roleScopes(rolePaths, name, globalRolePath); len(installs) > 0 {
-			out["galaxy_role/"+name] = installedArtifact{
-				Version: installs[0].Version,
-				Global:  global,
-				Scopes:  installs,
-			}
+		if art, ok := inv.roleArtifact(false, name); ok {
+			out["galaxy_role/"+name] = art
 		}
 	}
 
+	// Subscription roles only count when installed globally — the licensed
+	// pipeline's destination.
 	for name := range subNames {
-		if installs, global := roleScopes(subRolePaths, name, globalRolePath); len(installs) > 0 {
-			out["subscription_role/"+name] = installedArtifact{
-				Version: installs[0].Version,
-				Global:  global,
-				Scopes:  installs,
-			}
+		if art, ok := inv.roleArtifact(true, name); ok {
+			out["subscription_role/"+name] = art
 		}
 	}
 
-	// Collections: the on-disk MANIFEST lives at
-	// ansible_collections/<namespace>/<name>/. For a galaxy collection the
-	// requirements `name` IS the FQCN. For a git collection it's the repo
+	// Collections are identified by FQCN everywhere. For a galaxy collection
+	// the requirements `name` IS the FQCN; for a git collection it's the repo
 	// URL, so derive the FQCN — keying the result by the requirements name
 	// either way so artifactState (which looks up by that name) lines up.
 	for reqName, c := range collectionEntries {
@@ -456,27 +510,27 @@ func loadInstalledFromDisk(walked *WalkedSource, rolePaths, subRolePaths, ansibl
 				continue // can't resolve FQCN → can't confirm install on disk
 			}
 		}
-		for _, home := range ansibleHomes {
-			if v := readGalaxyInstalledCollectionVersion(home, lookup); v != "" {
-				out["collection/"+reqName] = installedArtifact{Version: v}
-				break
-			}
+		if art, ok := inv.collectionArtifact(lookup); ok {
+			out["collection/"+reqName] = art
 		}
 	}
 
-	return out
-}
-
-// candidateRolePaths returns the role-install destinations the catalog
-// checks for presence. Global path first (where subscription roles + roles
-// installed with --global land), then the user's own path (where per-user
-// galaxy roles land).
-func candidateRolePaths(proxmoxUsername string) []string {
-	paths := []string{globalRolesPath()}
-	if p := userRolesPath(proxmoxUsername); p != "" {
-		paths = append(paths, p)
+	// Local (vendored) collections, keyed by the FQCN from the source dir's
+	// galaxy.yml — the catalog item's identity — never the dir basename.
+	for _, dir := range walked.LocalCollections {
+		data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+		if err != nil {
+			continue
+		}
+		gm, perr := ParseGalaxyManifest(data)
+		if perr != nil || gm.Namespace == "" || gm.Name == "" {
+			continue
+		}
+		fqcn := gm.Namespace + "." + gm.Name
+		if art, ok := inv.collectionArtifact(fqcn); ok {
+			out["local_collection/"+fqcn] = art
+		}
 	}
-	return paths
 }
 
 // candidateAnsibleHomes lists ansible-home roots where collections may
@@ -491,31 +545,10 @@ func candidateAnsibleHomes(proxmoxUsername string) []string {
 	return homes
 }
 
-// roleScopes inspects rolePaths for an installed role of the given name and
-// returns one ScopeInstall per path it lives under — its scope ("global" for
-// the globalRolePath base, "user" otherwise) and the version read from that
-// path's meta/.galaxy_install_info — plus whether any copy is global. A role
-// can occupy more than one path at once, at different versions, so each is
-// reported separately. (Local roles carry no version, so Version is empty.)
-func roleScopes(rolePaths []string, name, globalRolePath string) (installs []ScopeInstall, global bool) {
-	for _, base := range rolePaths {
-		if info, err := os.Stat(filepath.Join(base, name)); err == nil && info.IsDir() {
-			scope := "user"
-			if base == globalRolePath {
-				scope = "global"
-				global = true
-			}
-			installs = append(installs, ScopeInstall{
-				Scope:   scope,
-				Version: readGalaxyInstalledVersion(base, name),
-			})
-		}
-	}
-	return installs, global
-}
-
 // artifactState returns (state, installedVersion) for a single named artifact.
-// walkedVersion is empty for templates and local roles (they carry no version).
+// walkedVersion is empty for templates (no version concept) and deliberately
+// empty for local roles and vendored collections — their shipped version is
+// surfaced for display but not enforced as a pin.
 // For galaxy roles and collections it can be either a concrete version
 // ("1.2.0") or a constraint pulled from a blueprint's requirements.yml
 // (">=1.2.0", "<2.0.0", etc.) — when the installed version satisfies the
@@ -787,6 +820,7 @@ func sortCatalog(c *SourceCatalog) {
 	sort.Slice(c.Blueprints, func(i, j int) bool { return c.Blueprints[i].ID < c.Blueprints[j].ID })
 	sort.Slice(c.Templates, func(i, j int) bool { return c.Templates[i].Name < c.Templates[j].Name })
 	sort.Slice(c.LocalRoles, func(i, j int) bool { return c.LocalRoles[i].Name < c.LocalRoles[j].Name })
+	sort.Slice(c.LocalCollections, func(i, j int) bool { return c.LocalCollections[i].Name < c.LocalCollections[j].Name })
 	sort.Slice(c.GalaxyRoles, func(i, j int) bool { return c.GalaxyRoles[i].Name < c.GalaxyRoles[j].Name })
 	sort.Slice(c.GalaxyCollections, func(i, j int) bool { return c.GalaxyCollections[i].Name < c.GalaxyCollections[j].Name })
 	sort.Slice(c.SubscriptionRoles, func(i, j int) bool { return c.SubscriptionRoles[i].Name < c.SubscriptionRoles[j].Name })

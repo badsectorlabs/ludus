@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"ludusapi/dto"
+
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
 
@@ -74,18 +76,23 @@ func createSourcesCollection(app core.App) error {
 		owner.id = @request.auth.id
 	)`)
 
+	// Reads stay open to owner/admin; writes are locked (nil = superuser only)
+	// so the custom /sources routes are the only write path. Raw record writes
+	// would bypass the invariants those routes enforce: sourceID slug + global
+	// uniqueness on create, the field whitelist and checkout re-clone on
+	// update, and checkout-dir cleanup on delete.
 	c.ListRule = ownerOrAdminRule
 	c.ViewRule = ownerOrAdminRule
-	c.CreateRule = types.Pointer(`@request.auth.id != ""`)
-	c.UpdateRule = ownerOrAdminRule
-	c.DeleteRule = ownerOrAdminRule
+	c.CreateRule = nil
+	c.UpdateRule = nil
+	c.DeleteRule = nil
 
 	c.Fields.Add(
 		&core.TextField{Name: "name", Required: true},
 		&core.TextField{
 			Name:     "sourceID",
 			Required: true,
-			Pattern:  `^[A-Za-z][A-Za-z0-9_\-]*$`,
+			Pattern:  dto.SourceIDRegex.String(),
 		},
 		&core.TextField{Name: "description"},
 		&core.JSONField{Name: "authors"},
@@ -112,10 +119,6 @@ func createSourcesCollection(app core.App) error {
 		// lastSyncError), "error" (clone/walk failed before any install).
 		&core.TextField{Name: "lastSyncStatus"},
 		&core.TextField{Name: "lastSyncError"},
-		// installSelection is JSON-encoded *InstallSelection. nil/missing
-		// means "install everything" — the default for a source installed
-		// without an explicit selection, and for any pre-existing row.
-		&core.JSONField{Name: "installSelection", MaxSize: 100_000},
 		&core.AutodateField{Name: "created", OnCreate: true},
 		&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 	)

@@ -635,17 +635,18 @@ type DeleteSourceResponse struct {
 // BlueprintCreatedResponse is the shape returned by CreateBlueprint,
 // CreateBlueprintFromRange, CopyBlueprint, and ImportBlueprint.
 type BlueprintCreatedResponse struct {
-	Result      string                               `json:"result,omitempty"`
-	BlueprintID string                               `json:"blueprintID"`
-	ID          string                               `json:"id,omitempty"` // record ID; emitted by ImportBlueprint
-	RoleResults []BlueprintCreatedResponseRoleResult `json:"roleResults,omitempty"`
+	Result         string                                  `json:"result,omitempty"`
+	BlueprintID    string                                  `json:"blueprintID"`
+	ID             string                                  `json:"id,omitempty"` // record ID; emitted by ImportBlueprint
+	AnsibleResults []BlueprintCreatedResponseAnsibleResult `json:"ansibleResults,omitempty"`
 }
 
-type BlueprintCreatedResponseRoleResult struct {
+type BlueprintCreatedResponseAnsibleResult struct {
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
 	OK      bool   `json:"ok"`
 	Error   string `json:"error,omitempty"`
+	Type    string `json:"type,omitempty"`
 }
 
 type SourceResponse struct {
@@ -656,7 +657,6 @@ type SourceResponse struct {
 	Authors        []string `json:"authors,omitempty"`
 	Homepage       string   `json:"homepage,omitempty"`
 	License        string   `json:"license,omitempty"`
-	Kind           string   `json:"kind"`
 	Type           string   `json:"type"`
 	URL            string   `json:"url,omitempty"`
 	Ref            string   `json:"ref,omitempty"`
@@ -676,28 +676,42 @@ type RegisterSourceResponse struct {
 
 // SourceCatalogDTO mirrors the internal SourceCatalog for the wire.
 type SourceCatalogDTO struct {
-	SourceID               string                    `json:"sourceID"`
-	SourceName             string                    `json:"sourceName"`
-	Blueprints             []CatalogBlueprintDTO     `json:"blueprints"`
-	Templates              []CatalogItemDTO          `json:"templates"`
-	LocalRoles             []CatalogItemDTO          `json:"localRoles"`
-	GalaxyRoles            []CatalogItemDTO          `json:"galaxyRoles"`
-	GalaxyCollections      []CatalogItemDTO          `json:"galaxyCollections"`
+	SourceID   string `json:"sourceID"`
+	SourceName string `json:"sourceName"`
+	// Description / SourceType / LastSyncedAt are display metadata for picker
+	// headers, read off the source record at catalog time.
+	Description      string               `json:"description,omitempty"`
+	SourceType       string               `json:"sourceType,omitempty"` // "git" | "upload"
+	LastSyncedAt     string               `json:"lastSyncedAt,omitempty"`
+	Blueprints       CatalogBlueprintsDTO `json:"blueprints"`
+	Templates        []CatalogItemDTO     `json:"templates"`
+	LocalRoles       []CatalogItemDTO     `json:"localRoles"`
+	LocalCollections []CatalogItemDTO     `json:"localCollections"`
+}
+
+// CatalogBlueprintsDTO groups the source's blueprints with the dependency
+// closure they pull in: galaxy roles/collections and subscription roles
+// unioned across every blueprint's requirements.yml, plus any config.yml role
+// references that aren't declared there.
+type CatalogBlueprintsDTO struct {
+	Items                  []CatalogBlueprintDTO     `json:"items"`
+	RequiredRoles          []CatalogItemDTO          `json:"requiredRoles"`
+	RequiredCollections    []CatalogItemDTO          `json:"requiredCollections"`
 	SubscriptionRoles      []CatalogItemDTO          `json:"subscriptionRoles"`
 	UndeclaredDependencies []UndeclaredDependencyDTO `json:"undeclaredDependencies,omitempty"`
 }
 
 type CatalogBlueprintDTO struct {
-	ID                        string   `json:"id"`
-	Name                      string   `json:"name"`
-	Description               string   `json:"description,omitempty"`
-	Version                   string   `json:"version"`
-	State                     string   `json:"state"`
-	InstalledVersion          string   `json:"installedVersion,omitempty"`
-	RequiredTemplates         []string `json:"requiredTemplates,omitempty"`
-	RequiredLocalRoles        []string `json:"requiredLocalRoles,omitempty"`
-	RequiredGalaxyRoles       []string `json:"requiredGalaxyRoles,omitempty"`
-	RequiredGalaxyCollections []string `json:"requiredGalaxyCollections,omitempty"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Description         string   `json:"description,omitempty"`
+	Version             string   `json:"version"`
+	State               string   `json:"state"`
+	InstalledVersion    string   `json:"installedVersion,omitempty"`
+	RequiredTemplates   []string `json:"requiredTemplates,omitempty"`
+	RequiredLocalRoles  []string `json:"requiredLocalRoles,omitempty"`
+	RequiredRoles       []string `json:"requiredRoles,omitempty"`
+	RequiredCollections []string `json:"requiredCollections,omitempty"`
 }
 
 type CatalogItemDTO struct {
@@ -714,10 +728,10 @@ type CatalogItemDTO struct {
 	VersionByBlueprint map[string]string `json:"versionByBlueprint,omitempty"`
 }
 
-// ScopeInstallDTO is one installed copy of a role: the scope it lives in
-// ("global"/"user"), the on-disk version there, and its state against the
-// required pin ("installed" / "upgrade_available"). A role can have entries
-// for both scopes, at different versions.
+// ScopeInstallDTO is one installed copy of a role or vendored collection:
+// the scope it lives in ("global"/"user"), the on-disk version there, and its
+// state against the required pin ("installed" / "upgrade_available"). An
+// artifact can have entries for both scopes, at different versions.
 type ScopeInstallDTO struct {
 	Scope   string `json:"scope"`
 	Version string `json:"version,omitempty"`

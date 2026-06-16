@@ -324,6 +324,14 @@ func RegisterRoutesWithPocketBase(se *core.ServeEvent, routes PocketBaseRoutes) 
 }
 
 func Version(e *core.RequestEvent) error {
+	// The "/" pattern is a subtree match in the router, so this handler also
+	// receives every GET under the API base that matched no real route. Those
+	// are 404s, not version probes — answering them with the version document
+	// masks client bugs (e.g. a mangled path that survives redirect cleaning).
+	// TODO: find a new home for this handler and create a dedicated "/" route for path mismatches.
+	if p := e.Request.URL.Path; p != APIBasePath+"/" && p != APIBasePath && p != "/" {
+		return JSONError(e, http.StatusNotFound, "not found")
+	}
 
 	response := dto.VersionResponse{
 		Version: LudusVersion,
@@ -1032,20 +1040,6 @@ var routes = PocketBaseRoutes{
 		http.MethodGet,
 		"/sources/{sourceID}/collections",
 		ListSourceCollections,
-	},
-
-	{
-		"ListAllSourceBlueprints",
-		http.MethodGet,
-		"/sources/blueprints",
-		ListAllSourceBlueprints,
-	},
-
-	{
-		"GetSourceBlueprintManifest",
-		http.MethodGet,
-		"/sources/blueprints/{id}/manifest",
-		GetSourceBlueprintManifest,
 	},
 
 	// Migration routes

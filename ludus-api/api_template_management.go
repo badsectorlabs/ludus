@@ -45,6 +45,7 @@ type TemplateStatus struct {
 	Status   string  `json:"status"`
 	Os       LudusOS `json:"os"`
 	FilePath string  `json:"-"`
+	Owner    string  `json:"-"` // user record id; "" for global/built-in templates
 }
 
 var templateLogSafeCharRegex = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -189,6 +190,52 @@ func ctyValueString(value cty.Value) string {
 		return ""
 	}
 	return strings.TrimSpace(value.AsString())
+}
+
+// packerVariableString returns the static string default of a top-level
+// `variable "<name>"` block, or "" if it's absent or not a string. Packer
+// requires variable defaults to be literals (no functions or references), so
+// reading one without a build is always safe — unlike a `locals` value, which
+// may interpolate at build time (e.g. template_description's isotime).
+func packerVariableString(filename string, src []byte, varName string) string {
+	parser := hclparse.NewParser()
+	var file *hcl.File
+	var diags hcl.Diagnostics
+	if strings.HasSuffix(filename, ".json") {
+		file, diags = parser.ParseJSON(src, filename)
+	} else {
+		file, diags = parser.ParseHCL(src, filename)
+	}
+	if diags.HasErrors() {
+		return ""
+	}
+	content, _, diags := file.Body.PartialContent(&hcl.BodySchema{
+		Blocks: []hcl.BlockHeaderSchema{{Type: "variable", LabelNames: []string{"name"}}},
+	})
+	if diags.HasErrors() {
+		return ""
+	}
+	_, variables := packerTemplateEvalContext(content.Blocks)
+	if v, ok := variables[varName]; ok {
+		return ctyValueString(v)
+	}
+	return ""
+}
+
+// packerVarFromDir reads the named static `variable "<varName>"` default from the
+// single packer file in a source's templates/<name>/ dir, letting authors define
+// catalog metadata (description, thumbnail_path) in the packer template itself.
+// Returns "" when there's no packer file or no such variable.
+func packerVarFromDir(dir, varName string) string {
+	files, err := findFiles(dir, "pkr.hcl", "pkr.json")
+	if err != nil || len(files) == 0 {
+		return ""
+	}
+	src, err := os.ReadFile(files[0])
+	if err != nil {
+		return ""
+	}
+	return packerVariableString(files[0], src, varName)
 }
 
 func isExtractedTemplateName(name string) bool {
@@ -561,6 +608,9 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 		// Fill out the template status details
 		thisTemplateStatus.Name = thisTemplateName
 		thisTemplateStatus.FilePath = templateFile
+		if strings.Contains(templateFile, fmt.Sprintf("%s/users/%s/", ludusInstallPath, user.ProxmoxUsername())) {
+			thisTemplateStatus.Owner = user.Id
+		}
 		thisTemplateStatus.Os = extractOSFromHCL(templateFile)
 		if thisTemplateStatus.Os == "" {
 			thisTemplateStatus.Os = osFromTemplateName(thisTemplateName)
@@ -633,6 +683,15 @@ func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus)
 			return fmt.Errorf("unable to query template '%s' in templates collection: %w", templateName, err)
 		}
 		if existingRecord != nil {
+			// Backfill owner for a row created before owner population (or by a
+			// path that didn't know it). Only fill when empty — never reassign,
+			// so on a shared name the first creator keeps ownership.
+			if templateStatus.Owner != "" && existingRecord.GetString("owner") == "" {
+				existingRecord.Set("owner", templateStatus.Owner)
+				if err := app.Save(existingRecord); err != nil {
+					return fmt.Errorf("unable to backfill owner for template '%s': %w", templateName, err)
+				}
+			}
 			continue
 		}
 
@@ -647,6 +706,9 @@ func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus)
 		}
 		templateRecord.Set("os", templateOS)
 		template.SetShared(true)
+		if templateStatus.Owner != "" {
+			templateRecord.Set("owner", templateStatus.Owner)
+		}
 
 		if err := app.Save(template); err != nil {
 			return fmt.Errorf("unable to create template '%s' in templates collection: %w", templateName, err)
@@ -659,7 +721,7 @@ func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus)
 func discoverTemplateStatusesForStartup(app core.App) ([]TemplateStatus, error) {
 
 	templateStatusByName := make(map[string]TemplateStatus)
-	addTemplateFromFile := func(templateFile string) {
+	addTemplateFromFile := func(templateFile, owner string) {
 		templateName, err := extractTemplateNameFromHCL(templateFile)
 		if err != nil {
 			logger.Error(fmt.Sprintf("Unable to extract template name from %s: %v", templateFile, err))
@@ -673,8 +735,9 @@ func discoverTemplateStatusesForStartup(app core.App) ([]TemplateStatus, error) 
 			templateOS = osFromTemplateName(templateName)
 		}
 		templateStatusByName[templateName] = TemplateStatus{
-			Name: templateName,
-			Os:   templateOS,
+			Name:  templateName,
+			Os:    templateOS,
+			Owner: owner,
 		}
 	}
 
@@ -683,7 +746,7 @@ func discoverTemplateStatusesForStartup(app core.App) ([]TemplateStatus, error) 
 		return nil, fmt.Errorf("unable to list global templates: %w", err)
 	}
 	for _, templateFile := range globalTemplateFiles {
-		addTemplateFromFile(templateFile)
+		addTemplateFromFile(templateFile, "")
 	}
 
 	userRecords, err := app.FindAllRecords("users")
@@ -712,7 +775,7 @@ func discoverTemplateStatusesForStartup(app core.App) ([]TemplateStatus, error) 
 			return strings.HasSuffix(template, "pkrvars.hcl")
 		})
 		for _, templateFile := range userTemplateFiles {
-			addTemplateFromFile(templateFile)
+			addTemplateFromFile(templateFile, userRecord.Id)
 		}
 	}
 
@@ -1107,6 +1170,8 @@ func DeleteTemplate(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing '%s' (path: %s): %v", templateName, templateDir, err))
 	}
+
+	releaseSourceClaims(e.App, []string{"template"}, templateName)
 
 	return JSONResult(e, http.StatusOK, fmt.Sprintf("Template '%s' removed", templateName))
 }

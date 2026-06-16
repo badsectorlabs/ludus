@@ -8,4 +8,7 @@ ludus:
     cpus: 1
     linux: true
     roles:
-      - say_hello
+      # The local role's installed name is its galaxy identity from meta
+      # (author "ludus" + role_name "say_hello"), so configs reference it
+      # namespaced — same as a Galaxy-installed role.
+      - ludus.say_hello
