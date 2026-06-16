@@ -1,11 +1,12 @@
 module ludusapi
 
-go 1.25.0
+go 1.26
 
 require (
 	github.com/Telmate/proxmox-api-go v0.0.0-20240901160831-032717b543a5
 	github.com/apenella/go-ansible v1.3.0
 	github.com/containrrr/shoutrrr v0.8.0
+	github.com/cnaize/landbox v0.3.2
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/goforj/godump v1.6.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -55,6 +56,7 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/keygen-sh/go-update v1.0.0 // indirect
 	github.com/keygen-sh/jsonapi-go v1.2.1 // indirect
+	github.com/liamg/memit v0.0.3 // indirect
 	github.com/magefile/mage v1.14.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
@@ -76,7 +78,7 @@ require (
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/stretchr/testify v1.10.0 // indirect
+	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect

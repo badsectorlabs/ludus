@@ -9,6 +9,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/cnaize/landbox"
 )
 
 var (
@@ -55,6 +57,11 @@ type CommandManager struct {
 	commands map[string]*CommandInfo
 }
 
+type sandboxedCmd struct {
+	*exec.Cmd
+	sandbox *landbox.Sandbox
+}
+
 // GetInstance returns the singleton instance of the CommandManager.
 // It creates the instance on the first call and returns it on every subsequent call.
 func GetInstance() *CommandManager {
@@ -67,16 +74,33 @@ func GetInstance() *CommandManager {
 	return instance
 }
 
+func sandboxedCommand(userDir string, name string, args ...string) *sandboxedCmd {
+	sandbox := landbox.NewSandbox(landbox.Paths{"/usr"}, landbox.Paths{userDir}, nil)
+	cmd := sandbox.Command(name, args...)
+	cmd.Env = append(os.Environ(), cmd.Env...)
+	return &sandboxedCmd{
+		Cmd:     cmd,
+		sandbox: sandbox,
+	}
+}
+
+func (cmd *sandboxedCmd) Close() {
+	if cmd != nil && cmd.sandbox != nil {
+		_ = cmd.sandbox.Close()
+	}
+}
+
 // StartCommandAsync starts a new long-running command and returns immediately.
 // The command's status is updated in the background.
 // If logfile is not empty, stdout and stderr are written to both the logfile and captured in the CommandInfo struct.
 // Otherwise, stdout and stderr are only captured and stored in the CommandInfo struct.
 // If workingDir is not empty, the command is executed with that directory as the working directory.
-func (cm *CommandManager) StartCommandAsync(id, command, logfile, workingDir string, args ...string) (*CommandInfo, error) {
+func (cm *CommandManager) StartCommandAsync(id, userDir, command, logfile, workingDir string, args ...string) (*CommandInfo, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	cmd := exec.Command(command, args...)
+	sandbox := sandboxedCommand(userDir, command, args...)
+	cmd := sandbox.Cmd
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
@@ -100,6 +124,7 @@ func (cm *CommandManager) StartCommandAsync(id, command, logfile, workingDir str
 		var err error
 		logFile, err = os.OpenFile(logfile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
+			sandbox.Close()
 			return nil, fmt.Errorf("failed to open logfile: %w", err)
 		}
 		// Use MultiWriter to write to both the logfile and the buffer
@@ -115,6 +140,7 @@ func (cm *CommandManager) StartCommandAsync(id, command, logfile, workingDir str
 		if logFile != nil {
 			logFile.Close()
 		}
+		sandbox.Close()
 		return nil, err
 	}
 
@@ -123,6 +149,8 @@ func (cm *CommandManager) StartCommandAsync(id, command, logfile, workingDir str
 
 	// Launch a goroutine to wait for the command to finish.
 	go func() {
+		defer sandbox.Close()
+
 		err := cmd.Wait()
 
 		// Close log file if it was opened
@@ -155,11 +183,12 @@ func (cm *CommandManager) StartCommandAsync(id, command, logfile, workingDir str
 // If logfile is not empty, stdout and stderr are written to both the logfile and captured in the CommandInfo struct.
 // Otherwise, stdout and stderr are only captured and stored in the CommandInfo struct.
 // If workingDir is not empty, the command is executed with that directory as the working directory.
-func (cm *CommandManager) StartCommandInShellAsync(id, command, logfile, workingDir string) (*CommandInfo, error) {
+func (cm *CommandManager) StartCommandInShellAsync(id, userDir, command, logfile, workingDir string) (*CommandInfo, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	cmd := exec.Command("/bin/bash", "-c", command)
+	sandbox := sandboxedCommand(userDir, "/bin/bash", "-c", command)
+	cmd := sandbox.Cmd
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
@@ -183,6 +212,7 @@ func (cm *CommandManager) StartCommandInShellAsync(id, command, logfile, working
 		var err error
 		logFile, err = os.OpenFile(logfile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
+			sandbox.Close()
 			return nil, fmt.Errorf("failed to open logfile: %w", err)
 		}
 		// Use MultiWriter to write to both the logfile and the buffer
@@ -198,6 +228,7 @@ func (cm *CommandManager) StartCommandInShellAsync(id, command, logfile, working
 		if logFile != nil {
 			logFile.Close()
 		}
+		sandbox.Close()
 		return nil, err
 	}
 
@@ -206,6 +237,8 @@ func (cm *CommandManager) StartCommandInShellAsync(id, command, logfile, working
 
 	// Launch a goroutine to wait for the command to finish.
 	go func() {
+		defer sandbox.Close()
+
 		err := cmd.Wait()
 
 		// Close log file if it was opened
@@ -239,8 +272,10 @@ func (cm *CommandManager) StartCommandInShellAsync(id, command, logfile, working
 // Otherwise, stdout and stderr are only captured and stored in the CommandInfo struct.
 // If workingDir is not empty, the command is executed with that directory as the working directory.
 // If metadata is not nil, its entries are copied into the CommandInfo's Metadata map before the command starts.
-func (cm *CommandManager) StartCommandAndWait(id, command, logfile, workingDir string, metadata map[string]string, args ...string) (*CommandInfo, error) {
-	cmd := exec.Command(command, args...)
+func (cm *CommandManager) StartCommandAndWait(id, userDir, command, logfile, workingDir string, metadata map[string]string, args ...string) (*CommandInfo, error) {
+	sandbox := sandboxedCommand(userDir, command, args...)
+	defer sandbox.Close()
+	cmd := sandbox.Cmd
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
@@ -323,8 +358,10 @@ func (cm *CommandManager) StartCommandAndWait(id, command, logfile, workingDir s
 // Otherwise, stdout and stderr are only captured and stored in the CommandInfo struct.
 // If workingDir is not empty, the command is executed with that directory as the working directory.
 // If metadata is not nil, its entries are copied into the CommandInfo's Metadata map before the command starts.
-func (cm *CommandManager) StartCommandInShellAndWait(id, command, logfile, workingDir string, metadata map[string]string) (*CommandInfo, error) {
-	cmd := exec.Command("/bin/bash", "-c", command)
+func (cm *CommandManager) StartCommandInShellAndWait(id, userDir, command, logfile, workingDir string, metadata map[string]string) (*CommandInfo, error) {
+	sandbox := sandboxedCommand(userDir, "/bin/bash", "-c", command)
+	defer sandbox.Close()
+	cmd := sandbox.Cmd
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}

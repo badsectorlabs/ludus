@@ -58,3 +58,5 @@ crash.log
 ### Packer Patch ###
 # ignore temporary output files
 output-*/
+
+.gograph/

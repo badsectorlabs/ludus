@@ -345,7 +345,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		`-var 'iso_storage_pool={{.ProxmoxISOStoragePool}}' ` +
 		`-var 'ansible_home={{.UsersAnsibleDir}}' ` +
 		`-var 'ludus_nat_interface={{.LudusNATInterface}}' ` +
-		`{{.PackerFile}}`
+		`'{{.PackerFile}}'`
 
 	packerVerbose := "1"
 
@@ -410,7 +410,8 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		"template_file":    packerFile,
 		"proxmox_username": user.ProxmoxUsername(),
 	}
-	_, packerCommandError := commandManager.StartCommandInShellAndWait(packerBuildCommandID, renderedOutputString, packerLogFile, workingDir, packerBuildCommandMetadata)
+	userDir := fmt.Sprintf("%s/users/%s", ludusInstallPath, user.ProxmoxUsername())
+	_, packerCommandError := commandManager.StartCommandInShellAndWait(packerBuildCommandID, userDir, renderedOutputString, packerLogFile, workingDir, packerBuildCommandMetadata)
 
 	// Write 'Build complete' to the per-template packer log so the user knows this build has finished.
 	if packerCommandError == nil {
@@ -999,7 +1000,11 @@ func PutTemplateTar(e *core.RequestEvent) error {
 	if force {
 		os.RemoveAll(templateDirPath)
 	}
-	err = Untar(templateTarPath, fmt.Sprintf("%s/users/%s/packer", ludusInstallPath, user.ProxmoxUsername()))
+	err = ExtractTarFile(templateTarPath, fmt.Sprintf("%s/users/%s/packer", ludusInstallPath, user.ProxmoxUsername()), ExtractOptions{
+		StripSingleRoot:        false,
+		RejectDangerousEntries: true,
+		MaxBytes:               500 * 1024 * 1024, // 500 MB
+	})
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Error untaring file:"+err.Error())
 	}
@@ -1026,11 +1031,19 @@ func PutTemplateTar(e *core.RequestEvent) error {
 	} else if len(uploadedTemplatePackerFiles) > 1 {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar: %v", uploadedTemplatePackerFiles))
 	} else {
+		uploadedTemplatePackerFile := uploadedTemplatePackerFiles[0]
+		// Check for bad chars in the packer file name (blocklist, probably bypassable)
+		if strings.Contains(uploadedTemplatePackerFile, "$(") ||
+			strings.Contains(uploadedTemplatePackerFile, "\"") ||
+			strings.Contains(uploadedTemplatePackerFile, "`") ||
+			strings.Contains(uploadedTemplatePackerFile, "'") {
+			return JSONError(e, http.StatusBadRequest, `Packer file name contains a bad character. Packer file names must not contain $(, ", <backtick>, or '`)
+		}
 		// Check the name of this template to see if it is already on the server - templates must have unique names
 		// The if else chain above has validated we only have one entry in the uploadedTemplatePackerFiles slice
-		thisTemplateName, err := extractTemplateNameFromHCL(uploadedTemplatePackerFiles[0])
+		thisTemplateName, err := extractTemplateNameFromHCL(uploadedTemplatePackerFile)
 		if err != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error extracting template name from %s: %v", uploadedTemplatePackerFiles[0], err))
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error extracting template name from %s: %v", uploadedTemplatePackerFile, err))
 		}
 		if slices.Contains(currentTemplateNames, thisTemplateName) {
 			// The uploaded template exists on the server, but this could be a `--force` override of a template in the user's packer dir
