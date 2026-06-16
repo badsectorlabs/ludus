@@ -543,17 +543,17 @@ paths:
         - ApiKeyAuth: []
   /ansible/collection:
     post:
-      summary: Install an Ansible collection
+      summary: Install or Remove an Ansible collection
       deprecated: false
       description: >
-        Install an ansible collection by name or URL.
+        Install or remove an ansible collection. Set `action` to `install`
+        (default) or `remove`.
 
-        Admins can pass a userID parameter to install a collection for other
-        users.
+        Install accepts a collection FQCN (from galaxy) or a git source URL.
+        Remove takes a collection FQCN; since ansible-galaxy has no collection
+        remove, Ludus deletes the collection's directory.
 
-        Ansible collections can only be removed by rm-ing their directories.
-        This is not supported via Ludus due to potential edge cases in naming
-        depending on how the collection was installed.
+        Admins can pass a userID parameter to act on another user's collections.
       operationId: InstallCollection
       tags:
         - Ansible Management
@@ -567,7 +567,8 @@ paths:
             ranges)
           required: false
           schema:
-            $ref: '#/components/schemas/userID'
+            type: object
+            properties: {}
       requestBody:
         content:
           application/json:
@@ -579,8 +580,12 @@ paths:
                     Collection FQCN (namespace.name) for a galaxy install, or a
                     git source URL (https/ssh, optionally git+ prefixed) to
                     install from git. The server infers git from the string's
-                    shape.
+                    shape. For removal, the FQCN of the collection to delete.
                   example: maxhoesel.smallstep
+                action:
+                  type: string
+                  description: Whether to install (default) or remove the collection.
+                  example: install
                 version:
                   type: string
                   description: >-
@@ -590,10 +595,18 @@ paths:
                 force:
                   type: boolean
                   example: true
+                global:
+                  type: boolean
+                  description: >-
+                    Target the instance-wide global collections path shared by
+                    all users instead of the requesting user's scope. Admin
+                    only; non-admins receive a 403. Defaults to false.
+                  example: false
               type: object
+            examples: {}
       responses:
         '201':
-          description: collection installed
+          description: collection installed or removed
           content:
             application/json:
               schema:
@@ -828,6 +841,10 @@ paths:
                   example: install
                 global:
                   type: boolean
+                  description: >-
+                    Install into the instance-wide global roles path shared by
+                    all users instead of the requesting user's scope. Admin
+                    only; non-admins receive a 403. Defaults to false.
                   example: false
               type: object
             examples: {}
