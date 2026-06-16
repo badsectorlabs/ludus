@@ -12,18 +12,151 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/apenella/go-ansible/pkg/execute"
 	"github.com/apenella/go-ansible/pkg/options"
 	"github.com/apenella/go-ansible/pkg/playbook"
+	"github.com/apenella/go-ansible/pkg/stdoutcallback"
+	"github.com/apenella/go-ansible/pkg/stdoutcallback/results"
+	"github.com/cnaize/landbox"
 	"github.com/pocketbase/pocketbase/core"
 	yaml "sigs.k8s.io/yaml"
 )
+
+type sandboxedAnsibleExecutor struct {
+	*execute.DefaultExecute
+	proxmoxUsername string
+}
+
+func newAnsibleSandbox(proxmoxUsername string) *landbox.Sandbox {
+	return landbox.NewSandbox(
+		landbox.Paths{
+			"/usr",
+			filepath.Join(ludusInstallPath, "ansible"),
+		},
+		landbox.Paths{
+			filepath.Join(ludusInstallPath, "users", proxmoxUsername),
+			filepath.Join(ludusInstallPath, "resources"),
+			filepath.Join(ludusInstallPath, "ranges"),
+		},
+		nil,
+	)
+}
+
+func newSandboxedAnsibleExecute(proxmoxUsername string, options ...execute.ExecuteOptions) *sandboxedAnsibleExecutor {
+	return &sandboxedAnsibleExecutor{
+		DefaultExecute:  execute.NewDefaultExecute(options...),
+		proxmoxUsername: proxmoxUsername,
+	}
+}
+
+func (e *sandboxedAnsibleExecutor) Execute(ctx context.Context, command []string, resultsFunc stdoutcallback.StdoutCallbackResultsFunc, options ...execute.ExecuteOptions) error {
+	if len(command) == 0 {
+		return errors.New("ansible command is empty")
+	}
+	for _, opt := range options {
+		opt(e.DefaultExecute)
+	}
+	if resultsFunc == nil {
+		resultsFunc = results.DefaultStdoutCallbackResults
+	}
+	if e.Write == nil {
+		e.Write = os.Stdout
+	}
+	if e.WriterError == nil {
+		e.WriterError = os.Stderr
+	}
+
+	sandbox := newAnsibleSandbox(e.proxmoxUsername)
+	defer sandbox.Close()
+
+	cmd := sandbox.CommandContext(ctx, command[0], command[1:]...)
+	if e.CmdRunDir != "" {
+		cmd.Dir = e.CmdRunDir
+	}
+	if len(e.EnvVars) > 0 {
+		cmd.Env = append(os.Environ(), e.EnvVars.Environ()...)
+	}
+	cmd.Stdin = os.Stdin
+
+	cmdStdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("creating stdout pipe: %w", err)
+	}
+	cmdStderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("creating stderr pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting ansible command: %w", err)
+	}
+
+	var wg sync.WaitGroup
+	resultErr := make(chan error, 1)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		resultErr <- resultsFunc(ctx, cmdStdout, e.Write, e.Transformers...)
+	}()
+	go func() {
+		defer wg.Done()
+		results.DefaultStdoutCallbackResults(ctx, cmdStderr, e.WriterError)
+	}()
+
+	wg.Wait()
+	if err := <-resultErr; err != nil {
+		return fmt.Errorf("managing ansible output: %w", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			fmt.Fprintf(e.Write, "\nWhoops! %s\n", ctx.Err())
+		}
+		return fmt.Errorf("ansible command failed: %s: %w", strings.Join(command, " "), err)
+	}
+
+	return nil
+}
+
+func sandboxedAnsibleCommand(proxmoxUsername string, cmd *exec.Cmd) (*exec.Cmd, *landbox.Sandbox) {
+	sandbox := newAnsibleSandbox(proxmoxUsername)
+
+	name := cmd.Path
+	if name == "" && len(cmd.Args) > 0 {
+		name = cmd.Args[0]
+	}
+	var args []string
+	if len(cmd.Args) > 1 {
+		args = cmd.Args[1:]
+	}
+
+	sandboxedCmd := sandbox.Command(name, args...)
+	sandboxedCmd.Dir = cmd.Dir
+	if cmd.Env != nil {
+		sandboxedCmd.Env = append(cmd.Env, sandboxedCmd.Env...)
+	} else {
+		sandboxedCmd.Env = append(os.Environ(), sandboxedCmd.Env...)
+	}
+	sandboxedCmd.Stdin = cmd.Stdin
+	sandboxedCmd.Stdout = cmd.Stdout
+	sandboxedCmd.Stderr = cmd.Stderr
+	sandboxedCmd.ExtraFiles = cmd.ExtraFiles
+	sandboxedCmd.SysProcAttr = cmd.SysProcAttr
+
+	return sandboxedCmd, sandbox
+}
+
+func runSandboxedAnsibleCommand(user *models.User, cmd *exec.Cmd) ([]byte, error) {
+	sandboxedCmd, sandbox := sandboxedAnsibleCommand(user.ProxmoxUsername(), cmd)
+	defer sandbox.Close()
+	return sandboxedCmd.CombinedOutput()
+}
 
 func getMergedDefaults(rangeConfigPath string) map[string]interface{} {
 	mergedDefaults := map[string]interface{}{}
@@ -186,7 +319,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		returnAllRanges = true
 	}
 
-	ansibleExecute := execute.NewDefaultExecute(
+	ansibleExecute := newSandboxedAnsibleExecute(user.ProxmoxUsername(),
 		// Use a multiwrtier that saves the output to a buffer and a file
 		execute.WithWrite(io.MultiWriter(buff, ansibleLogFile)),
 		// Also log stderr to the log file and the buff vs stderr (journalctl logs)
@@ -291,7 +424,6 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 func runUserManagementPlaybookStandalone(playbookPath string, extraVars map[string]interface{}) (string, error) {
 	buff := new(bytes.Buffer)
 	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
-
 	ansiblePlaybookConnectionOptions := &options.AnsibleConnectionOptions{
 		Connection: "local",
 	}
@@ -453,7 +585,9 @@ func checkRoleExists(e *core.RequestEvent, roleName string) (bool, error) {
 		var stdoutBuf bytes.Buffer
 		collectionCmd.Stdout = &stdoutBuf
 		collectionCmd.Stderr = io.Discard
-		err := collectionCmd.Run()
+		sandboxedCollectionCmd, sandbox := sandboxedAnsibleCommand(user.ProxmoxUsername(), collectionCmd)
+		err := sandboxedCollectionCmd.Run()
+		sandbox.Close()
 		collectionOutput := stdoutBuf.Bytes()
 		if err != nil {
 			return false, errors.New("Unable to get the ansible collections: " + err.Error())
@@ -499,7 +633,9 @@ func checkRoleExists(e *core.RequestEvent, roleName string) (bool, error) {
 	var stdoutBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = io.Discard
-	err := cmd.Run()
+	sandboxedRoleCmd, sandbox := sandboxedAnsibleCommand(user.ProxmoxUsername(), cmd)
+	err := sandboxedRoleCmd.Run()
+	sandbox.Close()
 	roleOutput := stdoutBuf.Bytes()
 	if err != nil {
 		return false, fmt.Errorf("unable to get the ansible roles: %w", err)
@@ -570,7 +706,7 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeDir + ".tmp-range-config.yml"}
 	inventory := "127.0.0.1"
 
-	ansibleExecute := execute.NewDefaultExecute(
+	ansibleExecute := newSandboxedAnsibleExecute(user.ProxmoxUsername(),
 		// Use a multiwrtier that saves the output to a buffer and a file
 		execute.WithWrite(buff),
 		// Also log stderr to the log file and the buff vs stderr (journalctl logs)

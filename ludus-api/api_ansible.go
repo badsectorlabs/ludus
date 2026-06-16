@@ -7,14 +7,12 @@ import (
 	"ludusapi/models"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/alessio/shellescape"
-	"github.com/cnaize/landbox"
 	"github.com/pocketbase/pocketbase/core"
 	yaml "sigs.k8s.io/yaml"
 )
@@ -34,33 +32,6 @@ var coreAnsibleRoles = []string{"lae.proxmox", "geerlingguy.packer", "ansible-th
 // collection is load-bearing yet) but enforced by ActionCollectionFromInternet
 // so a future core collection is protected the moment it is added here.
 var coreAnsibleCollections = []string{}
-
-func runSandboxedAnsibleCommand(user *models.User, cmd *exec.Cmd) ([]byte, error) {
-	sandbox := landbox.NewSandbox(
-		landbox.Paths{
-			"/usr",
-			filepath.Join(ludusInstallPath, "ansible"),
-		},
-		landbox.Paths{
-			filepath.Join(ludusInstallPath, "users", user.ProxmoxUsername()),
-			filepath.Join(ludusInstallPath, "resources"),
-			filepath.Join(ludusInstallPath, "ranges"),
-		},
-		nil,
-	)
-	defer sandbox.Close()
-
-	sandboxedCmd := sandbox.Command(cmd.Path, cmd.Args...)
-	sandboxedCmd.Dir = cmd.Dir
-	sandboxedCmd.Env = append(cmd.Env, sandboxedCmd.Env...)
-	sandboxedCmd.Stdin = cmd.Stdin
-	sandboxedCmd.Stdout = cmd.Stdout
-	sandboxedCmd.Stderr = cmd.Stderr
-	sandboxedCmd.ExtraFiles = cmd.ExtraFiles
-	sandboxedCmd.SysProcAttr = cmd.SysProcAttr
-
-	return sandboxedCmd.CombinedOutput()
-}
 
 // isCoreCollection reports whether the FQCN names a protected core collection.
 func isCoreCollection(fqcn string) bool {
