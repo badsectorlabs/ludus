@@ -7,12 +7,14 @@ import (
 	"ludusapi/models"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/alessio/shellescape"
+	"github.com/cnaize/landbox"
 	"github.com/pocketbase/pocketbase/core"
 	yaml "sigs.k8s.io/yaml"
 )
@@ -32,6 +34,33 @@ var coreAnsibleRoles = []string{"lae.proxmox", "geerlingguy.packer", "ansible-th
 // collection is load-bearing yet) but enforced by ActionCollectionFromInternet
 // so a future core collection is protected the moment it is added here.
 var coreAnsibleCollections = []string{}
+
+func runSandboxedAnsibleCommand(user *models.User, cmd *exec.Cmd) ([]byte, error) {
+	sandbox := landbox.NewSandbox(
+		landbox.Paths{
+			"/usr",
+			filepath.Join(ludusInstallPath, "ansible"),
+		},
+		landbox.Paths{
+			filepath.Join(ludusInstallPath, "users", user.ProxmoxUsername()),
+			filepath.Join(ludusInstallPath, "resources"),
+			filepath.Join(ludusInstallPath, "ranges"),
+		},
+		nil,
+	)
+	defer sandbox.Close()
+
+	sandboxedCmd := sandbox.Command(cmd.Path, cmd.Args...)
+	sandboxedCmd.Dir = cmd.Dir
+	sandboxedCmd.Env = append(cmd.Env, sandboxedCmd.Env...)
+	sandboxedCmd.Stdin = cmd.Stdin
+	sandboxedCmd.Stdout = cmd.Stdout
+	sandboxedCmd.Stderr = cmd.Stderr
+	sandboxedCmd.ExtraFiles = cmd.ExtraFiles
+	sandboxedCmd.SysProcAttr = cmd.SysProcAttr
+
+	return sandboxedCmd.CombinedOutput()
+}
 
 // isCoreCollection reports whether the FQCN names a protected core collection.
 func isCoreCollection(fqcn string) bool {
@@ -140,7 +169,7 @@ func ActionRoleFromInternet(e *core.RequestEvent) error {
 		scopePath = globalRolesPath()
 	}
 	cmd := galaxyInstallCmd(galaxyRole, []string{roleBody.Action}, []string{roleString}, roleBody.Force, scopePath, userAnsibleHome(user.ProxmoxUsername()))
-	cmdOutput, err := cmd.CombinedOutput()
+	cmdOutput, err := runSandboxedAnsibleCommand(user, cmd)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to %s the ansible role %s: %s; Output was: %s", roleBody.Action, roleString, err.Error(), string(cmdOutput)))
 	}
@@ -267,7 +296,7 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 	}
 	cmd := galaxyInstallCmd(galaxyRole, []string{"role", "install"}, []string{roleName}, force, scopePath, userAnsibleHome(user.ProxmoxUsername()))
 	cmd.Dir = fmt.Sprintf("%s/users/%s/.ansible/tmp", ludusInstallPath, user.ProxmoxUsername()) // If you try to install a tar'd role with the full path, it will fail to extract. Bug in ansible-galaxy?
-	cmdOutput, err := cmd.CombinedOutput()
+	cmdOutput, err := runSandboxedAnsibleCommand(user, cmd)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to install the ansible role %s: %s; Output was: %s", roleTarPath, err.Error(), string(cmdOutput)))
 	}
@@ -425,7 +454,7 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 		scopePath = globalCollectionsPath()
 	}
 	cmd := galaxyInstallCmd(galaxyCollection, []string{"collection", "install"}, []string{collectionString}, collectionBody.Force, scopePath, userAnsibleHome(user.ProxmoxUsername()))
-	cmdOutput, err := cmd.CombinedOutput()
+	cmdOutput, err := runSandboxedAnsibleCommand(user, cmd)
 	output := string(cmdOutput)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to install the ansible collection %s: %s; Output was: %s", collectionString, err.Error(), output))
@@ -521,7 +550,7 @@ func InstallSubscriptionRoles(e *core.RequestEvent) error {
 		}
 		cmd := galaxyInstallCmd(galaxyRole, []string{"role", "install"}, []string{escapedRoleName}, requestBody.Force, scopePath, userAnsibleHome(user.ProxmoxUsername()))
 		cmd.Dir = tempDir // ansible-galaxy needs to be run from the directory containing the tar file
-		cmdOutput, err := cmd.CombinedOutput()
+		cmdOutput, err := runSandboxedAnsibleCommand(user, cmd)
 		if err != nil && !strings.Contains(string(cmdOutput), "was installed successfully") {
 			errors = append(errors, dto.InstallSubscriptionRolesResponseErrorsItem{
 				Role:   roleName,
