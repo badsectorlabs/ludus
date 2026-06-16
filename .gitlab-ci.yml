@@ -176,10 +176,18 @@ stages:
   - ludus ansible collection list | grep maxhoesel.smallstep | grep 0.24.4
   # Global collection install (regression: a successful global install must NOT be
   # reported as an error by ansible-galaxy's benign path/version-compat warnings)
-  - ludus ansible collection add community.proxmox --global || true
-  - ludus ansible collection list | grep community.proxmox | grep true
-  # A bundled collection installed --global is a clean no-op, not an error
-  - ludus ansible collection add ansible.posix --global 2>&1 | grep -i "already installed"
+  - |
+    if [[ "$(ludus user list --json | jq -r '.[].isAdmin')" == "true" ]]; then
+      ludus ansible collection add community.proxmox --global
+      ludus ansible collection list | grep community.proxmox | grep true
+      # A bundled collection installed --global is a clean no-op, not an error
+      ludus ansible collection add ansible.posix --global 2>&1 | grep -i "already installed"
+    else
+      set +o pipefail
+      ludus ansible collection add community.proxmox --global 2>&1 | grep "Only administrators can perform global ansible actions"
+      set -o pipefail
+      ludus ansible collection add ansible.posix 2>&1 | grep -i "already installed"
+    fi
   # Depends on tests
   - ludus ansible role add -d /opt/ludus/ci/roles/hello_world --force
   - ludus ansible role add -d /opt/ludus/ci/roles/first --force
@@ -693,6 +701,7 @@ install kickoff:
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 30m
   script:
+    - rm -rf /opt/ludus || true # Remove the install directory if this is a retry
     - sudo timedatectl set-ntp off && sudo timedatectl set-ntp on
     - date
     - sudo hostname ludus-$CI_PIPELINE_ID
