@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -656,12 +655,14 @@ func seedDefaultSourceBSL(app core.App) {
 	enabled := ServerConfiguration.RegisterDefaultSource
 	ConfigMu.RUnlock()
 	if !enabled {
+		logger.Debug("blueprint-sources: Skipping default source BSL registration: register_default_source is disabled")
 		return
 	}
 	// ROOT may not exist yet on the very first boot — skip and let a later
 	// boot register it.
 	root, err := app.FindFirstRecordByData("users", "userID", "ROOT")
 	if err != nil {
+		logger.Debug("blueprint-sources: Skipping default source BSL registration: ROOT user not found")
 		return
 	}
 	existing, _ := app.FindRecordsByFilter("sources",
@@ -672,6 +673,7 @@ func seedDefaultSourceBSL(app core.App) {
 	}
 	collection, err := app.FindCollectionByNameOrId("sources")
 	if err != nil {
+		logger.Debug("blueprint-sources: Skipping default source BSL registration: sources collection not found")
 		return
 	}
 	src := core.NewRecord(collection)
@@ -683,10 +685,10 @@ func seedDefaultSourceBSL(app core.App) {
 	src.Set("lastSyncStatus", "")
 	src.Set("lastSyncError", "")
 	if err := app.Save(src); err != nil {
-		log.Printf("[blueprint-sources] seed default source %q: %v", defaultSourceBSLID, err)
+		logger.Info(fmt.Sprintf("blueprint-sources: seed default source %q: %v", defaultSourceBSLID, err))
 		return
 	}
-	log.Printf("[blueprint-sources] registered default source %q (%s)", defaultSourceBSLID, defaultSourceBSLURL)
+	logger.Info(fmt.Sprintf("blueprint-sources: registered default source %q (%s)", defaultSourceBSLID, defaultSourceBSLURL))
 }
 
 // SyncAllSourcesOnStartup refreshes every registered source's catalog
