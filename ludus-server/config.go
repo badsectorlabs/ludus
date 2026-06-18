@@ -88,6 +88,8 @@ func automatedConfigGenerator(writeToFile bool) {
 				config.DatabaseEncryptionKey = security.RandomString(32)
 				config.WireguardPort = 51820
 				config.MaxLogHistory = 100
+				config.RegisterDefaultSource = true
+				config.SyncSourcesOnStartup = true
 				if inCluster {
 					config.ClusterMode = true
 					config.SDNZone = "ludus"
@@ -131,6 +133,8 @@ func automatedConfigGenerator(writeToFile bool) {
 						f.WriteString(fmt.Sprintf("sdn_zone: %s\n", config.SDNZone))
 						f.WriteString(fmt.Sprintf("vxlan_tag_base: %d\n", config.VXLANTagBase))
 					}
+					f.WriteString("register_default_source: true\n")
+					f.WriteString("sync_sources_on_startup: true\n")
 				} else {
 
 				}
