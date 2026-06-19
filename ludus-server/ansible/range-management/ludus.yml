@@ -17,7 +17,7 @@
     vm_groups: '"{{ range_id }}","{{ range_id }}_router"'
     is_linux: true
     ram: "{{ router.ram_gb | default(2) }}"
-    balloon_size: "{{ router.ram_min_gb if router.ram_min_gb is defined else '0.5' }}"
+    balloon_size: "{{ router.ram_min_gb if router.ram_min_gb is defined else ('0.5' if router.ram_gb is not defined else '0') }}"
     cpu_cores: "{{ router.cpus | default(2) }}"
     num_vcpus: "{{ router.cpus | default(2) }}"
     unmanaged: false
