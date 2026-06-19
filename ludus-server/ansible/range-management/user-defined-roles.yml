@@ -9,6 +9,7 @@
     - name: Run the custom module to resolve role dependencies
       ludus_role_dependency_resolver:
         ludus_config_object: "{{ ludus }}"
+        router_config_object: "{{ router }}"
       register: resolved_role_order
 
     - name: Display resolved role order

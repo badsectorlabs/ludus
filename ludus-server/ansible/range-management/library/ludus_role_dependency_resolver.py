@@ -44,7 +44,7 @@ error:
     sample: "ERROR: Circular dependency found for vm1:role1"
 '''
 
-def parse_ludus_config(ludus):
+def parse_ludus_config(ludus, router):
     graph = OrderedDict()
     nodes = OrderedDict()
 
@@ -65,6 +65,17 @@ def parse_ludus_config(ludus):
                     dep_vm = dep['vm_name']
                     dep_role = dep['role']
                     graph[(vm_name, role_name)].append((dep_vm, dep_role))
+    # Also check router roles
+    if router is not None:
+        router_vm_name = router['vm_name']
+        for role in router.get('roles', []):
+            if isinstance(role, str):
+                role_name = role
+                nodes[(router_vm_name, role_name)] = True
+                graph[(router_vm_name, role_name)] = []
+            elif isinstance(role, dict):
+                role_name = role['name']
+                nodes[(router_vm_name, role_name)] = True
 
     return graph, nodes
 
@@ -101,13 +112,15 @@ def topological_sort(graph, nodes):
 def main():
     module = AnsibleModule(
         argument_spec=dict(
-            ludus_config_object=dict(type='list', required=True)
+            ludus_config_object=dict(type='list', required=True),
+            router_config_object=dict(type='dict', required=False)
         )
     )
 
     ludus = module.params['ludus_config_object']
+    router = module.params['router_config_object']
     try:
-        graph, nodes = parse_ludus_config(ludus)
+        graph, nodes = parse_ludus_config(ludus, router)
         order = topological_sort(graph, nodes)
 
         module.exit_json(changed=False, order=order)
