@@ -919,7 +919,9 @@ paths:
                 force:
                   type: boolean
                   example: false
-            examples: {}
+            example:
+              file: ''
+              force: 'false'
       responses:
         '201':
           description: role installed
@@ -1562,7 +1564,7 @@ paths:
           in: path
           description: The id of the users to delete
           required: true
-          example: ''
+          example: {}
           schema:
             $ref: '#/components/schemas/userID'
         - name: deleteDefaultRange
@@ -2022,7 +2024,7 @@ paths:
           in: path
           description: The range number to delete VMs from
           required: false
-          example: ''
+          example: {}
           schema:
             $ref: '#/components/schemas/rangeID'
         - name: userID
@@ -2285,7 +2287,9 @@ paths:
                 force:
                   type: boolean
                   example: false
-            examples: {}
+            example:
+              file: ''
+              force: 'false'
       responses:
         '200':
           description: successfully updated configuration
@@ -3959,6 +3963,9 @@ paths:
                 force:
                   type: boolean
                   example: false
+            example:
+              file: ''
+              force: 'false'
       responses:
         '201':
           description: template added
@@ -5304,6 +5311,8 @@ paths:
                   example: ''
               required:
                 - archive
+            example:
+              archive: ''
         required: true
       responses:
         '201':
@@ -6155,7 +6164,14 @@ paths:
                   type: string
                   format: binary
                   example: ''
-            examples: {}
+            example:
+              id: ''
+              type: ''
+              url: ''
+              ref: ''
+              global: ''
+              force: ''
+              archive: ''
       responses:
         '200':
           description: ''
@@ -6395,7 +6411,12 @@ paths:
                   description: Remote url for git-type sources.
                   example: ''
                   type: string
-            examples: {}
+            example:
+              archive: ''
+              ref: ''
+              global: ''
+              force: ''
+              url: ''
         required: true
       responses:
         '200':
