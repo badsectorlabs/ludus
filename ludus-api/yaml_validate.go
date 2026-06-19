@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"encoding/json"
 	"fmt"
+	"ludusapi/models"
 	"os"
 	"regexp"
 	"slices"
@@ -235,6 +236,8 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 	}
 	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
 
+	user := e.Get("user").(*models.User)
+
 	// Validate range-level target_node if specified
 	if config.Router != nil {
 		if config.Router.VMName != "" {
@@ -339,7 +342,7 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 							return fmt.Errorf("error checking if role exists on the server: %s", err)
 						}
 						if !exists {
-							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, targetRange.RangeId())
+							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, user.UserId())
 						}
 					case map[string]interface{}:
 						logger.Debug("Yaml validate: checking role: " + godump.DumpStr(role))
@@ -349,7 +352,7 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 								return fmt.Errorf("error checking if role exists on the server: %s", err)
 							}
 							if !exists {
-								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, targetRange.RangeId())
+								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, user.UserId())
 							}
 							if dependsOn, ok := r["depends_on"].([]interface{}); ok {
 								for _, dep := range dependsOn {
@@ -360,7 +363,7 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 												return fmt.Errorf("error checking if role exists on the server: %s", err)
 											}
 											if !exists {
-												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, targetRange.RangeId())
+												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, user.UserId())
 											}
 										}
 									}
