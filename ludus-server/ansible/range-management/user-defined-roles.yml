@@ -8,8 +8,9 @@
   tasks:
     - name: Run the custom module to resolve role dependencies
       ludus_role_dependency_resolver:
-        ludus_config_object: "{{ ludus }}"
-        router_config_object: "{{ router }}"
+        ludus_config_object: "{{ ludus | default([]) }}"
+        router_config_object: "{{ router | default({}) }}"
+        range_id: "{{ range_id }}"
       register: resolved_role_order
 
     - name: Display resolved role order

@@ -18,6 +18,16 @@ options:
             - the Ludus configuration object
         required: true
         type: list
+    router_config_object:
+        description:
+            - the Router configuration object
+        required: false
+        type: dict
+    range_id:
+        description:
+            - Range ID used to derive the default router VM name when router.vm_name is not set
+        required: true
+        type: str
 '''
 
 EXAMPLES = r'''
@@ -44,7 +54,7 @@ error:
     sample: "ERROR: Circular dependency found for vm1:role1"
 '''
 
-def parse_ludus_config(ludus, router):
+def parse_ludus_config(ludus, router, default_router_vm_name):
     graph = OrderedDict()
     nodes = OrderedDict()
 
@@ -67,7 +77,7 @@ def parse_ludus_config(ludus, router):
                     graph[(vm_name, role_name)].append((dep_vm, dep_role))
     # Also check router roles
     if router is not None:
-        router_vm_name = router['vm_name']
+        router_vm_name = router.get('vm_name', default_router_vm_name)
         for role in router.get('roles', []):
             if isinstance(role, str):
                 role_name = role
@@ -113,14 +123,17 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             ludus_config_object=dict(type='list', required=True),
-            router_config_object=dict(type='dict', required=False)
+            router_config_object=dict(type='dict', required=False),
+            range_id=dict(type='str', required=True),
         )
     )
 
     ludus = module.params['ludus_config_object']
     router = module.params['router_config_object']
+    range_id = module.params['range_id']
+    default_router_vm_name = f"{range_id}-router-debian11-x64"
     try:
-        graph, nodes = parse_ludus_config(ludus, router)
+        graph, nodes = parse_ludus_config(ludus, router, default_router_vm_name)
         order = topological_sort(graph, nodes)
 
         module.exit_json(changed=False, order=order)
