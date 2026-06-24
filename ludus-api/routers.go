@@ -107,6 +107,12 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		if err := startupSyncTemplatesCollection(app); err != nil {
 			logger.Error(fmt.Sprintf("Error syncing templates collection on startup: %v", err))
 		}
+		if err := startupReconcileRunningLogHistory(app); err != nil {
+			logger.Error(fmt.Sprintf("Error reconciling orphaned running log history on startup: %v", err))
+		}
+		if err := startupReconcileRangeStates(app); err != nil {
+			logger.Error(fmt.Sprintf("Error reconciling orphaned range states on startup: %v", err))
+		}
 	}
 
 	// Setup NAT VNet for cluster mode, this function checks if we are in cluster mode first
@@ -285,6 +291,17 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		return se.Next()
 	})
 
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		// Only the main (non-root) service manages sources on disk. The root
+		// admin service shares the same code path but would git-fetch as root,
+		// leaving root-owned files the main service cannot update on later syncs.
+		if os.Geteuid() != 0 {
+			seedDefaultSourceBSL(app)
+			SyncAllSourcesOnStartup(app)
+		}
+		return se.Next()
+	})
+
 	return &app
 }
 
@@ -307,6 +324,14 @@ func RegisterRoutesWithPocketBase(se *core.ServeEvent, routes PocketBaseRoutes) 
 }
 
 func Version(e *core.RequestEvent) error {
+	// The "/" pattern is a subtree match in the router, so this handler also
+	// receives every GET under the API base that matched no real route. Those
+	// are 404s, not version probes — answering them with the version document
+	// masks client bugs (e.g. a mangled path that survives redirect cleaning).
+	// TODO: find a new home for this handler and create a dedicated "/" route for path mismatches.
+	if p := e.Request.URL.Path; p != APIBasePath+"/" && p != APIBasePath && p != "/" {
+		return JSONError(e, http.StatusNotFound, "not found")
+	}
 
 	response := dto.VersionResponse{
 		Version: LudusVersion,
@@ -814,6 +839,20 @@ var routes = PocketBaseRoutes{
 	},
 
 	{
+		"GetBlueprintDetail",
+		http.MethodGet,
+		"/blueprints/{blueprintID}",
+		GetBlueprintDetail,
+	},
+
+	{
+		"CreateBlueprint",
+		http.MethodPost,
+		"/blueprints",
+		CreateBlueprint,
+	},
+
+	{
 		"CreateBlueprintFromRange",
 		http.MethodPost,
 		"/blueprints/from-range",
@@ -832,6 +871,20 @@ var routes = PocketBaseRoutes{
 		http.MethodPost,
 		"/blueprints/{blueprintID}/copy",
 		CopyBlueprint,
+	},
+
+	{
+		"ExportBlueprint",
+		http.MethodGet,
+		"/blueprints/{blueprintID}/export",
+		ExportBlueprint,
+	},
+
+	{
+		"ImportBlueprint",
+		http.MethodPost,
+		"/blueprints/import",
+		ImportBlueprint,
 	},
 
 	{
@@ -895,6 +948,98 @@ var routes = PocketBaseRoutes{
 		http.MethodDelete,
 		"/blueprints/{blueprintID}/share/users",
 		UnshareBlueprintWithUsers,
+	},
+
+	{
+		"InstallBlueprintDeps",
+		http.MethodPost,
+		"/blueprints/{blueprintID}/install",
+		InstallBlueprintDeps,
+	},
+
+	// Source routes
+	{
+		"CreateSource",
+		http.MethodPost,
+		"/sources",
+		CreateSource,
+	},
+
+	{
+		"ListSources",
+		http.MethodGet,
+		"/sources",
+		ListSources,
+	},
+
+	{
+		"GetSource",
+		http.MethodGet,
+		"/sources/{sourceID}",
+		GetSource,
+	},
+
+	{
+		"UpdateSource",
+		http.MethodPatch,
+		"/sources/{sourceID}",
+		UpdateSource,
+	},
+
+	{
+		"DeleteSource",
+		http.MethodDelete,
+		"/sources/{sourceID}",
+		DeleteSource,
+	},
+
+	{
+		"SyncSource",
+		http.MethodPost,
+		"/sources/{sourceID}/sync",
+		SyncSource,
+	},
+
+	{
+		"GetSourceCatalog",
+		http.MethodGet,
+		"/sources/{sourceID}/catalog",
+		GetSourceCatalog,
+	},
+
+	{
+		"InstallSource",
+		http.MethodPost,
+		"/sources/{sourceID}/install",
+		InstallSource,
+	},
+
+	{
+		"ListSourceBlueprints",
+		http.MethodGet,
+		"/sources/{sourceID}/blueprints",
+		ListSourceBlueprints,
+	},
+
+	{
+		"ListSourceTemplates",
+		http.MethodGet,
+		"/sources/{sourceID}/templates",
+		ListSourceTemplates,
+	},
+
+	{
+		"ListSourceRoles",
+		http.MethodGet,
+		"/sources/{sourceID}/roles",
+		ListSourceRoles,
+	},
+
+	{
+		"ListSourceCollections",
+		http.MethodGet,
+		"/sources/{sourceID}/collections",
+		ListSourceCollections,
 	},
 
 	// Migration routes
@@ -975,5 +1120,4 @@ var routes = PocketBaseRoutes{
 		"/ansible/role/scope",
 		MoveRoleScope,
 	},
-
 }

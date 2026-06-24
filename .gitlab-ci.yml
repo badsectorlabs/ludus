@@ -2,9 +2,9 @@ stages:
   - pages
   - documentation
   - build
-  - claim         # claim a VM pool (A or B) or the cluster slot
+  - claim         # claim the cluster slot
   - test          # all install/template/range/post-deploy/integration/cluster jobs (DAG via needs)
-  - release-claim       # release the claimed pool/cluster (when: always)
+  - release-claim # destroy successful dynamic CI clones and release cluster claim
   - upload
   - release-binaries # tag/release publishing jobs
 
@@ -12,10 +12,62 @@ stages:
 # YAML ANCHORS #
 ################
 
+.qm-guest-exec-retry: &qm-guest-exec-retry |
+  qm_guest_exec_retry() {
+    local vmid="$1"
+    shift
+    local attempt exit_code
+
+    for attempt in 1 2 3; do
+      if sudo qm guest exec "$vmid" -- "$@"; then
+        return 0
+      fi
+
+      exit_code=$?
+      if [[ "$attempt" -eq 3 ]]; then
+        return "$exit_code"
+      fi
+
+      echo "qm guest exec failed for VM ${vmid} on attempt ${attempt}/3; retrying in 15 seconds..." >&2
+      sleep 15
+    done
+  }
+
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key
 .common-setup: &common-setup # Sync time in the event this test is being run after a snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
+  - *qm-guest-exec-retry
+  # Set the config to use the "user" API by default
+  - mkdir -p ~/.config/ludus/
+  - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
+  # Start as the ROOT user
+  - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
+  # Download the build all artifacts from this pipeline if they are not present AND the version of Ludus we are running does not match the commit hash
+  - export BUILT_SHA=$(ludus version 2>&1 | grep '+' | cut -d '+' -f 2)
+  - |
+    if [[ ! -d binaries && "$BUILT_SHA" != "${CI_COMMIT_SHORT_SHA}" ]]; then
+      echo "binaries/ not found; downloading build all artifacts from this pipeline"
+
+      build_job_id="$(
+        curl --fail --silent --show-error --globoff \
+          --header "PRIVATE-TOKEN: ${JOB_READ_PAT}" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/pipelines/${CI_PIPELINE_ID}/jobs?scope[]=success&per_page=100" \
+        | jq -r '[.[] | select(.name == "build all")][0].id // empty'
+      )"
+
+      if [ -z "$build_job_id" ]; then
+        echo "Could not find successful build all job in pipeline ${CI_PIPELINE_ID}"
+        exit 1
+      fi
+
+      curl --fail --location --silent --show-error \
+        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        --output /tmp/build-all-artifacts.zip \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/jobs/${build_job_id}/artifacts"
+
+      unzip -o /tmp/build-all-artifacts.zip
+    fi
   - |
     if [ -d binaries ]; then
       cd binaries
@@ -25,11 +77,28 @@ stages:
       sudo cp -f ludus-client_linux-amd64 /usr/local/bin/ludus
       cd ..
     fi
-  # Set the config to use the "user" API by default
-  - mkdir -p ~/.config/ludus/
-  - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
-  # Start as the ROOT user
-  - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
+
+
+.wait-for-range-success: &wait-for-range-success
+  - |
+    while true; do
+      range_state="$(ludus range list --json | jq -r '.rangeState')"
+      echo "Current range state: ${range_state}"
+
+      case "${range_state}" in
+        SUCCESS)
+          break
+          ;;
+        ERROR|ABORTED)
+          echo "Range deployment ended in ${range_state}. Exiting."
+          ludus range errors || true
+          exit 1
+          ;;
+      esac
+
+      ludus range logs --tail 20 || true
+      sleep 60
+    done
 
 .powered-on-and-not-in-testing: &powered-on-and-not-in-testing
   # Start from a known state (in the event this is a retry)
@@ -40,6 +109,17 @@ stages:
       echo "Not all VMs are powered on, powering on now"
       ludus power on -n all
       timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true" ]]; do sleep 5; done'
+      # poweredOn=true only means Proxmox has issued the power-on; the
+      # guest OS still needs to finish booting before the QEMU guest agent
+      # responds. Downstream tests use `qm guest exec` against the Win11
+      # VM, which fails with "QEMU guest agent is not running" if we race
+      # ahead. Wait up to 5 min for the agent to come up.
+      WIN11VMID=$(sudo qm list | grep running | grep -i win11 | head -1 | awk '{print $1}' || true)
+      if [[ -n "$WIN11VMID" ]]; then
+        echo "Waiting for QEMU guest agent on Win11 VM $WIN11VMID..."
+        timeout 300 bash -c "until sudo qm agent $WIN11VMID ping >/dev/null 2>&1; do sleep 5; done" \
+          || echo "WARNING: Win11 guest agent did not respond within 300s — downstream qm guest exec may fail"
+      fi
     fi
   # Exit testing mode if we failed mid-testing mode and this is a retry
   - if [[ "$(ludus testing status --json | jq '.testingEnabled')" == "true" ]]; then echo "Testing mode was on, stopping it now"; ludus testing stop; fi
@@ -94,6 +174,20 @@ stages:
   # Force install a collection
   - ludus ansible collection add maxhoesel.smallstep --version 0.24.4 --force
   - ludus ansible collection list | grep maxhoesel.smallstep | grep 0.24.4
+  # Global collection install (regression: a successful global install must NOT be
+  # reported as an error by ansible-galaxy's benign path/version-compat warnings)
+  - |
+    if [[ "$(ludus user list --json | jq -r '.[].isAdmin')" == "true" ]]; then
+      ludus ansible collection add community.proxmox --global
+      ludus ansible collection list | grep community.proxmox | grep true
+      # A bundled collection installed --global is a clean no-op, not an error
+      ludus ansible collection add ansible.posix --global 2>&1 | grep -i "already installed"
+    else
+      set +o pipefail
+      ludus ansible collection add community.proxmox --global 2>&1 | grep "Only administrators can perform global ansible actions"
+      set -o pipefail
+      ludus ansible collection add ansible.posix 2>&1 | grep -i "already installed"
+    fi
   # Depends on tests
   - ludus ansible role add -d /opt/ludus/ci/roles/hello_world --force
   - ludus ansible role add -d /opt/ludus/ci/roles/first --force
@@ -101,7 +195,7 @@ stages:
   - ludus ansible role add -d /opt/ludus/ci/roles/third --force
   - ludus range config set -f /opt/ludus/ci/configs/depends-on.yml
   - ludus range deploy -t user-defined-roles
-  - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+  - *wait-for-range-success
   # Depends on - dependency that doesn't exist test
   - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
   - 'ludus range config set -f /opt/ludus/ci/configs/depends-on-not-found.yml 2>&1 | egrep "ERROR: Dependency not found \w+-ad-dc-win2022-server-x64-1:geerlingguy.docker"'
@@ -110,50 +204,50 @@ stages:
   - set -o pipefail
   - ludus range config set -f /opt/ludus/ci/configs/depends-on-complex.yml
   - ludus range deploy -t user-defined-roles
-  - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+  - *wait-for-range-success
 
 .testing-mode-tests: &testing-mode-tests
   - export WIN11VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}') # TODO use the API
   - ludus testing status
   # Validate that WIN10 can reach the internet
-  - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-  - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
+  - "qm_guest_exec_retry \"$WIN11VMID\" ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
   - ludus testing start
   - ludus testing status
   - ludus range list
   # Validate that WIN10 cannot reach the internet
-  - sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
+  - qm_guest_exec_retry "$WIN11VMID" ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
   # Sometimes the DNS lookup is cached from the test above, so test for a DNS failure or a connect failure
-  - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
   - ludus testing allow -i 8.8.8.8
   - ludus testing status
   # Validate that 8.8.8.8 is in the allowedIPs list
   - 'ludus testing status --json | jq -e ''.allowedIPs | index("8.8.8.8")'''
   # Validate that WIN10 can get to 8.8.8.8 but not 1.1.1.1
-  - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-  - sudo qm guest exec $WIN11VMID -- ping -n 1 1.1.1.1 | egrep 'Request timed out.|Destination port unreachable.'
+  - "qm_guest_exec_retry \"$WIN11VMID\" ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+  - qm_guest_exec_retry "$WIN11VMID" ping -n 1 1.1.1.1 | egrep 'Request timed out.|Destination port unreachable.'
   # Allow google.com and check that google is allowed but example isn't
   - ludus testing allow -d google.com
   - ludus testing status
   # Validate that google.com is in the allowedDomains list
   - 'ludus testing status --json | jq -e ''.allowedDomains | any(startswith("google.com"))'''
   # This sometimes takes a few seconds - try 3 times 5 seconds apart
-  - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML') && break || sleep 5; done
-  - sudo qm guest exec $WIN11VMID -- curl https://example.com/ | egrep 'Could not resolve host|Failed to connect to example.com'
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
+  - qm_guest_exec_retry "$WIN11VMID" curl https://example.com/ | egrep 'Could not resolve host|Failed to connect to example.com'
   # Deny google.com and 8.8.8.8 and check that they are not reachable
   - ludus testing deny -d google.com
   - ludus testing deny -i 8.8.8.8
   # Validate that google.com and 8.8.8.8 are no longer in the allowed lists
   - 'ludus testing status --json | jq -e ''(.allowedDomains | any(startswith("google.com")) | not) and (.allowedIPs | index("8.8.8.8") | not)'''
-  - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com') && break || sleep 5; done
-  - for i in {1..3}; do (sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.') && break || sleep 5; done
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
+  - qm_guest_exec_retry "$WIN11VMID" ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
   - ludus testing stop
   - ludus testing status
   # Validate that testing is disabled and allowed lists are empty
   - 'ludus testing status --json | jq -e ''.testingEnabled == false and (.allowedIPs | length == 0) and (.allowedDomains | length == 0)'''
   # Now that testing has stopped, check the VM can reach the internet
-  - "sudo qm guest exec $WIN11VMID -- ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-  - sudo qm guest exec $WIN11VMID -- curl https://google.com/ | grep 'HTML'
+  - "qm_guest_exec_retry \"$WIN11VMID\" ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
 
 .power-tests: &power-tests # Power on/off tests - single VM
   - ludus power off -n ${LUDUS_USER_ID}-kali
@@ -191,23 +285,25 @@ stages:
   - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'
   - ludus range status | grep "${LUDUS_USER_ID}-router-debian11-x64" | grep 'On'
 
-.template-tests: &template-tests # Remove debian 10 if it exists (retry)
+.template-tests: &template-tests # `templates add` CLI tests. The bundled template library moved to the ludus-source-bsl source; a throwaway fixture exercises add/force/ownership, and an embedded (server-included) template covers the build smoke-test.
+  - ludus templates list --json | jq -r '.[] | select(.name == "ci-add-test-template") | .name' | grep -q 'ci-add-test-template' && ludus templates rm -n "ci-add-test-template" || echo "No ci-add-test template on the server"
+  # Remove the debian10 template if it exists (retry)
   - ludus templates list --json | jq -r '.[] | select(.name == "debian-10-x64-server-template") | .name' | grep -q 'debian-10-x64-server-template' && ludus templates rm -n "debian-10-x64-server-template" || echo "No debian10 on the server"
-  - cd templates
   - ludus templates list
-  - ludus templates add -d debian10
+  - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test
   - ludus templates list
   - set +o pipefail
-  - ludus templates add -d debian10 2>&1 | grep 'Template already exists, use --force to overwrite it'
+  - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test 2>&1 | grep 'Template already exists, use --force to overwrite it'
   - mkdir /tmp/test-template || true
-  - echo "debian-10-x64-server-template" > /tmp/test-template/test.pkr.hcl
+  - echo "ci-add-test-template" > /tmp/test-template/test.pkr.hcl
   - 'ludus templates add -d /tmp/test-template/test.pkr.hcl 2>&1 | grep "Error finding .pkr.hcl or .pkr.json template files: the provided path is not a directory"'
-  - ludus templates add -d /tmp/test-template 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
-  - ludus templates add -d ../ludus-server/packer/kali 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
-  - ludus templates add -d ../ludus-server/packer/kali --force 2>&1 | grep "'kali-x64-desktop-template' is a template that does not belong to you"
+  - ludus templates add -d /tmp/test-template 2>&1 | grep "Error extracting template name"
+  - ludus templates add -d ludus-server/packer/kali 2>&1 | grep "The uploaded template name is already present on the server. Template names must be unique."
+  - ludus templates add -d ludus-server/packer/kali --force 2>&1 | grep "'kali-x64-desktop-template' is a template that does not belong to you"
   - set -o pipefail
-  - ludus templates add -d debian10 --force
-  - ludus templates list
+  - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test --force
+  - ludus templates rm -n "ci-add-test-template"
+  - ludus source add https://github.com/badsectorlabs/ludus-source-bsl --templates debian-10-x64-server-template
   - ludus templates build -n debian-10-x64-server-template
   - ludus templates status
   - ludus templates status | grep debian-10-x64-server-template
@@ -220,8 +316,6 @@ stages:
   - ludus templates logs --history --json | jq -e 'length > 0'
   - export TEMPLATE_LOG_ID=$(ludus templates logs --history --json | jq -r '.[0].id')
   - ludus templates logs --history --id "$TEMPLATE_LOG_ID" | grep -q "=>"
-  - ludus templates rm -n debian-10-x64-server-template
-  - '! ludus templates list | grep "debian-10-x64-server-template"'
 
 .snapshot-tests: &snapshot-tests
   - ludus snapshots list
@@ -262,9 +356,8 @@ stages:
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
 
-# Superset of every pool-using test job's rule set. claim-pool / release-pool
-# use this so the pool is claimed exactly when at least one pool test will
-# actually run.
+# Superset of every non-cluster test job's rule set. Kept as a reference for
+# dynamic clone cleanup and future all-series maintenance jobs.
 .pool-rules: &pool-rules
   rules:
     - if: $CI_COMMIT_TAG
@@ -292,10 +385,37 @@ stages:
         - ludus-server/**/*
         - ludus-client/**/*
 
+.cleanup-rules: &cleanup-rules
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[template tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[client tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[testing-mode tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[power tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[integration test\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
+    - changes:
+        - ludus-server/**/*
+        - ludus-client/**/*
+
 .ci-setup-cluster-admin: &ci-setup-cluster-admin
   # Sync time after snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
+  - *qm-guest-exec-retry
   # Update server binary if available
   - |
     if [ -f binaries/ludus-server ]; then
@@ -311,8 +431,30 @@ stages:
   - 'echo "url: https://127.0.0.1:9090" > ~/.config/ludus/config.yml'
   - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
   # Create cluster CI admin user
-  - for i in {1..5}; do (ludus users list all | grep -q 'Cluster CI Admin' || ludus users add -a -n "Cluster CI Admin" -i CCIA -e "ccia@ludus.internal" -p "cicdpassword") && break || sleep 5; done
-  - if [ ! -f /opt/ludus/ci/.apikey-cluster-admin ]; then ludus --user CCIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-cluster-admin; fi
+  - |
+    for i in {1..5}; do
+      if ludus users list all | grep -q 'Cluster CI Admin'; then
+        break
+      fi
+
+      if sudo pvesh get /pools --output-format=json | jq -e 'any(.[]; .poolid == "CCIA")' >/dev/null; then
+        if ! sudo pvesh get /pools/CCIA --output-format=json | jq -e '(.members // []) | length == 0' >/dev/null; then
+          echo "CCIA Proxmox pool exists but is not empty; refusing to remove it."
+          sudo pvesh get /pools/CCIA --output-format=json | jq .
+          exit 1
+        fi
+
+        sudo pvesh delete /pools/CCIA
+      fi
+
+      sudo pveum user delete cluster-ci-admin@pam 2>/dev/null || true
+      sudo userdel -r cluster-ci-admin 2>/dev/null || true
+      ludus users add -a -n "Cluster CI Admin" -i CCIA -e "ccia@ludus.internal" -p "cicdpassword" && break
+      sleep 5
+    done
+    ludus users list all | grep -q 'Cluster CI Admin'
+  - if [ ! -s /opt/ludus/ci/.apikey-cluster-admin ]; then rm -f /opt/ludus/ci/.apikey-cluster-admin; ludus --user CCIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-cluster-admin; fi
+  - test -s /opt/ludus/ci/.apikey-cluster-admin
   - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-cluster-admin)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
 
@@ -364,7 +506,7 @@ documentation:
     # Preserve docs/node_modules and Docusaurus' webpack cache across runs.
     # The build VM is not rolled back, so the cache persists; default
     # `git clean -ffdx` would otherwise wipe it every job.
-    GIT_CLEAN_FLAGS: "-ffdx --exclude=docs/node_modules --exclude=docs/.docusaurus"
+    GIT_CLEAN_FLAGS: "-ffdx --exclude=docs/node_modules --exclude=docs/.docusaurus --exclude=ludus-gui --exclude=ludus-client/spinner"
   tags:
     - ludus-proxmox-runner-parallel
   rules:
@@ -424,11 +566,11 @@ build all:
     # ludus-client/spinner clone across runs. The build VM is not rolled
     # back, so default `git clean -ffdx` would otherwise wipe these and
     # force a cold Next.js build every job.
-    GIT_CLEAN_FLAGS: "-ffdx --exclude=ludus-gui --exclude=ludus-client/spinner"
+    GIT_CLEAN_FLAGS: "-ffdx --exclude=docs/node_modules --exclude=docs/.docusaurus --exclude=ludus-gui --exclude=ludus-client/spinner"
   timeout: 10m
   script:
     - echo "Compiling the server code..."
-    - export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+    - export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short=8 HEAD)
     - if [[ -n $CI_COMMIT_TAG ]]; then export VERSION=$CI_COMMIT_TAG; else export VERSION=${CI_COMMIT_BRANCH}; fi
     - rm -rf binaries && mkdir binaries
     - echo "Getting web UI code..."
@@ -498,7 +640,7 @@ build all:
         go work use ./ludus-enterprise-plugin
         cd ludus-enterprise-plugin
         git config --global --add safe.directory $PWD
-        GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+        GIT_COMMIT_SHORT_HASH=$(git rev-parse --short=8 HEAD)
         CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags="${TAGS}" -o ../binaries/ludus-enterprise.so
         cd ..
         # Build the anti-sandbox plugin
@@ -506,7 +648,7 @@ build all:
         go work use ./ludus-antisandbox-plugin
         cd ludus-antisandbox-plugin
         git config --global --add safe.directory $PWD
-        GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+        GIT_COMMIT_SHORT_HASH=$(git rev-parse --short=8 HEAD)
         CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags="${TAGS}" -o ../binaries/ludus-antisandbox.so
       fi
     - echo "Compile complete."
@@ -514,27 +656,6 @@ build all:
 #########
 # CLAIM #
 #########
-# Atomically claim one of the two VM pools (A or B). Writes POOL=<A|B> to
-# pool.env so downstream jobs (via dotenv artifact) inherit it. Hard fails
-# after 1 hour if both pools remain busy.
-claim-pool:
-  stage: claim
-  tags:
-    - ludus-proxmox-runner-parallel
-  needs:
-    - build all
-  dependencies: [] # don't pull build artifacts; this script needs nothing from binaries/
-  <<: *pool-rules
-  variables:
-    LUDUS_BUILD_TYPE: pool-claim
-    GIT_STRATEGY: none
-  timeout: 1h
-  script:
-    - /opt/ludus/ci/claim-pool.sh
-  artifacts:
-    reports:
-      dotenv: pool.env
-
 # Atomically claim the single cluster slot (VMIDs 1005/1006). Hard fails
 # after 1 hour if the cluster is still busy.
 claim-cluster:
@@ -560,7 +681,6 @@ install kickoff:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
   rules:
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -579,9 +699,10 @@ install kickoff:
     LUDUS_BUILD_TYPE: full # We have to test the install process, so do a full build
     LUDUS_INSTALL_STEP: kickoff
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 10m
+  timeout: 30m
   script:
-    - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
+    - rm -rf /opt/ludus || true # Remove the install directory if this is a retry
+    - sudo timedatectl set-ntp off && sudo timedatectl set-ntp on
     - date
     - sudo hostname ludus-$CI_PIPELINE_ID
     - sudo hostnamectl set-hostname ludus-$CI_PIPELINE_ID
@@ -593,7 +714,6 @@ install check:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - install kickoff
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -616,7 +736,7 @@ install check:
   timeout: 1h
   script:
     - sudo cat /opt/ludus/install/install.log
-    - echo "root:$CI_PIPELINE_ID" | sudo chpasswd # allow root login via the web interface for debugging
+    - sudo grep -E '^ListenPort = 51820$' /etc/wireguard/wg0.conf
 
 #############
 # TEMPLATES #
@@ -626,7 +746,6 @@ templates build:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: install snapshot
       optional: true
@@ -676,7 +795,6 @@ templates check:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - templates build
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -705,16 +823,56 @@ templates check:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 2h
-  retry:
-    max: 2
+  timeout: 5h
   script:
     - *ci-setup-admin
-    # If there is no template building process, start one
-    # This may happen on a failed ISO upload
-    - pgrep -f 'packer' || ludus templates build
-    # Wait for all templates to build
-    - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
+    - |
+      TEMPLATE_RETRIES=3
+      declare -A TEMPLATE_RETRY_COUNTS=()
+
+      # If there is no template building process, start one.
+      # This may happen on a failed ISO upload.
+      pgrep -f 'packer' >/dev/null || ludus templates build
+
+      while true; do
+        UNBUILT_TEMPLATES=$(ludus templates list --json | jq -r '.[] | select(.built == false) | .name')
+        if [ -z "$UNBUILT_TEMPLATES" ]; then
+          break
+        fi
+
+        if pgrep -f 'packer' >/dev/null; then
+          date
+          sleep 60
+          continue
+        fi
+
+        RETRY_TEMPLATES=()
+        FAILED_TEMPLATES=()
+        while IFS= read -r TEMPLATE_NAME; do
+          [ -z "$TEMPLATE_NAME" ] && continue
+          TEMPLATE_RETRY_COUNT=${TEMPLATE_RETRY_COUNTS[$TEMPLATE_NAME]:-0}
+          if [ "$TEMPLATE_RETRY_COUNT" -lt "$TEMPLATE_RETRIES" ]; then
+            TEMPLATE_RETRY_COUNT=$((TEMPLATE_RETRY_COUNT + 1))
+            TEMPLATE_RETRY_COUNTS[$TEMPLATE_NAME]=$TEMPLATE_RETRY_COUNT
+            RETRY_TEMPLATES+=("$TEMPLATE_NAME")
+            echo "$TEMPLATE_NAME failed to build; retrying ($TEMPLATE_RETRY_COUNT/$TEMPLATE_RETRIES)"
+          else
+            FAILED_TEMPLATES+=("$TEMPLATE_NAME")
+          fi
+        done <<< "$UNBUILT_TEMPLATES"
+
+        if [ "${#FAILED_TEMPLATES[@]}" -ne 0 ]; then
+          echo "Template builds failed after $TEMPLATE_RETRIES retries:"
+          printf '%s\n' "${FAILED_TEMPLATES[@]}"
+          ludus templates list
+          exit 1
+        fi
+
+        RETRY_TEMPLATE_NAMES=$(IFS=,; echo "${RETRY_TEMPLATES[*]}")
+        ludus templates build -n "$RETRY_TEMPLATE_NAMES"
+        date
+        sleep 60
+      done
     - ludus templates list
     # Parallel builds should create separate template log history entries.
     - export TEMPLATE_LOG_HISTORY_COUNT=$(ludus templates logs --history --json | jq 'length')
@@ -730,7 +888,6 @@ client basic-commands:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
   dependencies:
     - build all
@@ -763,7 +920,11 @@ client basic-commands:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 5m
+  retry:
+    max: 2
+    when:
+      - script_failure
+  timeout: 30m
   script:
     - *ci-setup-admin
     - ludus version
@@ -785,7 +946,6 @@ range deploy-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: templates snapshot
       optional: true
@@ -818,7 +978,7 @@ range deploy-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: templates_built
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 5m
+  timeout: 2h
   retry:
     max: 2
     when:
@@ -828,64 +988,7 @@ range deploy-admin:
     - *ci-setup-admin
     - ludus range config get
     - ludus range deploy
-
-range check-admin:
-  stage: test
-  tags:
-    - ludus-proxmox-runner-parallel
-  needs:
-    - claim-pool
-    - range deploy-admin
-  dependencies: [] # Prevent download of build artifacts, use local cache
-  rules:
-    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
-      when: never
-    - changes:
-        - ludus-server/ansible/range-management/**/*
-  variables:
-    LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: templates_built
-    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 3h
-  retry:
-    max: 2
-    when: script_failure
-  script:
-    - *ci-setup-admin
-    - |
-      while true; do
-        range_state="$(ludus range list --json | jq -r '.rangeState')"
-        echo "Current range state: ${range_state}"
-
-        if [ "${range_state}" = "SUCCESS" ]; then
-          break
-        fi
-
-        if [ "${range_state}" = "ERROR" ]; then
-          echo "Range deployment failed. Exiting."
-          ludus range errors
-          exit 1
-        fi
-
-        ludus range logs --tail 20 || true
-        sleep 60
-      done
+    - *wait-for-range-success
     - ludus range logs
     - ludus range list
     # Check to make sure the IPs were set correctly
@@ -901,7 +1004,6 @@ post-deploy testing-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: range snapshot-admin
       optional: true
@@ -933,7 +1035,7 @@ post-deploy testing-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -946,7 +1048,6 @@ post-deploy power-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy testing-as-admin
       optional: true
@@ -979,7 +1080,7 @@ post-deploy power-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -992,7 +1093,6 @@ post-deploy ansible-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy power-as-admin
       optional: true
@@ -1024,7 +1124,7 @@ post-deploy ansible-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when:
@@ -1039,7 +1139,6 @@ post-deploy user-cmds-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy ansible-as-admin
       optional: true
@@ -1071,7 +1170,7 @@ post-deploy user-cmds-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1112,7 +1211,6 @@ post-deploy groups-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy user-cmds-as-admin
       optional: true
@@ -1144,7 +1242,7 @@ post-deploy groups-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1249,7 +1347,6 @@ post-deploy blueprints-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy groups-as-admin
       optional: true
@@ -1277,19 +1374,26 @@ post-deploy blueprints-as-admin:
     - changes:
       - ludus-client/cmd/blueprint.go
       - ludus-api/api_blueprint_management.go
+      - ludus-api/blueprint_dir.go
+      - ludus-api/blueprint_resolver.go
+      - ludus-api/blueprint_access.go
+      - ludus-api/range_config_write.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
   script:
     - *ci-setup-admin
-    # Fast blueprint-only flow with no extra user/range fixture setup
+    # Pre-clean everything this job creates so a stale snapshot doesn't trip
+    # up the create/import calls below.
     - ludus blueprint rm ci-bp-main --no-prompt || true
     - ludus blueprint rm ci-bp-copy --no-prompt || true
+    - ludus blueprint rm ci-bp-scratch --no-prompt || true
+    - ludus blueprint rm ci-bp-roundtrip --no-prompt || true
     # Create, list, fetch config, copy, apply, and remove as admin
     - ludus blueprint create --id ci-bp-main --name "CI Blueprint Main" --description "created in CI" --from-range CIA
     - ludus blueprint list | grep ci-bp-main
@@ -1307,20 +1411,330 @@ post-deploy blueprints-as-admin:
     - ludus blueprint create --id ci-bp-main --name "Duplicate Blueprint" --from-range CIA 2>&1 | grep "already in use"
     - ludus blueprint create --id ci-bp-missing-range --name "Missing Range Blueprint" --from-range NOTARANGE 2>&1 | grep "Range NOTARANGE not found"
     - set -o pipefail
-    # Cleanup
+    # From-scratch + round-trip
+    - ludus blueprint create --id ci-bp-scratch --name "Scratch BP" --version 1.2.3 --tag alpha,beta --min-ludus-version 2.1.0
+    - 'ludus blueprint config get ci-bp-scratch | grep -q "^ludus:"'
+    - ludus blueprint info ci-bp-scratch | tee /tmp/ci-bp-scratch.info
+    - 'grep -q "Version:.*1.2.3" /tmp/ci-bp-scratch.info'
+    - 'grep -q "Min Ludus:.*2.1.0" /tmp/ci-bp-scratch.info'
+    - 'grep -q alpha /tmp/ci-bp-scratch.info && grep -q beta /tmp/ci-bp-scratch.info'
+    # Local blueprint dirs must never carry an on-disk blueprint.yml (DB is canonical; manifest is synthesized at export)
+    - '! sudo find /opt/ludus/blueprints -maxdepth 2 -name "blueprint.yml" | grep .'
+    - ludus blueprint export ci-bp-scratch -o /tmp/ci-bp-scratch.tar.gz
+    - tar tzf /tmp/ci-bp-scratch.tar.gz | grep -q "^ci-bp-scratch/blueprint.yml$"
+    - ludus blueprint rm ci-bp-scratch --no-prompt
+    - ludus blueprint create --import /tmp/ci-bp-scratch.tar.gz
+    - ludus blueprint info ci-bp-scratch | tee /tmp/ci-bp-scratch.imported.info
+    - 'grep -q "Version:.*1.2.3" /tmp/ci-bp-scratch.imported.info'
+    - 'grep -q "Min Ludus:.*2.1.0" /tmp/ci-bp-scratch.imported.info'
+    # `ludus blueprint update` hits PB direct PATCH /api/collections/blueprints/records/{id}.
+    # Run AFTER the import roundtrip so it doesn't mutate the version/tags before that assertion.
+    - ludus blueprint update ci-bp-scratch --version 9.9.9 --tag updated --min-ludus-version 3.3.3
+    - ludus blueprint info ci-bp-scratch | tee /tmp/ci-bp-scratch.updated.info
+    - 'grep -q "Version:.*9.9.9" /tmp/ci-bp-scratch.updated.info'
+    - 'grep -q "Min Ludus:.*3.3.3" /tmp/ci-bp-scratch.updated.info'
+    - 'grep -q updated /tmp/ci-bp-scratch.updated.info'
+    # Copy must rewrite the synthesized manifest id
+    - ludus blueprint create --from-blueprint ci-bp-scratch --id ci-bp-roundtrip
+    - ludus blueprint export ci-bp-roundtrip -o /tmp/ci-bp-roundtrip.tar.gz
+    - tar xzf /tmp/ci-bp-roundtrip.tar.gz -C /tmp
+    - 'grep -q "^id: ci-bp-roundtrip" /tmp/ci-bp-roundtrip/blueprint.yml'
+    - ludus blueprint rm ci-bp-roundtrip --no-prompt || true
+    - ludus blueprint rm ci-bp-scratch --no-prompt || true
     - ludus blueprint rm ci-bp-copy --no-prompt || true
     - '! ludus blueprint list | grep ci-bp-copy'
     - ludus blueprint rm ci-bp-main --no-prompt || true
     - '! ludus blueprint list | grep ci-bp-main'
+
+post-deploy sources-as-admin:
+  stage: test
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - build all
+    - job: post-deploy blueprints-as-admin
+      optional: true
+  dependencies:
+    - build all
+  rules:
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[sources tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
+      when: never
+    - changes:
+      - ludus-client/cmd/source.go
+      - ludus-client/cmd/source_mode.go
+      - ludus-client/internal/sourcepicker/**.go
+      # Blueprint files are shared with the blueprints job on purpose: source
+      # installs upsert blueprint rows, blueprint rm shrinks a source's
+      # selection, and installRolesForBlueprint is the shared install engine.
+      - ludus-api/api_blueprint_management.go
+      - ludus-api/blueprint_resolver.go
+      - ludus-api/api_source_management.go
+      - ludus-api/source_catalog.go
+      - ludus-api/source_install.go
+      - ludus-api/source_roles.go
+      - ludus-api/source_sync.go
+      - ludus-api/source_walker.go
+      - ludus-server/ci/fixtures/source-template/**
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_admin
+    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
+  timeout: 45m
+  retry:
+    max: 2
+    when: script_failure
+  script:
+    - *ci-setup-admin
+    # Pre-clean the sources this job re-registers so a stale snapshot doesn't
+    # trip up the source add calls below.
+    - ludus source rm ci-src --no-prompt || true
+    - ludus source rm ci-src2 --no-prompt || true
+    # Retry hygiene: the legacy-compat block below plants a bare-named role
+    # dir and cleans it up; a retry that lands between the two must not
+    # inherit it — the "no bare-name dir" asserts depend on a clean slate.
+    - sudo rm -rf /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
+    # Sources — registered from a bundled fixture so CI never depends on a remote repo.
+    # The fixture ships a blueprint, a shared packer template, and a shared local ansible role.
+    # Table asserts use `grep pat >/dev/null`, not `grep -q`: -q exits at the
+    # first match, and under pipefail the resulting SIGPIPE kills `ludus`
+    # (exit 141) whenever the match sits early in a long table — a flaky
+    # false failure that also inverts `!`-negated asserts into false passes.
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --force
+    - 'ludus source list | grep "ci-src " >/dev/null'
+    - 'ludus blueprint list | grep "ci-src/example" >/dev/null'
+    - 'ludus blueprint list | grep "ci-src/secondary" >/dev/null' # both fixture blueprints installed via install-all default
+    - 'ludus templates list | grep "example-debian-12-template" >/dev/null'
+    # Regression: a directly-installed source role registers under its galaxy
+    # identity from meta (here ludus.say_hello), never the bare dir name — so
+    # `ansible role list` and namespaced range-config references agree.
+    - 'ludus ansible role list | grep "ludus.say_hello" >/dev/null'
+    - sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/ludus.say_hello
+    - '! sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello'
+    - ludus blueprint info ci-src/example | tee /tmp/ci-src-example.info
+    - 'grep -q "Authors:" /tmp/ci-src-example.info'
+    # Negative-path: a non-owner can't delete an admin-created source. CIU is created on demand here since this job runs admin-only setup.
+    - ludus users list all | grep 'Continuous Integration User' >/dev/null || ludus users add -n "Continuous Integration User" -i CIU -e "ciu@ludus.internal" -p "cicdpassword"
+    - set +o pipefail
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ci-src --no-prompt 2>&1 | grep -qiE "not found|owner or an admin"'
+    - set -o pipefail
+    # --- sourceID is globally unique across owners (regression) ---
+    # ci-src is still registered by CIA above. A DIFFERENT user adding the same
+    # EXPLICIT id must be rejected (UX-agnostic, no CLI flags) instead of
+    # silently creating a cross-owner duplicate (the bug this fixes).
+    - set +o pipefail
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --force 2>&1 | grep -qiE "already in use"'
+    - set -o pipefail
+    # A DERIVED id that collides across owners is REJECTED — the caller must pass
+    # an explicit id. Matches how templates/users/blueprints handle id collisions
+    # (no auto-rename). CIA registers the fixture's natural slug; CIU adding the
+    # same fixture with no --id is rejected, but CIU CAN add it under an explicit
+    # unique id.
+    - ludus source rm source-template --no-prompt || true
+    - ludus source rm ciu-src-template --no-prompt || true
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --force
+    - 'ludus source list | grep "source-template " >/dev/null'
+    - set +o pipefail
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --force 2>&1 | grep -qiE "already in use"'
+    - set -o pipefail
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ciu-src-template --force'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source list | grep "ciu-src-template " >/dev/null'
+    # cleanup
+    - ludus source rm source-template --no-prompt || true
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ciu-src-template --no-prompt || true'
+    # Uninstall model: `source rm` is registration-only (drops the source +
+    # its blueprints); installed artifacts are removed via the individual
+    # delete commands (blueprint rm / ansible role rm / templates rm), which
+    # also release every source's claim. Installs are stateless and act only
+    # on the selection they're given, so nothing resurrects removed items.
+    # ci-src is still registered from the add above; ci-src2 ships the same
+    # say_hello role + example-debian-12-template template.
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src2 --force
+    - ludus source sync ci-src2                                # catalog refresh only — sync never installs or prunes
+    - 'ludus blueprint list | grep "ci-src2/example" >/dev/null'
+    # blueprint rm now works on source-derived blueprints and shrinks the
+    # owning source's selection: a follow-up install of OTHER items must not
+    # resurrect the removed blueprint.
+    - ludus blueprint rm ci-src/example --no-prompt
+    - '! ludus blueprint list | grep "ci-src/example " >/dev/null'
+    - ludus source add ci-src --blueprints secondary
+    - '! ludus blueprint list | grep "ci-src/example " >/dev/null'     # install is additive; no resurrection
+    - 'ludus blueprint list | grep "ci-src/secondary" >/dev/null'
+    # Individual deletes remove the on-disk artifact (no cross-source
+    # refcount on content) and release both sources' claims.
+    - ludus ansible role rm ludus.say_hello
+    - '! ludus ansible role list | grep "say_hello" >/dev/null'
+    - ludus templates rm -n example-debian-12-template
+    - '! ludus templates list | grep "example-debian-12-template" >/dev/null'
+    # `source rm` is registration-only — drops ci-src2's record + blueprints.
+    - ludus source rm ci-src2 --no-prompt
+    - '! ludus source list | grep "ci-src2 " >/dev/null'
+    - ludus source rm ci-src --no-prompt
+    # Scripted selective install: pick one blueprint + its template + the
+    # bundled local role; secondary is intentionally left out.
+    - ludus source rm ci-src-pick --no-prompt || true
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-pick --blueprints example --templates example-debian-12-template --source-roles ludus.say_hello
+    - 'ludus blueprint list | grep "ci-src-pick/example" >/dev/null'
+    - '! ludus blueprint list | grep "ci-src-pick/secondary" >/dev/null'
+    # Idempotent re-add: same sourceID + wider selection picks up the
+    # previously skipped blueprint without disturbing already-installed ones.
+    - ludus source add ci-src-pick --blueprints example,secondary --templates example-debian-12-template --source-roles ludus.say_hello
+    - 'ludus blueprint list | grep "ci-src-pick/example" >/dev/null'
+    - 'ludus blueprint list | grep "ci-src-pick/secondary" >/dev/null'
+    - ludus source rm ci-src-pick --no-prompt
+    # Regression: a blueprint-only selection implies the blueprint's required
+    # source-shipped artifacts. example's range-config references the bundled
+    # template, and its requirements.yml declares the vendored collection —
+    # which the galaxy resolution strips in favor of the local copy, so the
+    # implied local install is the only path that delivers it. secondary's
+    # range-config references the bundled local role.
+    - ludus source rm ci-src-impl --no-prompt || true
+    - ludus ansible collection rm ludusci.ci_utils || true
+    - ludus templates rm -n example-debian-12-template || true
+    - '! ludus templates list | grep "example-debian-12-template" >/dev/null'
+    - '! sudo find /opt/ludus/users/continuous-integration-admin -path "*/ansible_collections/ludusci/ci_utils/galaxy.yml" | grep -q .'
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-impl --blueprints example
+    - 'ludus blueprint list | grep "ci-src-impl/example" >/dev/null'
+    - 'ludus templates list | grep "example-debian-12-template" >/dev/null'
+    - 'sudo find /opt/ludus/users/continuous-integration-admin -path "*/ansible_collections/ludusci/ci_utils/galaxy.yml" | grep -q .'
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localCollections[] | select(.name=="ludusci.ci_utils") | .state] == ["installed"]'
+    # Every view agrees on the install: the read-only deps view, and
+    # ansible-galaxy itself — the vendored install synthesizes a minimal
+    # MANIFEST.json receipt so `collection list` can enumerate it.
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.blueprints.requiredCollections[] | select(.name=="ludusci.ci_utils") | .state] == ["installed"]'
+    # The required-collection row carries a per-scope breakdown like roles do,
+    # so the picker can show a scope-wise sublist instead of a flat chip.
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.blueprints.requiredCollections[] | select(.name=="ludusci.ci_utils") | .scopes[].scope] == ["user"]'
+    - 'ludus ansible collection list | grep "ludusci.ci_utils" >/dev/null'
+    # Legacy compat: installs that predate the synthesized receipt carry only
+    # galaxy.yml — the catalog must still read them as installed.
+    - sudo rm /opt/ludus/users/continuous-integration-admin/.ansible/collections/ansible_collections/ludusci/ci_utils/MANIFEST.json
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localCollections[] | select(.name=="ludusci.ci_utils") | .state] == ["installed"]'
+    - ludus ansible role rm ludus.say_hello || true
+    - '! ludus ansible role list | grep "say_hello" >/dev/null'
+    - ludus source add ci-src-impl --blueprints secondary
+    - 'ludus ansible role list | grep "ludus.say_hello" >/dev/null'
+    # Regression: a local role's catalog identity is its namespaced galaxy
+    # name (<author>.<role_name> from meta — here ludus.say_hello), matching
+    # the name installs land under. A copy sitting under the BARE dir name
+    # (a pre-standardization install, or a roles-path drop-in) must still
+    # read as that item — scope and version included — the same alias rule
+    # vendored collections get via their galaxy.yml FQCN.
+    - ludus ansible role rm ludus.say_hello
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="ludus.say_hello") | .state] == ["not_installed"]'
+    - sudo cp -r /opt/ludus/ci/fixtures/source-template/ansible/roles/say_hello /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
+    - >-
+      sudo sh -c 'printf "install_date: \"\"\nversion: 9.9.9\n" > /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello/meta/.galaxy_install_info'
+    - 'ludus ansible role list | grep "say_hello" >/dev/null'
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="ludus.say_hello") | .scopes[] | "\(.scope):\(.version)"] == ["user:9.9.9"]'
+    - sudo rm -rf /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
+    - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="ludus.say_hello") | .state] == ["not_installed"]'
+    - ludus source rm ci-src-impl --no-prompt
+    # Regression: a blueprint requiring a vendored role by its PUBLISHED galaxy
+    # identity installs the local copy, not a Galaxy fetch. vendored_role
+    # declares `acme.vendored_demo`, vendored under the bare dir vendored_demo
+    # (galaxy identity acme.vendored_demo from meta). acme.vendored_demo is not
+    # a real Galaxy role, so the install only succeeds via the vendored copy —
+    # success is the proof. Before the fix, the namespaced requirement was not
+    # recognized as vendored and the Galaxy fetch failed.
+    - ludus source rm ci-src-vendrole --no-prompt || true
+    - ludus ansible role rm acme.vendored_demo || true
+    - '! ludus ansible role list | grep "acme.vendored_demo" >/dev/null'
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-vendrole --blueprints vendored_role
+    - 'ludus blueprint list | grep "ci-src-vendrole/vendored_role" >/dev/null'
+    # Installed under the namespaced name, with the vendored copy's version.
+    - 'ludus ansible role list | grep "acme.vendored_demo" >/dev/null'
+    - sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/acme.vendored_demo
+    - ludus source list ci-src-vendrole --catalog --json | jq -e '[.blueprints.requiredRoles[] | select(.name=="acme.vendored_demo") | .state] == ["installed"]'
+    - ludus source list ci-src-vendrole --catalog --json | jq -e '[.blueprints.requiredRoles[] | select(.name=="acme.vendored_demo") | .scopes[] | "\(.scope):\(.version)"] == ["user:2.0.0"]'
+    # No bare-name copy is left behind — the requirement drives the namespaced install only.
+    - '! sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/vendored_demo'
+    - ludus ansible role rm acme.vendored_demo
+    - '! ludus ansible role list | grep "acme.vendored_demo" >/dev/null'
+    - ludus source rm ci-src-vendrole --no-prompt
+    # --global: admin install scope. Roles land in the instance-wide
+    # global-roles dir, not the owner's per-user ansible roles dir.
+    - ludus source rm ci-src-global --no-prompt || true
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-global --all --global --force
+    - test -d /opt/ludus/resources/global-roles/ludus.say_hello
+    - '! test -d /opt/ludus/resources/global-roles/say_hello'   # identity-named install — no bare-name dir
+    # The example blueprint pulls a galaxy role (geerlingguy.docker). Under
+    # --global that install runs ansible-galaxy as the service against a
+    # read-only /home, so it only succeeds when the install is handed a
+    # writable ANSIBLE_HOME. Asserting the role landed guards the read-only
+    # filesystem regression.
+    - test -d /opt/ludus/resources/global-roles/geerlingguy.docker
+    # A vendored role required by its galaxy identity installs globally too,
+    # from the local copy under the namespaced name (acme.vendored_demo is not
+    # a real Galaxy role, so --global success proves the vendored path).
+    - test -d /opt/ludus/resources/global-roles/acme.vendored_demo
+    # Globally-installed roles (local and galaxy alike) are removed via
+    # `ansible role rm --global` — there is no source-level uninstall.
+    - ludus ansible role rm ludus.say_hello --global
+    - '! test -d /opt/ludus/resources/global-roles/ludus.say_hello'
+    - ludus ansible role rm geerlingguy.docker --global
+    - '! test -d /opt/ludus/resources/global-roles/geerlingguy.docker'
+    - ludus ansible role rm acme.vendored_demo --global
+    - '! test -d /opt/ludus/resources/global-roles/acme.vendored_demo'
+    - ludus source rm ci-src-global --no-prompt
+    # Non-admin safety: a non-admin's role remove must never touch the SHARED
+    # global-roles dir — ansible-galaxy runs against their per-user
+    # ANSIBLE_HOME only. Plant a global-roles entry, have non-admin CIU
+    # install + remove a same-named local role: CIU's own copy goes, the
+    # shared global one stays.
+    - ludus source rm ci-src-ciu --no-prompt || true
+    - sudo mkdir -p /opt/ludus/resources/global-roles/ludus.say_hello
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-ciu --blueprints secondary --source-roles ludus.say_hello'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus ansible role rm ludus.say_hello'
+    - test -d /opt/ludus/resources/global-roles/ludus.say_hello   # non-admin remove left the shared global role intact
+    - ludus source rm ci-src-ciu --no-prompt
+    - sudo rm -rf /opt/ludus/resources/global-roles/ludus.say_hello
+    # --no-deps: blueprints register and source-local content still installs,
+    # but the galaxy dependency install is skipped — only what's already on
+    # disk is used. example declares geerlingguy.docker, so its absence after
+    # a --no-deps install (and presence after a plain re-add of the same
+    # source) is the dep-skip proof.
+    - ludus source rm ci-src-nodeps --no-prompt || true
+    - ludus ansible role rm geerlingguy.docker || true
+    - '! ludus ansible role list | grep "geerlingguy.docker" >/dev/null'
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-nodeps --no-deps --force
+    - 'ludus source list | grep "ci-src-nodeps " >/dev/null'
+    - 'ludus blueprint list | grep "ci-src-nodeps/example" >/dev/null'
+    - 'ludus ansible role list | grep "ludus.say_hello" >/dev/null'        # local role still installed
+    - '! ludus ansible role list | grep "geerlingguy.docker" >/dev/null'   # galaxy dep skipped
+    - ludus source add ci-src-nodeps
+    - 'ludus ansible role list | grep "geerlingguy.docker" >/dev/null'     # same source with deps on — the skip assert was not vacuous
+    - ludus source rm ci-src-nodeps --no-prompt
+    # Clean up haning template
+    - ludus templates rm -n example-debian-12-template
 
 post-deploy ranges-as-admin:
   stage: test
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
+    # Both predecessors stay listed: optional needs drop out of the DAG when
+    # changes-rules filter a job from the pipeline, so needing only the
+    # sources job would let this run concurrently with the blueprints job.
     - job: post-deploy blueprints-as-admin
+      optional: true
+    - job: post-deploy sources-as-admin
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
@@ -1355,13 +1769,17 @@ post-deploy ranges-as-admin:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
   script:
     - *ci-setup-user # Ensure CIU user is created
     - *ci-setup-admin
+    # `ludus range update` hits PB direct PATCH /api/collections/ranges/records/{id}
+    - ludus range update CIA --description "patched in CI" --purpose "ci-update"
+    - ludus range list all --json | jq -e '.[] | select(.rangeID=="CIA") | .description == "patched in CI"'
+    - ludus range list all --json | jq -e '.[] | select(.rangeID=="CIA") | .purpose == "ci-update"'
     # Log history: verify a success entry was saved from the earlier deploy
     - ludus range logs --history --json | jq -e 'length > 0'
     - ludus range logs --history --json | jq -e '.[0].status == "success"'
@@ -1444,10 +1862,29 @@ post-deploy ranges-as-admin:
     - ludus power on -n CIA-router-debian11-x64
     - timeout 180 bash -c 'until [[ $(ludus range list --json | jq -r ".VMs[] | select(.name == \"CIA-router-debian11-x64\") | .poweredOn") == "true" ]]; do sleep 5; done'
     # Deploy a simple range, then delete it to verify deleting a range with VMs works
+    - ludus power off -n all -r CIA # power off range CIA as it is not used again
     - ludus range create -n "CIA Test Range" -r CIA-test
     - ludus range config set -f /opt/ludus/ci/configs/small-range.yml -r CIA-test
     - ludus range deploy -r CIA-test
-    - while [ "$(ludus range list --json -r CIA-test | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range -r CIA-test logs --tail 20; sleep 60; done
+    - |
+      while true; do
+        range_state="$(ludus range list --json -r CIA-test | jq -r '.rangeState')"
+        echo "Current CIA-test range state: ${range_state}"
+
+        case "${range_state}" in
+          SUCCESS)
+            break
+            ;;
+          ERROR|ABORTED)
+            echo "CIA-test range deployment ended in ${range_state}. Exiting."
+            ludus range -r CIA-test errors || true
+            exit 1
+            ;;
+        esac
+
+        ludus range -r CIA-test logs --tail 20 || true
+        sleep 60
+      done
     - ludus range rm-range -r CIA-test --no-prompt --force
     # --- Default range delete test ---
     # Deleting the default range throws an error for range function but allows non-range functions to work
@@ -1481,7 +1918,6 @@ post-deploy templates-as-admin:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy ranges-as-admin
       optional: true
@@ -1518,6 +1954,7 @@ post-deploy templates-as-admin:
     when: script_failure
   script:
     - *ci-setup-admin
+    - ludus power off -n all
     - *template-tests
 
 ################
@@ -1528,7 +1965,6 @@ range deploy-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: range snapshot-admin
       optional: true
@@ -1557,57 +1993,17 @@ range deploy-user:
         - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_admin
+    LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 5m
+  timeout: 2h
   retry:
     max: 2
     when: script_failure
   script:
-    - *ci-setup-admin
-    - ludus power off -n all # Shut down the admin range to save resources
     - *ci-setup-user
     - ludus range config get
     - ludus range deploy
-
-range check-user:
-  stage: test
-  tags:
-    - ludus-proxmox-runner-parallel
-  needs:
-    - claim-pool
-    - range deploy-user
-  dependencies: [] # Prevent download of build artifacts, use local cache
-  rules:
-    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[range tests\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-admin\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-user\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
-      when: never
-    - changes:
-        - ludus-server/ansible/range-management/**/*
-  variables:
-    LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_admin
-    GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 3h
-  retry:
-    max: 2
-    when: script_failure
-  script:
-    - *ci-setup-user
-    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - *wait-for-range-success
     - ludus range logs
     - ludus range list
     # Check to make sure the IPs were set correctly
@@ -1623,7 +2019,6 @@ post-deploy testing-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: range snapshot-user
       optional: true
@@ -1652,7 +2047,7 @@ post-deploy testing-as-user:
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1665,7 +2060,6 @@ post-deploy power-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy testing-as-user
       optional: true
@@ -1696,7 +2090,7 @@ post-deploy power-as-user:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1710,7 +2104,6 @@ post-deploy ansible-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy power-as-user
       optional: true
@@ -1740,7 +2133,7 @@ post-deploy ansible-as-user:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
   script:
@@ -1752,7 +2145,6 @@ post-deploy user-cmds-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy ansible-as-user
       optional: true
@@ -1782,7 +2174,7 @@ post-deploy user-cmds-as-user:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1820,7 +2212,6 @@ post-deploy blueprints-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy user-cmds-as-user
       optional: true
@@ -1849,7 +2240,7 @@ post-deploy blueprints-as-user:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
-  timeout: 15m
+  timeout: 45m
   retry:
     max: 2
     when: script_failure
@@ -1885,6 +2276,8 @@ post-deploy blueprints-as-user:
     - ludus blueprint config get ci-acl-main 2>&1 | grep "do not have access"
     - ludus blueprint create --from-blueprint ci-acl-main --id ci-acl-copy-ciu --name "CI ACL Copy CIU" 2>&1 | grep "do not have access"
     - ludus blueprint apply ci-acl-main --target-range CIU --force 2>&1 | grep "do not have access"
+    # PB-direct PATCH for non-owner: list filter excludes them, so blueprint-update lookup returns "not found"
+    - ludus blueprint update ci-acl-main --name "hijacked" 2>&1 | grep -qi "not found"
     - set -o pipefail
     # Share coverage (user + group) as admin
     - export LUDUS_API_KEY=$CIA_API_KEY
@@ -1948,7 +2341,6 @@ post-deploy templates-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy blueprints-as-user
       optional: true
@@ -1989,7 +2381,6 @@ post-deploy snapshots-as-user:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
     - job: post-deploy templates-as-user
       optional: true
@@ -2033,10 +2424,7 @@ test-everything:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
-    - claim-pool
     - build all
-    - job: post-deploy snapshots-as-user
-      optional: true
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
@@ -2056,7 +2444,7 @@ test-everything:
       when: never
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_user
+    LUDUS_SNAPSHOT_NAME: integration_ready
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   timeout: 3h
   retry:
@@ -2090,43 +2478,43 @@ test-everything:
     - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
     # Check for docker on the redirector
     - export REDIRECTOR_VMID=$(sudo qm list | grep running | grep redirector | head -1 | awk '{print $1}')
-    - sudo qm guest exec $REDIRECTOR_VMID -- docker --version | grep 'Docker version'
+    - qm_guest_exec_retry "$REDIRECTOR_VMID" docker --version | grep 'Docker version'
     # Check that local user is in the docker group (was set in extra vars)
-    - sudo qm guest exec $REDIRECTOR_VMID -- groups localuser | grep docker
+    - qm_guest_exec_retry "$REDIRECTOR_VMID" groups localuser | grep docker
     # Check for VSCodium (installed via chocolatey) on the Win 11 box
     - export WIN11_VMID=$(sudo qm list | grep running | grep win11 | head -1 | awk '{print $1}')
-    - sudo qm guest exec $WIN11_VMID -- where /R "C:\Program Files" VSCodium.exe | grep VSCodium
+    - qm_guest_exec_retry "$WIN11_VMID" where /R "C:\Program Files" VSCodium.exe | grep VSCodium
     # Check for Word (installed via office_version) on the Win 11 box
-    - sudo qm guest exec $WIN11_VMID -- where /R "C:\Program Files" WINWORD.exe | grep WINWORD
+    - qm_guest_exec_retry "$WIN11_VMID" where /R "C:\Program Files" WINWORD.exe | grep WINWORD
     # Check the domain is ludus.domain
-    - sudo qm guest exec $WIN11_VMID -- cmd /c "echo %userdomain%" | grep ludus
-    - sudo qm guest exec $WIN11_VMID -- ipconfig /all | grep ludus.domain
+    - qm_guest_exec_retry "$WIN11_VMID" cmd /c "echo %userdomain%" | grep ludus
+    - qm_guest_exec_retry "$WIN11_VMID" ipconfig /all | grep ludus.domain
     # Check the dns_rewrites
-    - sudo qm guest exec $WIN11_VMID -- ping -n 1 example.com | egrep 'example.com \[10.[1-9].20.1\]'
-    - sudo qm guest exec $WIN11_VMID -- ping -n 1 abc123.example.com | egrep 'abc123.example.com \[10.[1-9].20.1\]'
+    - qm_guest_exec_retry "$WIN11_VMID" ping -n 1 example.com | egrep 'example.com \[10.[1-9].20.1\]'
+    - qm_guest_exec_retry "$WIN11_VMID" ping -n 1 abc123.example.com | egrep 'abc123.example.com \[10.[1-9].20.1\]'
     # Check the custom ansible groups
     - ludus range inventory | grep -A 2 customgroup1 | grep redirector
     - ludus range inventory | grep -A 2 customgroup2 | grep redirector
     # Check the FW rules
     - export ROUTER_VMID=$(sudo qm list | grep running | grep router | head -1 | awk '{print $1}')
-    - sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g'
+    - qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g'
     - |
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].20.0/24         tcp dpt:22 \/\* User Rule: Block SSH from VLAN 10 to VLAN 20 \*\/ reject-with icmp-port-unreachable'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].20.0/24         tcp dpts:1:80 /\* User Rule: Allow TCP ports 1 to 80 from VLAN 10 to VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:9000 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:8090 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:4433 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpts:5000:6000 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 source IP range 10.[1-9].10.11-10.[1-9].10.22 destination IP range 10.[1-9].20.1-10.[1-9].20.2 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 and .2 on VLAN 20 using TCP port 443 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            10.[1-9].20.1            tcp dpt:80 source IP range 10.[1-9].10.11-10.[1-9].10.22 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 on VLAN 20 using TCP port 80 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].20.1            10.[1-9].10.21           tcp dpt:445 /\* User Rule: Only allow the .1 on VLAN 20 to hit port 445 of the .21 on VLAN 10 using TCP \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].99.0/24         10.[1-9].10.0/24         /\* User Rule: Allow kali to all windows \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:8080 /\* User Rule: Only allow windows to kali on 8080 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:80 /\* User Rule: Only allow windows to kali on 80 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:443 /\* User Rule: Only allow windows to kali on 443 \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     all  --  \*      \*       10.[1-9].0.0/16          10.[1-9].0.0/16          /\* User Default: Inter-VLAN Rule \*/ reject-with icmp-port-unreachable'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.[1-9].0.0/16          /\* User Default: External Rule \*/'
-      sudo qm guest exec $ROUTER_VMID -- /sbin/iptables -nvL | jq -r '."out-data"' | grep "This is a custom iptables command"
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].20.0/24         tcp dpt:22 \/\* User Rule: Block SSH from VLAN 10 to VLAN 20 \*\/ reject-with icmp-port-unreachable'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].20.0/24         tcp dpts:1:80 /\* User Rule: Allow TCP ports 1 to 80 from VLAN 10 to VLAN 20 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:9000 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:8090 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpt:4433 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.11           0.0.0.0/0            tcp dpts:5000:6000 destination IP range 10.[1-9].20.21-10.[1-9].20.25 /\* User Rule: Allow multiple TCP ports from .11 on VLAN 10 to .21-.25 on VLAN 20 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 source IP range 10.[1-9].10.11-10.[1-9].10.22 destination IP range 10.[1-9].20.1-10.[1-9].20.2 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 and .2 on VLAN 20 using TCP port 443 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       0.0.0.0/0            10.[1-9].20.1            tcp dpt:80 source IP range 10.[1-9].10.11-10.[1-9].10.22 /\* User Rule: Allow the .11-.22 on VLAN 10 to access the .1 on VLAN 20 using TCP port 80 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].20.1            10.[1-9].10.21           tcp dpt:445 /\* User Rule: Only allow the .1 on VLAN 20 to hit port 445 of the .21 on VLAN 10 using TCP \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].99.0/24         10.[1-9].10.0/24         /\* User Rule: Allow kali to all windows \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:8080 /\* User Rule: Only allow windows to kali on 8080 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:80 /\* User Rule: Only allow windows to kali on 80 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     tcp  --  \*      \*       10.[1-9].10.0/24         10.[1-9].99.0/24         tcp dpt:443 /\* User Rule: Only allow windows to kali on 443 \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'REJECT     all  --  \*      \*       10.[1-9].0.0/16          10.[1-9].0.0/16          /\* User Default: Inter-VLAN Rule \*/ reject-with icmp-port-unreachable'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.[1-9].0.0/16          /\* User Default: External Rule \*/'
+      qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | grep "This is a custom iptables command"
     # Check the custom DNS servers
 
 ###########
@@ -2146,9 +2534,9 @@ cluster install kickoff:
     LUDUS_BUILD_TYPE: clean-cluster
     LUDUS_INSTALL_STEP: kickoff
     GIT_STRATEGY: none
-  timeout: 20m
+  timeout: 60m
   script:
-    - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
+    - sudo timedatectl set-ntp off && sudo timedatectl set-ntp on
     - date
     - cd binaries
     - |
@@ -2176,7 +2564,7 @@ cluster install kickoff:
       sdn_zone: ludus
       vxlan_tag_base: 0
       EOF
-    - sudo ./ludus-server --no-prompt $(hostname)
+    - sudo ./ludus-server --no-prompt
 
 cluster-install-check:
   stage: test
@@ -2194,6 +2582,7 @@ cluster-install-check:
   timeout: 1h
   script:
     - sudo cat /opt/ludus/install/install.log
+    - sudo grep -E '^ListenPort = 51820$' /etc/wireguard/wg0.conf
     - echo "Install check completed via custom executor check loop"
 
 cluster-verify-sdn:
@@ -2212,13 +2601,13 @@ cluster-verify-sdn:
   script:
     - *ci-setup-cluster-admin
     # Verify Ludus is in cluster mode
-    - ludus migrate sdn status --json | jq '.cluster_mode == true'
+    - ludus migrate sdn status --json | jq -e '.cluster_mode == true'
     # Verify the SDN zone exists
     - sudo pvesh get /cluster/sdn/zones --output-format=json | jq -e '.[] | select(.zone == "ludus")'
-    - ludus migrate sdn status --json | jq '.sdn_zone_exists == true'
+    - ludus migrate sdn status --json | jq -e '.sdn_zone_exists == true'
     # Verify the ludusnat VNet exists
     - sudo pvesh get /cluster/sdn/vnets --output-format=json | jq -e '.[] | select(.vnet == "ludusnat")'
-    - ludus migrate sdn status --json | jq '.nat_vnet_exists == true'
+    - ludus migrate sdn status --json | jq -e '.nat_vnet_exists == true'
     # Verify cluster has 2 nodes
     - sudo pvesh get /cluster/status --output-format=json | jq -e '[.[] | select(.type == "node")] | length == 2'
 
@@ -2255,7 +2644,7 @@ cluster-templates-check:
   variables:
     LUDUS_BUILD_TYPE: cluster
     GIT_STRATEGY: none
-  timeout: 15m
+  timeout: 2h
   retry:
     max: 2
   script:
@@ -2267,8 +2656,8 @@ cluster-templates-check:
     - ludus templates list
     - export DEB11_TEMPLATE_VMID=$(sudo qm list | grep debian-11-x64-server-template | head -1 | awk '{print $1}')
     # Verify templates are accessible from both nodes
-    - test $(sudo pvesh get /nodes/ludus/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
-    - test $(sudo pvesh get /nodes/ludus2/storage/ceph-pool/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
+    - test $(sudo pvesh get /nodes/ludus/storage/ceph/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
+    - test $(sudo pvesh get /nodes/ludus2/storage/ceph/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
 
 cluster-range-deploy:
   stage: test
@@ -2295,7 +2684,7 @@ cluster-range-deploy:
     - ludus range config set -f /opt/ludus/ci/configs/cluster-explicit.yml
     - ludus range config get
     - ludus range deploy
-    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - *wait-for-range-success
     - ludus range logs
     - ludus range list
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
@@ -2361,7 +2750,7 @@ cluster-verify-vxlan:
       fi
       echo "Testing cross-node connectivity from VMID $DEB1_VMID"
       # Ping the gateway to verify VXLAN connectivity (router is on the other node)
-      sudo qm guest exec $DEB1_VMID -- ping -c 3 -w 5 $(ludus -r CCIA range list --json | jq '.rangeNumber' | awk '{printf "10.%d.10.254", $0}')
+      qm_guest_exec_retry "$DEB1_VMID" ping -c 3 -w 5 $(ludus -r CCIA range list --json | jq '.rangeNumber' | awk '{printf "10.%d.10.254", $0}')
 
 cluster-test-range-default:
   stage: test
@@ -2406,7 +2795,7 @@ cluster-test-range-default:
     # Deploy with range-level default and per-VM override
     - ludus range config set -f /opt/ludus/ci/configs/cluster-range-default.yml
     - ludus range deploy
-    - while [ "$(ludus range list --json | jq -r '.rangeState')" != "SUCCESS" ]; do ludus range logs --tail 20; sleep 60; done
+    - *wait-for-range-success
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
     - |
       NODE1_VMS=$(sudo pvesh get /nodes/ludus/qemu --output-format=json | jq '[.[] | select(.name | test("CITEST"))] | length' || echo 0)
@@ -2430,33 +2819,179 @@ cluster-test-range-default:
 #################
 # RELEASE CLAIM #
 #################
-# Release the claimed pool after all test-stage jobs complete.
-#
-# These jobs intentionally do NOT declare `needs:` — we rely on stage
-# ordering so they wait for the entire `test` stage to finish.
-#
-# `when: always` covers test failures; cancellation is handled by the
-# active-recovery API check in claim-pool.sh.
-#
-# Note: there are no needs:, so the dotenv from claim-pool is NOT
-# inherited. release-pool.sh reads POOL from the per-pipeline file on
-# the runner host, falling back to a no-op if neither is set.
-release-pool:
+# These dynamic VM release jobs run only when their upstream series succeeds.
+# Failed series intentionally keep their clone running for troubleshooting.
+release install-vm:
   stage: release-claim
   tags:
     - ludus-proxmox-runner-parallel
+  needs:
+    - job: install kickoff
+      optional: true
+    - job: install check
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
   variables:
-    LUDUS_BUILD_TYPE: pool-release
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: install
     GIT_STRATEGY: none
-  rules:
-    - if: $CI_COMMIT_TAG
-      when: never
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
-      when: never
-    - when: always
   timeout: 5m
   script:
-    - /opt/ludus/ci/release-pool.sh
+    - /opt/ludus/ci/release-vm.sh
+
+release templates-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: templates build
+      optional: true
+    - job: templates check
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: templates
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release client-basic-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: client basic-commands
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: client-basic
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release range-admin-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: range deploy-admin
+      optional: true
+    - job: range check-admin
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: range-admin
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release post-deploy-admin-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: post-deploy testing-as-admin
+      optional: true
+    - job: post-deploy power-as-admin
+      optional: true
+    - job: post-deploy ansible-as-admin
+      optional: true
+    - job: post-deploy user-cmds-as-admin
+      optional: true
+    - job: post-deploy groups-as-admin
+      optional: true
+    - job: post-deploy blueprints-as-admin
+      optional: true
+    - job: post-deploy sources-as-admin
+      optional: true
+    - job: post-deploy ranges-as-admin
+      optional: true
+    - job: post-deploy templates-as-admin
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: post-deploy-admin
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release range-user-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: range deploy-user
+      optional: true
+    - job: range check-user
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: range-user
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release post-deploy-user-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: post-deploy testing-as-user
+      optional: true
+    - job: post-deploy power-as-user
+      optional: true
+    - job: post-deploy ansible-as-user
+      optional: true
+    - job: post-deploy user-cmds-as-user
+      optional: true
+    - job: post-deploy blueprints-as-user
+      optional: true
+    - job: post-deploy templates-as-user
+      optional: true
+    - job: post-deploy snapshots-as-user
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: post-deploy-user
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release integration-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: test-everything
+      optional: true
+  dependencies: []
+  <<: *cleanup-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: integration
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
 
 release-cluster:
   stage: release-claim
@@ -2469,6 +3004,8 @@ release-cluster:
     - if: $CI_COMMIT_TAG
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - if: $CI_COMMIT_MESSAGE == "Automatic backup from Apidog"
       when: never
     - when: always
   timeout: 5m

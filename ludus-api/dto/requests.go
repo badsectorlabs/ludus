@@ -1,5 +1,12 @@
 package dto
 
+import "regexp"
+
+// SourceIDRegex is the sourceID slug contract: one regex shared by the
+// server's create-time validation, the sources collection schema, and the
+// client's positional-argument validation, so the three can't drift.
+var SourceIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*$`)
+
 type AddTemplateFromTarRequest struct {
 	Force bool   `json:"force,omitempty"`
 	File  string `json:"file,omitempty"`
@@ -43,6 +50,7 @@ type CreateRangeRequest struct {
 	UserID      []string `json:"userID,omitempty"`
 	RangeNumber int      `json:"rangeNumber,omitempty"`
 	Name        string   `json:"name"`
+	BlueprintID string   `json:"blueprintID,omitempty"`
 }
 type DenyRequest struct {
 	Domains []string `json:"domains,omitempty"`
@@ -55,9 +63,21 @@ type DeployRangeRequest struct {
 	Limit     string   `json:"limit,omitempty"`
 }
 type InstallCollectionRequest struct {
+	// Collection is a galaxy FQCN (namespace.name) or a git source URL —
+	// the server infers git from the string's shape (no separate flag).
 	Collection string `json:"collection,omitempty"`
-	Version    string `json:"version,omitempty"`
-	Force      bool   `json:"force,omitempty"`
+	// Version is a galaxy version pin or, for a git source, any commit-ish
+	// (branch / tag / commit).
+	Version string `json:"version,omitempty"`
+	Force   bool   `json:"force,omitempty"`
+	// Action is "install" (default when empty) or "remove". ansible-galaxy has
+	// no `collection remove`, so a remove deletes the on-disk collection dir.
+	Action string `json:"action,omitempty"`
+	// Global selects the shared global-collections path; otherwise the caller's
+	// per-user collections path. On remove it points the directory deletion at
+	// the right scope; on install it passes --collections-path so the bytes
+	// land in the global base instead of the per-user ANSIBLE_HOME default.
+	Global bool `json:"global,omitempty"`
 }
 type InstallRoleRequest struct {
 	Role    string `json:"role,omitempty"`
@@ -154,6 +174,21 @@ type CreateBlueprintFromRangeRequest struct {
 	Description string `json:"description,omitempty"`
 	RangeID     string `json:"rangeID,omitempty"`
 }
+
+// CreateBlueprintRequest is the body for POST /blueprints — creating a
+// blueprint from scratch (empty or seeded range-config). For other create
+// modes use POST /blueprints/from-range, /blueprints/{id}/copy, or
+// /blueprints/import.
+type CreateBlueprintRequest struct {
+	BlueprintID     string   `json:"blueprintID"`
+	Name            string   `json:"name,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	Version         string   `json:"version,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	MinLudusVersion string   `json:"min_ludus_version,omitempty"`
+	// Config is optional YAML for range-config.yml. Empty means `ludus: []`.
+	Config string `json:"config,omitempty"`
+}
 type CopyBlueprintRequest struct {
 	BlueprintID string `json:"blueprintID,omitempty"`
 	Name        string `json:"name,omitempty"`
@@ -163,6 +198,7 @@ type ApplyBlueprintRequest struct {
 	RangeID string `json:"rangeID,omitempty"`
 	Force   bool   `json:"force,omitempty"`
 }
+
 type UpdateBlueprintConfigRequest struct {
 	Config string `json:"config"`
 }
@@ -197,4 +233,58 @@ type SetGroupQuotaRequest struct {
 
 type AutoShutdownRequest struct {
 	AutoShutdownTimeout string `json:"autoShutdownTimeout"`
+}
+
+// CreateSourceRequest is the body for POST /sources. Register-only: the
+// source row is created, the repo is fetched and walked, and a catalog is
+// returned. Callers drive the install via POST /sources/{id}/install.
+type CreateSourceRequest struct {
+	ID     string `json:"id,omitempty" form:"id"`
+	Type   string `json:"type" form:"type"`
+	URL    string `json:"url,omitempty" form:"url"`
+	Ref    string `json:"ref,omitempty" form:"ref"`
+	Global bool   `json:"global,omitempty" form:"global"`
+	Force  bool   `json:"force,omitempty" form:"force"`
+}
+
+// InstallRequest is the body for POST /sources/{sourceID}/install.
+//
+// Install is additive and stateless: the selection is applied as-is and
+// nothing is persisted or uninstalled. Absent (or JSON null) selection means
+// "install everything the source ships"; a present selection installs
+// exactly the named items (validated against the walk).
+//
+// The pointer here is what lets us tell "absent" apart from "present and
+// empty" — Go's json package gives us nil for the former and a non-nil
+// pointer to a zero-value struct for the latter.
+type InstallRequest struct {
+	Selection *InstallSelectionDTO `json:"selection,omitempty"`
+	Global    bool                 `json:"global,omitempty"`
+	Force     bool                 `json:"force,omitempty"`
+	// NoDeps skips installing the selected blueprints' galaxy role/collection
+	// dependencies — no reaching out to ansible-galaxy; only what's already on
+	// disk is used. Default false: deps install, since a blueprint needs them
+	// to deploy.
+	NoDeps bool `json:"noDeps,omitempty"`
+}
+
+type InstallSelectionDTO struct {
+	Blueprints       []string `json:"blueprints,omitempty"`
+	Templates        []string `json:"templates,omitempty"`
+	LocalRoles       []string `json:"localRoles,omitempty"`
+	LocalCollections []string `json:"localCollections,omitempty"`
+}
+type UpdateSourceRequest struct {
+	Ref    string `json:"ref"`
+	URL    string `json:"url,omitempty"`
+	Global bool   `json:"global,omitempty"`
+	Force  bool   `json:"force,omitempty"`
+}
+type SyncSourceRequest struct {
+	Global bool `json:"global,omitempty" form:"global"`
+	Force  bool `json:"force,omitempty" form:"force"`
+}
+type InstallBlueprintDepsRequest struct {
+	Global     bool `json:"global,omitempty"`
+	ForceRoles bool `json:"forceRoles,omitempty"`
 }

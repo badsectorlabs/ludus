@@ -28,6 +28,11 @@
     server_private_key: "{{ wg_server_private_key_slurp['content'] | b64decode | trim }}"
     server_public_key: "{{ wg_server_public_key_slurp['content'] | b64decode | trim }}"
 
+- name: Check if server wireguard config exists
+  ansible.builtin.stat:
+    path: /etc/wireguard/wg0.conf
+  register: wg0_conf_stat
+
 - name: Create server wireguard config
   ansible.builtin.template:
     dest: /etc/wireguard/wg0.conf
@@ -35,6 +40,7 @@
     owner: root
     group: root
     mode: '0600'
+  when: not wg0_conf_stat.stat.exists
 
 - name: Enable and persist ip forwarding
   ansible.posix.sysctl:

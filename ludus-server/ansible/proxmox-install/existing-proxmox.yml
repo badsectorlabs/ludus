@@ -114,7 +114,7 @@
 
     - name: Check for existing VXLAN Zone
       ansible.builtin.shell: |
-        pvesh get /cluster/sdn/zones --output-format=json | jq -e '.[] | select(.type == "vxlan" and .zone == "{{ sdn_zone | default("ludus") }}") | length > 0'
+        pvesh get /cluster/sdn/zones --output-format=json | jq -e 'any(.[]; .type == "vxlan" and .zone == "{{ sdn_zone | default("ludus") }}")'
       register: vxlan_zone_status
       ignore_errors: true
       when: cluster_status.stdout | trim == "true"
@@ -126,10 +126,19 @@
         - cluster_status.stdout | trim == "true"
         - vxlan_zone_status.stdout | trim == "false"
 
+    - name: Check for existing ludusnat VNet (cluster mode only)
+      ansible.builtin.shell: |
+        pvesh get /cluster/sdn/vnets --output-format=json | jq -r 'any(.[]; .vnet == "{{ ludus_nat_interface | default("ludusnat") }}")'
+      register: ludusnat_vnet_status
+      changed_when: false
+      when: cluster_status.stdout | trim == "true"
+
     - name: Create ludusnat VNet (cluster mode only)
       ansible.builtin.shell: |
-        pvesh create /cluster/sdn/vnets --zone ludus --vnet {{ ludus_nat_interface | default("ludusnat") }} --tag 16777215 --vlanaware 1 && pvesh set /cluster/sdn
-      when: cluster_status.stdout | trim == "true"
+        pvesh create /cluster/sdn/vnets --zone {{ sdn_zone | default("ludus") }} --vnet {{ ludus_nat_interface | default("ludusnat") }} --tag 16777215 --vlanaware 1 && pvesh set /cluster/sdn
+      when:
+        - cluster_status.stdout | trim == "true"
+        - ludusnat_vnet_status.stdout | default("false") | trim == "false"
 
     - name: Add the ludusnat interface
       ansible.builtin.blockinfile:
@@ -255,7 +264,7 @@
           groups:
             - ludus_users
   vars:
-    port: "{{ wireguard_port }}"
+    wg_port: "{{ wireguard_port }}"
     server_cidr: "198.51.100.1/24"
   tasks:
     - name: Install proxmox and ansible packer plugin
@@ -321,13 +330,6 @@
         group: root
         mode: '0644'
 
-    - name: Start the ludus admin service
-      ansible.builtin.service:
-        name: ludus-admin.service
-        state: started
-        enabled: true
-        daemon_reload: true
-
     - name: Create systemd service file for ludus
       ansible.builtin.template:
         src: ludus.service.j2
@@ -336,13 +338,6 @@
         group: root
         mode: '0644'
 
-    - name: Start the ludus service
-      ansible.builtin.service:
-        name: ludus
-        state: started
-        enabled: true
-        daemon_reload: true
-    
     - name: Restart dnsmasq
       ansible.builtin.service:
         name: dnsmasq
@@ -353,6 +348,24 @@
         path: "{{ ludus_install_path }}/install/.stage-3-complete"
         state: touch
         mode: '0644'
+
+    - name: Start the ludus admin service
+      ansible.builtin.service:
+        name: ludus-admin.service
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    - name: Pause to allow the admin service to start
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: Start the ludus service
+      ansible.builtin.service:
+        name: ludus
+        state: started
+        enabled: true
+        daemon_reload: true
 
     - name: Alert
       ansible.builtin.pause:

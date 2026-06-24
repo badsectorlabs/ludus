@@ -22,6 +22,43 @@ var runningLogFilePathByLogID sync.Map
 var runningRangeLogIDByRangeID sync.Map
 var runningTemplateLogIDByUserAndName sync.Map
 
+// startupReconcileRunningLogHistory marks any logs row still flagged "running"
+// as aborted. The in-memory tracking maps above don't survive a process
+// restart, so a row stuck in "running" after startup is an orphan whose
+// finalize call will never come; left alone it shows up in the UI as a phantom
+// in-flight build forever.
+func startupReconcileRunningLogHistory(app core.App) error {
+	records, err := app.FindRecordsByFilter(
+		"logs",
+		"status = 'running'",
+		"-created",
+		0, 0,
+	)
+	if err != nil {
+		return fmt.Errorf("query running log rows: %w", err)
+	}
+	if len(records) == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	for _, record := range records {
+		record.Set("status", "aborted")
+		record.Set("end", now)
+		if err := app.Save(record); err != nil {
+			logger.Error(fmt.Sprintf("Failed to reconcile orphaned log %s: %v", record.Id, err))
+			continue
+		}
+		logger.Warn(fmt.Sprintf("Reconciled orphaned running log %s (template=%s range=%s start=%s) as aborted",
+			record.Id,
+			record.GetString("template"),
+			record.GetString("range"),
+			record.GetDateTime("start").Time().Format(time.RFC3339),
+		))
+	}
+	return nil
+}
+
 func maxLogHistoryEntries() int {
 	if ServerConfiguration.MaxLogHistory > 0 {
 		return ServerConfiguration.MaxLogHistory

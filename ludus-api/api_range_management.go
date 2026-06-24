@@ -35,7 +35,7 @@ const (
 )
 
 var ansibleTags = []string{"all", "access-control", "additional-tools", "allow-share-access", "assign-ip", "custom-choco", "custom-groups", "dcs", "debug", "dns-rewrites",
-	"domain-join", "install-office", "install-visual-studio", "network", "nexus", "share", "sysprep", "user-defined-roles", "vm-deploy", "windows"}
+	"domain-join", "install-office", "install-visual-studio", "linux-packages", "network", "nexus", "share", "sysprep", "user-defined-roles", "vm-deploy", "windows"}
 
 // DeployRange - deploys the range according to the range config
 func DeployRange(e *core.RequestEvent) error {
@@ -171,14 +171,6 @@ func deleteRangeResources(targetRange *models.Range, force bool, e *core.Request
 		return fmt.Errorf("failed to remove range directory: %w", err)
 	}
 
-	// Delete all VM records referencing this range before deleting the range itself,
-	// otherwise PocketBase will reject the deletion due to the required foreign key.
-	_, err = e.App.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").Bind(dbx.Params{"range_id": targetRange.Id}).Execute()
-	if err != nil {
-		return fmt.Errorf("failed to delete VM records for range: %w", err)
-	}
-
-	// Delete the range object from the database
 	err = e.App.Delete(targetRange)
 	if err != nil {
 		return fmt.Errorf("failed to delete range from database: %w", err)
@@ -591,29 +583,14 @@ func PutConfig(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusBadRequest, "Configuration error: "+err.Error())
 	}
 
-	// Check the roles and dependencies
-	rangeHasRoles := e.Get("rangeHasRoles")
-	logger.Debug(fmt.Sprintf("Range has roles: %v", rangeHasRoles))
-	if rangeHasRoles != nil && rangeHasRoles.(bool) {
-		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), "Resolving dependencies for user-defined roles..\n", false)
-		rolesOutput, err := RunLocalAnsiblePlaybookOnTmpRangeConfig(e, []string{fmt.Sprintf("%s/ansible/range-management/user-defined-roles.yml", ludusInstallPath)})
-		logToFile(fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId()), rolesOutput, true)
-		if err != nil {
-			targetRange.SetRangeState(LudusRangeStateError)
-			err = e.App.Save(targetRange)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Error saving range: %s", err.Error()))
-			}
-			// Find the 'ERROR' line in the output and return it to the user
-			errorLine := regexp.MustCompile(`ERROR[^"]*`)
-			errorMatch := errorLine.FindString(rolesOutput)
-			if errorMatch != "" {
-				return JSONError(e, http.StatusBadRequest, "Configuration error: "+errorMatch)
-			} else {
-				return JSONError(e, http.StatusBadRequest, fmt.Sprintf("Error generating ordered roles: %s %s", rolesOutput, err))
-
-			}
-		}
+	// Resolve user-defined role dependencies (or drop a stale playbook if
+	// the new config has no roles). Same helper drives blueprint apply.
+	configBytes, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to re-read validated config: "+readErr.Error())
+	}
+	if status, prepErr := prepareUserDefinedRolesPlaybook(e, targetRange, configBytes); prepErr != nil {
+		return JSONError(e, status, prepErr.Error())
 	}
 
 	// The file is valid, so let's move it to the range-config
@@ -744,6 +721,21 @@ func CreateRange(e *core.RequestEvent) error {
 	var payload dto.CreateRangeRequest
 	if err := e.BindBody(&payload); err != nil {
 		return JSONError(e, http.StatusBadRequest, "Invalid request body: "+err.Error())
+	}
+
+	// Pre-flight blueprint resolve so access/subscription failures hit before
+	// we provision any range resources.
+	var blueprintConfigBytes []byte
+	if payload.BlueprintID != "" {
+		user, ok := e.Get("user").(*models.User)
+		if !ok || user == nil {
+			return JSONError(e, http.StatusUnauthorized, "Authenticated user required to apply a blueprint")
+		}
+		var resolveErr error
+		blueprintConfigBytes, resolveErr = resolveBlueprintConfigForApply(e, user, normalizeBlueprintID(payload.BlueprintID))
+		if resolveErr != nil {
+			return resolveErr
+		}
 	}
 
 	// If UserID array is provided, verify the users exist
@@ -891,6 +883,19 @@ func CreateRange(e *core.RequestEvent) error {
 
 	if len(errorArray) > 0 {
 		return e.JSON(http.StatusInternalServerError, dto.CreateRangeResponseError{Errors: errorArray})
+	}
+
+	// Apply the blueprint config to the just-created range. On failure the
+	// range is already provisioned; we surface a retry hint rather than roll
+	// back so the user can fix and re-apply.
+	if payload.BlueprintID != "" {
+		if status, err := writeRangeConfig(e, rangeRecord, blueprintConfigBytes, false); err != nil {
+			_ = status
+			return JSONError(e, http.StatusInternalServerError,
+				fmt.Sprintf("Range %s was created but applying blueprint %q failed: %v. Run 'ludus blueprint apply %s --target-range %s' to retry.",
+					payload.RangeID, payload.BlueprintID, err, payload.BlueprintID, payload.RangeID))
+		}
+		return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s created and blueprint %s applied", payload.RangeID, payload.BlueprintID))
 	}
 
 	return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s created successfully", payload.RangeID))
@@ -1054,4 +1059,55 @@ func ListUserAccessibleRanges(e *core.RequestEvent) error {
 	}
 
 	return e.JSON(http.StatusOK, result)
+}
+
+// startupReconcileRangeStates clears stuck transitional range states left
+// behind by a process death mid-deploy or mid-destroy. The deploy/destroy
+// goroutines flip the state back to a terminal value when they finish, so any
+// range still in DEPLOYING or DESTROYING after startup is an orphan whose
+// goroutine died with the previous process.
+//
+// DEPLOYING → ABORTED is safe and matches the existing AbortAnsible semantics.
+// DESTROYING → ERROR rather than DESTROYED because mid-destroy means some VMs
+// may still exist on Proxmox; ERROR surfaces the inconsistency so the user
+// re-triggers destroy (which is idempotent).
+func startupReconcileRangeStates(app core.App) error {
+	records, err := app.FindRecordsByFilter(
+		"ranges",
+		"rangeState = {:deploying} || rangeState = {:destroying}",
+		"-updated",
+		0, 0,
+		dbx.Params{
+			"deploying":  LudusRangeStateDeploying,
+			"destroying": LudusRangeStateDestroying,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("query in-flight ranges: %w", err)
+	}
+	if len(records) == 0 {
+		return nil
+	}
+
+	for _, record := range records {
+		previousState := record.GetString("rangeState")
+		var newState string
+		switch previousState {
+		case LudusRangeStateDeploying:
+			newState = LudusRangeStateAborted
+		case LudusRangeStateDestroying:
+			newState = LudusRangeStateError
+		default:
+			continue
+		}
+
+		record.Set("rangeState", newState)
+		if err := app.Save(record); err != nil {
+			logger.Error(fmt.Sprintf("Failed to reconcile orphaned range %s state: %v", record.GetString("rangeID"), err))
+			continue
+		}
+		logger.Warn(fmt.Sprintf("Reconciled orphaned range %s: %s -> %s",
+			record.GetString("rangeID"), previousState, newState))
+	}
+	return nil
 }

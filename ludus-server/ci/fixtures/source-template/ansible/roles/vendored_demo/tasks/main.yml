@@ -1,0 +1,4 @@
+---
+- name: Say hello from the vendored_demo role
+  ansible.builtin.debug:
+    msg: "Hello from acme.vendored_demo — installed from the source's vendored copy."

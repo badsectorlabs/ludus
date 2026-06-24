@@ -35,6 +35,10 @@ ludus ansible role add -d ./ludus_child_domain
 # Add a role for another user/range (as an admin)
 #terminal-command-local
 ludus ansible role add badsectorlabs.luds_adcs --user USER2
+
+# Add a role globally for all users (admin only)
+#terminal-command-local
+ludus ansible role add badsectorlabs.ludus_adcs --global
 ```
 
 Roles added from a directory will be listed as the directory name, regardless of what is in `meta/main.yml`. This is how `ansible-galaxy` works when installing roles.
@@ -63,6 +67,38 @@ ludus:
 
 You can define any variables that will be passed to the role with `role_vars` as seen above. Note that all variable in `role_vars` will be passed to all roles.
 
+## Ansible Collections
+
+Ansible collections bundle modules, roles, and plugins under a namespaced name (`namespace.name`). Like roles, collections install per-user by default, and any collection on [Ansible Galaxy](https://galaxy.ansible.com/ui/standalone/collections/) works with Ludus. Admins can install a collection instance-wide for all users with `--global`.
+
+Manage them with `ludus ansible collection` (alias `collections`):
+
+```bash
+# Add from Ansible Galaxy (pin a version with --version)
+#terminal-command-local
+ludus ansible collection add community.windows
+
+# Add globally for all users (admin only)
+#terminal-command-local
+ludus ansible collection add community.windows --global
+
+# Add from a .tar.gz collection artifact URL
+#terminal-command-local
+ludus ansible collection add https://example.com/my_namespace-my_collection-1.0.0.tar.gz
+
+# List your installed collections
+#terminal-command-local
+ludus ansible collection list
+
+# Remove a collection by its FQCN (namespace.name). ansible-galaxy has no
+# "collection remove", so Ludus deletes the collection's directory. Admins can
+# add --global to remove an instance-wide copy.
+#terminal-command-local
+ludus ansible collection rm community.windows
+```
+
+Roles bundled in a collection can be used in a range config — reference them in the `roles:` key by their fully-qualified name (e.g. `badsectorlabs.ludus_windows_utils.ludus_ad_password_policy`).
+
 ## Ludus Specific Roles
 
 While most existing ansible roles will work with Ludus, this page contains a table of roles specifically designed for Ludus.
@@ -76,9 +112,9 @@ While most existing ansible roles will work with Ludus, this page contains a tab
 | [badsectorlabs.ludus_elastic_container](https://github.com/badsectorlabs/ludus_elastic_container) | Installs "The Elastic Container Project" on a Linux system. | Bad Sector Labs | See [the env guide](../environment-guides/elastic) |
 | [badsectorlabs.ludus_elastic_agent](https://github.com/badsectorlabs/ludus_elastic_agent) | Installs an Elastic Agent on a Windows, Debian, or Ubuntu system | Bad Sector Labs | See [the env guide](../environment-guides/elastic) |
 | [badsectorlabs.ludus_xz_backdoor](https://github.com/badsectorlabs/ludus_xz_backdoor) | Installs the xz backdoor (CVE-2024-3094) on a Debian host and optionally installs the xzbot tool. | Bad Sector Labs | See [the env guide](../environment-guides/malware-lab) |
-| [badsectorlabs.ludus_commandovm](https://github.com/badsectorlabs/ludus_commandovm) | Sets up Commando VM on Windows >= 10 hosts | Bad Sector Labs | Available as a [template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates/commando-vm?ref_type=heads) |
-| [badsectorlabs.ludus_flarevm](https://github.com/badsectorlabs/ludus_flarevm) | Installs Flare VM on Windows >= 10 hosts | Bad Sector Labs | Available as a [template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates/flare-vm?ref_type=heads) |
-| [badsectorlabs.ludus_remnux](https://github.com/badsectorlabs/ludus_remnux) | Installs REMnux on Ubuntu 20.04 systems | Bad Sector Labs | Available as a [template](https://gitlab.com/badsectorlabs/ludus/-/tree/main/templates/remnux?ref_type=heads) |
+| [badsectorlabs.ludus_commandovm](https://github.com/badsectorlabs/ludus_commandovm) | Sets up Commando VM on Windows >= 10 hosts | Bad Sector Labs | Available as a [template](https://github.com/badsectorlabs/ludus-source-bsl/tree/main/templates/commando-vm) |
+| [badsectorlabs.ludus_flarevm](https://github.com/badsectorlabs/ludus_flarevm) | Installs Flare VM on Windows >= 10 hosts | Bad Sector Labs | Available as a [template](https://github.com/badsectorlabs/ludus-source-bsl/tree/main/templates/flare-vm) |
+| [badsectorlabs.ludus_remnux](https://github.com/badsectorlabs/ludus_remnux) | Installs REMnux on Ubuntu 20.04 systems | Bad Sector Labs | Available as a [template](https://github.com/badsectorlabs/ludus-source-bsl/tree/main/templates/remnux) |
 | [badsectorlabs.ludus_emux](https://github.com/badsectorlabs/ludus_emux) | Installs EMUX and runs an emulated device on Debian based hosts | Bad Sector Labs | |
 | [aleemladha.wazuh_server_install](https://github.com/aleemladha/wazuh_server_install) | Install Wazuh SIEM Unified XDR and SIEM protection with SOC Fortress Rules | [@LadhaAleem](https://twitter.com/LadhaAleem) ||
 | [aleemladha.ludus_wazuh_agent](https://github.com/aleemladha/ludus_wazuh_agent) | Deploys Wazuh Agents to Windows systems | [@LadhaAleem](https://twitter.com/LadhaAleem) ||

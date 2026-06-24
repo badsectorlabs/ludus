@@ -4,7 +4,8 @@
 #
 # Custom executor cleanup phase. Called after every job.
 #
-# Pool/cluster release is handled by explicit release-pool / release-cluster
-# YAML jobs (stage: release, when: always), so this script is a no-op.
+# Dynamic clone cleanup and cluster lock release are handled by explicit
+# YAML jobs. This custom-executor cleanup hook must stay a no-op so failed
+# test series keep their VMs running for troubleshooting.
 
 exit 0

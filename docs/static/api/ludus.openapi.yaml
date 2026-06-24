@@ -4,7 +4,7 @@ info:
   description: >-
     This API controls Ludus user management, range deployment, power state, and
     testing state.
-  version: 2.0.0
+  version: 2.1.0
   license:
     name: GNU AGPLv3
     url: https://www.gnu.org/licenses/agpl-3.0.txt/
@@ -23,9 +23,10 @@ tags:
   - name: Snapshot Management
   - name: KMS Management
   - name: Group Management
-  - name: Quota Management
   - name: Migration
   - name: Blueprint Management
+  - name: Quota Management
+  - name: Sources
 paths:
   /:
     get:
@@ -143,6 +144,43 @@ paths:
                     size: 1966606663680
                     free: 376010477568
                     disk_type: unknown
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /openapi:
+    get:
+      summary: Retrieve the Ludus OpenAPI specification
+      deprecated: false
+      description: >
+        Returns the embedded OpenAPI 3.0 specification for the Ludus API as a
+        YAML document.
+
+        Useful for importing into API tooling (API Dog, Postman, Insomnia,
+        etc.).
+      operationId: getOpenAPISpec
+      tags:
+        - Host Management
+      parameters: []
+      responses:
+        '200':
+          description: OpenAPI specification document (YAML)
+          content:
+            text/yaml:
+              schema:
+                type: string
+          headers: {}
+        '404':
+          description: OpenAPI spec not available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
           headers: {}
       security:
         - JWT: []
@@ -503,6 +541,112 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /ansible/collection:
+    post:
+      summary: Install or Remove an Ansible collection
+      deprecated: false
+      description: >
+        Install or remove an ansible collection. Set `action` to `install`
+        (default) or `remove`.
+
+        Install accepts a collection FQCN (from galaxy) or a git source URL.
+        Remove takes a collection FQCN; since ansible-galaxy has no collection
+        remove, Ludus deletes the collection's directory.
+
+        Admins can pass a userID parameter to act on another user's collections.
+      operationId: InstallCollection
+      tags:
+        - Ansible Management
+      parameters:
+        - name: userID
+          in: query
+          description: >
+            pass an optional userID to install for.
+
+            Defaults to the user's range (admins can interact with other users'
+            ranges)
+          required: false
+          schema:
+            type: object
+            properties: {}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                collection:
+                  type: string
+                  description: >-
+                    Collection FQCN (namespace.name) for a galaxy install, or a
+                    git source URL (https/ssh, optionally git+ prefixed) to
+                    install from git. The server infers git from the string's
+                    shape. For removal, the FQCN of the collection to delete.
+                  example: maxhoesel.smallstep
+                action:
+                  type: string
+                  description: Whether to install (default) or remove the collection.
+                  example: install
+                version:
+                  type: string
+                  description: >-
+                    Version pin for a galaxy collection, or any commit-ish
+                    (branch / tag / commit) for a git source.
+                  example: 0.23.1
+                force:
+                  type: boolean
+                  example: true
+                global:
+                  type: boolean
+                  description: >-
+                    Target the instance-wide global collections path shared by
+                    all users instead of the requesting user's scope. Admin
+                    only; non-admins receive a 403. Defaults to false.
+                  example: false
+              type: object
+            examples: {}
+      responses:
+        '201':
+          description: collection installed or removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: 'Successfully installed: maxhoesel.smallstep'
+          headers: {}
+        '409':
+          description: Collection already installed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Collection already installed. Collections from
+                      https://docs.ansible.com/ansible/latest/collections/index.html
+                      are installed globally. If you want to reinstall it,
+                      consider using `--force`.
+          headers: {}
+        '500':
+          description: Error installing collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Unable to install the ansible collection:
+                      maxhoesel.smallstep
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /ansible:
     get:
       summary: Retrieve available Ansible roles and collections
@@ -697,6 +841,10 @@ paths:
                   example: install
                 global:
                   type: boolean
+                  description: >-
+                    Install into the instance-wide global roles path shared by
+                    all users instead of the requesting user's scope. Admin
+                    only; non-admins receive a 403. Defaults to false.
                   example: false
               type: object
             examples: {}
@@ -771,7 +919,9 @@ paths:
                 force:
                   type: boolean
                   example: false
-            examples: {}
+            example:
+              file: ''
+              force: 'false'
       responses:
         '201':
           description: role installed
@@ -816,92 +966,6 @@ paths:
                   error:
                     type: string
                     example: 'Unable to install the ansible role: <error>'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /ansible/collection:
-    post:
-      summary: Install an Ansible collection
-      deprecated: false
-      description: >
-        Install an ansible collection by name or URL.
-
-        Admins can pass a userID parameter to install a collection for other
-        users.
-
-        Ansible collections can only be removed by rm-ing their directories.
-        This is not supported via Ludus due to potential edge cases in naming
-        depending on how the collection was installed.
-      operationId: InstallCollection
-      tags:
-        - Ansible Management
-      parameters:
-        - name: userID
-          in: query
-          description: >
-            pass an optional userID to install for.
-
-            Defaults to the user's range (admins can interact with other users'
-            ranges)
-          required: false
-          schema:
-            $ref: '#/components/schemas/userID'
-      requestBody:
-        content:
-          application/json:
-            schema:
-              properties:
-                collection:
-                  type: string
-                  example: maxhoesel.smallstep
-                version:
-                  type: string
-                  example: 0.23.1
-                force:
-                  type: boolean
-                  example: true
-              type: object
-            examples: {}
-      responses:
-        '201':
-          description: collection installed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: string
-                    example: 'Successfully installed: maxhoesel.smallstep'
-          headers: {}
-        '409':
-          description: Collection already installed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: >-
-                      Collection already installed. Collections from
-                      https://docs.ansible.com/ansible/latest/collections/index.html
-                      are installed globally. If you want to reinstall it,
-                      consider using `--force`.
-          headers: {}
-        '500':
-          description: Error installing collection
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: >-
-                      Unable to install the ansible collection:
-                      maxhoesel.smallstep
           headers: {}
       security:
         - JWT: []
@@ -1015,6 +1079,8 @@ paths:
                         type: integer
                       quotaRanges:
                         type: integer
+                      quotaStorage:
+                        type: integer
                       quotaVMs:
                         type: integer
                       ranges:
@@ -1047,6 +1113,7 @@ paths:
                       - quotaCPU
                       - quotaRAM
                       - quotaRanges
+                      - quotaStorage
                       - quotaVMs
                       - ranges
                       - updated
@@ -1149,6 +1216,7 @@ paths:
                     "quotaCPU": 0,
                     "quotaRAM": 0,
                     "quotaRanges": 0,
+                    "quotaStorage": 0,
                     "quotaVMs": 0,
                     "ranges": [
                       "3lbupcsqp1ebiub",
@@ -1496,7 +1564,7 @@ paths:
           in: path
           description: The id of the users to delete
           required: true
-          example: ''
+          example: {}
           schema:
             $ref: '#/components/schemas/userID'
         - name: deleteDefaultRange
@@ -1704,395 +1772,66 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /user/quotas:
-    get:
-      summary: Get quota status for the current user
+  /ranges/create:
+    post:
+      summary: Create a new range
       deprecated: false
-      description: |
-        Returns the effective quota limits and current resource usage for the authenticated user.
-        Limits are resolved using the priority chain: user quota > group default > system default > unlimited (0).
-      operationId: getQuotaStatus
+      description: Creates a new range.
+      operationId: createRange
       tags:
-        - Quota Management
-      parameters:
-        - name: userID
-          in: query
-          description: pass an optional userID to view quotas for a specific user (admin only)
-          required: false
-          schema:
-            $ref: '#/components/schemas/userID'
-      responses:
-        '200':
-          description: quota status
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  limitRAM:
-                    type: integer
-                    description: Effective RAM limit in GB (0 = unlimited)
-                    example: 64
-                  limitCPU:
-                    type: integer
-                    description: Effective CPU core limit (0 = unlimited)
-                    example: 16
-                  limitVMs:
-                    type: integer
-                    description: Effective VM count limit (0 = unlimited)
-                    example: 10
-                  limitRanges:
-                    type: integer
-                    description: Effective range count limit (0 = unlimited)
-                    example: 3
-                  usedRAM:
-                    type: integer
-                    description: Current RAM usage in GB
-                    example: 24
-                  usedCPU:
-                    type: integer
-                    description: Current CPU core usage
-                    example: 12
-                  usedVMs:
-                    type: integer
-                    description: Current VM count
-                    example: 5
-                  usedRanges:
-                    type: integer
-                    description: Current range count
-                    example: 2
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    put:
-      summary: Set quotas for one or more users (admin only)
-      deprecated: false
-      description: |
-        Set resource quota limits for one or more users. Only provided fields are updated.
-        Set a value to 0 to remove a limit. Negative values are rejected.
-        Supports bulk operations via the userIDs array.
-      operationId: setUserQuota
-      tags:
-        - Quota Management
+        - Range Management
       parameters: []
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              required:
-                - userIDs
               properties:
-                userIDs:
+                name:
+                  type: string
+                  example: Red Team Range
+                rangeID:
+                  type: string
+                  pattern: ^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+){0,2}$
+                  example: RED_TEAM_RANGE
+                description:
+                  type: string
+                  example: Range for red team
+                purpose:
+                  type: string
+                  example: Testing
+                userID:
                   type: array
                   items:
                     type: string
-                  description: One or more userIDs to set quotas for
-                  example: ["JD", "AB"]
-                quotaRAM:
+                rangeNumber:
                   type: integer
-                  description: RAM limit in GB (0 = remove limit)
-                  example: 64
-                quotaCPU:
-                  type: integer
-                  description: CPU core limit (0 = remove limit)
-                  example: 16
-                quotaVMs:
-                  type: integer
-                  description: VM count limit (0 = remove limit)
-                  example: 10
-                quotaRanges:
-                  type: integer
-                  description: Range count limit (0 = remove limit)
                   example: 3
-      responses:
-        '200':
-          description: quotas updated
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: string
-                    example: "Quotas updated for 2 user(s)"
-        '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: "quota values must be >= 0"
-        '403':
-          description: Unauthorized - not an admin
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: You are not an admin and cannot set user quotas
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /user/quotas/all:
-    get:
-      summary: Get quota status for all users (admin only)
-      deprecated: false
-      description: |
-        Returns effective quota limits, current usage, and quota source for all users.
-        Source indicates where the effective quota comes from: U (user), G (group default), S (system default).
-      operationId: getAllQuotaStatus
-      tags:
-        - Quota Management
-      parameters: []
-      responses:
-        '200':
-          description: all users' quota status
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    userID:
-                      type: string
-                      example: JD
-                    name:
-                      type: string
-                      example: John Doe
-                    limitRAM:
-                      type: integer
-                      example: 64
-                    limitCPU:
-                      type: integer
-                      example: 16
-                    limitVMs:
-                      type: integer
-                      example: 10
-                    limitRanges:
-                      type: integer
-                      example: 3
-                    usedRAM:
-                      type: integer
-                      example: 24
-                    usedCPU:
-                      type: integer
-                      example: 12
-                    usedVMs:
-                      type: integer
-                      example: 5
-                    usedRanges:
-                      type: integer
-                      example: 2
-                    sourceRAM:
-                      type: string
-                      description: "Source of RAM limit: U (user), G (group), S (system), empty (unlimited)"
-                      example: U
-                    sourceCPU:
-                      type: string
-                      example: G
-                    sourceVMs:
-                      type: string
-                      example: G
-                    sourceRanges:
-                      type: string
-                      example: S
-        '403':
-          description: Unauthorized - not an admin
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: You are not an admin and cannot view all quotas
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /user/quotas/defaults:
-    get:
-      summary: Get system-wide default quotas (admin only)
-      deprecated: false
-      description: |
-        Returns the system-wide default quota values configured in /opt/ludus/config.yml.
-        These are the fallback values when neither user nor group quotas are set.
-      operationId: getQuotaDefaults
-      tags:
-        - Quota Management
-      parameters: []
-      responses:
-        '200':
-          description: system default quotas
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  limitRAM:
-                    type: integer
-                    example: 64
-                  limitCPU:
-                    type: integer
-                    example: 16
-                  limitVMs:
-                    type: integer
-                    example: 10
-                  limitRanges:
-                    type: integer
-                    example: 3
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /groups/quotas:
-    get:
-      summary: Get default quotas for all groups (admin only)
-      deprecated: false
-      description: |
-        Returns the default quota values and member count for all groups.
-      operationId: getGroupQuotas
-      tags:
-        - Quota Management
-      parameters: []
-      responses:
-        '200':
-          description: group quota defaults
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    name:
-                      type: string
-                      example: students
-                    defaultQuotaRAM:
-                      type: integer
-                      example: 32
-                    defaultQuotaCPU:
-                      type: integer
-                      example: 8
-                    defaultQuotaVMs:
-                      type: integer
-                      example: 5
-                    defaultQuotaRanges:
-                      type: integer
-                      example: 2
-                    memberCount:
-                      type: integer
-                      example: 30
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    put:
-      summary: Set default quotas for one or more groups (admin only)
-      deprecated: false
-      description: |
-        Set default resource quota limits for one or more groups. These apply to members
-        who don't have explicit per-user quotas. Only provided fields are updated.
-        Set a value to 0 to remove a limit. Supports bulk operations via the groupNames array.
-      operationId: setGroupQuota
-      tags:
-        - Quota Management
-      parameters: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
+                blueprintID:
+                  type: string
+                  description: >-
+                    Optional blueprintID to apply to the new range. Accepts a
+                    local blueprintID or a source-prefixed id (e.g. 'bsl/goad').
+                    Pre-flight (resolve, access, subscription refs) runs before
+                    any range resources are provisioned.
+                  example: ad-lab
               required:
-                - groupNames
-              properties:
-                groupNames:
-                  type: array
-                  items:
-                    type: string
-                  description: One or more group names to set quotas for
-                  example: ["students", "red-team"]
-                defaultQuotaRAM:
-                  type: integer
-                  description: Default RAM limit in GB (0 = remove limit)
-                  example: 32
-                defaultQuotaCPU:
-                  type: integer
-                  description: Default CPU core limit (0 = remove limit)
-                  example: 8
-                defaultQuotaVMs:
-                  type: integer
-                  description: Default VM count limit (0 = remove limit)
-                  example: 5
-                defaultQuotaRanges:
-                  type: integer
-                  description: Default range count limit (0 = remove limit)
-                  example: 2
+                - name
+                - rangeID
+            examples: {}
       responses:
-        '200':
-          description: group quotas updated
+        '201':
+          description: Range created
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   result:
-                    type: string
-                    example: "Quotas updated for 2 group(s)"
+                    $ref: '#/components/schemas/RangeObject'
+          headers: {}
         '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: "quota values must be >= 0"
-        '403':
-          description: Unauthorized - not an admin
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: You are not an admin and cannot set group quotas
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /vm/{vmID}:
-    delete:
-      summary: Destroy VM
-      deprecated: false
-      description: Halt and destroy a VM
-      operationId: destroyVM
-      tags: []
-      parameters:
-        - name: vmID
-          in: path
-          description: The Proxmox VMID to destroy
-          required: true
-          example: '123'
-          schema:
-            type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: string
-                required:
-                  - result
+          description: Invalid input
           headers: {}
       security:
         - JWT: []
@@ -2128,6 +1867,15 @@ paths:
           required: false
           schema:
             $ref: '#/components/schemas/userID'
+        - name: details
+          in: query
+          description: >-
+            Set to true to return OS version, license, and update information
+            for VMs. This will execute commands on the VMs via the guest agent
+            to gather the information.
+          required: false
+          schema:
+            type: boolean
       responses:
         '200':
           description: search results matching criteria
@@ -2276,7 +2024,7 @@ paths:
           in: path
           description: The range number to delete VMs from
           required: false
-          example: ''
+          example: {}
           schema:
             $ref: '#/components/schemas/rangeID'
         - name: userID
@@ -2539,7 +2287,9 @@ paths:
                 force:
                   type: boolean
                   example: false
-            examples: {}
+            example:
+              file: ''
+              force: 'false'
       responses:
         '200':
           description: successfully updated configuration
@@ -3026,62 +2776,6 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /ranges/create:
-    post:
-      summary: Create a new range
-      deprecated: false
-      description: Creates a new range.
-      operationId: createRange
-      tags:
-        - Range Management
-      parameters: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                name:
-                  type: string
-                  example: Red Team Range
-                rangeID:
-                  type: string
-                  pattern: ^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+){0,2}$
-                  example: RED_TEAM_RANGE
-                description:
-                  type: string
-                  example: Range for red team
-                purpose:
-                  type: string
-                  example: Testing
-                userID:
-                  type: array
-                  items:
-                    type: string
-                rangeNumber:
-                  type: integer
-                  example: 3
-              required:
-                - name
-                - rangeID
-            examples: {}
-      responses:
-        '201':
-          description: Range created
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    $ref: '#/components/schemas/RangeObject'
-          headers: {}
-        '400':
-          description: Invalid input
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
   /ranges/assign/{userID}/{rangeID}:
     post:
       summary: Assign a range to a user (admin only)
@@ -3204,7 +2898,13 @@ paths:
       operationId: listUserAccessibleRanges
       tags:
         - Range Management
-      parameters: []
+      parameters:
+        - name: userID
+          in: query
+          description: The userID to impersonate for this request (Admins only)
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: List of accessible ranges
@@ -3315,6 +3015,12 @@ paths:
           example: abc123
           schema:
             type: string
+        - name: rangeID
+          in: query
+          description: The rangeID to use for this request
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: The full log history entry including log content
@@ -3331,6 +3037,136 @@ paths:
           headers: {}
         '404':
           description: Log entry not found
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /range/auto-shutdown:
+    get:
+      summary: Retrieve auto-shutdown configuration (enterprise)
+      deprecated: false
+      description: >-
+        Returns the current auto-shutdown timeout for the range, including the
+        server-wide default, per-range override, and resolved effective value.
+      operationId: getAutoShutdown
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to query. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            type: string
+            schema:
+              $ref: '#/components/schemas/rangeID'
+        - name: userID
+          in: query
+          description: |
+            The userID to query.
+            Defaults to the current user (admins can query other users' ranges)
+          required: false
+          schema:
+            type: string
+            schema:
+              $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: successfully retrieved auto-shutdown configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autoShutdownTimeout:
+                    type: object
+                    properties:
+                      serverDefault:
+                        type: string
+                        example: 4h
+                      rangeOverride:
+                        type: string
+                        example: ''
+                      effective:
+                        type: string
+                        example: 4h
+          headers: {}
+        '500':
+          description: error retrieving auto-shutdown configuration
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Update auto-shutdown (enterprise)
+      deprecated: false
+      description: >
+        Updates the per-range auto-shutdown timeout. Set to a Go duration string
+        (e.g. "4h", "30m") to override the server default, "0" to explicitly
+        disable for this range, or "" to clear the override and fall back to the
+        server default.
+      operationId: updateAutoShutdown
+      tags:
+        - Range Management
+      parameters:
+        - name: rangeID
+          in: query
+          description: >
+            The range ID to update. If not provided, uses the user's default
+            range.
+          required: false
+          schema:
+            schema:
+              $ref: '#/components/schemas/rangeID'
+            type: string
+        - name: userID
+          in: query
+          description: |
+            The userID to update.
+            Defaults to the current user (admins can update other users' ranges)
+          required: false
+          schema:
+            type: string
+            schema:
+              $ref: '#/components/schemas/userID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                autoShutdownTimeout:
+                  type: string
+                  example: 4h
+            examples: {}
+      responses:
+        '200':
+          description: successfully updated auto-shutdown configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autoShutdownTimeout:
+                    type: object
+                    properties:
+                      serverDefault:
+                        type: string
+                        example: 4h
+                      rangeOverride:
+                        type: string
+                        example: 2h
+                      effective:
+                        type: string
+                        example: 2h
+          headers: {}
+        '400':
+          description: bad input parameter
+          headers: {}
+        '500':
+          description: error updating auto-shutdown configuration
           headers: {}
       security:
         - JWT: []
@@ -3464,137 +3300,6 @@ paths:
           headers: {}
         '500':
           description: error with range VM power off
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /range/auto-shutdown:
-    get:
-      summary: Retrieve the auto-shutdown configuration for a range
-      deprecated: false
-      description: >
-        Returns the current auto-shutdown timeout for the range, including the
-        server-wide default, per-range override, and resolved effective value.
-
-
-        Use rangeID to specify which range to query. If rangeID is not provided,
-        the user's default range will be used. Use userID to query a different
-        user's range (admins only).
-      operationId: getAutoShutdown
-      tags:
-        - Range Management
-      parameters:
-        - name: rangeID
-          in: query
-          description: >
-            The range ID to query. If not provided, uses the user's default
-            range.
-          required: false
-          schema:
-            $ref: '#/components/schemas/rangeID'
-        - name: userID
-          in: query
-          description: >
-            The userID to query.
-
-            Defaults to the current user (admins can query other users' ranges)
-          required: false
-          schema:
-            $ref: '#/components/schemas/userID'
-      responses:
-        '200':
-          description: successfully retrieved auto-shutdown configuration
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  autoShutdownTimeout:
-                    type: object
-                    properties:
-                      serverDefault:
-                        type: string
-                        example: "4h"
-                      rangeOverride:
-                        type: string
-                        example: ""
-                      effective:
-                        type: string
-                        example: "4h"
-        '500':
-          description: error retrieving auto-shutdown configuration
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    put:
-      summary: Update the auto-shutdown configuration for a range
-      deprecated: false
-      description: >
-        Updates the per-range auto-shutdown timeout. Set to a Go duration string
-        (e.g. "4h", "30m") to override the server default, "0" to explicitly
-        disable for this range, or "" to clear the override and fall back to the
-        server default.
-
-
-        Use rangeID to specify which range to update. If rangeID is not provided,
-        the user's default range will be used. Use userID to update a different
-        user's range (admins only).
-      operationId: updateAutoShutdown
-      tags:
-        - Range Management
-      parameters:
-        - name: rangeID
-          in: query
-          description: >
-            The range ID to update. If not provided, uses the user's default
-            range.
-          required: false
-          schema:
-            $ref: '#/components/schemas/rangeID'
-        - name: userID
-          in: query
-          description: >
-            The userID to update.
-
-            Defaults to the current user (admins can update other users' ranges)
-          required: false
-          schema:
-            $ref: '#/components/schemas/userID'
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                autoShutdownTimeout:
-                  type: string
-                  example: "4h"
-      responses:
-        '200':
-          description: successfully updated auto-shutdown configuration
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  autoShutdownTimeout:
-                    type: object
-                    properties:
-                      serverDefault:
-                        type: string
-                        example: "4h"
-                      rangeOverride:
-                        type: string
-                        example: "2h"
-                      effective:
-                        type: string
-                        example: "2h"
-        '400':
-          description: bad input parameter
-          headers: {}
-        '500':
-          description: error updating auto-shutdown configuration
           headers: {}
       security:
         - JWT: []
@@ -3899,6 +3604,12 @@ paths:
       tags:
         - Anti-Sandbox Management
       parameters:
+        - name: rangeID
+          in: query
+          description: The rangeID to use for this request
+          required: false
+          schema:
+            type: string
         - name: userID
           in: query
           description: >
@@ -3938,6 +3649,13 @@ paths:
                     - Google
                     - IBM
                   description: The computer vendor to use for all hardware values
+                product:
+                  type: string
+                  description: >-
+                    Override the auto-detected hardware product string used for
+                    SMBIOS spoofing. When empty, a default is chosen based on
+                    vendor
+                  example: Latitude 7420
                 dropFiles:
                   type: boolean
                   description: >-
@@ -3949,15 +3667,14 @@ paths:
                   type: boolean
                   description: >-
                     If true, populate Chromium-based browsers (Edge, Chrome)
-                    with realistic history, bookmarks, autofill, encrypted
-                    saved credentials, encrypted cookies, and TypedURLs
-                    registry entries. Any existing profile data is
-                    overwritten. Sets the machine-level
-                    ApplicationBoundEncryptionEnabled=0 policy so v10 DPAPI
-                    encryption is used; not intended for VMs where users
-                    will sign in with a real browser account to sync data
+                    with realistic history, bookmarks, autofill, encrypted saved
+                    credentials, encrypted cookies, and TypedURLs registry
+                    entries. Any existing profile data is overwritten. Sets the
+                    machine-level ApplicationBoundEncryptionEnabled=0 policy so
+                    v10 DPAPI encryption is used; not intended for VMs where
+                    users will sign in with a real browser account to sync data
                     (default false).
-                  example: true
+                  default: false
                 processorName:
                   type: string
                   description: The ProcessorNameString value to use for the VMs
@@ -4246,6 +3963,9 @@ paths:
                 force:
                   type: boolean
                   example: false
+            example:
+              file: ''
+              force: 'false'
       responses:
         '201':
           description: template added
@@ -4593,6 +4313,8 @@ paths:
                     enum:
                       - success
                       - failure
+                      - running
+                      - aborted
                     example: success
                   start:
                     type: string
@@ -4941,6 +4663,13 @@ paths:
           required: false
           schema:
             $ref: '#/components/schemas/userID'
+        - name: rangeID
+          in: query
+          description: pass an optional rangeID to specify the range to act on
+          required: false
+          example: JD
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -5437,6 +5166,1486 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
+  /blueprints:
+    get:
+      summary: List blueprints
+      deprecated: false
+      description: Returns all blueprints the current user can access. Admins see all.
+      operationId: listBlueprints
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: from-source
+          in: query
+          description: Filter to blueprints registered by the named blueprint source.
+          required: false
+          schema:
+            type: string
+        - name: tag
+          in: query
+          description: >-
+            Filter to blueprints whose manifest includes the given tag (source
+            blueprints only — local blueprints have no tags).
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of blueprints
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BlueprintListItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    post:
+      summary: Create blueprint
+      deprecated: false
+      description: >
+        Creates a new blueprint with the supplied metadata and an optional seed
+        `range-config.yml`. For other create modes use the dedicated endpoints:
+        `/blueprints/from-range`, `/blueprints/{blueprintID}/copy`, or
+        `/blueprints/import`.
+      operationId: createBlueprint
+      tags:
+        - Blueprint Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBlueprintRequest'
+      responses:
+        '201':
+          description: Blueprint created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintCreatedResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/from-range:
+    post:
+      summary: Create blueprint from range
+      deprecated: false
+      description: Creates a blueprint from a range configuration.
+      operationId: createBlueprintFromRange
+      tags:
+        - Blueprint Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBlueprintFromRangeRequest'
+      responses:
+        '201':
+          description: Blueprint created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintCreatedResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/copy:
+    post:
+      summary: Copy blueprint
+      deprecated: false
+      description: Creates a copy of an existing blueprint.
+      operationId: copyBlueprint
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CopyBlueprintRequest'
+      responses:
+        '201':
+          description: Blueprint copied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintCreatedResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/import:
+    post:
+      summary: Import blueprint
+      deprecated: false
+      description: >-
+        Uploads a .tar.gz blueprint bundle (multipart form field 'archive') and
+        creates a new blueprint from it.
+      operationId: importBlueprint
+      tags:
+        - Blueprint Management
+      parameters: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                archive:
+                  type: string
+                  format: binary
+                  description: Bundle .tar.gz produced by /blueprints/{blueprintID}/export.
+                  example: ''
+              required:
+                - archive
+            example:
+              archive: ''
+        required: true
+      responses:
+        '201':
+          description: Imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintMutationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/apply:
+    post:
+      summary: Apply blueprint to range
+      deprecated: false
+      description: Applies a blueprint configuration to a target range.
+      operationId: applyBlueprintToRange
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyBlueprintRequest'
+        required: true
+      responses:
+        '200':
+          description: Blueprint applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/config:
+    get:
+      summary: Get blueprint config
+      deprecated: false
+      description: Returns the blueprint configuration content.
+      operationId: getBlueprintConfig
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+        - name: download
+          in: query
+          description: ''
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Blueprint config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Update blueprint config
+      deprecated: false
+      description: Updates a blueprint configuration from raw YAML text.
+      operationId: updateBlueprintConfig
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBlueprintConfigRequest'
+        required: true
+      responses:
+        '200':
+          description: Blueprint config updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/access/users:
+    get:
+      summary: List blueprint access users
+      deprecated: false
+      description: Lists users who can access this blueprint and how they inherit access.
+      operationId: listBlueprintAccessUsers
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint access users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BlueprintAccessUserItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/share/users:
+    post:
+      summary: Share blueprint with users
+      deprecated: false
+      description: Shares a blueprint with one or more users.
+      operationId: shareBlueprintWithUsers
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkShareBlueprintWithUsersRequest'
+        required: true
+      responses:
+        '200':
+          description: Bulk share result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Unshare blueprint from users
+      deprecated: false
+      description: Removes blueprint sharing from one or more users.
+      operationId: unshareBlueprintWithUsers
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUnshareBlueprintWithUsersRequest'
+        required: true
+      responses:
+        '200':
+          description: Bulk unshare result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/access/groups:
+    get:
+      summary: List blueprint access groups
+      deprecated: false
+      description: Lists groups shared to this blueprint and their managers/members.
+      operationId: listBlueprintAccessGroups
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint access groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BlueprintAccessGroupItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/share/groups:
+    post:
+      summary: Share blueprint with groups
+      deprecated: false
+      description: Shares a blueprint with one or more groups.
+      operationId: shareBlueprintWithGroups
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkShareBlueprintWithGroupsRequest'
+        required: true
+      responses:
+        '200':
+          description: Bulk share result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Unshare blueprint from groups
+      deprecated: false
+      description: Removes blueprint sharing from one or more groups.
+      operationId: unshareBlueprintWithGroups
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUnshareBlueprintWithGroupsRequest'
+        required: true
+      responses:
+        '200':
+          description: Bulk unshare result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}:
+    get:
+      summary: Get blueprint detail
+      deprecated: false
+      description: >
+        Returns the full blueprint record plus computed dependency status. Works
+        for both local blueprints (id = blueprintID) and source-blueprints (id =
+        "<sourceID>/<sourceBlueprintID>").
+      operationId: getBlueprintDetail
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintDetail'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Delete blueprint
+      deprecated: false
+      description: Deletes a blueprint by ID.
+      operationId: deleteBlueprint
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blueprint deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/install:
+    post:
+      summary: Install blueprint dependencies
+      deprecated: false
+      description: Installs the roles and collections referenced by a blueprint
+      operationId: installBlueprintDeps
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallBlueprintDepsRequest'
+            examples: {}
+      responses:
+        '200':
+          description: Install completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintCreatedResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /blueprints/{blueprintID}/export:
+    get:
+      summary: Export blueprint
+      deprecated: false
+      description: >-
+        Streams a .tar.gz archive of the blueprint bundle (range-config,
+        manifest, dependencies).
+      operationId: exportBlueprint
+      tags:
+        - Blueprint Management
+      parameters:
+        - name: blueprintID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bundle archive
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /user/quotas:
+    get:
+      summary: Get quota status for the current user
+      deprecated: false
+      description: >
+        Returns the effective quota limits and current resource usage for the
+        authenticated user.
+
+        Limits are resolved using the priority chain: user quota > group default
+        > system default > unlimited (0).
+      operationId: getQuotaStatus
+      tags:
+        - Quota Management
+      parameters:
+        - name: userID
+          in: query
+          description: >-
+            pass an optional userID to view quotas for a specific user (admin
+            only)
+          required: false
+          schema:
+            $ref: '#/components/schemas/userID'
+      responses:
+        '200':
+          description: quota status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limitRAM:
+                    type: integer
+                    description: Effective RAM limit in GB (0 = unlimited)
+                    example: 64
+                  limitCPU:
+                    type: integer
+                    description: Effective CPU core limit (0 = unlimited)
+                    example: 16
+                  limitVMs:
+                    type: integer
+                    description: Effective VM count limit (0 = unlimited)
+                    example: 10
+                  limitRanges:
+                    type: integer
+                    description: Effective range count limit (0 = unlimited)
+                    example: 3
+                  usedRAM:
+                    type: integer
+                    description: Current RAM usage in GB
+                    example: 24
+                  usedCPU:
+                    type: integer
+                    description: Current CPU core usage
+                    example: 12
+                  usedVMs:
+                    type: integer
+                    description: Current VM count
+                    example: 5
+                  usedRanges:
+                    type: integer
+                    description: Current range count
+                    example: 2
+          headers: {}
+      security: []
+    put:
+      summary: Set quotas for one or more users (admin only)
+      deprecated: false
+      description: >
+        Set resource quota limits for one or more users. Only provided fields
+        are updated.
+
+        Set a value to 0 to remove a limit. Negative values are rejected.
+
+        Supports bulk operations via the userIDs array.
+      operationId: setUserQuota
+      tags:
+        - Quota Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - userIDs
+              properties:
+                userIDs:
+                  type: array
+                  items:
+                    type: string
+                  description: One or more userIDs to set quotas for
+                  example:
+                    - JD
+                    - AB
+                quotaRAM:
+                  type: integer
+                  description: RAM limit in GB (0 = remove limit)
+                  example: 64
+                quotaCPU:
+                  type: integer
+                  description: CPU core limit (0 = remove limit)
+                  example: 16
+                quotaVMs:
+                  type: integer
+                  description: VM count limit (0 = remove limit)
+                  example: 10
+                quotaRanges:
+                  type: integer
+                  description: Range count limit (0 = remove limit)
+                  example: 3
+      responses:
+        '200':
+          description: quotas updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Quotas updated for 2 user(s)
+          headers: {}
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: quota values must be >= 0
+          headers: {}
+        '403':
+          description: Unauthorized - not an admin
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not an admin and cannot set user quotas
+          headers: {}
+      security: []
+  /user/quotas/all:
+    get:
+      summary: Get quota status for all users (admin only)
+      deprecated: false
+      description: >
+        Returns effective quota limits, current usage, and quota source for all
+        users.
+
+        Source indicates where the effective quota comes from: U (user), G
+        (group default), S (system default).
+      operationId: getAllQuotaStatus
+      tags:
+        - Quota Management
+      parameters: []
+      responses:
+        '200':
+          description: all users' quota status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    userID:
+                      type: string
+                      example: JD
+                    name:
+                      type: string
+                      example: John Doe
+                    limitRAM:
+                      type: integer
+                      example: 64
+                    limitCPU:
+                      type: integer
+                      example: 16
+                    limitVMs:
+                      type: integer
+                      example: 10
+                    limitRanges:
+                      type: integer
+                      example: 3
+                    usedRAM:
+                      type: integer
+                      example: 24
+                    usedCPU:
+                      type: integer
+                      example: 12
+                    usedVMs:
+                      type: integer
+                      example: 5
+                    usedRanges:
+                      type: integer
+                      example: 2
+                    sourceRAM:
+                      type: string
+                      description: >-
+                        Source of RAM limit: U (user), G (group), S (system),
+                        empty (unlimited)
+                      example: U
+                    sourceCPU:
+                      type: string
+                      example: G
+                    sourceVMs:
+                      type: string
+                      example: G
+                    sourceRanges:
+                      type: string
+                      example: S
+          headers: {}
+        '403':
+          description: Unauthorized - not an admin
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not an admin and cannot view all quotas
+          headers: {}
+      security: []
+  /user/quotas/defaults:
+    get:
+      summary: Get system-wide default quotas (admin only)
+      deprecated: false
+      description: >
+        Returns the system-wide default quota values configured in
+        /opt/ludus/config.yml.
+
+        These are the fallback values when neither user nor group quotas are
+        set.
+      operationId: getQuotaDefaults
+      tags:
+        - Quota Management
+      parameters: []
+      responses:
+        '200':
+          description: system default quotas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limitRAM:
+                    type: integer
+                    example: 64
+                  limitCPU:
+                    type: integer
+                    example: 16
+                  limitVMs:
+                    type: integer
+                    example: 10
+                  limitRanges:
+                    type: integer
+                    example: 3
+          headers: {}
+      security: []
+  /groups/quotas:
+    get:
+      summary: Get default quotas for all groups (admin only)
+      deprecated: false
+      description: |
+        Returns the default quota values and member count for all groups.
+      operationId: getGroupQuotas
+      tags:
+        - Quota Management
+      parameters: []
+      responses:
+        '200':
+          description: group quota defaults
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      example: students
+                    defaultQuotaRAM:
+                      type: integer
+                      example: 32
+                    defaultQuotaCPU:
+                      type: integer
+                      example: 8
+                    defaultQuotaVMs:
+                      type: integer
+                      example: 5
+                    defaultQuotaRanges:
+                      type: integer
+                      example: 2
+                    memberCount:
+                      type: integer
+                      example: 30
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    put:
+      summary: Set default quotas for one or more groups (admin only)
+      deprecated: false
+      description: >
+        Set default resource quota limits for one or more groups. These apply to
+        members
+
+        who don't have explicit per-user quotas. Only provided fields are
+        updated.
+
+        Set a value to 0 to remove a limit. Supports bulk operations via the
+        groupNames array.
+      operationId: setGroupQuota
+      tags:
+        - Quota Management
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - groupNames
+              properties:
+                groupNames:
+                  type: array
+                  items:
+                    type: string
+                  description: One or more group names to set quotas for
+                  example:
+                    - students
+                    - red-team
+                defaultQuotaRAM:
+                  type: integer
+                  description: Default RAM limit in GB (0 = remove limit)
+                  example: 32
+                defaultQuotaCPU:
+                  type: integer
+                  description: Default CPU core limit (0 = remove limit)
+                  example: 8
+                defaultQuotaVMs:
+                  type: integer
+                  description: Default VM count limit (0 = remove limit)
+                  example: 5
+                defaultQuotaRanges:
+                  type: integer
+                  description: Default range count limit (0 = remove limit)
+                  example: 2
+      responses:
+        '200':
+          description: group quotas updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: Quotas updated for 2 group(s)
+          headers: {}
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: quota values must be >= 0
+          headers: {}
+        '403':
+          description: Unauthorized - not an admin
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: You are not an admin and cannot set group quotas
+          headers: {}
+      security: []
+  /sources:
+    post:
+      summary: Create source
+      deprecated: false
+      description: >
+        Register a new source. For type=git supply url and (optionally) ref. For
+        type=upload include an "archive" multipart file (tar.gz or zip).
+      operationId: createSource
+      tags:
+        - Sources
+      parameters: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                  example: ''
+                type:
+                  type: string
+                  enum:
+                    - git
+                    - upload
+                  example: ''
+                url:
+                  type: string
+                  example: ''
+                ref:
+                  type: string
+                  example: ''
+                global:
+                  type: boolean
+                  example: ''
+                force:
+                  type: boolean
+                  example: ''
+                archive:
+                  type: string
+                  format: binary
+                  example: ''
+            example:
+              id: ''
+              type: ''
+              url: ''
+              ref: ''
+              global: ''
+              force: ''
+              archive: ''
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterSourceResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    get:
+      summary: List sources
+      deprecated: false
+      description: Returns all sources the current user can access. Admins see all.
+      operationId: listSources
+      tags:
+        - Sources
+      parameters: []
+      responses:
+        '200':
+          description: List of sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SourceResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/catalog:
+    get:
+      summary: Get source catalog
+      deprecated: false
+      description: >-
+        Returns the on-disk source's contents — blueprints, templates, and
+        bundled ansible roles and collections—with metadata like install state
+        and dependencies.
+      operationId: getSourceCatalog
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Catalog with per-item install state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceCatalog'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/install:
+    post:
+      summary: Install items from source
+      deprecated: false
+      description: >-
+        Installs a selection of blueprints/templates/ansible items to a
+        registered source. Selection is persisted on the source record and
+        honored by subsequent syncs.
+
+
+        Required ansible roles and collections, defined in a blueprint's
+        manifest, are pulled automatically by installing a blueprint.
+      operationId: installSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                selection:
+                  type: object
+                  properties:
+                    blueprints:
+                      type: array
+                      description: sourceBlueprintID values to install.
+                      items:
+                        type: string
+                    templates:
+                      type: array
+                      description: Template names to install.
+                      items:
+                        type: string
+                    localRoles:
+                      type: array
+                      description: Source-bundled role names to install.
+                      items:
+                        type: string
+                    localCollections:
+                      type: array
+                      description: >-
+                        Source-bundled collection FQCNs (namespace.name) to
+                        install.
+                      items:
+                        type: string
+                  description: >-
+                    Persisted picker selection on a source record. Items added
+                    upstream later do NOT auto-extend this set; the user has to
+                    re-install to widen the selection.
+                global:
+                  type: boolean
+                  description: >-
+                    Admin only. Install the source's roles and collections for
+                    all users.
+                force:
+                  type: boolean
+                  description: >-
+                    Force install: rm-and-recopy templates and reinstall ansible
+                    items; pass `-f` to ansible-galaxy for galaxy roles and
+                    galaxy collections so already-installed artifacts of the
+                    same name are overwritten.
+                noDeps:
+                  type: boolean
+                  description: >-
+                    Skip installing the selected blueprints' ansible role and
+                    collection dependencies
+            examples: {}
+      responses:
+        '200':
+          description: Sync result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResultResponse'
+          headers: {}
+        '400':
+          description: Selection is empty or malformed.
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/sync:
+    post:
+      summary: Sync source
+      deprecated: false
+      description: >
+        Refresh-only: re-pull a git-backed source's working tree and update the
+        catalog view. No artifact installs, removes, or DB writes for
+        blueprints/templates/roles happen here. To apply upstream changes,
+        commit a fresh selection via POST /sources/{sourceID}/install. Returns
+        400 for upload-type sources; push new content via PATCH
+        /sources/{sourceID} instead.
+      operationId: syncSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Sync result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResultResponse'
+          headers: {}
+        '400':
+          description: Source is upload-type; sync is git-only.
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}:
+    patch:
+      summary: Update source
+      deprecated: false
+      description: >
+        Update a source. The body is always `multipart/form-data` so it can
+        carry an `archive` file when needed.
+      operationId: updateSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                archive:
+                  type: string
+                  format: binary
+                  description: >-
+                    New tarball for upload-type sources. Ignored on git-type
+                    sources.
+                  example: ''
+                ref:
+                  type: string
+                  description: New git ref. Ignored on upload-type sources.
+                  example: ''
+                global:
+                  type: boolean
+                  description: >-
+                    Admin only. Install the source's roles and collections for
+                    all users.
+                  example: ''
+                force:
+                  type: boolean
+                  description: >-
+                    Overwrite already-installed templates and galaxy/local
+                    roles.
+                  example: ''
+                url:
+                  description: Remote url for git-type sources.
+                  example: ''
+                  type: string
+            example:
+              archive: ''
+              ref: ''
+              global: ''
+              force: ''
+              url: ''
+        required: true
+      responses:
+        '200':
+          description: Source updated.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SourceResponse'
+                  - $ref: '#/components/schemas/SyncResultResponse'
+                description: >
+                  Returns `SyncResultResponse` when an `archive` was supplied
+                  (the upload triggers an inline sync), `SourceResponse`
+                  otherwise.
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    get:
+      summary: Get source metadata
+      deprecated: false
+      description: Returns a single source by ID.
+      operationId: getSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceResponse'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+    delete:
+      summary: Delete source
+      deprecated: false
+      description: >-
+        Deregisters the source: drops the record, its blueprints, and its
+        install-claim rows. Installed templates, roles, and collections stay on
+        disk — remove them via their own delete endpoints.
+      operationId: deleteSource
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/blueprints:
+    get:
+      summary: List source blueprints
+      deprecated: false
+      description: Lists cached blueprint metadata for a single source.
+      operationId: listSourceBlueprints
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source blueprints
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SourceBlueprintListItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/templates:
+    get:
+      summary: List source templates
+      deprecated: false
+      description: Lists templates registered by this source.
+      operationId: listSourceTemplates
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ListSourceTemplatesResponseItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/roles:
+    get:
+      summary: List source roles
+      deprecated: false
+      description: >-
+        Lists Ansible roles registered by this source. Each item includes a
+        scope: "subscription" (entitled via Ludus Pro) or "local" (bundled in
+        source).
+      operationId: listSourceRoles
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source roles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ListSourceRolesResponseItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /sources/{sourceID}/collections:
+    get:
+      summary: List source collections
+      deprecated: false
+      description: Lists Ansible collections declared by this source's blueprints.
+      operationId: listSourceCollections
+      tags:
+        - Sources
+      parameters:
+        - name: sourceID
+          in: path
+          description: ''
+          required: true
+          example: ''
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Source collections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ListSourceCollectionsResponseItem'
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
+  /vm/{vmID}:
+    delete:
+      summary: Destroy VM
+      deprecated: false
+      description: Halt and destroy a VM
+      operationId: destroyVM
+      tags: []
+      parameters:
+        - name: vmID
+          in: path
+          description: The Proxmox VMID to destroy
+          required: true
+          example: '123'
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                required:
+                  - result
+          headers: {}
+      security:
+        - JWT: []
+        - ApiKeyAuth: []
   /vm/console/ticket:
     get:
       summary: Get Console Websocket Ticket
@@ -5555,404 +6764,366 @@ paths:
       security:
         - JWT: []
         - ApiKeyAuth: []
-  /blueprints:
-    get:
-      summary: List accessible blueprints
-      deprecated: false
-      description: Returns all blueprints the current user can access.
-      operationId: listBlueprints
-      tags:
-        - Blueprint Management
-      parameters: []
-      responses:
-        '200':
-          description: List of blueprints
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/BlueprintListItem'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/from-range:
-    post:
-      summary: Create blueprint from range
-      deprecated: false
-      description: Creates a blueprint from a range configuration.
-      operationId: createBlueprintFromRange
-      tags:
-        - Blueprint Management
-      parameters: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateBlueprintFromRangeRequest'
-      responses:
-        '201':
-          description: Blueprint created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BlueprintMutationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/{blueprintID}:
-    delete:
-      summary: Delete blueprint
-      deprecated: false
-      description: Deletes a blueprint by ID.
-      operationId: deleteBlueprint
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Blueprint deleted
-          content:
-            application/json:
-              schema:
-                type: object
-                properties: {}
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/{blueprintID}/copy:
-    post:
-      summary: Copy blueprint
-      deprecated: false
-      description: Creates a copy of an existing blueprint.
-      operationId: copyBlueprint
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CopyBlueprintRequest'
-      responses:
-        '201':
-          description: Blueprint copied
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BlueprintMutationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/{blueprintID}/apply:
-    post:
-      summary: Apply blueprint to range
-      deprecated: false
-      description: Applies a blueprint configuration to a target range.
-      operationId: applyBlueprintToRange
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ApplyBlueprintRequest'
-        required: true
-      responses:
-        '200':
-          description: Blueprint applied
-          content:
-            application/json:
-              schema:
-                type: object
-                properties: {}
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/{blueprintID}/config:
-    get:
-      summary: Get blueprint config
-      deprecated: false
-      description: Returns the blueprint configuration content.
-      operationId: getBlueprintConfig
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-        - name: download
-          in: query
-          description: ''
-          required: false
-          schema:
-            type: boolean
-      responses:
-        '200':
-          description: Blueprint config
-          content:
-            application/json:
-              schema:
-                type: object
-                properties: {}
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    put:
-      summary: Update blueprint config
-      deprecated: false
-      description: Updates a blueprint configuration from raw YAML text.
-      operationId: updateBlueprintConfig
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateBlueprintConfigRequest'
-        required: true
-      responses:
-        '200':
-          description: Blueprint config updated
-          content:
-            application/json:
-              schema:
-                type: object
-                properties: {}
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/{blueprintID}/share/groups:
-    post:
-      summary: Share blueprint with groups
-      deprecated: false
-      description: Shares a blueprint with one or more groups.
-      operationId: shareBlueprintWithGroups
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkShareBlueprintWithGroupsRequest'
-        required: true
-      responses:
-        '200':
-          description: Bulk share result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    delete:
-      summary: Unshare blueprint from groups
-      deprecated: false
-      description: Removes blueprint sharing from one or more groups.
-      operationId: unshareBlueprintWithGroups
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkUnshareBlueprintWithGroupsRequest'
-        required: true
-      responses:
-        '200':
-          description: Bulk unshare result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/{blueprintID}/share/users:
-    post:
-      summary: Share blueprint with users
-      deprecated: false
-      description: Shares a blueprint with one or more users.
-      operationId: shareBlueprintWithUsers
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkShareBlueprintWithUsersRequest'
-        required: true
-      responses:
-        '200':
-          description: Bulk share result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-    delete:
-      summary: Unshare blueprint from users
-      deprecated: false
-      description: Removes blueprint sharing from one or more users.
-      operationId: unshareBlueprintWithUsers
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkUnshareBlueprintWithUsersRequest'
-        required: true
-      responses:
-        '200':
-          description: Bulk unshare result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkBlueprintOperationResponse'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/{blueprintID}/access/users:
-    get:
-      summary: List blueprint access users
-      deprecated: false
-      description: Lists users who can access this blueprint and how they inherit access.
-      operationId: listBlueprintAccessUsers
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Blueprint access users
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/BlueprintAccessUserItem'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
-  /blueprints/{blueprintID}/access/groups:
-    get:
-      summary: List blueprint access groups
-      deprecated: false
-      description: Lists groups shared to this blueprint and their managers/members.
-      operationId: listBlueprintAccessGroups
-      tags:
-        - Blueprint Management
-      parameters:
-        - name: blueprintID
-          in: path
-          description: ''
-          required: true
-          example: ''
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Blueprint access groups
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/BlueprintAccessGroupItem'
-          headers: {}
-      security:
-        - JWT: []
-        - ApiKeyAuth: []
 components:
   schemas:
+    CreateBlueprintRequest:
+      type: object
+      required:
+        - blueprintID
+      properties:
+        blueprintID:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+          description: Semver. Empty defaults to "0.1.0".
+        tags:
+          type: array
+          items:
+            type: string
+        min_ludus_version:
+          type: string
+        config:
+          type: string
+          description: |
+            Optional YAML for `range-config.yml`. Empty defaults to `ludus: []`.
+    CopyBlueprintResponse:
+      type: object
+      required:
+        - result
+        - blueprintID
+        - bundleComplete
+      properties:
+        result:
+          type: string
+        blueprintID:
+          type: string
+        bundleComplete:
+          type: boolean
+          description: >-
+            Whether every template and role referenced by the source bundle was
+            present on disk and copied. False indicates the copy inherits an
+            incomplete bundle and may not deploy without further setup.
+    UpdateBlueprintMetadataRequest:
+      type: object
+      description: >
+        Any subset of fields may be supplied. `config` accepts a YAML string and
+        replaces the blueprint's stored config — it is validated as a range
+        config before the write.
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        min_ludus_version:
+          type: string
+        config:
+          type: string
+          description: Replacement YAML config; validated as a range config before save.
+    InstallBlueprintDepsRequest:
+      type: object
+      properties:
+        global:
+          type: boolean
+          description: >-
+            Admin only. Install the source's roles and collections for all
+            users.
+        forceRoles:
+          type: boolean
+    JobAcceptedResponse:
+      type: object
+      required:
+        - jobID
+      properties:
+        jobID:
+          type: string
+        sourceID:
+          type: string
+          description: Set on blueprint-source endpoints; equals the source's slug.
+    BlueprintDetail:
+      type: object
+      required:
+        - sourceBlueprintID
+        - name
+      properties:
+        sourceBlueprintID:
+          type: string
+          description: >-
+            ID of the blueprint within its source (the part after
+            "<sourceID>/").
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        authors:
+          type: array
+          items:
+            type: string
+        homepage:
+          type: string
+        license:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        min_ludus_version:
+          type: string
+        requirements_yaml:
+          type: string
+          description: >-
+            Galaxy-style requirements.yml shipped with the source blueprint, if
+            any.
+    TemplateStatusEntry:
+      type: object
+      required:
+        - name
+        - built
+      properties:
+        name:
+          type: string
+        built:
+          type: boolean
+    RoleStatusEntry:
+      type: object
+      required:
+        - name
+        - installed
+      properties:
+        name:
+          type: string
+        installed:
+          type: boolean
+        subscription:
+          type: boolean
+    SourceResponse:
+      type: object
+      required:
+        - id
+        - sourceID
+        - name
+        - type
+        - ownerUserID
+      properties:
+        id:
+          type: string
+        sourceID:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        authors:
+          type: array
+          items:
+            type: string
+        homepage:
+          type: string
+        license:
+          type: string
+        type:
+          type: string
+          enum:
+            - git
+            - upload
+        url:
+          type: string
+        ref:
+          type: string
+        ownerUserID:
+          type: string
+          description: Human-readable userID of the owner (not the PocketBase record ID).
+        lastSyncedAt:
+          type: string
+        lastSyncStatus:
+          type: string
+          enum:
+            - ok
+            - error
+            - pending
+            - ''
+        lastSyncError:
+          type: string
+    SourceCreateResponse:
+      allOf:
+        - $ref: '#/components/schemas/SourceResponse'
+        - type: object
+          properties:
+            sync:
+              $ref: '#/components/schemas/SyncResult'
+    UpdateSourceRequest:
+      type: object
+      properties:
+        ref:
+          type: string
+        global:
+          type: boolean
+          description: >-
+            Admin only. Install the source's roles and collections for all
+            users.
+        force:
+          type: boolean
+    DeleteSourceRequest:
+      type: object
+      properties:
+        purge:
+          type: boolean
+          description: >-
+            If true, also remove templates and local roles registered by this
+            source.
+    SyncSourceRequest:
+      type: object
+      description: >-
+        Body for POST /sources/{sourceID}/sync. No fields are required — sync is
+        read-only and accepts an empty body. The legacy globalRoles, force, and
+        dryRun fields are ignored (kept here for client compatibility; they had
+        install-side semantics that no longer apply).
+      properties:
+        globalRoles:
+          type: boolean
+          deprecated: true
+          description: Ignored — sync no longer installs anything.
+        force:
+          type: boolean
+          deprecated: true
+          description: Ignored — sync no longer installs anything.
+        dryRun:
+          type: boolean
+          deprecated: true
+          description: Ignored — sync is always read-only.
+    SyncResult:
+      type: object
+      properties:
+        templateResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactResult'
+        localAnsibleResults:
+          type: object
+          description: >-
+            Registration outcomes for ansible content vendored by the source
+            (its ansible/roles/ and ansible/collections/ dirs).
+          properties:
+            roleResults:
+              type: array
+              items:
+                $ref: '#/components/schemas/ArtifactResult'
+            collectionResults:
+              type: array
+              items:
+                $ref: '#/components/schemas/ArtifactResult'
+        blueprintResults:
+          type: object
+          description: Outcomes for the blueprints' galaxy dependency closure.
+          properties:
+            ansibleResults:
+              type: array
+              description: >-
+                Galaxy roles, collections, and subscription roles installed for
+                the source's blueprints. Each item's `type` says which kind it
+                is.
+              items:
+                $ref: '#/components/schemas/AnsibleInstallResult'
+            undeclaredDependencies:
+              type: array
+              items:
+                $ref: '#/components/schemas/UndeclaredDependency'
+    ArtifactResult:
+      type: object
+      required:
+        - name
+        - ok
+      properties:
+        name:
+          type: string
+        ok:
+          type: boolean
+        message:
+          type: string
+    RoleInstallResult:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        ok:
+          type: boolean
+        message:
+          type: string
+    DryRunPlan:
+      type: object
+      properties:
+        sourceName:
+          type: string
+        blueprintIDs:
+          type: array
+          items:
+            type: string
+        templates:
+          type: array
+          items:
+            type: string
+        localRoles:
+          type: array
+          items:
+            type: string
+        galaxyRoles:
+          type: array
+          items:
+            type: string
+        subscriptionRoles:
+          type: array
+          items:
+            type: string
+    SourceBlueprintListItem:
+      type: object
+      required:
+        - id
+        - sourceID
+        - sourceBlueprintID
+        - name
+      properties:
+        id:
+          type: string
+          description: Slug-prefixed display ID (<sourceID>/<sourceBlueprintID>).
+        sourceID:
+          type: string
+        sourceBlueprintID:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        authors:
+          type: array
+          items:
+            type: string
+        homepage:
+          type: string
+        license:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        min_ludus_version:
+          type: string
     ErrorInfo:
       type: object
       properties:
@@ -6037,6 +7208,8 @@ components:
           enum:
             - success
             - failure
+            - running
+            - aborted
           example: success
         start:
           type: string
@@ -6070,6 +7243,8 @@ components:
           enum:
             - success
             - failure
+            - running
+            - aborted
           example: success
         start:
           type: string
@@ -6464,6 +7639,8 @@ components:
           type: string
         description:
           type: string
+        thumbnailUrl:
+          type: string
         ownerUserID:
           type: string
         sharedUsers:
@@ -6482,6 +7659,13 @@ components:
             - direct
             - group
             - unknown
+        sourceID:
+          type: string
+          description: Set when this blueprint was discovered via a registered source.
+        tags:
+          type: array
+          items:
+            type: string
         created:
           type: string
           format: date-time
@@ -6607,6 +7791,434 @@ components:
           type: array
           items:
             type: string
+    SyncResultResponse:
+      allOf:
+        - type: object
+          required:
+            - sourceID
+          properties:
+            sourceID:
+              type: string
+        - $ref: '#/components/schemas/SyncResult'
+    ListSourceTemplatesResponseItem: &ref_2
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+    ListSourceRolesResponseItem:
+      type: object
+      required:
+        - name
+        - scope
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        scope:
+          type: string
+          enum:
+            - subscription
+            - local
+          description: >-
+            Where the role is sourced from: "subscription" (entitled via Ludus
+            Pro) or "local" (bundled in source).
+    ListSourceCollectionsResponseItem: *ref_2
+    BlueprintCreatedResponse:
+      description: >-
+        Shape returned by every blueprint-create path (from scratch, from-range,
+        copy, import). `result` is the message ("Blueprint
+        created/copied/imported successfully"); `blueprintID` is the
+        slug-prefixed public ID; `id` is the PocketBase record ID (emitted by
+        importBlueprint); `ansibleResults` reports the outcome of each galaxy
+        role/collection install kicked off as part of the create.
+      type: object
+      required:
+        - blueprintID
+      properties:
+        result:
+          type: string
+        blueprintID:
+          type: string
+        id:
+          type: string
+          description: PocketBase record ID; emitted by importBlueprint.
+        ansibleResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlueprintCreatedResponseAnsibleResult'
+    BlueprintCreatedResponseRoleResult:
+      type: object
+      required:
+        - name
+        - ok
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        ok:
+          type: boolean
+        error:
+          type: string
+    DeleteSourceResponse:
+      description: >-
+        Returned by `deleteSource`. Registration-only delete, so `status` is
+        always "deleted" — the source and its blueprints are dropped while
+        installed templates/roles/collections remain on disk.
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - deleted
+    InstallSelection:
+      type: object
+      description: >-
+        Persisted picker selection on a source record. Items added upstream
+        later do NOT auto-extend this set; the user has to re-install to widen
+        the selection.
+      properties:
+        blueprints:
+          type: array
+          description: sourceBlueprintID values to install.
+          items:
+            type: string
+        templates:
+          type: array
+          description: Template names to install.
+          items:
+            type: string
+        localRoles:
+          type: array
+          description: Source-bundled role names to install.
+          items:
+            type: string
+        localCollections:
+          type: array
+          description: Source-bundled collection FQCNs (namespace.name) to install.
+          items:
+            type: string
+    InstallRequest:
+      type: object
+      properties:
+        selection:
+          $ref: '#/components/schemas/InstallSelection'
+        global:
+          type: boolean
+          description: >-
+            Admin only. Install the source's roles and collections for all
+            users.
+        force:
+          type: boolean
+          description: >-
+            Force install: rm-and-recopy templates and reinstall ansible items;
+            pass `-f` to ansible-galaxy for galaxy roles and galaxy collections
+            so already-installed artifacts of the same name are overwritten.
+        noDeps:
+          type: boolean
+          description: >-
+            Skip installing the selected blueprints' ansible role and collection
+            dependencies
+    RegisterSourceResponse:
+      type: object
+      description: >-
+        Returned by POST /sources. The source is registered and walked but no
+        install has been committed. Callers drive the picker against the
+        included catalog and follow up with POST /sources/{sourceID}/install —
+        omit `selection` to have the server snapshot the current walk.
+      required:
+        - sourceID
+        - catalog
+      properties:
+        sourceID:
+          type: string
+        catalog:
+          $ref: '#/components/schemas/SourceCatalog'
+    SourceCatalog:
+      type: object
+      description: >-
+        Picker-facing view of a registered source: every artifact the source
+        ships, joined with the install state for this source row. Driven by GET
+        /sources/{sourceID}/catalog and the body of RegisterSourceResponse.
+      required:
+        - sourceID
+        - sourceName
+        - blueprints
+        - templates
+        - localRoles
+        - localCollections
+      properties:
+        sourceID:
+          type: string
+        sourceName:
+          type: string
+        description:
+          type: string
+        sourceType:
+          type: string
+          enum:
+            - git
+            - upload
+        lastSyncedAt:
+          type: string
+        blueprints:
+          $ref: '#/components/schemas/CatalogBlueprints'
+        templates:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        localRoles:
+          type: array
+          description: Source-bundled Ansible roles (the source's ansible/roles/ dir).
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        localCollections:
+          type: array
+          description: >-
+            Source-bundled Ansible collections (the source's
+            ansible/collections/ dir).
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+    CatalogBlueprint:
+      type: object
+      description: >-
+        A blueprint shipped by a source, with its install state for this source
+        row and the artifacts it would pull in if selected.
+      required:
+        - id
+        - name
+        - version
+        - state
+      properties:
+        id:
+          type: string
+          description: sourceBlueprintID — unique within the source.
+        name:
+          type: string
+        description:
+          type: string
+          description: >-
+            Human description from the blueprint manifest (blueprint.yml).
+            Optional.
+        version:
+          type: string
+        state:
+          type: string
+          enum:
+            - not_installed
+            - installed
+            - upgrade_available
+        installedVersion:
+          type: string
+          description: Set when state is installed or upgrade_available.
+        requiredTemplates:
+          type: array
+          items:
+            type: string
+        requiredLocalRoles:
+          type: array
+          items:
+            type: string
+        requiredRoles:
+          type: array
+          items:
+            type: string
+        requiredCollections:
+          type: array
+          items:
+            type: string
+    CatalogItem:
+      type: object
+      description: One template, role, or collection in a SourceCatalog.
+      required:
+        - name
+        - state
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          description: >-
+            From the item's source metadata (template description variable, role
+            meta/main.yml, collection galaxy.yml). Absent for
+            galaxy/subscription items.
+        version:
+          type: string
+          description: >-
+            Required version or constraint for galaxy deps; shipped galaxy.yml
+            version for vendored collections. Absent for templates and local
+            roles (versionless).
+        state:
+          type: string
+          enum:
+            - not_installed
+            - installed
+            - upgrade_available
+        installedVersion:
+          type: string
+        global:
+          type: boolean
+          description: >-
+            True when an installed role or vendored collection has a copy in the
+            system-wide global path. Absent for templates and
+            galaxy/subscription items.
+        scopes:
+          type: array
+          description: >-
+            Installed copies of a role or vendored collection: scope
+            ("global"/"user"), on-disk version, and state against the required
+            pin. Both scopes can be occupied at different versions. Absent for
+            templates, galaxy deps, and not-installed items.
+          items:
+            type: object
+            properties:
+              scope:
+                type: string
+              version:
+                type: string
+              state:
+                type: string
+                enum:
+                  - installed
+                  - upgrade_available
+        type:
+          type: string
+          description: >-
+            "git" for a collection sourced from a git repo (`name` holds the
+            repo URL). Absent otherwise.
+        fqcn:
+          type: string
+          description: >-
+            Resolved namespace.name for a git collection. Absent when not a git
+            collection or not inferable from the URL.
+        requiredBy:
+          type: array
+          description: Blueprint IDs that require this item.
+          items:
+            type: string
+        versionByBlueprint:
+          type: object
+          description: Pinned version per blueprint ID, for galaxy roles/collections.
+          additionalProperties:
+            type: string
+          properties: {}
+    UndeclaredDependency:
+      type: object
+      description: >-
+        A range-config role reference that isn't covered by the blueprint's
+        requirements.yml or a source-bundled local role. The picker surfaces
+        these so the user can declare them before deploy.
+      required:
+        - blueprintID
+        - role
+        - kind
+      properties:
+        blueprintID:
+          type: string
+        role:
+          type: string
+        kind:
+          type: string
+          enum:
+            - missing_role
+            - missing_collection
+        parentCollection:
+          type: string
+          description: >-
+            Populated when kind is missing_collection. The collection parent of
+            an FQCN role reference whose parent collection isn't declared in
+            requirements.yml.
+    AnsibleInstallResult:
+      type: object
+      description: >-
+        Result of installing one galaxy artifact for a blueprint. `type`
+        distinguishes role / collection / subscription_role — they all flow
+        through the same ansible-galaxy install path.
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        ok:
+          type: boolean
+        error:
+          type: string
+        type:
+          type: string
+          enum:
+            - role
+            - collection
+            - subscription_role
+    BlueprintCreatedResponseAnsibleResult:
+      type: object
+      required:
+        - name
+        - ok
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        ok:
+          type: boolean
+        error:
+          type: string
+        type:
+          type: string
+          enum:
+            - role
+            - collection
+            - subscription_role
+    CatalogBlueprints:
+      type: object
+      description: >-
+        The source's blueprints plus the dependency closure they pull in: galaxy
+        roles/collections and subscription roles unioned across every
+        blueprint's requirements.yml, plus any config.yml role references that
+        aren't declared there.
+      required:
+        - items
+        - requiredRoles
+        - requiredCollections
+        - subscriptionRoles
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogBlueprint'
+        requiredRoles:
+          type: array
+          description: Galaxy roles declared by any blueprint's requirements.yml.
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        requiredCollections:
+          type: array
+          description: Galaxy collections declared by any blueprint's requirements.yml.
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        subscriptionRoles:
+          type: array
+          description: >-
+            Ludus subscription roles declared by any blueprint's
+            requirements.yml (license-gated install pipeline).
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+        undeclaredDependencies:
+          type: array
+          description: >-
+            Range-config role references the picker found but couldn't cover via
+            requirements.yml or a source-bundled local role.
+          items:
+            $ref: '#/components/schemas/UndeclaredDependency'
   responses: {}
   securitySchemes:
     ApiKeyAuth:

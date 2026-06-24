@@ -23,7 +23,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/zclconf/go-cty/cty"
 )
 
 // LudusOS represents the operating system category for a template.
@@ -42,11 +45,9 @@ type TemplateStatus struct {
 	Status   string  `json:"status"`
 	Os       LudusOS `json:"os"`
 	FilePath string  `json:"-"`
+	Owner    string  `json:"-"` // user record id; "" for global/built-in templates
 }
 
-const templateRegex string = `(?m)[^"]*?-template`
-
-var templateStringRegex = regexp.MustCompile(templateRegex)
 var templateLogSafeCharRegex = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 var templateProgressStore sync.Map
@@ -68,19 +69,180 @@ func getAvailableTemplates(user *models.User) ([]string, error) {
 	return allTemplates, nil
 }
 
-func extractTemplateNameFromHCL(hclFile string, templateRegex *regexp.Regexp) string {
-	// This should use the hcl package for golang and parse the files, but this will work for now
+func extractTemplateNameFromHCL(hclFile string) (string, error) {
 	fileBytes, err := os.ReadFile(hclFile)
 	if err != nil {
-		return "error reading file: " + hclFile
+		return "", fmt.Errorf("error reading file: %w", err)
 	}
-	fileString := string(fileBytes)
-	templateName := templateRegex.FindString(fileString)
-	if templateName != "" {
-		return templateName
+
+	templateName, err := extractPackerTemplateName(hclFile, fileBytes)
+	if err == nil && templateName != "" {
+		return templateName, nil
+	}
+	return "", fmt.Errorf("could not find template name in %s", hclFile)
+}
+
+func extractPackerTemplateName(filename string, src []byte) (string, error) {
+	parser := hclparse.NewParser()
+	var file *hcl.File
+	var diags hcl.Diagnostics
+	if strings.HasSuffix(filename, ".json") {
+		file, diags = parser.ParseJSON(src, filename)
 	} else {
-		return "could not find template name in " + hclFile
+		file, diags = parser.ParseHCL(src, filename)
 	}
+	if diags.HasErrors() {
+		return "", fmt.Errorf("parse packer template: %s", diags.Error())
+	}
+
+	content, _, diags := file.Body.PartialContent(&hcl.BodySchema{
+		Blocks: []hcl.BlockHeaderSchema{
+			{Type: "variable", LabelNames: []string{"name"}},
+			{Type: "locals"},
+			{Type: "source", LabelNames: []string{"type", "name"}},
+		},
+	})
+	if diags.HasErrors() {
+		return "", fmt.Errorf("read packer template blocks: %s", diags.Error())
+	}
+
+	evalCtx, variables := packerTemplateEvalContext(content.Blocks)
+	for _, block := range content.Blocks.OfType("source") {
+		sourceContent, _, diags := block.Body.PartialContent(&hcl.BodySchema{
+			Attributes: []hcl.AttributeSchema{{Name: "vm_name"}},
+		})
+		if diags.HasErrors() {
+			continue
+		}
+		attr, ok := sourceContent.Attributes["vm_name"]
+		if !ok {
+			continue
+		}
+		if name := hclStringValue(attr.Expr, evalCtx); name != "" {
+			return name, nil
+		}
+	}
+
+	if variable, ok := variables["vm_name"]; ok {
+		if name := ctyValueString(variable); name != "" {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
+func packerTemplateEvalContext(blocks hcl.Blocks) (*hcl.EvalContext, map[string]cty.Value) {
+	evalCtx := &hcl.EvalContext{Variables: map[string]cty.Value{}}
+	variables := map[string]cty.Value{}
+	for _, block := range blocks.OfType("variable") {
+		if len(block.Labels) != 1 {
+			continue
+		}
+		variableContent, _, diags := block.Body.PartialContent(&hcl.BodySchema{
+			Attributes: []hcl.AttributeSchema{{Name: "default"}},
+		})
+		if diags.HasErrors() {
+			continue
+		}
+		attr, ok := variableContent.Attributes["default"]
+		if !ok {
+			continue
+		}
+		value, diags := attr.Expr.Value(evalCtx)
+		if diags.HasErrors() || !value.IsWhollyKnown() || value.IsNull() {
+			continue
+		}
+		variables[block.Labels[0]] = value
+	}
+	evalCtx.Variables["var"] = cty.ObjectVal(variables)
+
+	locals := map[string]cty.Value{}
+	for _, block := range blocks.OfType("locals") {
+		attrs, diags := block.Body.JustAttributes()
+		if diags.HasErrors() {
+			continue
+		}
+		for name, attr := range attrs {
+			value, diags := attr.Expr.Value(evalCtx)
+			if diags.HasErrors() || !value.IsWhollyKnown() || value.IsNull() {
+				continue
+			}
+			locals[name] = value
+		}
+	}
+	if len(locals) > 0 {
+		evalCtx.Variables["local"] = cty.ObjectVal(locals)
+	}
+
+	return evalCtx, variables
+}
+
+func hclStringValue(expr hcl.Expression, evalCtx *hcl.EvalContext) string {
+	value, diags := expr.Value(evalCtx)
+	if diags.HasErrors() {
+		return ""
+	}
+	return ctyValueString(value)
+}
+
+func ctyValueString(value cty.Value) string {
+	if !value.IsWhollyKnown() || value.IsNull() || value.Type() != cty.String {
+		return ""
+	}
+	return strings.TrimSpace(value.AsString())
+}
+
+// packerVariableString returns the static string default of a top-level
+// `variable "<name>"` block, or "" if it's absent or not a string. Packer
+// requires variable defaults to be literals (no functions or references), so
+// reading one without a build is always safe — unlike a `locals` value, which
+// may interpolate at build time (e.g. template_description's isotime).
+func packerVariableString(filename string, src []byte, varName string) string {
+	parser := hclparse.NewParser()
+	var file *hcl.File
+	var diags hcl.Diagnostics
+	if strings.HasSuffix(filename, ".json") {
+		file, diags = parser.ParseJSON(src, filename)
+	} else {
+		file, diags = parser.ParseHCL(src, filename)
+	}
+	if diags.HasErrors() {
+		return ""
+	}
+	content, _, diags := file.Body.PartialContent(&hcl.BodySchema{
+		Blocks: []hcl.BlockHeaderSchema{{Type: "variable", LabelNames: []string{"name"}}},
+	})
+	if diags.HasErrors() {
+		return ""
+	}
+	_, variables := packerTemplateEvalContext(content.Blocks)
+	if v, ok := variables[varName]; ok {
+		return ctyValueString(v)
+	}
+	return ""
+}
+
+// packerVarFromDir reads the named static `variable "<varName>"` default from the
+// single packer file in a source's templates/<name>/ dir, letting authors define
+// catalog metadata (description, thumbnail_path) in the packer template itself.
+// Returns "" when there's no packer file or no such variable.
+func packerVarFromDir(dir, varName string) string {
+	files, err := findFiles(dir, "pkr.hcl", "pkr.json")
+	if err != nil || len(files) == 0 {
+		return ""
+	}
+	src, err := os.ReadFile(files[0])
+	if err != nil {
+		return ""
+	}
+	return packerVariableString(files[0], src, varName)
+}
+
+func isExtractedTemplateName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" &&
+		!strings.HasPrefix(name, "error reading file:") &&
+		!strings.HasPrefix(name, "could not find template name in ")
 }
 
 // proxmoxOSToLudusOS maps a Proxmox guest OS type code to a Ludus OS category.
@@ -431,18 +593,24 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 	}
 
 	// Check all the .hcl files
-	templateStringRegex, _ := regexp.Compile(templateRegex)
 	var templateStatusArray []TemplateStatus
 	var templateHCLNames []string
 	for _, templateFile := range allTemplates {
 		// Create a template status, fill out the details, and save it to the templateStatusArray
 		var thisTemplateStatus TemplateStatus
-		thisTemplateName := extractTemplateNameFromHCL(templateFile, templateStringRegex)
+		thisTemplateName, err := extractTemplateNameFromHCL(templateFile)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Unable to extract template name from %s: %v", templateFile, err))
+			continue
+		}
 		// Save this name for later comparison with template VM names
 		templateHCLNames = append(templateHCLNames, thisTemplateName)
 		// Fill out the template status details
 		thisTemplateStatus.Name = thisTemplateName
 		thisTemplateStatus.FilePath = templateFile
+		if strings.Contains(templateFile, fmt.Sprintf("%s/users/%s/", ludusInstallPath, user.ProxmoxUsername())) {
+			thisTemplateStatus.Owner = user.Id
+		}
 		thisTemplateStatus.Os = extractOSFromHCL(templateFile)
 		if thisTemplateStatus.Os == "" {
 			thisTemplateStatus.Os = osFromTemplateName(thisTemplateName)
@@ -515,6 +683,15 @@ func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus)
 			return fmt.Errorf("unable to query template '%s' in templates collection: %w", templateName, err)
 		}
 		if existingRecord != nil {
+			// Backfill owner for a row created before owner population (or by a
+			// path that didn't know it). Only fill when empty — never reassign,
+			// so on a shared name the first creator keeps ownership.
+			if templateStatus.Owner != "" && existingRecord.GetString("owner") == "" {
+				existingRecord.Set("owner", templateStatus.Owner)
+				if err := app.Save(existingRecord); err != nil {
+					return fmt.Errorf("unable to backfill owner for template '%s': %w", templateName, err)
+				}
+			}
 			continue
 		}
 
@@ -529,6 +706,9 @@ func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus)
 		}
 		templateRecord.Set("os", templateOS)
 		template.SetShared(true)
+		if templateStatus.Owner != "" {
+			templateRecord.Set("owner", templateStatus.Owner)
+		}
 
 		if err := app.Save(template); err != nil {
 			return fmt.Errorf("unable to create template '%s' in templates collection: %w", templateName, err)
@@ -539,15 +719,12 @@ func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus)
 }
 
 func discoverTemplateStatusesForStartup(app core.App) ([]TemplateStatus, error) {
-	templateRegexCompiled, err := regexp.Compile(templateRegex)
-	if err != nil {
-		return nil, fmt.Errorf("unable to compile template regex: %w", err)
-	}
 
 	templateStatusByName := make(map[string]TemplateStatus)
-	addTemplateFromFile := func(templateFile string) {
-		templateName := strings.TrimSpace(extractTemplateNameFromHCL(templateFile, templateRegexCompiled))
-		if templateName == "" || strings.HasPrefix(templateName, "error reading file:") || strings.HasPrefix(templateName, "could not find template name in ") {
+	addTemplateFromFile := func(templateFile, owner string) {
+		templateName, err := extractTemplateNameFromHCL(templateFile)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Unable to extract template name from %s: %v", templateFile, err))
 			return
 		}
 		if _, exists := templateStatusByName[templateName]; exists {
@@ -558,8 +735,9 @@ func discoverTemplateStatusesForStartup(app core.App) ([]TemplateStatus, error) 
 			templateOS = osFromTemplateName(templateName)
 		}
 		templateStatusByName[templateName] = TemplateStatus{
-			Name: templateName,
-			Os:   templateOS,
+			Name:  templateName,
+			Os:    templateOS,
+			Owner: owner,
 		}
 	}
 
@@ -568,7 +746,7 @@ func discoverTemplateStatusesForStartup(app core.App) ([]TemplateStatus, error) 
 		return nil, fmt.Errorf("unable to list global templates: %w", err)
 	}
 	for _, templateFile := range globalTemplateFiles {
-		addTemplateFromFile(templateFile)
+		addTemplateFromFile(templateFile, "")
 	}
 
 	userRecords, err := app.FindAllRecords("users")
@@ -597,7 +775,7 @@ func discoverTemplateStatusesForStartup(app core.App) ([]TemplateStatus, error) 
 			return strings.HasSuffix(template, "pkrvars.hcl")
 		})
 		for _, templateFile := range userTemplateFiles {
-			addTemplateFromFile(templateFile)
+			addTemplateFromFile(templateFile, userRecord.Id)
 		}
 	}
 
@@ -827,32 +1005,33 @@ func PutTemplateTar(e *core.RequestEvent) error {
 	}
 	os.Remove(templateTarPath)
 
+	// Register a defer to clean up the untar'd template dir if we exit early, skip cleanup if all checks pass
+	shouldCleanup := true
+	defer func() {
+		if shouldCleanup {
+			removeErr := os.RemoveAll(templateDirPath)
+			if removeErr != nil {
+				logger.Error(fmt.Sprintf("Error removing untar'd template dir '%s' during cleanup: %v", templateDirPath, removeErr))
+			}
+		}
+	}()
+
 	// Check the uploaded folder for a packer file
 	uploadedTemplatePackerFiles, err := findFiles(templateDirPath, "pkr.hcl", "pkr.json")
 	if err != nil {
-		removeErr := os.RemoveAll(templateDirPath)
-		if removeErr != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding *.pkr.hcl or *.pkr.json files in tar AND Error removing '%s': %v", templateDirPath, removeErr))
-		}
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error finding *.pkr.hcl or *.pkr.json files: %v", err))
 	}
 	if len(uploadedTemplatePackerFiles) == 0 {
-		removeErr := os.RemoveAll(templateDirPath)
-		if removeErr != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("No packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr))
-		}
 		return JSONError(e, http.StatusInternalServerError, "No packer file (*.pkr.hcl or *.pkr.json) found in the tar!")
 	} else if len(uploadedTemplatePackerFiles) > 1 {
-		removeErr := os.RemoveAll(templateDirPath)
-		if removeErr != nil {
-			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar AND Error removing '%s': %v", templateDirPath, removeErr))
-		}
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("More than one packer file (*.pkr.hcl or *.pkr.json) found in the tar: %v", uploadedTemplatePackerFiles))
 	} else {
 		// Check the name of this template to see if it is already on the server - templates must have unique names
-		templateStringRegex, _ := regexp.Compile(templateRegex)
 		// The if else chain above has validated we only have one entry in the uploadedTemplatePackerFiles slice
-		thisTemplateName := extractTemplateNameFromHCL(uploadedTemplatePackerFiles[0], templateStringRegex)
+		thisTemplateName, err := extractTemplateNameFromHCL(uploadedTemplatePackerFiles[0])
+		if err != nil {
+			return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error extracting template name from %s: %v", uploadedTemplatePackerFiles[0], err))
+		}
 		if slices.Contains(currentTemplateNames, thisTemplateName) {
 			// The uploaded template exists on the server, but this could be a `--force` override of a template in the user's packer dir
 			if force {
@@ -871,25 +1050,17 @@ func PutTemplateTar(e *core.RequestEvent) error {
 					} else {
 						errorString = fmt.Sprintf("'%s' is a template that does not belong to you", thisTemplateName)
 					}
-					// We need to remove the untar'd template dir now since the template name is either another user's or built-in
-					removeErr := os.RemoveAll(templateDirPath)
-					if removeErr != nil {
-						errorString = fmt.Sprintf("'%s' is a template that does not belong to you AND Error removing '%s': %v", thisTemplateName, templateDirPath, removeErr)
-					}
 					return JSONError(e, http.StatusBadRequest, errorString)
-				} else {
-					return JSONResult(e, http.StatusOK, "Successfully added template")
 				}
 			} else {
 				// The template name exists on the server and it isn't a template this user previously had (would have hit the 'already exists' error above) so remove it from the file system
-				removeErr := os.RemoveAll(templateDirPath)
-				if removeErr != nil {
-					return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("The uploaded template name is already present on the server. Template names must be unique. AND Error removing '%s': %v", templateDirPath, removeErr))
-				}
 				return JSONError(e, http.StatusInternalServerError, "The uploaded template name is already present on the server. Template names must be unique.")
 			}
 		}
 	}
+
+	// If we get here, all checks passed and the template was added successfully
+	shouldCleanup = false
 
 	return JSONResult(e, http.StatusOK, "Successfully added template")
 }
@@ -999,6 +1170,8 @@ func DeleteTemplate(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error removing '%s' (path: %s): %v", templateName, templateDir, err))
 	}
+
+	releaseSourceClaims(e.App, []string{"template"}, templateName)
 
 	return JSONResult(e, http.StatusOK, fmt.Sprintf("Template '%s' removed", templateName))
 }

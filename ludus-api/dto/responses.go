@@ -358,6 +358,8 @@ type ListBlueprintsResponseItem struct {
 	SharedUsers  []string  `json:"sharedUsers,omitempty"`
 	SharedGroups []string  `json:"sharedGroups,omitempty"`
 	AccessType   string    `json:"accessType,omitempty"`
+	SourceID     string    `json:"sourceID,omitempty"`
+	Tags         []string  `json:"tags,omitempty"`
 	Created      time.Time `json:"created"`
 	Updated      time.Time `json:"updated"`
 }
@@ -372,6 +374,23 @@ type ListBlueprintAccessGroupsResponseItem struct {
 	Managers  []string `json:"managers,omitempty"`
 	Members   []string `json:"members,omitempty"`
 }
+
+type ListSourceTemplatesResponseItem struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+}
+
+type ListSourceRolesResponseItem struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	Scope   string `json:"scope"`
+}
+
+type ListSourceCollectionsResponseItem struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+}
+
 type ListUserResponse struct {
 	Value []ListUserResponseItem `json:"-"`
 }
@@ -607,4 +626,138 @@ type AutoShutdownDetail struct {
 
 type AutoShutdownResponse struct {
 	AutoShutdownTimeout AutoShutdownDetail `json:"autoShutdownTimeout"`
+}
+
+type DeleteSourceResponse struct {
+	Status string `json:"status"`
+}
+
+// BlueprintCreatedResponse is the shape returned by CreateBlueprint,
+// CreateBlueprintFromRange, CopyBlueprint, and ImportBlueprint.
+type BlueprintCreatedResponse struct {
+	Result         string                                  `json:"result,omitempty"`
+	BlueprintID    string                                  `json:"blueprintID"`
+	ID             string                                  `json:"id,omitempty"` // record ID; emitted by ImportBlueprint
+	AnsibleResults []BlueprintCreatedResponseAnsibleResult `json:"ansibleResults,omitempty"`
+}
+
+type BlueprintCreatedResponseAnsibleResult struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+	Type    string `json:"type,omitempty"`
+}
+
+type SourceResponse struct {
+	ID             string   `json:"id"`
+	SourceID       string   `json:"sourceID"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description,omitempty"`
+	Authors        []string `json:"authors,omitempty"`
+	Homepage       string   `json:"homepage,omitempty"`
+	License        string   `json:"license,omitempty"`
+	Type           string   `json:"type"`
+	URL            string   `json:"url,omitempty"`
+	Ref            string   `json:"ref,omitempty"`
+	OwnerUserID    string   `json:"ownerUserID"`
+	LastSyncedAt   string   `json:"lastSyncedAt,omitempty"`
+	LastSyncStatus string   `json:"lastSyncStatus,omitempty"`
+	LastSyncError  string   `json:"lastSyncError,omitempty"`
+}
+
+// RegisterSourceResponse is what POST /sources returns. Always a catalog —
+// installs are driven via POST /sources/{id}/install (an absent selection
+// installs everything the source ships).
+type RegisterSourceResponse struct {
+	SourceID string           `json:"sourceID"`
+	Catalog  SourceCatalogDTO `json:"catalog"`
+}
+
+// SourceCatalogDTO mirrors the internal SourceCatalog for the wire.
+type SourceCatalogDTO struct {
+	SourceID   string `json:"sourceID"`
+	SourceName string `json:"sourceName"`
+	// Description / SourceType / LastSyncedAt are display metadata for picker
+	// headers, read off the source record at catalog time.
+	Description      string               `json:"description,omitempty"`
+	SourceType       string               `json:"sourceType,omitempty"` // "git" | "upload"
+	LastSyncedAt     string               `json:"lastSyncedAt,omitempty"`
+	Blueprints       CatalogBlueprintsDTO `json:"blueprints"`
+	Templates        []CatalogItemDTO     `json:"templates"`
+	LocalRoles       []CatalogItemDTO     `json:"localRoles"`
+	LocalCollections []CatalogItemDTO     `json:"localCollections"`
+}
+
+// CatalogBlueprintsDTO groups the source's blueprints with the dependency
+// closure they pull in: galaxy roles/collections and subscription roles
+// unioned across every blueprint's requirements.yml, plus any config.yml role
+// references that aren't declared there.
+type CatalogBlueprintsDTO struct {
+	Items                  []CatalogBlueprintDTO     `json:"items"`
+	RequiredRoles          []CatalogItemDTO          `json:"requiredRoles"`
+	RequiredCollections    []CatalogItemDTO          `json:"requiredCollections"`
+	SubscriptionRoles      []CatalogItemDTO          `json:"subscriptionRoles"`
+	UndeclaredDependencies []UndeclaredDependencyDTO `json:"undeclaredDependencies,omitempty"`
+}
+
+type CatalogBlueprintDTO struct {
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Description         string   `json:"description,omitempty"`
+	Version             string   `json:"version"`
+	State               string   `json:"state"`
+	InstalledVersion    string   `json:"installedVersion,omitempty"`
+	RequiredTemplates   []string `json:"requiredTemplates,omitempty"`
+	RequiredLocalRoles  []string `json:"requiredLocalRoles,omitempty"`
+	RequiredRoles       []string `json:"requiredRoles,omitempty"`
+	RequiredCollections []string `json:"requiredCollections,omitempty"`
+}
+
+type CatalogItemDTO struct {
+	Name               string            `json:"name"`
+	Description        string            `json:"description,omitempty"`
+	Version            string            `json:"version,omitempty"`
+	State              string            `json:"state"`
+	InstalledVersion   string            `json:"installedVersion,omitempty"`
+	Global             bool              `json:"global,omitempty"`
+	Scopes             []ScopeInstallDTO `json:"scopes,omitempty"`
+	Type               string            `json:"type,omitempty"`
+	Fqcn               string            `json:"fqcn,omitempty"`
+	RequiredBy         []string          `json:"requiredBy,omitempty"`
+	VersionByBlueprint map[string]string `json:"versionByBlueprint,omitempty"`
+}
+
+// ScopeInstallDTO is one installed copy of a role or vendored collection:
+// the scope it lives in ("global"/"user"), the on-disk version there, and its
+// state against the required pin ("installed" / "upgrade_available"). An
+// artifact can have entries for both scopes, at different versions.
+type ScopeInstallDTO struct {
+	Scope   string `json:"scope"`
+	Version string `json:"version,omitempty"`
+	State   string `json:"state,omitempty"`
+}
+
+// UndeclaredDependencyDTO mirrors the internal UndeclaredDependency.
+// Kind classifies the gap so renderers can dedupe + group items and emit
+// one guidance message per kind, instead of one prose hint per item.
+type UndeclaredDependencyDTO struct {
+	BlueprintID      string `json:"blueprintID"`
+	Role             string `json:"role"`
+	Kind             string `json:"kind"`                       // "missing_role" | "missing_collection"
+	ParentCollection string `json:"parentCollection,omitempty"` // populated when kind=missing_collection
+}
+
+type SourceBlueprintListItem struct {
+	ID                string   `json:"id"`
+	SourceID          string   `json:"sourceID"`
+	SourceBlueprintID string   `json:"sourceBlueprintID"`
+	Name              string   `json:"name"`
+	Description       string   `json:"description,omitempty"`
+	Version           string   `json:"version,omitempty"`
+	Authors           []string `json:"authors,omitempty"`
+	Homepage          string   `json:"homepage,omitempty"`
+	License           string   `json:"license,omitempty"`
+	Tags              []string `json:"tags,omitempty"`
+	MinLudusVersion   string   `json:"min_ludus_version,omitempty"`
 }

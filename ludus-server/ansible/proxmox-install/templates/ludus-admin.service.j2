@@ -1,8 +1,7 @@
 [Unit]
 Description=Ludus admin server
-Wants=network.target
-After=network.target
-After=wg-quick@wg0.service
+Wants=network-online.target
+After=network-online.target nss-lookup.target wg-quick@wg0.service
 
 [Service]
 Type=simple

@@ -1,0 +1,11 @@
+ludus:
+  - vm_name: "{{ range_id }}-example"
+    hostname: "example"
+    template: example-debian-12-template
+    vlan: 10
+    ip_last_octet: 10
+    ram_gb: 2
+    cpus: 2
+    linux: true
+    roles:
+      - geerlingguy.docker

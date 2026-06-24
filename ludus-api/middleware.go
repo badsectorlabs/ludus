@@ -209,6 +209,12 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/migrate/")) {
+
+		// Explicit block for proxying the SSO provision request
+		if strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/provision-oauth2") {
+			return JSONError(e, http.StatusForbidden, "This endpoint is only available on the admin API")
+		}
+
 		// First clear all the headers to prevent sending 2x of each header
 		for k := range e.Response.Header() {
 			e.Response.Header().Del(k)
@@ -272,7 +278,7 @@ func redirectBaseURLToUI(e *core.RequestEvent) error {
 }
 
 func restrictPocketBaseEndpoints(e *core.RequestEvent) error {
-	if strings.HasPrefix(e.Request.URL.Path, "/_") && os.Getenv("LUDUS_ENABLE_SUPERADMIN") != "ill-be-careful" {
+	if (strings.HasPrefix(e.Request.URL.Path, "/_") || strings.HasPrefix(e.Request.URL.Path, "/admin")) && os.Getenv("LUDUS_ENABLE_SUPERADMIN") != "ill-be-careful" {
 		return JSONError(e, http.StatusForbidden, "Superadmin access is disabled. Enable it by setting the LUDUS_ENABLE_SUPERADMIN environment variable to 'ill-be-careful'.")
 	}
 	return e.Next()

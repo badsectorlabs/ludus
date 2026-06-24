@@ -21,7 +21,25 @@
   when: domain_joined.reboot_required
 
 - name: Sync time with the DC
-  ansible.windows.win_shell: "w32tm /resync"
+  block:
+    - name: Sync time with the DC
+      ansible.windows.win_shell: "w32tm /resync"
+      register: time_sync_command
+  rescue:
+    - name: Start Windows Time service
+      ansible.windows.win_service:
+        name: w32time
+        state: started
+      when: "'The service has not been started' in (time_sync_command.stdout | default(''))"
+
+    - name: Retry syncing time with the DC
+      ansible.windows.win_shell: "w32tm /resync"
+      when: "'The service has not been started' in (time_sync_command.stdout | default(''))"
+
+    - name: Fail time sync for unhandled errors
+      ansible.builtin.fail:
+        msg: "{{ time_sync_command.stderr | default(time_sync_command.stdout) }}"
+      when: "'The service has not been started' not in (time_sync_command.stdout | default(''))"
 
 - name: Update group policy
   ansible.windows.win_shell: "gpupdate /force"

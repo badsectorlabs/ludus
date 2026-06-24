@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"encoding/json"
 	"fmt"
+	"ludusapi/models"
 	"os"
 	"regexp"
 	"slices"
@@ -201,9 +202,27 @@ type LudusConfig struct {
 	Defaults *Defaults `json:"defaults,omitempty"`
 }
 
-// validateRangeYAML checks for duplicate vlan and ip_last_octet combinations, templates exist on the server, and unique hostname
-// also checks each role to see if it exists on the server and creates the user-defined-roles.yml file.
-// Additionally validates target_node settings for cluster deployments.
+// vmNameRE constrains user-supplied vm_name / hostname values. These flow into ansible
+// shell/command tasks (router lookup, ansible-inventory --host) and into filesystem paths,
+// so the charset must exclude shell/jq/path metacharacters. DNS-label-ish: alnum, dot, dash;
+// must start alnum; max 63. The literal "{{ range_id }}" placeholder is permitted and is
+// substituted before this regex is applied.
+var vmNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$`)
+
+func validateVMName(field, value string) error {
+	if !vmNameRE.MatchString(value) {
+		return fmt.Errorf("%s %q is invalid: must be 1-63 chars of letters, digits, '.' or '-' and start with a letter or digit", field, value)
+	}
+	return nil
+}
+
+// validateRangeYAML runs the full set of structural + dep-existence checks
+// on a range config: target_node validity, duplicate vlan+ip_last_octet,
+// duplicate vm_name / hostname, NETBIOS uniqueness per domain, every
+// referenced template built on this server, every referenced role installed
+// for this user. `range config set` and `blueprint apply` both run this —
+// the two paths are substitutes and should surface deployment-blocking
+// problems at write time, not at deploy time.
 func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 	var config LudusConfig
 	err := yaml.Unmarshal(yamlData, &config)
@@ -211,10 +230,27 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 		return err
 	}
 
+	targetRange, err := GetRange(e)
+	if err != nil {
+		return err
+	}
+	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
+
+	user := e.Get("user").(*models.User)
+
 	// Validate range-level target_node if specified
-	if config.Defaults != nil && config.Defaults.TargetNode != "" {
-		if err := validateTargetNode(e, config.Defaults.TargetNode); err != nil {
-			return fmt.Errorf("range-level target_node error: %w", err)
+	if config.Router != nil {
+		if config.Router.VMName != "" {
+			resolvedVMName := rangeIDTemplateRegex.ReplaceAllString(config.Router.VMName, targetRange.RangeId())
+			if err := validateVMName("router.vm_name", resolvedVMName); err != nil {
+				return err
+			}
+		}
+		if config.Router.TargetNode != "" {
+			resolvedTargetNode := rangeIDTemplateRegex.ReplaceAllString(config.Router.TargetNode, targetRange.RangeId())
+			if err := validateTargetNode(e, resolvedTargetNode); err != nil {
+				return fmt.Errorf("router target_node error: %w", err)
+			}
 		}
 	}
 
@@ -225,16 +261,11 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 		}
 	}
 
-	// Get a list of all the built templates on the system
 	templateSlice, err := getTemplateNameArray(e, true)
 	if err != nil {
 		return err
 	}
 
-	targetRange, err := GetRange(e)
-	if err != nil {
-		return err
-	}
 	// Check for duplicate vlan and ip_last_octet combinations
 	seenVLANAndIP := make(map[string]bool)
 	// Check that all vm_names and hostnames are unique
@@ -242,11 +273,19 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 	seenHostnames := make(map[string]bool)
 	// Check that NETBIOS are unique per domain
 	seenNETBIOSnames := make(map[string]string)
-	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
 
 	var NETBIOSnameKey string
-	e.Set("rangeHasRoles", false)
 	for _, vm := range config.Ludus {
+		resolvedVMName := rangeIDTemplateRegex.ReplaceAllString(vm.VMName, targetRange.RangeId())
+		if err := validateVMName("vm_name", resolvedVMName); err != nil {
+			return err
+		}
+		if vm.Hostname != "" {
+			resolvedHostname := rangeIDTemplateRegex.ReplaceAllString(vm.Hostname, targetRange.RangeId())
+			if err := validateVMName("hostname", resolvedHostname); err != nil {
+				return err
+			}
+		}
 		vlanIPKey := fmt.Sprintf("vlan: %d, ip_last_octet: %d", vm.VLAN, vm.IPLastOctet)
 		vmNameKey := vm.VMName
 		vmHostnameKey := vm.Hostname
@@ -281,7 +320,6 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 		seenVLANAndIP[vlanIPKey] = true
 		seenHostnames[vmHostnameKey] = true
 		seenVMNames[vmNameKey] = true
-		// Check the template
 		if !slices.Contains(templateSlice, vm.Template) {
 			return fmt.Errorf("template not found or not built on this server: %s for VM: %s", vm.Template, vm.VMName)
 		}
@@ -291,7 +329,8 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 				return fmt.Errorf("VM '%s' target_node error: %w", vm.VMName, err)
 			}
 		}
-		// Check the roles (if any)
+		// Check the roles (if any) — every referenced role must be installed
+		// for this user.
 		if vm.Roles != nil {
 			switch roles := vm.Roles.(type) {
 			case []interface{}:
@@ -303,9 +342,7 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 							return fmt.Errorf("error checking if role exists on the server: %s", err)
 						}
 						if !exists {
-							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, targetRange.RangeId())
-						} else {
-							e.Set("rangeHasRoles", true)
+							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, user.UserId())
 						}
 					case map[string]interface{}:
 						logger.Debug("Yaml validate: checking role: " + godump.DumpStr(role))
@@ -315,9 +352,7 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 								return fmt.Errorf("error checking if role exists on the server: %s", err)
 							}
 							if !exists {
-								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, targetRange.RangeId())
-							} else {
-								e.Set("rangeHasRoles", true)
+								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, user.UserId())
 							}
 							if dependsOn, ok := r["depends_on"].([]interface{}); ok {
 								for _, dep := range dependsOn {
@@ -328,7 +363,7 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 												return fmt.Errorf("error checking if role exists on the server: %s", err)
 											}
 											if !exists {
-												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, targetRange.RangeId())
+												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, user.UserId())
 											}
 										}
 									}
@@ -336,15 +371,6 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 							}
 						}
 					}
-				}
-			}
-		} else {
-			// Remove the user-defined-roles.yml file in the event the range previously had a config with roles defined
-			_, err = os.Stat(fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, targetRange.RangeId()))
-			if err == nil {
-				err = os.Remove(fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, targetRange.RangeId()))
-				if err != nil {
-					return fmt.Errorf("failed to remove user-defined-roles.yml: %v", err)
 				}
 			}
 		}

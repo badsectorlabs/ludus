@@ -14,19 +14,67 @@ Huge shout out to [@M4yFly](https://twitter.com/M4yFly) for all the hard work to
 
 ![GOAD Network Map](https://raw.githubusercontent.com/Orange-Cyberdefense/GOAD/main/docs/img/GOAD_schema.png)
 
+
+
+### 1. Use the Ludus-native GOAD blueprint
+
+```bash
+#terminal-command-local
+ludus source add ludus-source-bsl
+Ludus Source - Bad Sector Labs
+Production-ready Ludus blueprints (GOAD multi-domain AD attack lab and AD + Elastic Security detection labs) plus the Packer templates they
+build on.
+Synced 2h ago
+
+  Blueprints 1/3 │ Templates 0/21 │ Ansible 0/13
+
+  [ ] AD + Elastic Security Range                                  v0.1.0             ○ not installed
+  [ ] Clean AD + Elastic Baseline                                  v0.1.0             ○ not installed
+> [x] Game of Active Directory (GOAD)                              v1.1.35            ○ not installed
+      Multi-forest AD attack lab based on GOAD.
+#terminal-command-local
+ludus range create -r GOAD --name GOAD --from-blueprint badsectorlabs-ludus-source-bsl/goad
+#terminal-command-local
+ludus range deploy -t GOAD
+#terminal-command-local
+ludus range logs -f -r GOAD
+# Wait for the deploy to finish
+```
+
+### 2. Snapshot VMs
+
+Take snapshots via the proxmox web UI or SSH run the following ludus command:
+
+```bash
+ludus -r GOAD snapshot create clean-setup -d "Clean GOAD setup after ansible run"
+```
+
+### 3. Hack!
+
+Grab a fresh wireguard config with `ludus user wireguard` and connect.
+
+With your WireGuard connected on a client machine (your laptop, etc.), access your Kali machine at `https://10.RANGENUMBER.10.99:8444` using the creds `kali:password`. Or you can access the lab directly from your client machine with WireGuard connected and attack the 10.RANGENUMBER.10.X subnet.
+
+Follow [the GOAD guide](https://mayfly277.github.io/posts/GOADv2-pwning_part1/) or explore the network on your own.
+
+
+
+---
+
+:::info
+
+## Below are the instructions for the official goad.sh script
+
+## You do not need to follow this if you did the above steps.
+
+:::
+
 ### 1. Add the Windows 2019 and 2016 server templates to Ludus
 
 ```bash
 #terminal-command-local
-git clone https://gitlab.com/badsectorlabs/ludus
-#terminal-command-local
-cd ludus/templates
-#terminal-command-local
-ludus templates add -d win2016-server-x64
-[INFO]  Successfully added template
-#terminal-command-local
-ludus templates add -d win2019-server-x64
-[INFO]  Successfully added template
+ludus source add ludus-source-bsl --templates win2016-server-x64-template,win2019-server-x64-template
+[INFO]  Source 'ludus-source-bsl' installed successfully.
 #terminal-command-local
 ludus templates build
 [INFO]  Template building started - this will take a while. Building 1 template(s) at a time.

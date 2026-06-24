@@ -9,14 +9,6 @@
 currentDir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 source "${currentDir}/base.sh"
 
-# POOL discovery: prefer the dotenv-forwarded variable, fall back to the
-# per-pipeline file written by claim-pool.sh on the runner host.
-export POOL="${CUSTOM_ENV_POOL:-${POOL:-}}"
-if [[ -z "$POOL" && -f "$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool" ]]; then
-    POOL=$(cat "$POOL_ASSIGNMENT_DIR/${PIPELINE_ID}.pool")
-    export POOL
-fi
-
 # --- Claim/release jobs run on the runner host (gitlab-runner shell) ---
 if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"claim"* || "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"release"* ]]; then
     /bin/bash --login < "${1}"
@@ -49,8 +41,8 @@ fi
 ssh -F /home/gitlab-runner/.ssh/config gitlab-runner@"$VM_IP" /bin/bash --login < "${1}"
 SSH_EXIT=$?
 
-if [[ $SSH_EXIT -ne 0 && (-z "$CUSTOM_ENV_LUDUS_INSTALL_STEP" || "$CUSTOM_ENV_LUDUS_INSTALL_STEP" != "kickoff") ]]; then
-    exit "${BUILD_FAILURE_EXIT_CODE:-1}"
-elif [[ -n "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP" = "kickoff" && $SSH_EXIT -ne 0 ]]; then
+if [[ $SSH_EXIT -ne 0 && -n "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP" = "kickoff" && $SSH_EXIT -eq 255 ]]; then
     echo "SSH connection lost, assuming reboot during install."
+elif [[ $SSH_EXIT -ne 0 ]]; then
+    exit "${BUILD_FAILURE_EXIT_CODE:-1}"
 fi

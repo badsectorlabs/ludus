@@ -7,3 +7,5 @@ proxmox_gateway: "192.168.0.0"    # The default gateway for this machine
 proxmox_netmask: "255.255.255.0"  # The netmask for this machine's network
 proxmox_storage: local            # The storage pool to use for templates and VMs (default: local; if you set up ZFS manually after install, change this)
 # boot_disk: /dev/sda             # Optional: override the auto-detected boot disk used for grub-pc recovery (e.g. /dev/nvme0n1 on EC2/NVMe hosts)
+# register_default_source: true   # Optional: set false to skip auto-registering the Bad Sector Labs source on startup
+# sync_sources_on_startup: true   # Optional: set false to skip re-syncing registered sources on each startup

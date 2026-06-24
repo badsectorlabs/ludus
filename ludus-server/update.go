@@ -105,6 +105,19 @@ func ensurePocketBaseStoragePermissions() {
 	if userExists("ludus") {
 		chownDirToUsernameRecursive(storageDir, "ludus")
 	}
+
+	// Bundle and source-checkout roots are written by the ludus service at
+	// runtime; create them now so the first request doesn't race with mkdir.
+	for _, sub := range []string{"blueprints", "sources"} {
+		dir := filepath.Join(ludusInstallPath, sub)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("Failed to create %s directory: %v", dir, err)
+			continue
+		}
+		if userExists("ludus") {
+			chownDirToUsernameRecursive(dir, "ludus")
+		}
+	}
 }
 
 // recursively extract an embed.FS directory to the ludus install path, skipping the file "config.yml.example"
