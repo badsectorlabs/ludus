@@ -134,7 +134,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		inventory = "127.0.0.1"
 	} else {
 		// For regular Ludus users, provide the dynamic inventory
-		inventory = ludusInstallPath + "/ansible/range-management/proxmox.py"
+		inventory = ludusInstallPath + "/ansible/range-management/dynamic-inventory"
 	}
 
 	// Check if the user specified a limit, and if so, make sure it has 'localhost' in it
@@ -198,12 +198,12 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		execute.WithEnvVar("ANSIBLE_SSH_CONTROL_PATH_DIR", fmt.Sprintf("%s/users/%s/.ansible/cp", ludusInstallPath, user.ProxmoxUsername())),
 		execute.WithEnvVar("ANSIBLE_ROLES_PATH", ansibleRolesSearchPath(user.ProxmoxUsername())),
 		execute.WithEnvVar("ANSIBLE_COLLECTIONS_PATH", ansibleCollectionsSearchPath(user.ProxmoxUsername())),
-		// Inject vars for the proxmox.py dynamic inventory script
+		// Inject vars for the dynamic inventory
 		execute.WithEnvVar("PROXMOX_NODE", ServerConfiguration.ProxmoxNode),
 		execute.WithEnvVar("PROXMOX_INVALID_CERT", strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert)),
 		execute.WithEnvVar("PROXMOX_URL", ServerConfiguration.ProxmoxURL),
 		execute.WithEnvVar("PROXMOX_HOSTNAME", ServerConfiguration.ProxmoxHostname),
-		// Inject creds for the proxmox.py dynamic inventory script
+		// Inject creds for the dynamic inventory
 		execute.WithEnvVar("PROXMOX_USERNAME", user.ProxmoxUsername()+"@"+user.ProxmoxRealm()),
 		execute.WithEnvVar("PROXMOX_TOKEN", user.ProxmoxTokenId()),
 		execute.WithEnvVar("PROXMOX_SECRET", proxmoxTokenSecret),

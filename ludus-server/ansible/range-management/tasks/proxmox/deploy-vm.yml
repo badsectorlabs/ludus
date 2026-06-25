@@ -165,7 +165,7 @@
     argv:
       - ansible-inventory
       - -i
-      - "{{ ludus_install_path }}/ansible/range-management/proxmox.py"
+      - "{{ ludus_install_path }}/ansible/range-management/dynamic-inventory"
       - --host
       - "{{ vm_name }}"
   register: nodecheck

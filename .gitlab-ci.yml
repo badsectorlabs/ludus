@@ -600,6 +600,10 @@ build all:
         mv out ../ludus-api/webUI
         cd ..
       fi
+    - echo "Compiling the dynamic-inventory binary..."
+    - cd dynamic-inventory
+    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o ../ludus-server/ansible/range-management/dynamic-inventory
+    - cd ..
     - cd ludus-server
     - | # If we have docs from the previous stage, embed them, otherwise build without docs
       if [[ -d ../built-docs ]]; then

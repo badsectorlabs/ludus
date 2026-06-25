@@ -185,8 +185,10 @@ func checkDirAndReplaceFiles() {
 	log.Printf("Extracting ludus to %s...\n", ludusInstallPath)
 	extractDirectory(embeddedAnsbileDir, "ansible")
 
-	// proxmox.py has to be executable or it will not work!
-	os.Chmod(ludusInstallPath+"/ansible/range-management/proxmox.py", 0770)
+	// dynamic-inventory has to be executable or it will not work!
+	if err := os.Chmod(ludusInstallPath+"/ansible/range-management/dynamic-inventory", 0770); err != nil {
+		log.Fatalf("Error making dynamic-inventory executable: %s\n", err.Error())
+	}
 
 	if userExists("ludus") {
 		Run(fmt.Sprintf("chown -R ludus:ludus %s/ansible", ludusInstallPath), false, true)
