@@ -66,6 +66,20 @@ GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
 if [ -z "$VERSION_STRING" ]; then
     VERSION_STRING=$(git rev-parse --abbrev-ref HEAD)
 fi
+
+# Build the dynamic-inventory binary first so it gets embedded into the
+# ludus-server binary via //go:embed all:ansible.
+echo "[+] Building dynamic-inventory binary"
+(cd ../dynamic-inventory && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o ../ludus-server/ansible/range-management/dynamic-inventory)
+if [[ $? -ne 0 ]]; then
+    echo
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "[!] ERROR building dynamic-inventory"
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo
+    exit 1
+fi
+
 echo CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${VERSION_STRING}" -tags "${TAGS}" -o ludus-server
 CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${VERSION_STRING}" -tags "${TAGS}" -o ludus-server
 if [[ $? -ne 0 ]]; then

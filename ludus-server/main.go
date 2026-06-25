@@ -36,6 +36,12 @@ var logger *slog.Logger
 //go:embed all:ansible
 var embeddedAnsbileDir embed.FS
 
+// Keep direct ludus-server builds from silently omitting the generated
+// dynamic-inventory binary. Build ../dynamic-inventory before building server.
+//
+//go:embed ansible/range-management/dynamic-inventory
+var embeddedDynamicInventory []byte
+
 //go:embed all:packer
 var embeddedPackerDir embed.FS
 
