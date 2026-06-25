@@ -65,8 +65,19 @@
     name: "{{ vm_hostname }}"
   register: res
 
+# win_hostname invalidates the cached WinRM/NTLM session (it is bound to the
+# computer name), so the next task's connection is rejected before it can run.
+# Reset the connection so the reboot reconnects fresh, and retry to ride out the
+# brief post-rename rejection window.
+- name: Reset connection after rename
+  ansible.builtin.meta: reset_connection
+
 - name: Reboot
   ansible.windows.win_reboot:
+  register: sysprep_hostname_reboot
+  until: sysprep_hostname_reboot is succeeded
+  retries: 5
+  delay: 20
   when: res.reboot_required
 
 - name: Wait for the host's control interface (WinRM via HTTPS) to come up
