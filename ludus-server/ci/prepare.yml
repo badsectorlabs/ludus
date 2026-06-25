@@ -68,7 +68,7 @@
             state: started
 
     - name: Wait for VM to acquire an IP address
-      command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/proxmox.py --host {{ runner_vm_name }}
+      command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/dynamic-inventory --host {{ runner_vm_name }}
       register: nodecheck
       changed_when: false
       until: (nodecheck.stdout | default('') | from_json).ansible_host | default('') | ansible.utils.ipaddr

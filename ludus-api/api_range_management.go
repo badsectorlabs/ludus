@@ -630,7 +630,7 @@ func GetAnsibleInventoryForRange(e *core.RequestEvent) error {
 	// Check for allranges parameter
 	allRanges := e.Request.URL.Query().Get("allranges") == "true"
 
-	cmd := exec.Command("ansible-inventory", "-i", ludusInstallPath+"/ansible/range-management/proxmox.py", "--list", "-y")
+	cmd := exec.Command("ansible-inventory", "-i", ludusInstallPath+"/ansible/range-management/dynamic-inventory", "--list", "-y")
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, targetUser.ProxmoxUsername()))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PROXMOX_NODE=%s", ServerConfiguration.ProxmoxNode))
