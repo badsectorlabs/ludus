@@ -1,38 +1,84 @@
-- name: Create a VM from a template
-  community.general.proxmox_kvm:
-    api_user: "{{ api_user }}"
-    api_token_id: "{{ proxmox_token_id }}"
-    api_token_secret: "{{ proxmox_token_secret }}"
-    api_host: "{{ api_host }}"
-    node: "{{ node_name }}"
-    # Node selection priority (computed by Go backend):
-    # 1. vm_target_nodes[vm_name] - per-VM target node
-    # 2. range_default_target_node - range-level default
-    # 3. node_name - original single-node fallback
-    target: "{{ vm_target_nodes[vm_name] | default(range_default_target_node) | default(node_name) }}"
-    clone: "{{ template_vm_name }}"
-    name: "{{ vm_name }}"
-    pool: "{{ vm_pool | default(range_id) }}"
-    full: "{{ true if (full_clone is defined and full_clone) else false }}"
-    format: "{{ 'unspecified' if (full_clone is not defined or (full_clone is defined and not full_clone)) else proxmox_vm_storage_format }}" # proxmox_vm_storage_format comes from /opt/ludus/config.yml
-    storage: "{{ proxmox_vm_storage_pool if (full_clone is defined and full_clone) else omit }}" # proxmox_vm_storage_pool comes from /opt/ludus/config.yml
-    timeout: 500
-  register: clone_vm
-
-- name: Pause for 5 seconds to allow the vmid to populate
-  ansible.builtin.pause:
-    seconds: 5
-  when: clone_vm is changed
-
-- name: Set the vm_id
-  ansible.builtin.set_fact:
-    vm_id: "{{ clone_vm.vmid }}"
-  when: clone_vm is successful
-  until: vm_id != -1
-
+# Node selection priority (computed by Go backend):
+# 1. vm_target_nodes[vm_name] - per-VM target node
+# 2. range_default_target_node - range-level default
+# 3. node_name - original single-node fallback
 - name: Set the effective target node for this VM
   ansible.builtin.set_fact:
     effective_target_node: "{{ vm_target_nodes[vm_name] | default(range_default_target_node) | default(node_name) }}"
+
+# Proxmox allows duplicate VM names cluster-wide; allocate an explicit VMID so the
+# proxmox_kvm clone task does not fail when the same name exists in another pool.
+# /cluster/nextid is not reserved until clone starts, so concurrent deploys can
+# receive the same ID — retry with a fresh VMID on collision (see ci/base.sh).
+- name: Clone VM from template with VMID collision retry
+  when: clone_vm is not defined
+  block:
+    - name: Get next available VMID from Proxmox
+      ansible.builtin.uri:
+        url: "https://{{ api_host }}:8006/api2/json/cluster/nextid"
+        method: GET
+        validate_certs: false
+        headers:
+          Authorization: "PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}"
+      register: next_vmid_response
+
+    - name: Set vm_id for this deployment attempt
+      ansible.builtin.set_fact:
+        vm_id: "{{ next_vmid_response.json.data | int }}"
+
+    - name: Create a VM from a template
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_token_id: "{{ proxmox_token_id }}"
+        api_token_secret: "{{ proxmox_token_secret }}"
+        api_host: "{{ api_host }}"
+        node: "{{ node_name }}"
+        target: "{{ effective_target_node }}"
+        clone: "{{ template_vm_name }}"
+        name: "{{ vm_name }}"
+        newid: "{{ vm_id }}"
+        pool: "{{ vm_pool | default(range_id) }}"
+        full: "{{ true if (full_clone is defined and full_clone) else false }}"
+        format: "{{ 'unspecified' if (full_clone is not defined or (full_clone is defined and not full_clone)) else proxmox_vm_storage_format }}" # proxmox_vm_storage_format comes from /opt/ludus/config.yml
+        storage: "{{ proxmox_vm_storage_pool if (full_clone is defined and full_clone) else omit }}" # proxmox_vm_storage_pool comes from /opt/ludus/config.yml
+        timeout: 500
+      register: clone_attempt_result
+
+    - name: Record successful clone
+      ansible.builtin.set_fact:
+        clone_vm: "{{ clone_attempt_result }}"
+  rescue:
+    - name: Retry linked clone as full clone when unsupported
+      ansible.builtin.set_fact:
+        full_clone: true
+      when: ansible_failed_result.msg is defined and 'linked clone feature is not supported' in ansible_failed_result.msg | lower
+
+    - name: Fail clone on non-retriable error
+      ansible.builtin.fail:
+        msg: "Failed to clone {{ vm_name }}: {{ ansible_failed_result.msg | default('unknown error') }}"
+      when: >-
+        ansible_failed_result.msg is not defined
+        or (
+          'already exists' not in (ansible_failed_result.msg | lower)
+          and 'linked clone feature is not supported' not in (ansible_failed_result.msg | lower)
+        )
+
+    - name: Pause before retrying clone with a new VMID
+      ansible.builtin.pause:
+        seconds: 2
+
+    - name: Log VMID collision clone retry
+      ansible.builtin.debug:
+        msg: "Clone attempt {{ clone_attempt }} with VMID {{ vm_id }} failed, retrying with a fresh VMID: {{ ansible_failed_result.msg | default('unknown error') }}"
+  loop: "{{ range(1, (clone_max_attempts | default(10)) + 1) | list }}"
+  loop_control:
+    loop_var: clone_attempt
+    label: "clone attempt {{ clone_attempt }}"
+
+- name: Fail if VM clone did not succeed
+  ansible.builtin.fail:
+    msg: "Failed to clone {{ vm_name }} after {{ clone_max_attempts | default(10) }} attempts"
+  when: clone_vm is not defined
 
 - name: Update the VM description by vmid
   community.general.proxmox_kvm:
@@ -45,39 +91,7 @@
     description: '{ "groups": [{{ vm_groups }}] }'
     # This must be set to update the config
     update: true
-  when: clone_vm is changed and clone_vm.vmid != -1
-  register: update_desc
-
-- name: Update the VM description by name
-  when: clone_vm is changed and update_desc is skipped
-  block:
-    - name: Update the VM description by name (take 1)
-      community.general.proxmox_kvm:
-        api_user: "{{ api_user }}"
-        api_token_id: "{{ proxmox_token_id }}"
-        api_token_secret: "{{ proxmox_token_secret }}"
-        api_host: "{{ api_host }}"
-        node: "{{ effective_target_node }}"
-        name: "{{ vm_name }}"
-        description: '{ "groups": [{{ vm_groups }}] }'
-        update: true
-  rescue:
-    - name: Pause a little more to allow the vmid to become populated
-      ansible.builtin.pause:
-        seconds: 5
-    - name: Set the vm_id
-      ansible.builtin.set_fact:
-        vm_id: "{{ clone_vm.vmid }}"
-    - name: Update the VM description by name (take 2)
-      community.general.proxmox_kvm:
-        api_user: "{{ api_user }}"
-        api_token_id: "{{ proxmox_token_id }}"
-        api_token_secret: "{{ proxmox_token_secret }}"
-        api_host: "{{ api_host }}"
-        node: "{{ effective_target_node }}"
-        name: "{{ vm_name }}"
-        description: '{ "groups": [{{ vm_groups }}] }'
-        update: true
+  when: clone_vm is changed
 
 - name: Update the VM's options
   community.general.proxmox_kvm:

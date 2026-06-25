@@ -268,11 +268,17 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 
 	// Check for duplicate vlan and ip_last_octet combinations
 	seenVLANAndIP := make(map[string]bool)
-	// Check that all vm_names and hostnames are unique
+	// Check that all vm_names are unique after range_id template resolution
 	seenVMNames := make(map[string]bool)
 	seenHostnames := make(map[string]bool)
 	// Check that NETBIOS are unique per domain
 	seenNETBIOSnames := make(map[string]string)
+
+	routerVMName := fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeId())
+	if config.Router != nil && config.Router.VMName != "" {
+		routerVMName = rangeIDTemplateRegex.ReplaceAllString(config.Router.VMName, targetRange.RangeId())
+	}
+	seenVMNames[routerVMName] = true
 
 	var NETBIOSnameKey string
 	for _, vm := range config.Ludus {
@@ -287,13 +293,12 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 			}
 		}
 		vlanIPKey := fmt.Sprintf("vlan: %d, ip_last_octet: %d", vm.VLAN, vm.IPLastOctet)
-		vmNameKey := vm.VMName
 		vmHostnameKey := vm.Hostname
 		if seenVLANAndIP[vlanIPKey] {
 			return fmt.Errorf("duplicate vlan and ip_last_octet combination found: %s for VM: %s", vlanIPKey, vm.VMName)
 		}
-		if seenVMNames[vmNameKey] {
-			return fmt.Errorf("duplicate VM name found: %s", vmNameKey)
+		if seenVMNames[resolvedVMName] {
+			return fmt.Errorf("duplicate VM name found: %s", resolvedVMName)
 		}
 		if seenHostnames[vmHostnameKey] {
 			return fmt.Errorf("duplicate hostname name found: %s", vmHostnameKey)
@@ -319,7 +324,7 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 		}
 		seenVLANAndIP[vlanIPKey] = true
 		seenHostnames[vmHostnameKey] = true
-		seenVMNames[vmNameKey] = true
+		seenVMNames[resolvedVMName] = true
 		if !slices.Contains(templateSlice, vm.Template) {
 			return fmt.Errorf("template not found or not built on this server: %s for VM: %s", vm.Template, vm.VMName)
 		}
