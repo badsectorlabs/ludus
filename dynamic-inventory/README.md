@@ -80,7 +80,7 @@ For LXC containers, `ansible_host` is parsed out of the `ip=` field in the conta
 
 ### OS detection
 
-`proxmox_os_id` comes from the QEMU guest agent's `os-info` call. `mswindows` is normalized to `windows`. If the agent isn't reachable, the script falls back to the range-config flags (`windows` / `linux` / `macOS`) for that VM. As a last resort for macOS, if the VM name contains `macos` it's tagged as such — macOS guests don't expose a usable agent os-id.
+`proxmox_os_id` comes from the QEMU guest agent's `os-info` call. `mswindows` is normalized to `windows`. If the agent isn't reachable, the script falls back to the range-config OS key: `windows` accepts its documented mapping form (and the legacy boolean form), `linux` accepts a boolean or mapping, and `macOS` is boolean. A configured mapping marks that OS as enabled. If no OS is available and the VM name contains `macos`, it is tagged as macOS because macOS guests do not expose a usable agent os-id.
 
 ### Notes-based groups and hostvars
 

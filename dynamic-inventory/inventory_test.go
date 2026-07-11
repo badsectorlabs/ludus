@@ -284,13 +284,14 @@ func TestMainList_AgentDownFallsBackToConfigOS(t *testing.T) {
 	t.Setenv("LUDUS_RANGE_ID", "TEST7")
 	t.Setenv("LUDUS_RANGE_NUMBER", "7")
 
-	// Range config with one Windows VM, force_ip on
+	// Range config uses the documented Windows mapping form and force_ip.
 	dir := t.TempDir()
 	ludusYAML := []byte(`ludus:
   - vm_name: "{{ range_id }}-dc"
     vlan: 10
     ip_last_octet: 9
-    windows: true
+    windows:
+      sysprep: false
     force_ip: true
 `)
 	cfgPath := dir + "/range.yml"
