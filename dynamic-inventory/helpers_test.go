@@ -318,13 +318,19 @@ func TestLoadLudusEnv(t *testing.T) {
   - vm_name: "{{ range_id }}-web"
     vlan: 10
     ip_last_octet: 5
-    windows: false
-    linux: true
+    linux:
+      packages:
+        - curl
   - vm_name: "{{ range_id }}-dc"
     vlan: 10
     ip_last_octet: 6
-    windows: true
+    windows:
+      sysprep: false
     force_ip: true
+  - vm_name: "{{ range_id }}-mac"
+    vlan: 20
+    ip_last_octet: 7
+    macOS: true
 `
 		if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
 			t.Fatal(err)
@@ -336,18 +342,21 @@ func TestLoadLudusEnv(t *testing.T) {
 		t.Setenv("LUDUS_RETURN_ALL_RANGES", "")
 
 		e := loadLudusEnv()
-		if len(e.VMs) != 2 {
-			t.Fatalf("expected 2 VMs loaded, got %d", len(e.VMs))
+		if len(e.VMs) != 3 {
+			t.Fatalf("expected 3 VMs loaded, got %d", len(e.VMs))
 		}
-		if !e.VMs[0].Linux || e.VMs[0].VLAN != 10 || e.VMs[0].IPLastOctet != 5 {
+		if !bool(e.VMs[0].Linux) || e.VMs[0].VLAN != 10 || e.VMs[0].IPLastOctet != 5 {
 			t.Errorf("VM0 not parsed correctly: %+v", e.VMs[0])
 		}
-		if !e.VMs[1].Windows || !e.VMs[1].ForceIP {
+		if !bool(e.VMs[1].Windows) || !e.VMs[1].ForceIP {
 			t.Errorf("VM1 not parsed correctly: %+v", e.VMs[1])
+		}
+		if !e.VMs[2].MacOS {
+			t.Errorf("VM2 not parsed correctly: %+v", e.VMs[2])
 		}
 
 		vm := e.findLudusVM("R2-dc")
-		if vm == nil || !vm.Windows {
+		if vm == nil || !bool(vm.Windows) {
 			t.Errorf("findLudusVM should resolve range_id template, got %+v", vm)
 		}
 		if e.findLudusVM("does-not-exist") != nil {
