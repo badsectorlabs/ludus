@@ -1519,10 +1519,10 @@ post-deploy sources-as-admin:
     # first match, and under pipefail the resulting SIGPIPE kills `ludus`
     # (exit 141) whenever the match sits early in a long table — a flaky
     # false failure that also inverts `!`-negated asserts into false passes.
-    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --force
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --all --force
     - 'ludus source list | grep "ci-src " >/dev/null'
     - 'ludus blueprint list | grep "ci-src/example" >/dev/null'
-    - 'ludus blueprint list | grep "ci-src/secondary" >/dev/null' # both fixture blueprints installed via install-all default
+    - 'ludus blueprint list | grep "ci-src/secondary" >/dev/null' # both fixture blueprints installed via explicit --all
     - 'ludus templates list | grep "example-debian-12-template" >/dev/null'
     # Regression: a directly-installed source role registers under its galaxy
     # identity from meta (here ludus.say_hello), never the bare dir name — so
@@ -1542,7 +1542,7 @@ post-deploy sources-as-admin:
     # EXPLICIT id must be rejected (UX-agnostic, no CLI flags) instead of
     # silently creating a cross-owner duplicate (the bug this fixes).
     - set +o pipefail
-    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --force 2>&1 | grep -qiE "already in use"'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --all --force 2>&1 | grep -qiE "already in use"'
     - set -o pipefail
     # A DERIVED id that collides across owners is REJECTED — the caller must pass
     # an explicit id. Matches how templates/users/blueprints handle id collisions
@@ -1551,12 +1551,12 @@ post-deploy sources-as-admin:
     # unique id.
     - ludus source rm source-template --no-prompt || true
     - ludus source rm ciu-src-template --no-prompt || true
-    - ludus source add -d /opt/ludus/ci/fixtures/source-template --force
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --all --force
     - 'ludus source list | grep "source-template " >/dev/null'
     - set +o pipefail
-    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --force 2>&1 | grep -qiE "already in use"'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --all --force 2>&1 | grep -qiE "already in use"'
     - set -o pipefail
-    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ciu-src-template --force'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ciu-src-template --all --force'
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source list | grep "ciu-src-template " >/dev/null'
     # cleanup
     - ludus source rm source-template --no-prompt || true
@@ -1568,7 +1568,7 @@ post-deploy sources-as-admin:
     # on the selection they're given, so nothing resurrects removed items.
     # ci-src is still registered from the add above; ci-src2 ships the same
     # say_hello role + example-debian-12-template template.
-    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src2 --force
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src2 --all --force
     - ludus source sync ci-src2                                # catalog refresh only — sync never installs or prunes
     - 'ludus blueprint list | grep "ci-src2/example" >/dev/null'
     # blueprint rm now works on source-derived blueprints and shrinks the
@@ -1716,12 +1716,12 @@ post-deploy sources-as-admin:
     - ludus source rm ci-src-nodeps --no-prompt || true
     - ludus ansible role rm geerlingguy.docker || true
     - '! ludus ansible role list | grep "geerlingguy.docker" >/dev/null'
-    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-nodeps --no-deps --force
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-nodeps --all --no-deps --force
     - 'ludus source list | grep "ci-src-nodeps " >/dev/null'
     - 'ludus blueprint list | grep "ci-src-nodeps/example" >/dev/null'
     - 'ludus ansible role list | grep "ludus.say_hello" >/dev/null'        # local role still installed
     - '! ludus ansible role list | grep "geerlingguy.docker" >/dev/null'   # galaxy dep skipped
-    - ludus source add ci-src-nodeps
+    - ludus source add ci-src-nodeps --all
     - 'ludus ansible role list | grep "geerlingguy.docker" >/dev/null'     # same source with deps on — the skip assert was not vacuous
     - ludus source rm ci-src-nodeps --no-prompt
     # Clean up haning template
