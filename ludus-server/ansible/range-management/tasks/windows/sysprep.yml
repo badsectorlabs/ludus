@@ -28,32 +28,88 @@
     src: windows/sysprep/oob-disable.xml
     dest: C:\ludus\sysprep\oob-disable.xml
 
-# https://www.deploymentresearch.com/fixing-why-sysprep-fails-in-windows-10-due-to-windows-store-updates/
-# https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/sysprep-fails-remove-or-update-store-apps#cause
-- name: Remove Microsoft.Edge.GameAssist appx package if it exists as it prevents sysprep from working
-  ansible.windows.win_shell: |
-    $packageFullName = (Get-AppxPackage | Where-Object { $_.PackageFamilyName -eq 'Microsoft.Edge.GameAssist_8wekyb3d8bbwe' }).PackageFullName
-    if ($packageFullName) {
-      Remove-AppxPackage -Package $packageFullName
-    }
-  ignore_errors: true
+# Sysprep can be blocked by an Edge AppX package installed for one user but
+# not provisioned for all users. Try Sysprep first so healthy machines keep
+# their installed packages. Only remove the package when the current attempt
+# reports that exact failure, then retry once.
+- name: Clear previous Sysprep error log
+  ansible.windows.win_file:
+    path: C:\Windows\System32\Sysprep\Panther\setuperr.log
+    state: absent
 
-- name: Run Sysprep
-  ansible.windows.win_shell: C:\Windows\System32\Sysprep\sysprep.exe /generalize /quiet /reboot /oobe /unattend:C:\ludus\sysprep\oob-disable.xml
+- name: Generalize the Windows VM
+  block:
+    - name: Run Sysprep
+      ansible.windows.win_shell: C:\Windows\System32\Sysprep\sysprep.exe /generalize /quiet /reboot /oobe /unattend:C:\ludus\sysprep\oob-disable.xml
 
-- name: Wait for WinRM credentials to work after sysprep reboot
+    - name: Wait for WinRM to stop for the Sysprep reboot
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 5986
+        state: stopped
+        timeout: 180
+      delegate_to: localhost
+
+  rescue:
+    # https://www.deploymentresearch.com/fixing-why-sysprep-fails-in-windows-10-due-to-windows-store-updates/
+    # https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/sysprep-fails-remove-or-update-store-apps#cause
+    - name: Remove Edge AppX packages reported by the failed Sysprep attempt
+      ansible.windows.win_powershell:
+        script: |
+          $logPath = 'C:\Windows\System32\Sysprep\Panther\setuperr.log'
+          [string]$log = Get-Content -Path $logPath -Raw -ErrorAction Stop
+          $pattern = 'Package (?<package>\S*[Ee]dge\S*) was installed for a user, but not provisioned for all users'
+          $packageNames = @(
+            [regex]::Matches($log, $pattern) |
+              ForEach-Object { $_.Groups['package'].Value } |
+              Sort-Object -Unique
+          )
+
+          if ($packageNames.Count -eq 0) {
+            throw "Sysprep did not reboot and did not report an Edge AppX blocker.`n$log"
+          }
+
+          foreach ($packageName in $packageNames) {
+            $packages = @(
+              Get-AppxPackage -AllUsers |
+                Where-Object { $_.PackageFullName -eq $packageName }
+            )
+            if ($packages.Count -eq 0) {
+              throw "Sysprep reported Edge package '$packageName', but it is not installed."
+            }
+            foreach ($package in $packages) {
+              Remove-AppxPackage -Package $package.PackageFullName -AllUsers -ErrorAction Stop
+            }
+          }
+
+    - name: Clear Sysprep error log before retry
+      ansible.windows.win_file:
+        path: C:\Windows\System32\Sysprep\Panther\setuperr.log
+        state: absent
+
+    - name: Retry Sysprep after removing the blocking Edge packages
+      ansible.windows.win_shell: C:\Windows\System32\Sysprep\sysprep.exe /generalize /quiet /reboot /oobe /unattend:C:\ludus\sysprep\oob-disable.xml
+
+    - name: Wait for WinRM to stop for the retried Sysprep reboot
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 5986
+        state: stopped
+        timeout: 180
+      delegate_to: localhost
+
+- name: Wait for WinRM credentials to work after Sysprep
   ansible.builtin.wait_for_connection:
     delay: 60
     timeout: 1800
     sleep: 10
     connect_timeout: 5
 
-- name: Wait for WinRM credentials to work after sysprep second reboot
-  ansible.builtin.wait_for_connection:
-    delay: 60
-    timeout: 1800
-    sleep: 10
-    connect_timeout: 5
+- name: Verify Windows reports that Sysprep succeeded
+  ansible.windows.win_stat:
+    path: C:\Windows\System32\Sysprep\Sysprep_succeeded.tag
+  register: sysprep_succeeded
+  failed_when: not sysprep_succeeded.stat.exists
 
 - name: Create sysprepd file
   ansible.windows.win_file:
