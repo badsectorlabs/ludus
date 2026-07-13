@@ -19,6 +19,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // gzipBytes wraps a tar buffer in gzip so the resulting payload matches the
@@ -1261,9 +1262,5 @@ func init() {
 // stdinIsTerminal reports whether stdin is connected to an interactive TTY.
 // Returns false when stdin is a pipe/redirect (e.g. CI), so prompts can be skipped.
 func stdinIsTerminal() bool {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }

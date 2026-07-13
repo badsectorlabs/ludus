@@ -85,14 +85,35 @@ type Options struct {
 	Validate bool
 }
 
+// enabledOSConfig accepts the boolean and mapping forms used by range-config
+// OS keys. A mapping enables the OS because this inventory only needs the key's
+// presence; provisioning consumes the mapping's contents elsewhere.
+type enabledOSConfig bool
+
+func (o *enabledOSConfig) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var enabled bool
+		if err := value.Decode(&enabled); err != nil {
+			return err
+		}
+		*o = enabledOSConfig(enabled)
+	case yaml.MappingNode:
+		*o = true
+	default:
+		return fmt.Errorf("expected a boolean or mapping")
+	}
+	return nil
+}
+
 type LudusVM struct {
-	VMName      string `yaml:"vm_name"`
-	VLAN        int    `yaml:"vlan"`
-	IPLastOctet int    `yaml:"ip_last_octet"`
-	ForceIP     bool   `yaml:"force_ip"`
-	Windows     bool   `yaml:"windows"`
-	Linux       bool   `yaml:"linux"`
-	MacOS       bool   `yaml:"macOS"`
+	VMName      string          `yaml:"vm_name"`
+	VLAN        int             `yaml:"vlan"`
+	IPLastOctet int             `yaml:"ip_last_octet"`
+	ForceIP     bool            `yaml:"force_ip"`
+	Windows     enabledOSConfig `yaml:"windows"`
+	Linux       enabledOSConfig `yaml:"linux"`
+	MacOS       bool            `yaml:"macOS"`
 }
 
 type LudusConfig struct {
@@ -597,9 +618,9 @@ func getOSInfoFromConfig(env ludusEnv, vmName string) string {
 		return ""
 	}
 	switch {
-	case vm.Windows:
+	case bool(vm.Windows):
 		return "windows"
-	case vm.Linux:
+	case bool(vm.Linux):
 		return "linux"
 	case vm.MacOS:
 		return "macos"
