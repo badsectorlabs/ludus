@@ -449,6 +449,8 @@ func checkRoleExists(e *core.RequestEvent, roleName string) (bool, error) {
 		collectionCmd := exec.Command("ansible-galaxy", "collection", "list", "--format", "json")
 		collectionCmd.Env = os.Environ()
 		collectionCmd.Env = append(collectionCmd.Env, fmt.Sprintf("ANSIBLE_HOME=%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername()))
+		collectionCmd.Env = append(collectionCmd.Env, "ANSIBLE_ROLES_PATH="+ansibleRolesSearchPath(user.ProxmoxUsername()))
+		collectionCmd.Env = append(collectionCmd.Env, "ANSIBLE_COLLECTIONS_PATH="+ansibleCollectionsSearchPath(user.ProxmoxUsername()))
 
 		var stdoutBuf bytes.Buffer
 		collectionCmd.Stdout = &stdoutBuf
@@ -469,7 +471,9 @@ func checkRoleExists(e *core.RequestEvent, roleName string) (bool, error) {
 		// Iterate through the data
 		var collections []string
 		for path, modules := range data {
-			if strings.Contains(path, ".ansible") {
+			// Only include collections that are in the user's ansible home or the global collections path
+			// Exclude the collections that are built into ansible itself
+			if strings.Contains(path, ".ansible") || strings.Contains(path, "global-collections") {
 				for name := range modules {
 					collections = append(collections, name)
 				}
