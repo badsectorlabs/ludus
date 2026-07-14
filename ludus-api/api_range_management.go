@@ -889,11 +889,14 @@ func CreateRange(e *core.RequestEvent) error {
 	// range is already provisioned; we surface a retry hint rather than roll
 	// back so the user can fix and re-apply.
 	if payload.BlueprintID != "" {
-		if status, err := writeRangeConfig(e, rangeRecord, blueprintConfigBytes, false); err != nil {
-			_ = status
+		_, applyErr := writeRangeConfig(e, rangeRecord, blueprintConfigBytes, false)
+		// Range creation runs on the root service. Restore ownership after
+		// blueprint application creates or replaces files in the range directory.
+		chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), "ludus")
+		if applyErr != nil {
 			return JSONError(e, http.StatusInternalServerError,
 				fmt.Sprintf("Range %s was created but applying blueprint %q failed: %v. Run 'ludus blueprint apply %s --target-range %s' to retry.",
-					payload.RangeID, payload.BlueprintID, err, payload.BlueprintID, payload.RangeID))
+					payload.RangeID, payload.BlueprintID, applyErr, payload.BlueprintID, payload.RangeID))
 		}
 		return JSONResult(e, http.StatusCreated, fmt.Sprintf("Range %s created and blueprint %s applied", payload.RangeID, payload.BlueprintID))
 	}

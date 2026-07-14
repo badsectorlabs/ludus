@@ -1382,6 +1382,7 @@ post-deploy blueprints-as-admin:
       - ludus-api/blueprint_resolver.go
       - ludus-api/blueprint_access.go
       - ludus-api/range_config_write.go
+      - ludus-api/api_range_management.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1398,9 +1399,12 @@ post-deploy blueprints-as-admin:
     - ludus blueprint rm ci-bp-copy --no-prompt || true
     - ludus blueprint rm ci-bp-scratch --no-prompt || true
     - ludus blueprint rm ci-bp-roundtrip --no-prompt || true
+    - ludus range rm-range -r ci-bp-range --no-prompt --force || true
     # Create, list, fetch config, copy, apply, and remove as admin
     - ludus blueprint create --id ci-bp-main --name "CI Blueprint Main" --description "created in CI" --from-range CIA
     - ludus blueprint list | grep ci-bp-main
+    - ludus range create --range-id ci-bp-range --name "CI Blueprint Range" --from-blueprint ci-bp-main
+    - 'test -z "$(sudo find /opt/ludus/ranges/ci-bp-range \( ! -user ludus -o ! -group ludus \) -print -quit)"'
     - ludus blueprint config get ci-bp-main > /tmp/ci-bp-main-raw.yml
     - test -s /tmp/ci-bp-main-raw.yml
     - ludus blueprint access users ci-bp-main | grep CIA
@@ -1447,6 +1451,7 @@ post-deploy blueprints-as-admin:
     - ludus blueprint rm ci-bp-scratch --no-prompt || true
     - ludus blueprint rm ci-bp-copy --no-prompt || true
     - '! ludus blueprint list | grep ci-bp-copy'
+    - ludus range rm-range -r ci-bp-range --no-prompt --force || true
     - ludus blueprint rm ci-bp-main --no-prompt || true
     - '! ludus blueprint list | grep ci-bp-main'
 
