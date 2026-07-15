@@ -237,9 +237,7 @@ Do you want to continue? (y/N): `, userID)
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/apikey"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Unmarshal JSON data
 		var data dto.GetAPIKeyResponse
@@ -285,9 +283,7 @@ var usersWireguardCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/wireguard"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Unmarshal JSON data
 		var data dto.GetWireguardConfigResponse
@@ -338,9 +334,7 @@ var usersAddCmd = &cobra.Command{
 		}
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/user"), requestBody)
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Unmarshal JSON data
 		var data dto.AddUserResponse
@@ -426,9 +420,7 @@ Do you want to continue? (y/N): `, defaultRangeID)
 
 		responseJSON, success = rest.GenericDelete(client, deleteURL)
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -457,9 +449,7 @@ var usersCredsSetCmd = &cobra.Command{
 		}
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/user/credentials"), requestBody)
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }

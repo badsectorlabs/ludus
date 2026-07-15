@@ -765,10 +765,8 @@ func doInstallAll(client *resty.Client, sourceID string, _ dto.SourceCatalogDTO,
 }
 
 func postInstall(client *resty.Client, sourceID string, body dto.InstallRequest, verbPast string) {
-	resp, ok := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/install"), body)
-	if didFailOrWantJSON(ok, resp) {
-		return
-	}
+	resp, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/install"), body)
+	checkSuccessAndProvideJSON(success, resp)
 	var sync syncResultPayload
 	if err := json.Unmarshal(resp, &sync); err != nil || sync.SourceID == "" {
 		logger.Logger.Info(string(resp))
@@ -855,9 +853,7 @@ ansible roles/collections) joined with the current install state.`,
 			return
 		}
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		var sources []dto.SourceResponse
 		if err := json.Unmarshal(responseJSON, &sources); err != nil {
 			logger.Logger.Fatal(err)
@@ -904,9 +900,7 @@ ansible roles/collections) joined with the current install state.`,
 func runSourceDetail(client *resty.Client, sourceID string) {
 	if sourceFlagCatalog {
 		catJSON, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID+"/catalog"))
-		if didFailOrWantJSON(ok, catJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(ok, catJSON)
 		var cat dto.SourceCatalogDTO
 		if err := json.Unmarshal(catJSON, &cat); err != nil {
 			logger.Logger.Fatal(err)
@@ -916,9 +910,7 @@ func runSourceDetail(client *resty.Client, sourceID string) {
 	}
 
 	srcJSON, ok := rest.GenericGet(client, buildURLWithRangeAndUserID("/sources/"+sourceID))
-	if didFailOrWantJSON(ok, srcJSON) {
-		return
-	}
+	checkSuccessAndProvideJSON(ok, srcJSON)
 	var src dto.SourceResponse
 	if err := json.Unmarshal(srcJSON, &src); err != nil {
 		logger.Logger.Fatal(err)
@@ -1009,9 +1001,7 @@ func runSourceSync(cmd *cobra.Command, args []string) {
 		}
 		path := fmt.Sprintf("/sources/%s/sync", sid)
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(path), string(body))
-		if didFailOrWantJSON(success, responseJSON) {
-			continue
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		var resp syncResultPayload
 		if err := json.Unmarshal(responseJSON, &resp); err != nil || resp.SourceID == "" {
 			logger.Logger.Info(string(responseJSON))
@@ -1080,9 +1070,7 @@ func runSourceUpdate(cmd *cobra.Command, args []string) {
 	}
 	responseJSON, success := rest.FileUpload(client, "PATCH",
 		buildURLWithRangeAndUserID(path), fileField, fileName, fileBytes, updateSourceRequestToForm(updateReq))
-	if didFailOrWantJSON(success, responseJSON) {
-		return
-	}
+	checkSuccessAndProvideJSON(success, responseJSON)
 	var resp syncResultPayload
 	if err := json.Unmarshal(responseJSON, &resp); err != nil || resp.SourceID == "" {
 		logger.Logger.Info(string(responseJSON))
@@ -1121,9 +1109,7 @@ func runSourceSetURL(cmd *cobra.Command, args []string) {
 
 	body, _ := json.Marshal(dto.UpdateSourceRequest{Ref: sourceFlagRef, URL: newURL})
 	responseJSON, success := rest.GenericJSONPatch(client, buildURLWithRangeAndUserID(fmt.Sprintf("/sources/%s", sid)), string(body))
-	if didFailOrWantJSON(success, responseJSON) {
-		return
-	}
+	checkSuccessAndProvideJSON(success, responseJSON)
 	var changed []string
 	if newURL != "" {
 		changed = append(changed, "url")
@@ -1201,9 +1187,7 @@ templates/ansible commands ('ludus templates rm', 'ludus ansible role rm',
 		}
 		path := fmt.Sprintf("/sources/%s", sid)
 		responseJSON, success := rest.GenericDelete(client, buildURLWithRangeAndUserID(path))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		logger.Logger.Infof("Source %q removed. Its blueprints are gone; installed templates, roles, and collections remain on disk.", sid)
 	},
 }
@@ -1220,10 +1204,10 @@ func init() {
 
 	// Selection group — what to install from the source.
 	sourceAddCmd.Flags().BoolVar(&sourceFlagAll, "all", false, "install everything from the source")
-	sourceAddCmd.Flags().Var(&sourceFlagBlueprints, "blueprints", "blueprint IDs to install (CSV or repeated)")
-	sourceAddCmd.Flags().Var(&sourceFlagTemplates, "templates", "template names to install (CSV or repeated)")
-	sourceAddCmd.Flags().Var(&sourceFlagLocalRoles, "source-roles", "source role names to install (CSV or repeated)")
-	sourceAddCmd.Flags().Var(&sourceFlagLocalCollections, "source-collections", "source collection FQCNs to install (CSV or repeated)")
+	sourceAddCmd.Flags().Var(&sourceFlagBlueprints, "blueprints", "blueprint IDs to install (Comma separated values)")
+	sourceAddCmd.Flags().Var(&sourceFlagTemplates, "templates", "template names to install (Comma separated values)")
+	sourceAddCmd.Flags().Var(&sourceFlagLocalRoles, "source-roles", "source role names to install (Comma separated values)")
+	sourceAddCmd.Flags().Var(&sourceFlagLocalCollections, "source-collections", "source collection FQCNs to install (Comma separated values)")
 
 	sourceAddCmd.Flags().BoolVar(&sourceFlagGlobal, "global", false, "admin only: install the source's roles and collections for all users")
 	sourceAddCmd.Flags().BoolVar(&sourceFlagForce, "force", false, "force install: re-extract templates and source roles, and rerun ansible-galaxy with -f for galaxy roles and collections")

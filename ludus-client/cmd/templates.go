@@ -43,9 +43,7 @@ var templatesListCmd = &cobra.Command{
 		var success bool
 
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/templates"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var templateStatusArray []dto.GetTemplatesResponseItem
 		err := json.Unmarshal(responseJSON, &templateStatusArray)
@@ -100,9 +98,7 @@ var templatesBuildCmd = &cobra.Command{
 
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/templates"), requestBody)
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		handleGenericResult(responseJSON)
 
@@ -127,9 +123,7 @@ var templatesStatusCmd = &cobra.Command{
 
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/templates/status"))
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var templatesInProgress []dto.GetTemplatesStatusResponseItem
 
@@ -217,9 +211,7 @@ var templateLogsCmd = &cobra.Command{
 				apiString = addQueryParameterToURL(apiString, "tail", strconv.Itoa(tail))
 			}
 			responseJSON, success := rest.GenericGet(client, apiString)
-			if didFailOrWantJSON(success, responseJSON) {
-				return
-			}
+			checkSuccessAndProvideJSON(success, responseJSON)
 			newLogs, _ := stringAndCursorFromResult(responseJSON)
 			filterAndPrintTemplateLogs(newLogs, verboseTemplateLogs)
 		}
@@ -269,9 +261,7 @@ var templateAddCmd = &cobra.Command{
 		filename := filepath.Base(templateDirectory)
 		responseJSON, success = rest.PostFileAndForce(client, buildURLWithRangeAndUserID("/templates"), roleTar.Bytes(), filename, force)
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 
 	},
@@ -295,9 +285,7 @@ var templatesAbortCmd = &cobra.Command{
 
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/templates/abort"), "")
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		handleGenericResult(responseJSON)
 
@@ -322,9 +310,7 @@ var templatesRemoveCmd = &cobra.Command{
 
 		responseJSON, success = rest.GenericDelete(client, buildURLWithRangeAndUserID(fmt.Sprintf("/template/%s", templateName)))
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		handleGenericResult(responseJSON)
 

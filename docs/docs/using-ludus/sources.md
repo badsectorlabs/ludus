@@ -339,10 +339,10 @@ Installing is additive — re-running `ludus source add` only ever adds to what'
 | Flag | Available on | Description |
 |------|-------------|-------------|
 | `--all` | `source add` | Skip the picker; install everything the source ships |
-| `--blueprints <ids>` | `source add` | Scripted selection: blueprint IDs to install (CSV or repeated) |
-| `--templates <names>` | `source add` | Scripted selection: template names to install (CSV or repeated) |
-| `--source-roles <names>` | `source add` | Scripted selection: source-bundled role names to install (CSV or repeated) |
-| `--source-collections <fqcns>` | `source add` | Scripted selection: source-bundled collection FQCNs to install (CSV or repeated) |
+| `--blueprints <ids>` | `source add` | Scripted selection: blueprint IDs to install (Comma separated values) |
+| `--templates <names>` | `source add` | Scripted selection: template names to install (Comma separated values) |
+| `--source-roles <names>` | `source add` | Scripted selection: source-bundled role names to install (Comma separated values) |
+| `--source-collections <fqcns>` | `source add` | Scripted selection: source-bundled collection FQCNs to install (Comma separated values) |
 | `--global` | `source add`, `source sync`, `source update`, `blueprint install` | Admin only. Install the source's roles and collections instance-wide instead of user-scoped |
 | `--force` | `source add`, `source sync`, `source update` | Overwrite already-installed templates and galaxy/local roles |
 | `--force-roles` | `blueprint install` | Overwrite already-installed galaxy/local roles |
