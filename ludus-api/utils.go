@@ -570,7 +570,7 @@ func CreateDefaultUserRange(e *core.RequestEvent, txApp core.App, user *models.U
 	if err := txApp.Save(rangeRecord); err != nil {
 		return err
 	}
-	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), 0770)
+	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), 0755)
 	copyFileContents(fmt.Sprintf("%s/ansible/user-files/range-config.example.yml", ludusInstallPath), fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, rangeRecord.RangeId()))
 	if os.Geteuid() == 0 {
 		setRangeDirPermissions(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()))
