@@ -88,9 +88,7 @@ var blueprintListCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericGet(client, endpoint)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var blueprints []dto.ListBlueprintsResponseItem
 		if err := json.Unmarshal(responseJSON, &blueprints); err != nil {
@@ -210,9 +208,7 @@ var blueprintCreateCmd = &cobra.Command{
 			responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/blueprints/from-range"), payload)
 		}
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		type BlueprintMutationResponse struct {
 			Result      string `json:"result"`
@@ -297,9 +293,7 @@ var blueprintApplyCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(fmt.Sprintf("/blueprints/%s/apply", neturl.PathEscape(args[0]))), payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -322,9 +316,7 @@ var blueprintConfigGetCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID(fmt.Sprintf("/blueprints/%s/config", neturl.PathEscape(args[0]))))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		type Result struct {
 			Result string `json:"result"`
@@ -353,9 +345,7 @@ var blueprintConfigSetCmd = &cobra.Command{
 		body, _ := json.Marshal(map[string]string{"config": string(configBytes)})
 		path := fmt.Sprintf("/blueprints/%s/config", neturl.PathEscape(args[0]))
 		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID(path), string(body))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -432,9 +422,7 @@ var blueprintAccessUsersCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID(fmt.Sprintf("/blueprints/%s/access/users", neturl.PathEscape(args[0]))))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var users []dto.ListBlueprintAccessUsersResponseItem
 		if err := json.Unmarshal(responseJSON, &users); err != nil {
@@ -464,9 +452,7 @@ var blueprintAccessGroupsCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID(fmt.Sprintf("/blueprints/%s/access/groups", neturl.PathEscape(args[0]))))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var groups []dto.ListBlueprintAccessGroupsResponseItem
 		if err := json.Unmarshal(responseJSON, &groups); err != nil {
@@ -510,9 +496,7 @@ var blueprintShareGroupsCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(fmt.Sprintf("/blueprints/%s/share/groups", neturl.PathEscape(args[0]))), payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		printBlueprintBulkOperationResponse(responseJSON, "shared with", "group(s)")
 	},
@@ -532,9 +516,7 @@ var blueprintUnshareGroupsCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericDeleteWithBody(client, buildURLWithRangeAndUserID(fmt.Sprintf("/blueprints/%s/share/groups", neturl.PathEscape(args[0]))), payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		printBlueprintBulkOperationResponse(responseJSON, "unshared from", "group(s)")
 	},
@@ -554,9 +536,7 @@ var blueprintShareUsersCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(fmt.Sprintf("/blueprints/%s/share/users", neturl.PathEscape(args[0]))), payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		printBlueprintBulkOperationResponse(responseJSON, "shared with", "user(s)")
 	},
@@ -576,9 +556,7 @@ var blueprintUnshareUsersCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericDeleteWithBody(client, buildURLWithRangeAndUserID(fmt.Sprintf("/blueprints/%s/share/users", neturl.PathEscape(args[0]))), payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		printBlueprintBulkOperationResponse(responseJSON, "unshared from", "user(s)")
 	},
@@ -607,9 +585,7 @@ Do you want to continue? (y/N): `, blueprintID)
 		}
 
 		responseJSON, success := rest.GenericDelete(client, buildURLWithRangeAndUserID(fmt.Sprintf("/blueprints/%s", neturl.PathEscape(blueprintID))))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -685,9 +661,7 @@ var blueprintInfoCmd = &cobra.Command{
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 		path := fmt.Sprintf("/blueprints/%s", neturl.PathEscape(args[0]))
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID(path))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		var detail map[string]any
 		if err := json.Unmarshal(responseJSON, &detail); err != nil {
 			logger.Logger.Fatal(err)
@@ -778,9 +752,7 @@ Works on local blueprints (e.g. 'my-lab') OR slug-prefixed source-blueprints (e.
 		})
 		path := fmt.Sprintf("/blueprints/%s/install", neturl.PathEscape(args[0]))
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID(path), string(body))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		var resp blueprintInstallPayload
 		if err := json.Unmarshal(responseJSON, &resp); err != nil || resp.BlueprintID == "" {
 			logger.Logger.Info(string(responseJSON))
@@ -835,9 +807,7 @@ field. For interactive editing of the YAML config, use 'ludus blueprint config e
 		jsonBody, _ := json.Marshal(body)
 		path := fmt.Sprintf("/api/collections/blueprints/records/%s", neturl.PathEscape(recordID))
 		responseJSON, success := rest.GenericJSONPatch(client, path, string(jsonBody))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		logger.Logger.Infof("Blueprint '%s' updated", args[0])
 	},
 }
@@ -910,9 +880,7 @@ func runBlueprintImport(client *resty.Client, tarPath string) {
 		data,
 		nil,
 	)
-	if didFailOrWantJSON(success, responseJSON) {
-		return
-	}
+	checkSuccessAndProvideJSON(success, responseJSON)
 	var resp struct {
 		ID          string `json:"id"`
 		BlueprintID string `json:"blueprintID"`
@@ -1015,12 +983,13 @@ func runBlueprintConfigEdit(bpID string) {
 	// 3. PUT updated config.
 	body, _ := json.Marshal(map[string]string{"config": string(newContent)})
 	responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID(configPath), string(body))
-	if didFailOrWantJSON(success, responseJSON) {
-		if !success && !jsonFormat {
-			removeTemp = false
-			logger.Logger.Errorf("Load your edits with: ludus blueprint config set %s --file %s", bpID, tmpName)
-		}
+	if jsonFormat {
+		fmt.Printf("%s\n", responseJSON)
 		return
+	}
+	if !success && !jsonFormat {
+		removeTemp = false
+		logger.Logger.Errorf("Load your edits with: ludus blueprint config set %s --file %s", bpID, tmpName)
 	}
 	handleGenericResult(responseJSON)
 }

@@ -181,12 +181,14 @@ stages:
       ludus ansible collection add community.proxmox --global
       ludus ansible collection list | grep community.proxmox | grep true
       # A bundled collection installed --global is a clean no-op, not an error
+      set +o pipefail
       ludus ansible collection add ansible.posix --global 2>&1 | grep -i "already installed"
+      set -o pipefail
     else
       set +o pipefail
       ludus ansible collection add community.proxmox --global 2>&1 | grep "Only administrators can perform global ansible actions"
-      set -o pipefail
       ludus ansible collection add ansible.posix 2>&1 | grep -i "already installed"
+      set +o pipefail
     fi
   # Depends on tests
   - ludus ansible role add -d /opt/ludus/ci/roles/hello_world --force
@@ -1382,6 +1384,9 @@ post-deploy blueprints-as-admin:
       - ludus-api/blueprint_resolver.go
       - ludus-api/blueprint_access.go
       - ludus-api/range_config_write.go
+      - ludus-api/api_range_management.go
+      - ludus-api/filesystem.go
+      - ludus-api/utils.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1398,9 +1403,14 @@ post-deploy blueprints-as-admin:
     - ludus blueprint rm ci-bp-copy --no-prompt || true
     - ludus blueprint rm ci-bp-scratch --no-prompt || true
     - ludus blueprint rm ci-bp-roundtrip --no-prompt || true
+    - ludus range rm-range -r ci-bp-range --no-prompt --force || true
     # Create, list, fetch config, copy, apply, and remove as admin
     - ludus blueprint create --id ci-bp-main --name "CI Blueprint Main" --description "created in CI" --from-range CIA
     - ludus blueprint list | grep ci-bp-main
+    - ludus range create -r ci-bp-range --name "CI Blueprint Range" --from-blueprint ci-bp-main
+    - ludus range create -r ci-bp-range --name "CI Blueprint Range" --from-blueprint ci-bp-main
+    - 'test -z "$(sudo find /opt/ludus/ranges/ci-bp-range \( ! -user ludus -o ! -group ludus \) -print -quit)"'
+    - 'test "$(sudo stat -c "%a %U %G" /opt/ludus/ranges/ci-bp-range)" = "770 ludus ludus"'
     - ludus blueprint config get ci-bp-main > /tmp/ci-bp-main-raw.yml
     - test -s /tmp/ci-bp-main-raw.yml
     - ludus blueprint access users ci-bp-main | grep CIA
@@ -1447,6 +1457,7 @@ post-deploy blueprints-as-admin:
     - ludus blueprint rm ci-bp-scratch --no-prompt || true
     - ludus blueprint rm ci-bp-copy --no-prompt || true
     - '! ludus blueprint list | grep ci-bp-copy'
+    - ludus range rm-range -r ci-bp-range --no-prompt --force || true
     - ludus blueprint rm ci-bp-main --no-prompt || true
     - '! ludus blueprint list | grep ci-bp-main'
 
@@ -1537,30 +1548,35 @@ post-deploy sources-as-admin:
     - set +o pipefail
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ci-src --no-prompt 2>&1 | grep -qiE "not found|owner or an admin"'
     - set -o pipefail
-    # --- sourceID is globally unique across owners (regression) ---
-    # ci-src is still registered by CIA above. A DIFFERENT user adding the same
-    # EXPLICIT id must be rejected (UX-agnostic, no CLI flags) instead of
-    # silently creating a cross-owner duplicate (the bug this fixes).
-    - set +o pipefail
-    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --all --force 2>&1 | grep -qiE "already in use"'
-    - set -o pipefail
-    # A DERIVED id that collides across owners is REJECTED — the caller must pass
-    # an explicit id. Matches how templates/users/blueprints handle id collisions
-    # (no auto-rename). CIA registers the fixture's natural slug; CIU adding the
-    # same fixture with no --id is rejected, but CIU CAN add it under an explicit
-    # unique id.
+    # Auto-derived ids are qualified by the effective user. Both users can add
+    # the same source without colliding, while explicit ids above stay global.
+    # Remove names from both sides of the behavior change for snapshot retries.
     - ludus source rm source-template --no-prompt || true
     - ludus source rm ciu-src-template --no-prompt || true
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --all --force
     - 'ludus source list | grep "source-template " >/dev/null'
-    - set +o pipefail
-    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --all --force 2>&1 | grep -qiE "already in use"'
-    - set -o pipefail
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ciu-src-template --all --force'
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source list | grep "ciu-src-template " >/dev/null'
-    # cleanup
-    - ludus source rm source-template --no-prompt || true
+    - ludus source rm CIA-source-template --no-prompt || true
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ciu-src-template --no-prompt || true'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm CIU-source-template --no-prompt || true'
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --force
+    - 'ludus source list | grep "CIA-source-template " >/dev/null'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --force'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source list | grep "CIU-source-template " >/dev/null'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus blueprint list | grep "CIU-source-template/example" >/dev/null'
+    # cleanup
+    - ludus source rm CIA-source-template --no-prompt || true
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm CIU-source-template --no-prompt || true'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm CIU-source-template --no-prompt || true'
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --force
+    - 'ludus source list | grep "CIA-source-template " >/dev/null'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --force'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source list | grep "CIU-source-template " >/dev/null'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus blueprint list | grep "CIU-source-template/example" >/dev/null'
+    # cleanup
+    - ludus source rm CIA-source-template --no-prompt || true
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm CIU-source-template --no-prompt || true'
     # Uninstall model: `source rm` is registration-only (drops the source +
     # its blueprints); installed artifacts are removed via the individual
     # delete commands (blueprint rm / ansible role rm / templates rm), which
@@ -1769,6 +1785,8 @@ post-deploy ranges-as-admin:
       - ludus-api/process.go
       - ludus-server/ansible/range-management/tasks/make-rdp-files.yml
       - ludus-server/ansible/range-management/ludus.yml
+      - ludus-server/ansible/user-files/range-config.jsonschema
+      - ludus-server/ci/configs/small-range.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1869,6 +1887,8 @@ post-deploy ranges-as-admin:
     - ludus power off -n all -r CIA # power off range CIA as it is not used again
     - ludus range create -n "CIA Test Range" -r CIA-test
     - ludus range config set -f /opt/ludus/ci/configs/small-range.yml -r CIA-test
+    - ludus range config get -r CIA-test > /tmp/ci-ludus-extensions.yml
+    - 'grep -q "^    schema_regression: preserved$" /tmp/ci-ludus-extensions.yml'
     - ludus range deploy -r CIA-test
     - |
       while true; do

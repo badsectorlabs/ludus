@@ -162,7 +162,6 @@ func (s *Server) checkLicense() {
 			log.Printf("LICENSE: %v\n", err)
 			return
 		}
-		s.LicenseValid = true
 		// Extract entitlements from license
 		entitlements, err = license.Entitlements(ctx)
 		if err != nil {
@@ -171,6 +170,7 @@ func (s *Server) checkLicense() {
 		}
 	}
 
+	s.LicenseValid = true
 	if license.Expiry != nil {
 		log.Printf("LICENSE: active, expires: %s, licensed to %s\n", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)
 		s.LicenseMessage = fmt.Sprintf("License active, expires: %s, licensed to %s", license.Expiry.Format("2006-01-02 15:04:05"), license.Name)

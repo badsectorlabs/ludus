@@ -39,9 +39,7 @@ var antiSandboxInstallCustomCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/antisandbox/install-custom"), "")
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -54,9 +52,7 @@ var antiSandboxInstallStandardCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/antisandbox/install-standard"), "")
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -69,19 +65,19 @@ var antiSandboxEnableCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		type AntiSandboxPayload struct {
-			VMIDs                string `json:"vmIDs"`
-			Owner                string `json:"registeredOwner,omitempty"`
-			Org                  string `json:"registeredOrganization,omitempty"`
-			Vendor               string `json:"vendor,omitempty"`
-			Product              string `json:"product,omitempty"`
-			DropFiles            bool   `json:"dropFiles,omitempty"`
-			BrowserData          bool   `json:"browserData,omitempty"`
-			ProcessorName        string `json:"processorName,omitempty"`
-			ProcessorVendor      string `json:"processorVendor,omitempty"`
-			ProcessorSpeed       string `json:"processorSpeed,omitempty"`
-			ProcessorIdentifier  string `json:"processorIdentifier,omitempty"`
-			SystemBiosVersion    string `json:"systemBiosVersion,omitempty"`
-			Persist              bool   `json:"persist,omitempty"`
+			VMIDs               string `json:"vmIDs"`
+			Owner               string `json:"registeredOwner,omitempty"`
+			Org                 string `json:"registeredOrganization,omitempty"`
+			Vendor              string `json:"vendor,omitempty"`
+			Product             string `json:"product,omitempty"`
+			DropFiles           bool   `json:"dropFiles,omitempty"`
+			BrowserData         bool   `json:"browserData,omitempty"`
+			ProcessorName       string `json:"processorName,omitempty"`
+			ProcessorVendor     string `json:"processorVendor,omitempty"`
+			ProcessorSpeed      string `json:"processorSpeed,omitempty"`
+			ProcessorIdentifier string `json:"processorIdentifier,omitempty"`
+			SystemBiosVersion   string `json:"systemBiosVersion,omitempty"`
+			Persist             bool   `json:"persist,omitempty"`
 		}
 		var antiSandboxPayload AntiSandboxPayload
 		antiSandboxPayload.VMIDs = VMIDs
@@ -120,9 +116,7 @@ Do you want to continue? (y/N): `, VMIDs)
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/antisandbox/enable"), string(payload))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleSuccessErrorArrayResult(responseJSON, "anti-sandbox")
 	},
 }
@@ -185,9 +179,7 @@ var antiSandboxStatusCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/antisandbox/status"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		type AntiSandboxStatus struct {
 			Result struct {

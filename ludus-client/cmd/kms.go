@@ -20,9 +20,7 @@ var installKMSCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		responseJSON, success := rest.GenericJSONPost(client, "/kms/install", "")
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -44,9 +42,7 @@ var licenseWindowsCmd = &cobra.Command{
 		var success bool
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/kms/license"), requestBody)
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleSuccessErrorArrayResult(responseJSON, "license")
 	},
 }

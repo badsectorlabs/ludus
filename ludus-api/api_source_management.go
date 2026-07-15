@@ -90,6 +90,7 @@ func CreateSource(e *core.RequestEvent) error {
 		if err != nil {
 			return JSONError(e, http.StatusBadRequest, err.Error())
 		}
+		sourceID = user.UserId() + "-" + sourceID
 	}
 	if !dto.SourceIDRegex.MatchString(sourceID) {
 		return JSONError(e, http.StatusBadRequest,

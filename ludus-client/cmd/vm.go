@@ -47,9 +47,7 @@ Do you want to continue? (y/N): `, vmID)
 		destroyVMURL := buildURLWithRangeAndUserID(fmt.Sprintf("/vm/%d", vmID))
 
 		responseJSON, success := rest.GenericDelete(client, destroyVMURL)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -63,4 +61,3 @@ func init() {
 	vmCmd.AddCommand(vmDestroyCmd)
 	rootCmd.AddCommand(vmCmd)
 }
-
