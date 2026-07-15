@@ -570,10 +570,10 @@ func CreateDefaultUserRange(e *core.RequestEvent, txApp core.App, user *models.U
 	if err := txApp.Save(rangeRecord); err != nil {
 		return err
 	}
-	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), 0755)
+	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), 0770)
 	copyFileContents(fmt.Sprintf("%s/ansible/user-files/range-config.example.yml", ludusInstallPath), fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, rangeRecord.RangeId()))
 	if os.Geteuid() == 0 {
-		chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), "ludus")
+		setRangeDirPermissions(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()))
 	}
 
 	// Add the range to the request context
@@ -645,10 +645,10 @@ func CreateDefaultUserRangeForBootstrap(txApp core.App, user *models.User) error
 	if err := txApp.Save(rangeRecord); err != nil {
 		return err
 	}
-	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), 0755)
+	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), 0770)
 	copyFileContents(fmt.Sprintf("%s/ansible/user-files/range-config.example.yml", ludusInstallPath), fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, rangeRecord.RangeId()))
 	if os.Geteuid() == 0 {
-		chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()), "ludus")
+		setRangeDirPermissions(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, rangeRecord.RangeId()))
 	}
 
 	user.SetDefaultRangeId(rangeRecord.RangeId())

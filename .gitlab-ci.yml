@@ -1383,6 +1383,8 @@ post-deploy blueprints-as-admin:
       - ludus-api/blueprint_access.go
       - ludus-api/range_config_write.go
       - ludus-api/api_range_management.go
+      - ludus-api/filesystem.go
+      - ludus-api/utils.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -1406,6 +1408,7 @@ post-deploy blueprints-as-admin:
     - ludus range create -r ci-bp-range --name "CI Blueprint Range" --from-blueprint ci-bp-main
     - ludus range create -r ci-bp-range --name "CI Blueprint Range" --from-blueprint ci-bp-main
     - 'test -z "$(sudo find /opt/ludus/ranges/ci-bp-range \( ! -user ludus -o ! -group ludus \) -print -quit)"'
+    - 'test "$(sudo stat -c "%a %U %G" /opt/ludus/ranges/ci-bp-range)" = "770 ludus ludus"'
     - ludus blueprint config get ci-bp-main > /tmp/ci-bp-main-raw.yml
     - test -s /tmp/ci-bp-main-raw.yml
     - ludus blueprint access users ci-bp-main | grep CIA

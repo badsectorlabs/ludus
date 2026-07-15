@@ -825,9 +825,9 @@ func CreateRange(e *core.RequestEvent) error {
 	}
 
 	// Create the range config file
-	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), 0755)
+	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), 0770)
 	copyFileContents(fmt.Sprintf("%s/ansible/user-files/range-config.example.yml", ludusInstallPath), fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, payload.RangeID))
-	chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), "ludus")
+	setRangeDirPermissions(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID))
 
 	// Create the range
 	rangeCollection, err := e.App.FindCollectionByNameOrId("ranges")
@@ -892,7 +892,7 @@ func CreateRange(e *core.RequestEvent) error {
 		_, applyErr := writeRangeConfig(e, rangeRecord, blueprintConfigBytes, false)
 		// Range creation runs on the root service. Restore ownership after
 		// blueprint application creates or replaces files in the range directory.
-		chownDirToUsernameRecursive(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), "ludus")
+		setRangeDirPermissions(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID))
 		if applyErr != nil {
 			return JSONError(e, http.StatusInternalServerError,
 				fmt.Sprintf("Range %s was created but applying blueprint %q failed: %v. Run 'ludus blueprint apply %s --target-range %s' to retry.",
