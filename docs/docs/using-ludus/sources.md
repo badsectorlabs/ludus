@@ -258,17 +258,17 @@ ludus source add https://github.com/you/my-source-repo
 
 ## Source IDs
 
-Every source gets a `sourceID` auto-derived from the URL or path when you run `source add`. Git URLs default to `<org>-<repo>` so two repos with the same name under different orgs don't collide. For example:
+When `--id` is omitted, Ludus derives an ID from the URL or path and prefixes it with the effective user's `userID`. Git URLs use `<userID>-<org>-<repo>`, so different users can register the same source without colliding. For example, these commands run as user `JD`:
 
 | Input | Derived sourceID |
 |-------|-----------------|
-| `https://github.com/badsectorlabs/ludus-source-bsl` | `badsectorlabs-ludus-source-bsl` |
-| `https://github.com/badsectorlabs/ludus-source-bsl.git` | `badsectorlabs-ludus-source-bsl` |
-| `git@gitlab.com:secteam/workshop-labs.git` | `secteam-workshop-labs` |
-| `/tmp/my-source.tar.gz` | `my-source` |
-| `/home/user/my-workshop-lab` (directory) | `my-workshop-lab` |
+| `https://github.com/badsectorlabs/ludus-source-bsl` | `JD-badsectorlabs-ludus-source-bsl` |
+| `https://github.com/badsectorlabs/ludus-source-bsl.git` | `JD-badsectorlabs-ludus-source-bsl` |
+| `git@gitlab.com:secteam/workshop-labs.git` | `JD-secteam-workshop-labs` |
+| `/tmp/my-source.tar.gz` | `JD-my-source` |
+| `/home/user/my-workshop-lab` (directory) | `JD-my-workshop-lab` |
 
-Override it with `--id` for a shorter alias:
+Pass `--id` to choose the complete source ID yourself. Explicit IDs are used as supplied and remain globally unique:
 
 ```bash
 # terminal-command-local
@@ -276,7 +276,7 @@ ludus source add https://github.com/badsectorlabs/ludus-source-bsl --id bsl
 ludus blueprint apply bsl/goad
 ```
 
-If you already have a source registered under the auto-derived ID, pass `--id` to give the new one a distinct alias. The same repo can be added twice to one account this way — useful for tracking different branches of the same upstream.
+Re-adding the same source under its derived ID is idempotent. Use `--id` when you want a shorter name or need another registration for a different branch of the same upstream.
 
 ## Sharing what's in a source
 
