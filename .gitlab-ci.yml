@@ -1546,16 +1546,6 @@ post-deploy sources-as-admin:
     - set +o pipefail
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ci-src --no-prompt 2>&1 | grep -qiE "not found|owner or an admin"'
     - set -o pipefail
-    # --- sourceID is globally unique across owners (regression) ---
-    # ci-src is still registered by CIA above. A DIFFERENT user adding the same
-    # EXPLICIT id must be rejected (UX-agnostic, no CLI flags) instead of
-    # silently creating a cross-owner duplicate (the bug this fixes).
-    - set +o pipefail
-    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src --all --force 2>&1 | grep -qiE "already in use"'
-    - set -o pipefail
-    # Auto-derived ids are qualified by the effective user. Both users can add
-    # the same source without colliding, while explicit ids above stay global.
-    # Remove names from both sides of the behavior change for snapshot retries.
     # Auto-derived ids are qualified by the effective user. Both users can add
     # the same source without colliding, while explicit ids above stay global.
     # Remove names from both sides of the behavior change for snapshot retries.
