@@ -1404,6 +1404,7 @@ post-deploy blueprints-as-admin:
     - ludus blueprint create --id ci-bp-main --name "CI Blueprint Main" --description "created in CI" --from-range CIA
     - ludus blueprint list | grep ci-bp-main
     - ludus range create -r ci-bp-range --name "CI Blueprint Range" --from-blueprint ci-bp-main
+    - ludus range create -r ci-bp-range --name "CI Blueprint Range" --from-blueprint ci-bp-main
     - 'test -z "$(sudo find /opt/ludus/ranges/ci-bp-range \( ! -user ludus -o ! -group ludus \) -print -quit)"'
     - ludus blueprint config get ci-bp-main > /tmp/ci-bp-main-raw.yml
     - test -s /tmp/ci-bp-main-raw.yml
@@ -1552,6 +1553,9 @@ post-deploy sources-as-admin:
     # Auto-derived ids are qualified by the effective user. Both users can add
     # the same source without colliding, while explicit ids above stay global.
     # Remove names from both sides of the behavior change for snapshot retries.
+    # Auto-derived ids are qualified by the effective user. Both users can add
+    # the same source without colliding, while explicit ids above stay global.
+    # Remove names from both sides of the behavior change for snapshot retries.
     - ludus source rm source-template --no-prompt || true
     - ludus source rm ciu-src-template --no-prompt || true
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --all --force
@@ -1563,6 +1567,15 @@ post-deploy sources-as-admin:
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source list | grep "ciu-src-template " >/dev/null'
     - ludus source rm CIA-source-template --no-prompt || true
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm ciu-src-template --no-prompt || true'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm CIU-source-template --no-prompt || true'
+    - ludus source add -d /opt/ludus/ci/fixtures/source-template --force
+    - 'ludus source list | grep "CIA-source-template " >/dev/null'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --force'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source list | grep "CIU-source-template " >/dev/null'
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus blueprint list | grep "CIU-source-template/example" >/dev/null'
+    # cleanup
+    - ludus source rm CIA-source-template --no-prompt || true
+    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm CIU-source-template --no-prompt || true'
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source rm CIU-source-template --no-prompt || true'
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --force
     - 'ludus source list | grep "CIA-source-template " >/dev/null'
