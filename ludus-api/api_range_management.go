@@ -825,7 +825,7 @@ func CreateRange(e *core.RequestEvent) error {
 	}
 
 	// Create the range config file
-	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), 0770)
+	os.MkdirAll(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID), 0755) // The first time this is run it creates the ranges directory which needs to be 0755
 	copyFileContents(fmt.Sprintf("%s/ansible/user-files/range-config.example.yml", ludusInstallPath), fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, payload.RangeID))
 	setRangeDirPermissions(fmt.Sprintf("%s/ranges/%s", ludusInstallPath, payload.RangeID))
 
