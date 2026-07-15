@@ -181,12 +181,14 @@ stages:
       ludus ansible collection add community.proxmox --global
       ludus ansible collection list | grep community.proxmox | grep true
       # A bundled collection installed --global is a clean no-op, not an error
+      set +o pipefail
       ludus ansible collection add ansible.posix --global 2>&1 | grep -i "already installed"
+      set -o pipefail
     else
       set +o pipefail
       ludus ansible collection add community.proxmox --global 2>&1 | grep "Only administrators can perform global ansible actions"
-      set -o pipefail
       ludus ansible collection add ansible.posix 2>&1 | grep -i "already installed"
+      set +o pipefail
     fi
   # Depends on tests
   - ludus ansible role add -d /opt/ludus/ci/roles/hello_world --force
