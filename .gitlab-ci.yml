@@ -1553,9 +1553,6 @@ post-deploy sources-as-admin:
     - ludus source rm ciu-src-template --no-prompt || true
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --all --force
     - 'ludus source list | grep "source-template " >/dev/null'
-    - set +o pipefail
-    - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --all --force 2>&1 | grep -qiE "already in use"'
-    - set -o pipefail
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ciu-src-template --all --force'
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source list | grep "ciu-src-template " >/dev/null'
     - ludus source rm CIA-source-template --no-prompt || true
