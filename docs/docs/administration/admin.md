@@ -34,7 +34,7 @@ systemctl restart ludus
 ## Promoting/Demoting a user to/from admin
 
 1. Enable the Pocketbase web UI as detailed above and log in. You can select a user in the `users` table and toggle the `isAdmin` toggle. Remember to click `Save changes`.
-2. Add the user to the `ludus_admins` group in the Proxmox Web UI or run `pveum user modify <username>@pam --groups ludus_admins`
+2. Add the user to the `ludus_admins` group in the Proxmox Web UI or run `pveum user modify <username>@pam --groups ludus_admins --append`
 
 ## Forcing a range out of testing mode
 
