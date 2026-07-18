@@ -6,6 +6,7 @@
   ansible.builtin.stat:
     path: "{{ blocky_staged_binary }}"
   delegate_to: localhost
+  become: false
   register: blocky_staged_binary_stat
   run_once: true
 
@@ -16,6 +17,7 @@
       - blocky_staged_binary_stat.stat.isreg | default(false)
     fail_msg: "The Ludus appliance is missing the staged Blocky binary at {{ blocky_staged_binary }}."
   delegate_to: localhost
+  become: false
   run_once: true
 
 - name: Stop and disable AdGuardHome if present

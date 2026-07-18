@@ -14,7 +14,7 @@
   ansible.builtin.assert:
     that:
       - item is string
-      - (item | regex_search('^https://[^\\s]+$')) or (item | ansible.utils.ipaddr)
+      - (item is match('^https://[^\\s]+$')) or ((item | ansible.utils.ipaddr) is not false)
     fail_msg: "router.upstream_dns entries must be bare IP addresses or https:// DoH URLs. Invalid value: {{ item }}"
   loop: "{{ blocky_upstreams }}"
 
