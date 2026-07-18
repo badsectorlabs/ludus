@@ -1,0 +1,11 @@
+ludus:
+  - vm_name: "{{ range_id }}-vendored-role"
+    hostname: "vendored-role"
+    template: debian-12-x64-server-template
+    vlan: 30
+    ip_last_octet: 30
+    ram_gb: 1
+    cpus: 1
+    linux: true
+    roles:
+      - acme.vendored_demo

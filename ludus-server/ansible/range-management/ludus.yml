@@ -16,7 +16,7 @@
     vm_groups: '"{{ range_id }}","{{ range_id }}_router"'
     is_linux: true
     ram: "{{ router.ram_gb | default(2) }}"
-    balloon_size: "{{ router.ram_min_gb if router.ram_min_gb is defined else '0.5' }}"
+    balloon_size: "{{ router.ram_min_gb if router.ram_min_gb is defined else ('0.5' if router.ram_gb is not defined else '0') }}"
     cpu_cores: "{{ router.cpus | default(2) }}"
     num_vcpus: "{{ router.cpus | default(2) }}"
     unmanaged: false
@@ -84,7 +84,24 @@
         - router.roles is defined
         - router.roles | length > 0
 
-    - name: Set any user defined firewall rules
+    - name: Check type of global_role_vars
+      ansible.builtin.assert:
+        that: global_role_vars | type_debug == 'dict'
+        fail_msg: "'global_role_vars' must be a dictionary. Remove the leading `-` from each value!"
+        success_msg: "'global_role_vars' is a dictionary"
+      when:
+        - global_role_vars is defined
+        - router.roles is defined
+        - router.roles | length > 0
+
+    - name: Set global role variables
+      ansible.builtin.set_fact:
+        "{{ global_role_var.key }}": "{{ global_role_var.value }}"
+      loop: "{{ global_role_vars | default({}) | dict2items }}"
+      loop_control:
+        loop_var: global_role_var
+
+    - name: Apply user-defined roles to the router
       ansible.builtin.include_tasks: tasks/router/user-defined-roles.yml
       when:
         - ludus_entitlements is defined and "PRO_ROLES" in ludus_entitlements
@@ -251,7 +268,7 @@
         argv:
           - ansible-inventory
           - -i
-          - "{{ ludus_install_path }}/ansible/range-management/proxmox.py"
+          - "{{ ludus_install_path }}/ansible/range-management/dynamic-inventory"
           - --host
           - "{{ item }}"
       register: nodecheck

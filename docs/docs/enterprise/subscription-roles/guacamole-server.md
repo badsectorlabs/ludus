@@ -12,7 +12,6 @@ This role has been tested on the following operating systems:
 ## Role Variables
 
 ```yaml
-# The user that will own the install directory
 default_user: "{{ ansible_user_id }}"
 
 # DB container credentials
@@ -29,12 +28,19 @@ postgres_version: "15.0"
 guacamole_backend_version: "1.6.0"
 guacamole_frontend_version: "1.6.0"
 
-# Guacamole password for the guacadmin user
-guac_password: "doubleguacplease"
+# Guacamole admin credentials
+guac_admin_username: "guacadmin"
+guac_admin_password: "doubleguacplease"
+
+# Non-admin Guacamole users to create
+guac_users:
+  - username: "operator"
+    password: "operatorpassword"
 ```
 
 ## Changes
 
+- v1.1.0 - Rename `guac_password` to `guac_admin_password`, add `guac_admin_username`, add `guac_users` for creating non-admin accounts, deploy Ludus branding extension, and skip admin password update when already configured
 - v1.0.3 - Fix port definition in docker compose file, update default container versions to 1.6.0
 - v1.0.2 - Fix status code check (204 vs 200)
 - v1.0.1 - Fix pip install compatibility with older OSs

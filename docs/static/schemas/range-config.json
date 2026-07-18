@@ -24,6 +24,11 @@
         },
         "notify": {
             "$ref": "#/definitions/Notify"
+        },
+        "ludus_extensions": {
+            "type": "object",
+            "description": "Application-specific data ignored by Ludus and available to Ansible as the ludus_extensions variable",
+            "additionalProperties": true
         }
     },
     "required": [

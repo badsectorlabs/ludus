@@ -1,0 +1,21 @@
+---
+dependencies: []
+
+# This role is vendored under a bare dir name (vendored_demo) but its published
+# galaxy identity is acme.vendored_demo. A blueprint that requires
+# acme.vendored_demo must install from THIS local copy, never from Galaxy
+# (where acme.vendored_demo does not exist) — so a successful install proves
+# the vendored copy was used.
+galaxy_info:
+  role_name: vendored_demo
+  author: acme
+  description: Fixture role vendored under a bare name but required by its galaxy identity.
+  company: Ludus
+  license: MIT
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+
+collections: []

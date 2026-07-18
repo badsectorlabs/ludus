@@ -17,8 +17,8 @@ const (
 	modeInstallAll
 )
 
-// sourceFlags collects everything the source add/catalog commands read off
-// the command line. Kept as a struct so selectInstallMode is pure and
+// sourceFlags collects everything the source add command reads off the
+// command line. Kept as a struct so selectInstallMode is pure and
 // testable without poking package-global flag vars.
 type sourceFlags struct {
 	ID  string
@@ -28,20 +28,18 @@ type sourceFlags struct {
 	// Directory is the value of -d. When set, runSourceAdd treats arg as a
 	// directory regardless of positional auto-detection.
 	Directory string
-	// Catalog is true when --catalog is set. runSourceAdd dumps the catalog
-	// JSON and exits without committing an install.
-	Catalog bool
 
 	All      bool
 	NoPrompt bool
 
-	Blueprints []string
-	Templates  []string
-	LocalRoles []string
+	Blueprints       []string
+	Templates        []string
+	LocalRoles       []string
+	LocalCollections []string
 
-	GlobalRoles bool
-	Force       bool
-	NoDeps      bool
+	Global bool
+	Force  bool
+	NoDeps bool
 }
 
 // selectInstallMode classifies the invocation. --all and --no-prompt force
@@ -52,7 +50,7 @@ func selectInstallMode(f sourceFlags, isTTY bool) installMode {
 	if f.All || f.NoPrompt {
 		return modeInstallAll
 	}
-	if len(f.Blueprints)+len(f.Templates)+len(f.LocalRoles) > 0 {
+	if len(f.Blueprints)+len(f.Templates)+len(f.LocalRoles)+len(f.LocalCollections) > 0 {
 		return modeScripted
 	}
 	if !isTTY {

@@ -72,9 +72,7 @@ var quotasViewCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/user/quotas"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var data QuotaStatusObject
 		err := json.Unmarshal(responseJSON, &data)
@@ -121,9 +119,7 @@ func formatCellWithSource(used, limit int, src string) string {
 
 func viewAllUsers(client *resty.Client) {
 	responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/user/quotas/all"))
-	if didFailOrWantJSON(success, responseJSON) {
-		return
-	}
+	checkSuccessAndProvideJSON(success, responseJSON)
 
 	var data []AllQuotaStatusObject
 	err := json.Unmarshal(responseJSON, &data)
@@ -151,9 +147,7 @@ func viewAllUsers(client *resty.Client) {
 
 func viewAllGroups(client *resty.Client) {
 	responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/groups/quotas"))
-	if didFailOrWantJSON(success, responseJSON) {
-		return
-	}
+	checkSuccessAndProvideJSON(success, responseJSON)
 
 	var data []GroupQuotaObject
 	err := json.Unmarshal(responseJSON, &data)
@@ -180,9 +174,7 @@ func viewAllGroups(client *resty.Client) {
 
 func viewDefaults(client *resty.Client) {
 	responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/user/quotas/defaults"))
-	if didFailOrWantJSON(success, responseJSON) {
-		return
-	}
+	checkSuccessAndProvideJSON(success, responseJSON)
 
 	var data QuotaStatusObject
 	err := json.Unmarshal(responseJSON, &data)
@@ -246,9 +238,7 @@ for the quotas you want to change. Use "ludus quotas user reset" to remove limit
 		}
 
 		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID("/user/quotas"), string(bodyJSON))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -307,9 +297,7 @@ flags to reset all quotas. For multiple users, provide comma-separated userIDs.`
 		}
 
 		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID("/user/quotas"), string(bodyJSON))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -369,9 +357,7 @@ want to change. Use "ludus quotas group reset" to remove limits.`,
 		}
 
 		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID("/groups/quotas"), string(bodyJSON))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -429,9 +415,7 @@ system defaults. Specify which quotas to reset with flags, or omit flags to rese
 		}
 
 		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID("/groups/quotas"), string(bodyJSON))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }

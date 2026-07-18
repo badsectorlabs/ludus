@@ -125,9 +125,7 @@ var rangeConfigEditCmd = &cobra.Command{
 			oldContent = string(oldContentBytes)
 		} else { // Get the config from the server
 			responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/range/config"))
-			if didFailOrWantJSON(success, responseJSON) {
-				return
-			}
+			checkSuccessAndProvideJSON(success, responseJSON)
 
 			type Result struct {
 				RangeConfig string `json:"result"`
@@ -169,13 +167,15 @@ var rangeConfigEditCmd = &cobra.Command{
 		// Send updated config back to server
 		responseJSON, success = rest.PostFileAndForce(client, buildURLWithRangeAndUserID("/range/config"), newContent, "file", force)
 
-		if didFailOrWantJSON(success, responseJSON) {
-			if !success && !jsonFormat {
-				command := strings.Join(os.Args, " ")
-				logger.Logger.Fatal(fmt.Sprintf("Load your edits with:\n%s --file %s", command, tempPath))
-			}
+		if jsonFormat {
+			fmt.Printf("%s\n", responseJSON)
 			return
 		}
+		if !success && !jsonFormat {
+			command := strings.Join(os.Args, " ")
+			logger.Logger.Fatal(fmt.Sprintf("Load your edits with:\n%s --file %s", command, tempPath))
+		}
+
 		handleGenericResult(responseJSON)
 	},
 }

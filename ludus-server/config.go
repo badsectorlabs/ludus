@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+
 // Load the config file from disk into the config struct
 func loadConfig() {
 	// Read the config file

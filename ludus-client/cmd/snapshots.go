@@ -175,9 +175,7 @@ var snapshotsListCmd = &cobra.Command{
 		apiPath := buildURLWithRangeAndUserID("/snapshots/list")
 		apiPath = addQueryParameterToURL(apiPath, "vmids", snapshotVMIDs)
 		responseJSON, success := rest.GenericGet(client, apiPath)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		var snapshotResponse SnapshotListResponse
 		err := json.Unmarshal(responseJSON, &snapshotResponse)
 		if err != nil {
@@ -230,9 +228,7 @@ var snapshotsCreateCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericJSONPost(client, apiPath, snapshotCreatePayload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var snapshotCreateResponse SnapshotCreateResponse
 		err := json.Unmarshal(responseJSON, &snapshotCreateResponse)
@@ -291,9 +287,7 @@ var snapshotsRollbackCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericJSONPost(client, apiPath, snapshotRollbackPayload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var snapshotRollbackResponse SnapshotGenericResponse
 		err := json.Unmarshal(responseJSON, &snapshotRollbackResponse)
@@ -348,9 +342,7 @@ var snapshotRemoveCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericJSONPost(client, apiPath, snapshotRemovePayload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var snapshotRemoveResponse SnapshotGenericResponse
 		err := json.Unmarshal(responseJSON, &snapshotRemoveResponse)

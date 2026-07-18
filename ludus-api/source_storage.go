@@ -24,7 +24,7 @@ func CloneOrUpdateGit(checkoutDir, gitURL, ref string) error {
 		if err := os.MkdirAll(filepath.Dir(checkoutDir), 0755); err != nil {
 			return err
 		}
-		args := []string{"clone", "--depth", "1"}
+		args := []string{"clone", "--depth", "1", "--recurse-submodules"}
 		if ref != "HEAD" {
 			args = append(args, "--branch", ref)
 		}
@@ -43,6 +43,8 @@ func CloneOrUpdateGit(checkoutDir, gitURL, ref string) error {
 		{"-C", checkoutDir, "fetch", "--depth", "1", "origin", ref},
 		{"-C", checkoutDir, "checkout", ref},
 		{"-C", checkoutDir, "reset", "--hard", "FETCH_HEAD"},
+		{"-C", checkoutDir, "submodule", "sync", "--recursive"},
+		{"-C", checkoutDir, "submodule", "update", "--init", "--recursive"},
 	} {
 		cmd := exec.Command("git", args...)
 		cmd.Env = gitEnvWithSafeDirectory()

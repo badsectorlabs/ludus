@@ -36,9 +36,7 @@ this binary was built from.
 		}
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 		responseJSON, success := rest.GenericGet(client, "/")
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 
 		//  TODO check for a more recent version via Gitlab release URL

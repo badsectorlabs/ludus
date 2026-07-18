@@ -133,11 +133,21 @@ func declaredFromRequirements(requirementsYAML []byte) (roles, collections, subs
 	return roles, collections, subscriptionRoles
 }
 
-type RoleInstallResult struct {
+// Ansible install-result kinds. Galaxy roles, collections, and subscription
+// roles all flow through the same install path; Type keeps them distinct on
+// the wire so consumers can label and group them.
+const (
+	AnsibleResultRole             = "role"
+	AnsibleResultCollection       = "collection"
+	AnsibleResultSubscriptionRole = "subscription_role"
+)
+
+type AnsibleInstallResult struct {
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
 	OK      bool   `json:"ok"`
 	Error   string `json:"error,omitempty"`
+	Type    string `json:"type,omitempty"`
 }
 
 // InstallRolesFromRequirementsWithHome shells out to `ansible-galaxy role
@@ -145,7 +155,7 @@ type RoleInstallResult struct {
 // systemd-protected /home default. Callers MUST inspect each result's OK
 // field; ansible-galaxy may exit non-zero while still installing some roles,
 // and the mixed state is surfaced via per-role results, not a wrapped error.
-func InstallRolesFromRequirementsWithHome(requirementsYAML []byte, rolesPath, ansibleHome string, force bool) ([]RoleInstallResult, error) {
+func InstallRolesFromRequirementsWithHome(requirementsYAML []byte, rolesPath, ansibleHome string, force bool) ([]AnsibleInstallResult, error) {
 	if len(requirementsYAML) == 0 || strings.TrimSpace(string(requirementsYAML)) == "{}" {
 		return nil, nil
 	}
@@ -159,18 +169,8 @@ func InstallRolesFromRequirementsWithHome(requirementsYAML []byte, rolesPath, an
 	}
 	tmp.Close()
 
-	args := []string{"role", "install", "-r", tmp.Name()}
-	if force {
-		args = append(args, "-f")
-	}
-	if rolesPath != "" {
-		args = append(args, "--roles-path", rolesPath)
-	}
-	cmd := exec.Command("ansible-galaxy", args...)
+	cmd := galaxyInstallCmd(galaxyRole, []string{"role", "install"}, []string{"-r", tmp.Name()}, force, rolesPath, ansibleHome)
 	cmd.Dir = filepath.Dir(tmp.Name())
-	if ansibleHome != "" {
-		cmd.Env = append(os.Environ(), "ANSIBLE_HOME="+ansibleHome)
-	}
 	out, err := cmd.CombinedOutput()
 
 	results := parseGalaxyInstallOutput(string(out))
@@ -186,7 +186,7 @@ func InstallRolesFromRequirementsWithHome(requirementsYAML []byte, rolesPath, an
 // install location so collections land alongside roles instead of in the
 // systemd-protected /home default. Returns one result per collection touched;
 // callers should treat the result list the same way they treat role results.
-func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansibleHome string, force bool) ([]RoleInstallResult, error) {
+func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, collectionsPath, ansibleHome string, force bool) ([]AnsibleInstallResult, error) {
 	if !hasRequirementsCollections(requirementsYAML) {
 		return nil, nil
 	}
@@ -200,15 +200,8 @@ func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansible
 	}
 	tmp.Close()
 
-	args := []string{"collection", "install", "-r", tmp.Name()}
-	if force {
-		args = append(args, "-f")
-	}
-	cmd := exec.Command("ansible-galaxy", args...)
+	cmd := galaxyInstallCmd(galaxyCollection, []string{"collection", "install"}, []string{"-r", tmp.Name()}, force, collectionsPath, ansibleHome)
 	cmd.Dir = filepath.Dir(tmp.Name())
-	if ansibleHome != "" {
-		cmd.Env = append(os.Environ(), "ANSIBLE_HOME="+ansibleHome)
-	}
 	out, err := cmd.CombinedOutput()
 
 	results := parseGalaxyCollectionInstallOutput(string(out))
@@ -235,12 +228,19 @@ func InstallCollectionsFromRequirementsWithHome(requirementsYAML []byte, ansible
 			// Prefer the on-disk version from MANIFEST.json over the declared
 			// pin: requirements.yml often omits the version (or uses a range
 			// like ">=1.2.0" that isn't a real version), but ansible-galaxy
-			// has already resolved it to a concrete release on disk.
-			version := readGalaxyInstalledCollectionVersion(ansibleHome, c.Name)
+			// has already resolved it to a concrete release on disk. Read from
+			// the base actually targeted: the global base when collectionsPath
+			// is set, else the per-user home.
+			var version string
+			if collectionsPath != "" {
+				version = readGalaxyInstalledCollectionVersionFromBase(collectionsPath, c.Name)
+			} else {
+				version = readGalaxyInstalledCollectionVersion(ansibleHome, c.Name)
+			}
 			if version == "" {
 				version = c.Version
 			}
-			results = append(results, RoleInstallResult{Name: c.Name, Version: version, OK: true})
+			results = append(results, AnsibleInstallResult{Name: c.Name, Version: version, OK: true})
 		}
 	}
 	return results, nil
@@ -280,14 +280,12 @@ func hasRequirementsCollections(requirementsYAML []byte) bool {
 //
 // Per-shape rules:
 //   - bare name (`myrole`) or 2-part (`org.repo`): must appear under `roles:`
-//     or as a directory under the source's `roles/`.
+//     or answer to a role under the source's `roles/` — by dir basename or
+//     by the role's galaxy identity from meta (the name installs land under).
 //   - 3-part FQCN (`namespace.collection.role`): the parent collection
 //     (`namespace.collection`) must appear under `collections:`.
 func findUndeclaredDependencies(walked *WalkedSource) []UndeclaredDependency {
-	localRoles := map[string]bool{}
-	for _, dir := range walked.LocalRoles {
-		localRoles[filepath.Base(dir)] = true
-	}
+	localRoles := localRoleNamesByRef(walked)
 	var out []UndeclaredDependency
 	for _, bp := range walked.Blueprints {
 		declaredRoles, declaredCollections := parseDeclaredRequirements(bp.RequirementsYAML)
@@ -315,7 +313,8 @@ func findUndeclaredDependencies(walked *WalkedSource) []UndeclaredDependency {
 			bpID = bp.Manifest.ID
 		}
 		for _, ref := range refs {
-			if localRoles[ref] || declaredRoles[ref] || declaredSubscription[ref] {
+			_, isLocal := localRoles[ref]
+			if isLocal || declaredRoles[ref] || declaredSubscription[ref] {
 				continue
 			}
 			parts := strings.Split(ref, ".")
@@ -376,8 +375,8 @@ func parseDeclaredRequirements(requirementsYAML []byte) (roles, collections map[
 //	"'community.general:9.4.0' was installed successfully"
 //	"Nothing to do. All requested collections are already installed."
 //	"ERROR! Failed to resolve the requested dependencies map. ..."
-func parseGalaxyCollectionInstallOutput(out string) []RoleInstallResult {
-	var results []RoleInstallResult
+func parseGalaxyCollectionInstallOutput(out string) []AnsibleInstallResult {
+	var results []AnsibleInstallResult
 	seen := map[string]bool{}
 	for _, raw := range strings.Split(out, "\n") {
 		line := strings.TrimSpace(raw)
@@ -386,17 +385,17 @@ func parseGalaxyCollectionInstallOutput(out string) []RoleInstallResult {
 			name, version, ok := parseCollectionInstallingLine(line)
 			if ok && !seen[name] {
 				seen[name] = true
-				results = append(results, RoleInstallResult{Name: name, Version: version, OK: true})
+				results = append(results, AnsibleInstallResult{Name: name, Version: version, OK: true})
 			}
 		case strings.Contains(line, "was installed successfully"):
 			// Format: "'ns.coll:1.2.3' was installed successfully"
 			name, version, ok := parseCollectionQuotedSpec(line)
 			if ok && !seen[name] {
 				seen[name] = true
-				results = append(results, RoleInstallResult{Name: name, Version: version, OK: true})
+				results = append(results, AnsibleInstallResult{Name: name, Version: version, OK: true})
 			}
 		case strings.HasPrefix(line, "ERROR!"):
-			results = append(results, RoleInstallResult{OK: false, Error: strings.TrimPrefix(line, "ERROR! ")})
+			results = append(results, AnsibleInstallResult{OK: false, Error: strings.TrimPrefix(line, "ERROR! ")})
 		}
 	}
 	return results
@@ -448,8 +447,8 @@ func splitCollectionSpec(spec string) (name, version string, ok bool) {
 //	"- the role geerlingguy.docker is already installed, skipping."
 //	"[WARNING]: - <name> is already installed, skipping"
 //	"[WARNING]: - <name> was NOT installed successfully: <reason>"
-func parseGalaxyInstallOutput(out string) []RoleInstallResult {
-	var results []RoleInstallResult
+func parseGalaxyInstallOutput(out string) []AnsibleInstallResult {
+	var results []AnsibleInstallResult
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 
@@ -464,7 +463,7 @@ func parseGalaxyInstallOutput(out string) []RoleInstallResult {
 					name = strings.TrimSpace(body[:idx])
 					reason = strings.TrimSpace(body[idx+len(" was NOT installed successfully:"):])
 				}
-				results = append(results, RoleInstallResult{Name: name, OK: false, Error: reason})
+				results = append(results, AnsibleInstallResult{Name: name, OK: false, Error: reason})
 				continue
 			} else {
 				continue
@@ -482,7 +481,7 @@ func parseGalaxyInstallOutput(out string) []RoleInstallResult {
 				if len(parts) >= 2 && strings.HasPrefix(parts[1], "(") {
 					ver = strings.Trim(parts[1], "()")
 				}
-				results = append(results, RoleInstallResult{Name: name, Version: ver, OK: true})
+				results = append(results, AnsibleInstallResult{Name: name, Version: ver, OK: true})
 			}
 		case strings.Contains(line, "is already installed"):
 			parts := strings.Fields(strings.TrimPrefix(line, "-"))
@@ -495,14 +494,14 @@ func parseGalaxyInstallOutput(out string) []RoleInstallResult {
 				if len(parts) >= 2 && strings.HasPrefix(parts[1], "(") {
 					ver = strings.Trim(parts[1], "()")
 				}
-				results = append(results, RoleInstallResult{Name: name, Version: ver, OK: true, Error: "already installed (skipped)"})
+				results = append(results, AnsibleInstallResult{Name: name, Version: ver, OK: true, Error: "already installed (skipped)"})
 			}
 		case strings.HasPrefix(strings.ToUpper(line), "ERROR! - YOU CAN USE --IGNORE-ERRORS"):
 			// Generic trailing line ansible-galaxy emits whenever any role failed.
 			// The per-role failure was already captured from the [WARNING]: line.
 			continue
 		case strings.HasPrefix(strings.ToUpper(line), "ERROR"):
-			results = append(results, RoleInstallResult{OK: false, Error: line})
+			results = append(results, AnsibleInstallResult{OK: false, Error: line})
 		}
 	}
 	return results
@@ -512,7 +511,7 @@ func parseGalaxyInstallOutput(out string) []RoleInstallResult {
 // results to OK=false when the on-disk version disagrees with the requested
 // pin. Bare-name deps (no pin) are left alone — "already installed" is the
 // right answer for them.
-func detectGalaxyVersionMismatches(results []RoleInstallResult, requirementsYAML []byte, rolesPath string) []RoleInstallResult {
+func detectGalaxyVersionMismatches(results []AnsibleInstallResult, requirementsYAML []byte, rolesPath string) []AnsibleInstallResult {
 	requested := parseRequestedVersions(requirementsYAML)
 	for i, r := range results {
 		if !r.OK || !strings.Contains(r.Error, "already installed") {
@@ -550,23 +549,61 @@ func parseRequestedVersions(data []byte) map[string]string {
 }
 
 // readGalaxyInstalledCollectionVersion returns the version recorded in
-// MANIFEST.json for an installed Ansible collection, or "" if the file is
-// missing or unreadable.
+// MANIFEST.json for a collection installed under the per-user ansible home, or
+// "" if the file is missing or unreadable.
 func readGalaxyInstalledCollectionVersion(ansibleHome, name string) string {
 	if ansibleHome == "" {
+		return ""
+	}
+	return readGalaxyInstalledCollectionVersionFromBase(filepath.Join(ansibleHome, "collections"), name)
+}
+
+// readGalaxyInstalledCollectionVersionFromBase reads the MANIFEST.json version
+// of an installed collection from a collections base — the directory that
+// directly contains ansible_collections/ (a per-user "<home>/collections" or
+// the shared global-collections path). Returns "" if missing or unreadable.
+func readGalaxyInstalledCollectionVersionFromBase(base, name string) string {
+	if base == "" {
 		return ""
 	}
 	dot := strings.Index(name, ".")
 	if dot <= 0 || dot == len(name)-1 {
 		return ""
 	}
-	manifestPath := filepath.Join(
-		ansibleHome, "collections", "ansible_collections",
+	v, _ := readCollectionManifestVersion(filepath.Join(
+		base, "ansible_collections",
 		name[:dot], name[dot+1:], "MANIFEST.json",
-	)
+	))
+	return v
+}
+
+// readInstalledCollectionVersion reports whether a collection is installed at
+// dir, and the version recorded there. ansible-galaxy-built installs carry a
+// MANIFEST.json; source-vendored collections are copied verbatim and carry
+// only their galaxy.yml — either one counts as installed.
+func readInstalledCollectionVersion(dir string) (version string, ok bool) {
+	if v, mok := readCollectionManifestVersion(filepath.Join(dir, "MANIFEST.json")); mok {
+		return v, true
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "galaxy.yml"))
+	if err != nil {
+		return "", false
+	}
+	gm, perr := ParseGalaxyManifest(data)
+	if perr != nil {
+		return "", true
+	}
+	return gm.Version, true
+}
+
+// readCollectionManifestVersion reads the version recorded in a collection's
+// MANIFEST.json at the given path. ok reports whether the manifest exists at
+// all — presence means the collection is installed even when the version
+// can't be parsed out.
+func readCollectionManifestVersion(manifestPath string) (version string, ok bool) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	var doc struct {
 		CollectionInfo struct {
@@ -574,9 +611,9 @@ func readGalaxyInstalledCollectionVersion(ansibleHome, name string) string {
 		} `json:"collection_info"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return ""
+		return "", true
 	}
-	return doc.CollectionInfo.Version
+	return doc.CollectionInfo.Version, true
 }
 
 func readGalaxyInstalledVersion(rolesPath, name string) string {
@@ -598,4 +635,76 @@ func readGalaxyInstalledVersion(rolesPath, name string) string {
 		return v
 	}
 	return ""
+}
+
+// localRoleVersion resolves a vendored role's version for the catalog and
+// install receipts. The author's meta/version.yml always wins — it is the
+// Ludus convention for versioning roles that aren't published to Galaxy, and
+// it survives tarball uploads. Otherwise, when the role dir is its own git
+// work tree (a submodule), the exact release tag at the pinned commit — the
+// same place ansible-galaxy's role versions come from (Galaxy registers a
+// repo's tags as versions at import time). A plain vendored dir or an
+// off-tag pin resolves to "": an untagged commit is not a release.
+func localRoleVersion(dir string) string {
+	if v := roleVersionYml(dir); v != "" {
+		return v
+	}
+	return exactGitTagVersion(dir)
+}
+
+// roleVersionYml leniently reads meta/version.yml's version field; "" when
+// the file is missing or malformed. (reflectRoleVersionToGalaxyInfo keeps
+// its own strict parse — the role-add API surfaces malformed files as
+// errors, while a catalog walk must not fail on one bad role.)
+func roleVersionYml(roleDir string) string {
+	data, err := os.ReadFile(filepath.Join(roleDir, "meta", "version.yml"))
+	if err != nil {
+		return ""
+	}
+	var doc map[string]string
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc["version"])
+}
+
+// exactGitTagVersion returns the release tag at dir's pinned commit, or "".
+// Guarded to dirs that are their own git work tree (submodules): a plain
+// vendored dir would resolve to the source repo itself, stamping the
+// bundle's tag onto every role. Off-tag pins return "" — mirroring Galaxy,
+// which only ever versions tags. A leading "v" is stripped (v1.6.0 → 1.6.0).
+func exactGitTagVersion(dir string) string {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	top, err := gitOutput(absDir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(top); err == nil {
+		top = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(absDir); err == nil {
+		absDir = resolved
+	}
+	if top != absDir {
+		return ""
+	}
+	tag, err := gitOutput(absDir, "describe", "--tags", "--exact-match", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(tag, "v")
+}
+
+// gitOutput runs git -C dir with the given args and returns trimmed stdout.
+func gitOutput(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = gitEnvWithSafeDirectory()
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }

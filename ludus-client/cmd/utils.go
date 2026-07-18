@@ -136,15 +136,14 @@ func tarDirectoryInMemory(dirPath string) (bytes.Buffer, error) {
 	return buf, nil
 }
 
-func didFailOrWantJSON(success bool, responseJSON []byte) bool {
-	if !success {
-		return true
-	}
+func checkSuccessAndProvideJSON(success bool, responseJSON []byte) {
 	if jsonFormat {
 		fmt.Printf("%s\n", responseJSON)
-		return true
+		os.Exit(0)
 	}
-	return false
+	if !success {
+		logger.Logger.Fatalf("Request failed")
+	}
 }
 
 func findFiles(rootDir, pattern1, pattern2 string) ([]string, error) {
@@ -402,9 +401,7 @@ func displayLogHistory(client *resty.Client, basePath string) bool {
 	if historyID != "" {
 		apiString := buildURLWithRangeAndUserID(fmt.Sprintf("%s/%s", basePath, historyID))
 		responseJSON, success := rest.GenericGet(client, apiString)
-		if didFailOrWantJSON(success, responseJSON) {
-			return true
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		var data dto.LogHistoryDetailResponse
 		if err := json.Unmarshal(responseJSON, &data); err != nil {
 			logger.Logger.Fatal(err.Error())
@@ -422,9 +419,7 @@ func displayLogHistory(client *resty.Client, basePath string) bool {
 	} else {
 		apiString := buildURLWithRangeAndUserID(basePath)
 		responseJSON, success := rest.GenericGet(client, apiString)
-		if didFailOrWantJSON(success, responseJSON) {
-			return true
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		var entries []dto.LogHistoryEntry
 		if err := json.Unmarshal(responseJSON, &entries); err != nil {
 			logger.Logger.Fatal(err.Error())

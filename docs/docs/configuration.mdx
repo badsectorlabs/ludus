@@ -121,6 +121,14 @@ ludus:
 global_role_vars:
   docker_edition: ce
 
+# Store data for external programs under this key. Ludus does not interpret its contents.
+ludus_extensions:
+  asset_tracker:
+    project_id: training-range
+    labels:
+      - windows
+      - active-directory
+
 # This key defines the settings for the router VM in your range. It is optional, and by default Ludus will deploy a router VM with the default settings.
 router:
   vm_name: "{{ range_id }}-router-debian11-x64"
@@ -222,6 +230,24 @@ notify:
    - "https://www.example.com/path"
 ```
 
+
+# Third-party Data
+
+Unknown top-level keys are rejected so that misspelled Ludus settings cannot pass validation. Put application-specific data under `ludus_extensions` instead. The value must be a mapping, but each program's entry may contain any JSON-compatible YAML value. Give each program its own key:
+
+```yaml
+ludus_extensions:
+  asset_tracker:
+    project_id: training-range
+    enabled: true
+    labels:
+      - windows
+      - active-directory
+  example_com_reporting:
+    retention_days: 30
+```
+
+Ludus preserves this data without interpreting it. The complete range config is also passed to Ansible as extra variables, so roles can read values such as `ludus_extensions.asset_tracker.project_id`.
 
 # Range Config Schema 
 

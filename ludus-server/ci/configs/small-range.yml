@@ -7,3 +7,11 @@ ludus:
     ram_gb: 4
     cpus: 2
     linux: true
+
+ludus_extensions:
+  ci:
+    schema_regression: preserved
+    mixed_values:
+      - true
+      - 3
+      - null

@@ -7,6 +7,16 @@ variable "vm_name" {
   default = "example-debian-12-template"
 }
 
+variable "description" {
+  type    = string
+  default = "Example Debian 12 template (CI fixture)."
+}
+
+variable "icon_path" {
+  type    = string
+  default = "icon.png"
+}
+
 variable "iso_url" {
   type    = string
   default = "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-12-netinst.iso"

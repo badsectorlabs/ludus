@@ -41,9 +41,7 @@ var testingStatusCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/range"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var rangeObject RangeObject
 		err := json.Unmarshal(responseJSON, &rangeObject)
@@ -115,9 +113,7 @@ var testingStartCmd = &cobra.Command{
 		}
 
 		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID("/testing/start"), "")
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 
 	},
@@ -151,9 +147,7 @@ Do you want to continue? (y/N): `)
 		}
 
 		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID("/testing/stop"), putBody)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 
 	},
@@ -290,9 +284,7 @@ func testingAllowDenyCmd(use, short, long string) *cobra.Command {
 			var success bool
 			responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/testing/"+use), string(payload))
 
-			if didFailOrWantJSON(success, responseJSON) {
-				return
-			}
+			checkSuccessAndProvideJSON(success, responseJSON)
 			handleAllowDenyResult(responseJSON)
 		},
 	}
@@ -335,9 +327,7 @@ var testingUpdateCmd = &cobra.Command{
 		var success bool
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/testing/update"), string(payload))
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }

@@ -128,9 +128,7 @@ var rolesListCmd = &cobra.Command{
 
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/ansible"))
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Unmarshal JSON data
 		var ansibleItems []AnsibleItem
@@ -175,9 +173,7 @@ func genericRoleCmd(use, short, long string, aliases []string) *cobra.Command {
 				filename := filepath.Base(roleDirectory)
 				responseJSON, success = rest.PostFileAndForceAndGlobal(client, buildURLWithRangeAndUserID("/ansible/role/fromtar"), roleTar.Bytes(), filename, ansibleForce, ansibleGlobal)
 
-				if didFailOrWantJSON(success, responseJSON) {
-					return
-				}
+				checkSuccessAndProvideJSON(success, responseJSON)
 				handleGenericResult(responseJSON)
 
 			} else if len(args) == 1 && roleDirectory == "" { // install from galaxy/URL
@@ -190,9 +186,7 @@ func genericRoleCmd(use, short, long string, aliases []string) *cobra.Command {
 			  }`, args[0], strconv.FormatBool(ansibleForce), ansibleVersion, action, strconv.FormatBool(ansibleGlobal))
 
 				responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/ansible/role"), requestBody)
-				if didFailOrWantJSON(success, responseJSON) {
-					return
-				}
+				checkSuccessAndProvideJSON(success, responseJSON)
 				handleGenericResult(responseJSON)
 			} else {
 				logger.Logger.Fatalf("You cannot specify a role name and a directory at the same time")
@@ -229,14 +223,13 @@ var collectionAddCmd = &cobra.Command{
 		requestBody := fmt.Sprintf(`{
 				"collection": "%s",
 				"force": %s,
-				"version": "%s"
-			  }`, args[0], strconv.FormatBool(ansibleForce), ansibleVersion)
+				"version": "%s",
+				"global": %s
+			  }`, args[0], strconv.FormatBool(ansibleForce), ansibleVersion, strconv.FormatBool(ansibleGlobal))
 
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/ansible/collection"), requestBody)
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -244,6 +237,33 @@ var collectionAddCmd = &cobra.Command{
 func setupCollectionAddCmd(command *cobra.Command) {
 	command.Flags().BoolVarP(&ansibleForce, "force", "f", false, "force the collection to be added")
 	command.Flags().StringVar(&ansibleVersion, "version", "", "the collection version to install")
+	command.Flags().BoolVarP(&ansibleGlobal, "global", "g", false, "install the collection for all users")
+}
+
+var collectionRemoveCmd = &cobra.Command{
+	Use:     "rm <collection>",
+	Short:   "Remove an ansible collection from the ludus host",
+	Long:    `Specify a collection FQCN (namespace.name) to remove from the ludus host. ansible-galaxy has no collection remove, so Ludus deletes the collection's directory.`,
+	Args:    cobra.ExactArgs(1),
+	Aliases: []string{"remove", "del"},
+	Run: func(cmd *cobra.Command, args []string) {
+		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+
+		requestBody := fmt.Sprintf(`{
+				"collection": "%s",
+				"action": "remove",
+				"global": %s
+			  }`, args[0], strconv.FormatBool(ansibleGlobal))
+
+		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/ansible/collection"), requestBody)
+
+		checkSuccessAndProvideJSON(success, responseJSON)
+		handleGenericResult(responseJSON)
+	},
+}
+
+func setupCollectionRemoveCmd(command *cobra.Command) {
+	command.Flags().BoolVarP(&ansibleGlobal, "global", "g", false, "remove the collection installed for all users (admin only)")
 }
 
 var collectionsListCmd = &cobra.Command{
@@ -258,9 +278,7 @@ var collectionsListCmd = &cobra.Command{
 		var success bool
 
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/ansible"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		// Unmarshal JSON data
 		var ansibleItems []AnsibleItem
 		err := json.Unmarshal([]byte(responseJSON), &ansibleItems)
@@ -284,9 +302,7 @@ var subscriptionRolesListCmd = &cobra.Command{
 		var success bool
 
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/ansible/subscription-roles"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Unmarshal JSON data
 		var subscriptionRoles []dto.GetSubscriptionRolesResponseItem
@@ -335,9 +351,7 @@ var subscriptionRolesInstallCmd = &cobra.Command{
 
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/ansible/subscription-roles"), string(requestJSON))
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Unmarshal response
 		var response dto.InstallSubscriptionRolesResponse
@@ -411,9 +425,7 @@ var roleScopeCmd = &cobra.Command{
 
 		responseJSON, success = rest.GenericJSONPatch(client, buildURLWithRangeAndUserID("/ansible/role/scope"), string(requestJSON))
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Unmarshal response
 		var response dto.MoveRoleScopeResponse
@@ -453,6 +465,8 @@ func init() {
 	collectionCmd.AddCommand(collectionsListCmd)
 	setupCollectionAddCmd(collectionAddCmd)
 	collectionCmd.AddCommand(collectionAddCmd)
+	setupCollectionRemoveCmd(collectionRemoveCmd)
+	collectionCmd.AddCommand(collectionRemoveCmd)
 	roleCmd.AddCommand(rolesListCmd)
 	setupRoleCmd(roleAddCmd)
 	setupRoleCmd(roleRmCmd)

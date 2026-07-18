@@ -1,5 +1,12 @@
 package dto
 
+import "regexp"
+
+// SourceIDRegex is the sourceID slug contract: one regex shared by the
+// server's create-time validation, the sources collection schema, and the
+// client's positional-argument validation, so the three can't drift.
+var SourceIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]*$`)
+
 type AddTemplateFromTarRequest struct {
 	Force bool   `json:"force,omitempty"`
 	File  string `json:"file,omitempty"`
@@ -63,6 +70,14 @@ type InstallCollectionRequest struct {
 	// (branch / tag / commit).
 	Version string `json:"version,omitempty"`
 	Force   bool   `json:"force,omitempty"`
+	// Action is "install" (default when empty) or "remove". ansible-galaxy has
+	// no `collection remove`, so a remove deletes the on-disk collection dir.
+	Action string `json:"action,omitempty"`
+	// Global selects the shared global-collections path; otherwise the caller's
+	// per-user collections path. On remove it points the directory deletion at
+	// the right scope; on install it passes --collections-path so the bytes
+	// land in the global base instead of the per-user ANSIBLE_HOME default.
+	Global bool `json:"global,omitempty"`
 }
 type InstallRoleRequest struct {
 	Role    string `json:"role,omitempty"`
@@ -224,35 +239,28 @@ type AutoShutdownRequest struct {
 // source row is created, the repo is fetched and walked, and a catalog is
 // returned. Callers drive the install via POST /sources/{id}/install.
 type CreateSourceRequest struct {
-	ID          string `json:"id,omitempty" form:"id"`
-	Type        string `json:"type" form:"type"`
-	URL         string `json:"url,omitempty" form:"url"`
-	Ref         string `json:"ref,omitempty" form:"ref"`
-	GlobalRoles bool   `json:"globalRoles,omitempty" form:"globalRoles"`
-	Force       bool   `json:"force,omitempty" form:"force"`
+	ID     string `json:"id,omitempty" form:"id"`
+	Type   string `json:"type" form:"type"`
+	URL    string `json:"url,omitempty" form:"url"`
+	Ref    string `json:"ref,omitempty" form:"ref"`
+	Global bool   `json:"global,omitempty" form:"global"`
+	Force  bool   `json:"force,omitempty" form:"force"`
 }
 
 // InstallRequest is the body for POST /sources/{sourceID}/install.
 //
-// Selection semantics depend on whether the field is present in the JSON
-// body:
-//   - absent (or JSON null)              → server snapshots the current
-//     walk into installSelection (the
-//     "install everything" shortcut)
-//   - present with non-empty arrays      → used as-is; replaces any
-//     previously persisted selection
-//   - present with all-empty arrays      → uninstall everything from this
-//     source; selection commits as
-//     empty and the prune logic
-//     removes all rows/files
+// Install is additive and stateless: the selection is applied as-is and
+// nothing is persisted or uninstalled. Absent (or JSON null) selection means
+// "install everything the source ships"; a present selection installs
+// exactly the named items (validated against the walk).
 //
 // The pointer here is what lets us tell "absent" apart from "present and
 // empty" — Go's json package gives us nil for the former and a non-nil
 // pointer to a zero-value struct for the latter.
 type InstallRequest struct {
-	Selection   *InstallSelectionDTO `json:"selection,omitempty"`
-	GlobalRoles bool                 `json:"globalRoles,omitempty"`
-	Force       bool                 `json:"force,omitempty"`
+	Selection *InstallSelectionDTO `json:"selection,omitempty"`
+	Global    bool                 `json:"global,omitempty"`
+	Force     bool                 `json:"force,omitempty"`
 	// NoDeps skips installing the selected blueprints' galaxy role/collection
 	// dependencies — no reaching out to ansible-galaxy; only what's already on
 	// disk is used. Default false: deps install, since a blueprint needs them
@@ -261,20 +269,22 @@ type InstallRequest struct {
 }
 
 type InstallSelectionDTO struct {
-	Blueprints []string `json:"blueprints,omitempty"`
-	Templates  []string `json:"templates,omitempty"`
-	LocalRoles []string `json:"localRoles,omitempty"`
+	Blueprints       []string `json:"blueprints,omitempty"`
+	Templates        []string `json:"templates,omitempty"`
+	LocalRoles       []string `json:"localRoles,omitempty"`
+	LocalCollections []string `json:"localCollections,omitempty"`
 }
 type UpdateSourceRequest struct {
-	Ref         string `json:"ref"`
-	GlobalRoles bool   `json:"globalRoles,omitempty"`
-	Force       bool   `json:"force,omitempty"`
+	Ref    string `json:"ref"`
+	URL    string `json:"url,omitempty"`
+	Global bool   `json:"global,omitempty"`
+	Force  bool   `json:"force,omitempty"`
 }
 type SyncSourceRequest struct {
-	GlobalRoles bool `json:"globalRoles,omitempty" form:"globalRoles"`
-	Force       bool `json:"force,omitempty" form:"force"`
+	Global bool `json:"global,omitempty" form:"global"`
+	Force  bool `json:"force,omitempty" form:"force"`
 }
 type InstallBlueprintDepsRequest struct {
-	GlobalRoles bool `json:"globalRoles,omitempty"`
-	ForceRoles  bool `json:"forceRoles,omitempty"`
+	Global     bool `json:"global,omitempty"`
+	ForceRoles bool `json:"forceRoles,omitempty"`
 }

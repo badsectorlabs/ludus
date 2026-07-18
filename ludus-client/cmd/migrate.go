@@ -191,9 +191,7 @@ In cluster mode, the SDN zone must be pre-configured with correct VXLAN peer IPs
 
 		// Run migration
 		responseJSON, success = rest.GenericJSONPost(client, "/migrate/sdn", nil)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		type Result struct {
 			Result string `json:"result"`

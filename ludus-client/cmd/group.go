@@ -53,9 +53,7 @@ var groupsListCmd = &cobra.Command{
 		var success bool
 		groupURL := buildURLWithRangeAndUserID("/groups")
 		responseJSON, success = rest.GenericGet(client, groupURL)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var data []dto.ListGroupsResponseItem
 		err := json.Unmarshal(responseJSON, &data)
@@ -102,9 +100,7 @@ var groupsCreateCmd = &cobra.Command{
 		var success bool
 		groupURL := buildURLWithRangeAndUserID("/groups")
 		responseJSON, success = rest.GenericJSONPost(client, groupURL, payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		logger.Logger.Info(fmt.Sprintf("Group '%s' created successfully", args[0]))
 	},
@@ -124,9 +120,7 @@ var groupsDeleteCmd = &cobra.Command{
 		var success bool
 		groupURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s", groupName))
 		responseJSON, success = rest.GenericDelete(client, groupURL)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		logger.Logger.Info(fmt.Sprintf("Group %s deleted successfully", groupName))
 	},
 }
@@ -164,9 +158,7 @@ var groupsAddUserCmd = &cobra.Command{
 
 		groupUserURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/users", groupName))
 		responseJSON, success := rest.GenericJSONPost(client, groupUserURL, payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		printBulkOperationResponse(responseJSON, "added", "user(s)")
 	},
@@ -196,9 +188,7 @@ var groupsAddRangeCmd = &cobra.Command{
 
 		groupRangeURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/ranges", groupName))
 		responseJSON, success := rest.GenericJSONPost(client, groupRangeURL, payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		printBulkOperationResponse(responseJSON, "granted access to", "range(s)")
 	},
@@ -231,9 +221,7 @@ var groupsRemoveUserCmd = &cobra.Command{
 
 		groupUserURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/users", groupName))
 		responseJSON, success := rest.GenericDeleteWithBody(client, groupUserURL, payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		printBulkOperationResponse(responseJSON, "removed", "user(s)")
 	},
@@ -259,9 +247,7 @@ var groupsRemoveRangeCmd = &cobra.Command{
 
 		groupRangeURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/ranges", groupName))
 		responseJSON, success := rest.GenericDeleteWithBody(client, groupRangeURL, payload)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		printBulkOperationResponse(responseJSON, "revoked access from", "range(s)")
 	},
@@ -281,9 +267,7 @@ var groupsMembersCmd = &cobra.Command{
 		var success bool
 		groupURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/users", groupName))
 		responseJSON, success = rest.GenericGet(client, groupURL)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var data []dto.ListGroupMembersResponseItem
 		err := json.Unmarshal(responseJSON, &data)
@@ -320,9 +304,7 @@ var groupsRangesCmd = &cobra.Command{
 
 		groupURL := buildURLWithRangeAndUserID(fmt.Sprintf("/groups/%s/ranges", groupName))
 		responseJSON, success = rest.GenericGet(client, groupURL)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		var data []dto.ListGroupRangesResponseItem
 		err := json.Unmarshal(responseJSON, &data)
 		if err != nil {

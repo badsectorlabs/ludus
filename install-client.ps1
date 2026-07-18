@@ -171,6 +171,11 @@ function Add-LudusToPath {
     } else {
         Write-Output "[+] Ludus binary directory appears to already be in the user PATH. This is okay if you're upgrading."
     }
+
+    # Add to the PATH environment variable for the current session
+    if ($env:Path -notmatch [regex]::Escape($ludusPath)) {
+        $env:Path = "$env:Path;$ludusPath"
+    }
 }
 
 #---  FUNCTION  ----------------------------------------------------------------

@@ -1,7 +1,7 @@
 [Unit]
 Description=Ludus API Server
 Wants=network-online.target
-After=network-online.target ludus-admin.service wg-quick@wg0.service
+After=network-online.target nss-lookup.target ludus-admin.service wg-quick@wg0.service
 
 [Service]
 Type=simple

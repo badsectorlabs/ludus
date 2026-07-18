@@ -1,7 +1,7 @@
 ludus:
   - vm_name: "{{ range_id }}-example"
     hostname: "example"
-    template: debian-12-x64-server-template
+    template: example-debian-12-template
     vlan: 10
     ip_last_octet: 10
     ram_gb: 2

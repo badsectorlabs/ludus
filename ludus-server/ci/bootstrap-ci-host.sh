@@ -160,6 +160,14 @@ build_seed_binaries() {
 
     install -d "$bin_dir"
 
+    echo "Building dynamic-inventory for CI seed server embed..."
+    (
+        cd "$REPO_DIR/dynamic-inventory"
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags "-s -w" \
+            -o "$REPO_DIR/ludus-server/ansible/range-management/dynamic-inventory"
+    )
+
     echo "Building ludus-server for CI seeds..."
     (
         cd "$REPO_DIR/ludus-server"
@@ -232,7 +240,7 @@ run_ci_template_setup() {
     ansible-galaxy collection install community.general ansible.utils ansible.posix >/dev/null
 
     set +e
-    ansible-playbook -i "$LUDUS_DIR/ansible/range-management/proxmox.py" \
+    ansible-playbook -i "$LUDUS_DIR/ansible/range-management/dynamic-inventory" \
         --extra-vars "@$CONFIG_FILE" \
         --extra-vars "@$extra_vars_file" \
         "$CI_DIR/ci-setup.yml"

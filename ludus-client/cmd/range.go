@@ -157,9 +157,7 @@ empty string to clear a field.`,
 		jsonBody, _ := json.Marshal(body)
 		path := fmt.Sprintf("/api/collections/ranges/records/%s", neturl.PathEscape(recordID))
 		responseJSON, success := rest.GenericJSONPatch(client, path, string(jsonBody))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		logger.Logger.Infof("Range '%s' updated", args[0])
 	},
 }
@@ -282,9 +280,7 @@ var rangeConfigGet = &cobra.Command{
 		} else {
 			responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/range/config"))
 		}
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		type Result struct {
 			RangeConfig string `json:"result"`
 		}
@@ -318,9 +314,7 @@ var rangeConfigSet = &cobra.Command{
 		}
 		responseJSON, success = rest.PostFileAndForce(client, buildURLWithRangeAndUserID("/range/config"), configFileContent, "file", force)
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -348,9 +342,7 @@ var rangeDefaultGetCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/user/default-range"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Unmarshal JSON data
 		var data dto.GetOrPostDefaultRangeIDResponse
@@ -387,9 +379,7 @@ var rangeDefaultSetCmd = &cobra.Command{
 			DefaultRangeID: rangeID,
 		}
 		responseJSON, success := rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/user/default-range"), requestBody)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Unmarshal JSON data
 		var data dto.GetOrPostDefaultRangeIDResponse
@@ -436,9 +426,7 @@ var rangeDeployCmd = &cobra.Command{
 
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/range/deploy"), deployBody)
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -474,9 +462,7 @@ var rangeLogsCmd = &cobra.Command{
 				apiString := buildURLWithRangeAndUserID("/range/logs")
 				apiString = addQueryParameterToURL(apiString, "cursor", strconv.Itoa(cursor))
 				responseJSON, success := rest.GenericGet(client, apiString)
-				if didFailOrWantJSON(success, responseJSON) {
-					return
-				}
+				checkSuccessAndProvideJSON(success, responseJSON)
 				newLogs, cursor = stringAndCursorFromResult(responseJSON)
 				if len(newLogs) > 0 {
 					fmt.Print(newLogs)
@@ -489,9 +475,7 @@ var rangeLogsCmd = &cobra.Command{
 				apiString = addQueryParameterToURL(apiString, "tail", strconv.Itoa(tail))
 			}
 			responseJSON, success := rest.GenericGet(client, apiString)
-			if didFailOrWantJSON(success, responseJSON) {
-				return
-			}
+			checkSuccessAndProvideJSON(success, responseJSON)
 			newLogs, _ := stringAndCursorFromResult(responseJSON)
 			fmt.Print(newLogs)
 		}
@@ -515,9 +499,7 @@ var rangeErrorsCmd = &cobra.Command{
 
 		apiString := buildURLWithRangeAndUserID("/range/logs")
 		responseJSON, success := rest.GenericGet(client, apiString)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		rangeLogs, _ := stringAndCursorFromResult(responseJSON)
 		printFatalErrorsFromString(rangeLogs)
 
@@ -703,9 +685,7 @@ var rangeGetTags = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/range/tags"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Unmarshal JSON data
 		var data dto.ListRangeTagsResponse
@@ -733,9 +713,7 @@ var rangeAbortCmd = &cobra.Command{
 
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID("/range/abort"), "")
 
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 	},
 }
@@ -770,9 +748,7 @@ var rangeEtcHostsGET = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/range/etchosts"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		type Result struct {
 			RangeConfig string `json:"result"`
@@ -798,9 +774,7 @@ var rangeTaskOutputCmd = &cobra.Command{
 
 		apiString := buildURLWithRangeAndUserID("/range/logs")
 		responseJSON, success := rest.GenericGet(client, apiString)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		rangeLogs, _ := stringAndCursorFromResult(responseJSON)
 		printTaskOutputFromString(rangeLogs, args[0])
 
@@ -920,9 +894,7 @@ var rangeAssignCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericJSONPost(client, buildURLWithRangeAndUserID(fmt.Sprintf("/ranges/assign/%s/%s", userID, rangeID)), nil)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 		handleGenericResult(responseJSON)
 		// fmt.Printf("Range %s assigned to user %s successfully\n", rangeID, userID)
 	},
@@ -950,9 +922,7 @@ var rangeRevokeCmd = &cobra.Command{
 			}
 		}
 		responseJSON, success = rest.GenericDelete(client, revokeURL)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		fmt.Printf("Range %s access revoked from user %s successfully\n", rangeID, userID)
 	},
@@ -978,9 +948,7 @@ var rangeUsersCmd = &cobra.Command{
 		rangesUsersURL := buildURLWithRangeAndUserID(fmt.Sprintf("/ranges/%s/users", rangeID))
 
 		responseJSON, success = rest.GenericGet(client, rangesUsersURL)
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var data []dto.ListRangeUsersResponseItem
 		err := json.Unmarshal(responseJSON, &data)
@@ -1013,9 +981,7 @@ var rangeAccessibleCmd = &cobra.Command{
 		var responseJSON []byte
 		var success bool
 		responseJSON, success = rest.GenericGet(client, buildURLWithRangeAndUserID("/ranges/accessible"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var data []dto.ListUserAccessibleRangesResponseItem
 		err := json.Unmarshal(responseJSON, &data)

@@ -47,7 +47,11 @@ func provisionNewUser(txApp core.App, user *models.User, plaintextPassword strin
 		return "", "", fmt.Errorf("get root pve client: %w", err)
 	}
 	userid := user.ProxmoxUsername() + "@" + user.ProxmoxRealm()
-	proxmoxWarn, err = pc.CreateUser(context.Background(), userid, plaintextPassword, []string{"ludus_users"})
+	proxmoxGroups := []string{"ludus_users"}
+	if user.IsAdmin() {
+		proxmoxGroups = append(proxmoxGroups, "ludus_admins")
+	}
+	proxmoxWarn, err = pc.CreateUser(context.Background(), userid, plaintextPassword, proxmoxGroups)
 	if err != nil {
 		return "", "", fmt.Errorf("create proxmox user %s: %w", userid, err)
 	}

@@ -24,9 +24,7 @@ var diagnosticsCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 		responseJSON, success := rest.GenericGet(client, "/diagnostics")
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		// Parse the diagnostics response
 		var diagnostics dto.GetDiagnosticsResponse

@@ -48,9 +48,7 @@ var autoShutdownGetCmd = &cobra.Command{
 		var client = rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
 
 		responseJSON, success := rest.GenericGet(client, buildURLWithRangeAndUserID("/range/auto-shutdown"))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var data AutoShutdownResponse
 		if err := json.Unmarshal(responseJSON, &data); err != nil {
@@ -74,9 +72,7 @@ var autoShutdownSetCmd = &cobra.Command{
 		payload, _ := json.Marshal(AutoShutdownPayload{AutoShutdownTimeout: autoShutdownTimeout})
 
 		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID("/range/auto-shutdown"), string(payload))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var data AutoShutdownResponse
 		if err := json.Unmarshal(responseJSON, &data); err != nil {
@@ -101,9 +97,7 @@ var autoShutdownResetCmd = &cobra.Command{
 		payload, _ := json.Marshal(map[string]string{"autoShutdownTimeout": ""})
 
 		responseJSON, success := rest.GenericJSONPut(client, buildURLWithRangeAndUserID("/range/auto-shutdown"), string(payload))
-		if didFailOrWantJSON(success, responseJSON) {
-			return
-		}
+		checkSuccessAndProvideJSON(success, responseJSON)
 
 		var data AutoShutdownResponse
 		if err := json.Unmarshal(responseJSON, &data); err != nil {
