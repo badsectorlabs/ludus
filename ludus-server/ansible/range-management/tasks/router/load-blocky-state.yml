@@ -1,0 +1,25 @@
+- name: Check for existing Blocky DNS state
+  ansible.builtin.stat:
+    path: /etc/blocky/ludus-state.yml
+  register: blocky_state_file
+
+- name: Read existing Blocky DNS state
+  ansible.builtin.slurp:
+    path: /etc/blocky/ludus-state.yml
+  register: blocky_state_contents
+  when: blocky_state_file.stat.exists
+
+- name: Set Blocky DNS state defaults
+  ansible.builtin.set_fact:
+    blocky_state_defaults:
+      range_rewrites: {}
+      user_rewrites: {}
+      wildcard_rewrites: {}
+      testing:
+        enabled: false
+        exempt_clients: []
+        allowed_domains: {}
+
+- name: Load Blocky DNS state
+  ansible.builtin.set_fact:
+    blocky_state: "{{ blocky_state_defaults | combine(((blocky_state_contents.content | b64decode | from_yaml) if blocky_state_file.stat.exists else {}) | default({}, true), recursive=True) }}"

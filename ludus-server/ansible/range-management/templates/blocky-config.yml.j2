@@ -1,0 +1,82 @@
+ports:
+  dns: 0.0.0.0:53
+  http: 127.0.0.1:4000
+
+upstreams:
+  groups:
+    default:
+{% for upstream in blocky_upstreams %}
+      - {{ upstream | to_json }}
+{% endfor %}
+  strategy: strict
+  init:
+    strategy: blocking
+  timeout: 10s
+
+bootstrapDns:
+  - tcp+udp:1.1.1.1
+  - tcp+udp:9.9.9.10
+  - tcp+udp:149.112.112.10
+
+connectIPVersion: v4
+
+queryLog:
+  type: csv
+  target: /var/log/blocky
+  logRetentionDays: 90
+
+log:
+  level: info
+  format: text
+  timestamp: true
+
+{% if blocky_exact_rewrites | length > 0 %}
+hostsFile:
+  sources:
+    - |
+{% for domain, ip in blocky_exact_rewrites | dictsort %}
+      {{ ip }} {{ domain }}
+{% endfor %}
+
+{% endif %}
+{% if blocky_wildcard_rewrites | length > 0 %}
+customDNS:
+  customTTL: 30s
+  filterUnmappedTypes: false
+  mapping:
+{% for domain, ip in blocky_wildcard_rewrites | dictsort %}
+    {{ domain | to_json }}: {{ ip | to_json }}
+{% endfor %}
+
+{% endif %}
+blocking:
+  blockType: nxDomain
+  blockTTL: 10s
+  loading:
+    refreshPeriod: 0s
+    strategy: blocking
+{% if blocky_testing_enabled %}
+  allowlists:
+    ludus_testing_allowed:
+      - |
+{% if blocky_testing_allowed_domains | length > 0 %}
+{% for domain, ip in blocky_testing_allowed_domains | dictsort %}
+        {{ domain }}
+        *.{{ domain }}
+{% endfor %}
+{% else %}
+        no-domains-allowed.invalid
+{% endif %}
+    ludus_testing_allow_all:
+      - |
+        /.*/
+  clientGroupsBlock:
+    10.0.0.0/8:
+      - ludus_testing_allowed
+{% for client_ip in blocky_testing_exempt_clients | sort %}
+    {{ client_ip }}/32:
+      - ludus_testing_allow_all
+{% endfor %}
+{% else %}
+  clientGroupsBlock: {}
+{% endif %}

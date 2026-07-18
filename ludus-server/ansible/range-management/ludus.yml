@@ -339,6 +339,7 @@
 - name: Add all hosts to DNS on the router
   tags: [dns-rewrites]
   hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
+  become: true
   tasks:
     - name: Add host to router DNS
       ansible.builtin.include_tasks: tasks/router/add-host-to-router-dns.yml
@@ -357,6 +358,7 @@
 - name: Add custom DNS rewrite rules
   tags: [dns-rewrites]
   hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
+  become: true
   tasks:
     - name: Add user-defined rewrites to the router
       ansible.builtin.include_tasks: tasks/router/add-user-defined-rewrites-to-router.yml
