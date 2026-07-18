@@ -58,6 +58,10 @@
   with_items:
     - Workstations
     - Servers
+  register: configure_default_ou
+  until: configure_default_ou is succeeded
+  retries: 30
+  delay: 10
 
 # Add the router as the DNS forwarder to allow windows machines to resolve addresses
 # Add home.arpa to the SuffixSearchList so we can access things by bare hostname (these will get forwarded to the router)

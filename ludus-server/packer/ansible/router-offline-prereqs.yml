@@ -1,0 +1,41 @@
+---
+- name: Install offline router prerequisites
+  hosts: all
+  become: true
+  tasks:
+    - name: Install router packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - conntrack
+          - curl
+          - dbus
+          - dnsmasq
+          - ifupdown
+          - iptables-persistent
+          - libpam-systemd
+          - python3-apt
+          - rsync
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Disable DNS in dnsmasq
+      ansible.builtin.lineinfile:
+        path: /etc/dnsmasq.conf
+        line: port=0
+        create: true
+        mode: "0644"
+
+    - name: Restart dnsmasq
+      ansible.builtin.service:
+        name: dnsmasq
+        state: restarted
+
+    - name: Install AdGuardHome
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -sS -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
+      args:
+        executable: /bin/bash
+        creates: /opt/AdGuardHome/AdGuardHome

@@ -12,14 +12,14 @@ bootstrap:
 install:
 	dab install python3 python3-pip python3-venv wireguard-tools \
 	  dnsmasq nftables iproute2 openssh-client sshpass curl jq ca-certificates \
-	  git gpg dbus systemd-resolved sudo
+	  git gpg dbus systemd-resolved sudo xorriso
 	# system user
 	dab exec groupadd -g 1001 ludus
 	dab exec useradd -u 1001 -g 1001 -m -s /bin/bash ludus
 	# dirs
 	dab exec mkdir -p /opt/ludus/install /opt/ludus/db /opt/ludus/tls \
-	  /opt/ludus/users /opt/ludus/collections /opt/ludus/resources/global-roles \
-	  /opt/ludus/resources/packer/plugins
+	  /opt/ludus/users /opt/ludus/resources/global-collections \
+	  /opt/ludus/resources/global-roles /opt/ludus/resources/packer/plugins
 	# binary + embedded trees
 	install -m 0755 ../../binaries/ludus-server $(BASEDIR)/opt/ludus/ludus-server
 	cp -r ../ansible $(BASEDIR)/opt/ludus/ansible
@@ -32,7 +32,7 @@ install:
 	  -r /opt/ludus/install/python-requirements.txt
 	dab exec rm -rf /opt/ludus/install/python-wheels /opt/ludus/install/python-requirements.txt
 	# galaxy collections (air-gap)
-	cp -r deps/collections/ansible_collections $(BASEDIR)/opt/ludus/collections/
+	cp -r deps/collections/ansible_collections $(BASEDIR)/opt/ludus/resources/global-collections/
 	cp -r deps/roles/* $(BASEDIR)/opt/ludus/resources/global-roles/
 	chmod 0755 $(BASEDIR)/opt/ludus/ansible/range-management/dynamic-inventory
 	# packer + plugins

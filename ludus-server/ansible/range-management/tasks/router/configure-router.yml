@@ -44,6 +44,11 @@
     content: |
       nameserver {{ ludus_nat_ip }}
 
+- name: Check for a preinstalled AdGuardHome binary
+  ansible.builtin.stat:
+    path: /opt/AdGuardHome/AdGuardHome
+  register: adguard_home_binary
+
 - name: Install AdGuardHome
   ansible.builtin.shell: |
     set -o pipefail
@@ -52,6 +57,7 @@
     executable: /bin/bash
   register: adguard_install
   failed_when: adguard_install.rc != 0 and 'the existing AdGuard Home installation is detected' not in adguard_install.stderr
+  when: not adguard_home_binary.stat.exists
 
 - name: Check AdGuardHome install directory
   ansible.builtin.stat:

@@ -200,21 +200,6 @@
   ignore_errors: true
   when: ansible_os_family == "Debian" and (interfaces_status_debian is changed or interfaces_status_redhat is changed)
 
-# Hostname - Linux
-- name: Setting hostname (Linux)
-  become: true
-  ansible.builtin.hostname:
-    name: "{{ vm_hostname }}"
-    use: debian
-  register: linux_hostname
-  when: ansible_os_family == "Debian"
-
-- name: Setting hostname (Linux-RedHat/CentOS/Alma/Rocky)
-  become: true
-  ansible.builtin.hostname:
-    name: "{{ vm_hostname }}"
-  register: linux_hostname
-  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux', 'CentOS']
 
 - name: Add IP address to /etc/hosts
   ansible.builtin.lineinfile:
@@ -231,6 +216,22 @@
     line: "127.0.1.1    {{ inventory_hostname }}"
     state: present
   become: true
+
+# Hostname - Linux
+- name: Setting hostname (Linux)
+  become: true
+  ansible.builtin.hostname:
+    name: "{{ vm_hostname }}"
+    use: debian
+  register: linux_hostname
+  when: ansible_os_family == "Debian"
+
+- name: Setting hostname (Linux-RedHat/CentOS/Alma/Rocky)
+  become: true
+  ansible.builtin.hostname:
+    name: "{{ vm_hostname }}"
+  register: linux_hostname
+  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux', 'CentOS']
 
 - name: Remove default entry for 127.0.0.1 from /etc/hosts
   ansible.builtin.lineinfile:

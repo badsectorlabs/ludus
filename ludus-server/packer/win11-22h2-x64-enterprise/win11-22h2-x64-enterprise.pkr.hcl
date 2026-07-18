@@ -72,6 +72,9 @@ variable "ansible_home" {
 variable "ludus_nat_interface" {
   type = string
 }
+variable "packer_http_bind_address" {
+  type = string
+}
 ####
 
 locals {
