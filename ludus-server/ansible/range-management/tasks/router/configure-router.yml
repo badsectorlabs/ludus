@@ -25,6 +25,7 @@
       - rsync
       - curl
       - conntrack
+      - tar
     state: present
 
 - name: Disable DNS in dnsmasq (only use it for DHCP)
@@ -38,23 +39,14 @@
     name: dnsmasq
     state: restarted
 
-- name: Install AdGuardHome
-  ansible.builtin.shell: |
-    curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
-  register: adguard_install
-  failed_when: adguard_install.rc != 0 and 'the existing AdGuard Home installation is detected' not in adguard_install.stderr
+- name: Install Blocky
+  ansible.builtin.include_tasks: tasks/router/ensure-blocky.yml
 
-- name: Configure AdGuardHome
-  ansible.builtin.template:
-    src: AdGuardHome.yaml.j2
-    dest: /opt/AdGuardHome/AdGuardHome.yaml
-  when: adguard_install.rc == 0
+- name: Load Blocky DNS state
+  ansible.builtin.include_tasks: tasks/router/load-blocky-state.yml
 
-- name: Restart AdGuardHome to take config
-  ansible.builtin.service:
-    name: AdGuardHome
-    state: restarted
-  when: adguard_install.rc == 0
+- name: Save initial Blocky DNS state
+  ansible.builtin.include_tasks: tasks/router/save-blocky-state.yml
 
 - name: Drop a file to signal that we have completed configuration
   ansible.builtin.file:

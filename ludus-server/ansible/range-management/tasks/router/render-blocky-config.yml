@@ -1,0 +1,61 @@
+- name: Set Blocky upstream DNS defaults
+  ansible.builtin.set_fact:
+    blocky_upstreams: "{{ (router | default({})).upstream_dns | default(['https://1.1.1.1/dns-query']) }}"
+
+- name: Validate router upstream DNS list
+  ansible.builtin.assert:
+    that:
+      - blocky_upstreams is sequence
+      - blocky_upstreams is not string
+      - blocky_upstreams | length > 0
+    fail_msg: "router.upstream_dns must be a non-empty list of bare IP addresses or https:// DoH URLs."
+
+- name: Validate router upstream DNS values
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - (item | regex_search('^https://[^\\s]+$')) or (item | ansible.utils.ipaddr)
+    fail_msg: "router.upstream_dns entries must be bare IP addresses or https:// DoH URLs. Invalid value: {{ item }}"
+  loop: "{{ blocky_upstreams }}"
+
+- name: Build effective Blocky rewrite state
+  ansible.builtin.set_fact:
+    blocky_testing_state: "{{ blocky_state.testing | default({}) }}"
+    blocky_exact_rewrites: "{{ (blocky_state.range_rewrites | default({})) | combine(blocky_state.user_rewrites | default({}), recursive=False) | combine((blocky_state.testing | default({})).allowed_domains | default({}), recursive=False) }}"
+    blocky_wildcard_rewrites: "{{ blocky_state.wildcard_rewrites | default({}) }}"
+
+- name: Build effective Blocky testing state
+  ansible.builtin.set_fact:
+    blocky_testing_enabled: "{{ blocky_testing_state.enabled | default(false) }}"
+    blocky_testing_exempt_clients: "{{ blocky_testing_state.exempt_clients | default([]) }}"
+    blocky_testing_allowed_domains: "{{ blocky_testing_state.allowed_domains | default({}) }}"
+
+- name: Check for conflicting exact and wildcard DNS rewrites
+  ansible.builtin.assert:
+    that:
+      - (blocky_exact_rewrites | dict2items | selectattr('key', 'match', '(^|.*\\.)' + (item.key | regex_escape) + '$') | rejectattr('value', 'equalto', item.value) | list | length) == 0
+    fail_msg: "DNS rewrite conflict: wildcard *.{{ item.key }} points to {{ item.value }}, but an exact rewrite for {{ item.key }} or one of its subdomains points elsewhere. Blocky config-only wildcard rewrites also match the apex domain and all subdomains."
+  loop: "{{ blocky_wildcard_rewrites | dict2items }}"
+
+- name: Render Blocky configuration
+  ansible.builtin.template:
+    src: blocky-config.yml.j2
+    dest: /etc/blocky/config.yml
+    owner: root
+    group: blocky
+    mode: '0640'
+    validate: /usr/local/bin/blocky validate --config %s
+  register: blocky_config_render
+
+- name: Restart Blocky when config changed
+  ansible.builtin.service:
+    name: blocky
+    state: restarted
+    enabled: true
+  when: blocky_config_render.changed
+
+- name: Ensure Blocky is running
+  ansible.builtin.service:
+    name: blocky
+    state: started
+    enabled: true

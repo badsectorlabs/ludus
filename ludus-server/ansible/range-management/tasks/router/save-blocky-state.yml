@@ -1,0 +1,10 @@
+- name: Save Blocky DNS state
+  ansible.builtin.copy:
+    dest: /etc/blocky/ludus-state.yml
+    owner: root
+    group: root
+    mode: '0644'
+    content: "{{ blocky_state | to_nice_yaml(indent=2, sort_keys=True) }}"
+
+- name: Render Blocky config from DNS state
+  ansible.builtin.include_tasks: tasks/router/render-blocky-config.yml

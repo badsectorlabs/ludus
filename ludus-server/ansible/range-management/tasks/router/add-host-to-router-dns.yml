@@ -1,81 +1,29 @@
-- name: Get current DNS rules
-  ansible.builtin.uri:
-    url: http://127.0.0.1:3000/control/rewrite/list
-    method: GET
-    status_code: [200, 202]
-    return_content: true
-    headers:
-      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
-  register: rewrites
+- name: Ensure Blocky is installed
+  ansible.builtin.include_tasks: tasks/router/ensure-blocky.yml
 
-- name: Delete all rewrite rules to start fresh
-  ansible.builtin.uri:
-    url: http://127.0.0.1:3000/control/rewrite/delete
-    method: POST
-    status_code: [200, 202]
-    return_content: true
-    body_format: json
-    headers:
-      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
-    body:
-      domain: "{{ rewrite_item.domain }}"
-      answer: "{{ rewrite_item.answer }}"
-  loop: "{{ rewrites.content | from_json | list }}"
-  loop_control:
-    loop_var: rewrite_item
+- name: Load Blocky DNS state
+  ansible.builtin.include_tasks: tasks/router/load-blocky-state.yml
 
-- name: Add IP address of all hosts for this range_id to DNS without range_id prefix
-  ansible.builtin.uri:
-    url: http://127.0.0.1:3000/control/rewrite/add
-    method: POST
-    status_code: [200, 202]
-    return_content: true
-    body_format: json
-    headers:
-      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
-    body:
-      domain: "{{ item.hostname | regex_replace('^.*?-', '') }}"
-      answer: "10.{{ range_second_octet }}.{{ item.vlan }}.{{ item.ip_last_octet }}"
+- name: Initialize range DNS rewrites
+  ansible.builtin.set_fact:
+    blocky_range_rewrites: {}
+
+- name: Build range DNS rewrites
+  ansible.builtin.set_fact:
+    blocky_range_rewrites: >-
+      {{
+        blocky_range_rewrites | combine({
+          (item.hostname | lower | regex_replace('^.*?-', '')): '10.' + (range_second_octet | string) + '.' + (item.vlan | string) + '.' + (item.ip_last_octet | string),
+          (item.hostname | lower): '10.' + (range_second_octet | string) + '.' + (item.vlan | string) + '.' + (item.ip_last_octet | string),
+          ((item.hostname | lower | regex_replace('^.*?-', '')) + '.home.arpa'): '10.' + (range_second_octet | string) + '.' + (item.vlan | string) + '.' + (item.ip_last_octet | string),
+          ((item.hostname | lower) + '.home.arpa'): '10.' + (range_second_octet | string) + '.' + (item.vlan | string) + '.' + (item.ip_last_octet | string)
+        })
+      }}
   loop: "{{ ludus }}"
 
-- name: Add IP address of all hosts for this range_id to DNS with range_id prefix
-  ansible.builtin.uri:
-    url: http://127.0.0.1:3000/control/rewrite/add
-    method: POST
-    status_code: [200, 202]
-    return_content: true
-    body_format: json
-    headers:
-      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
-    body:
-      domain: "{{ item.hostname }}"
-      answer: "10.{{ range_second_octet }}.{{ item.vlan }}.{{ item.ip_last_octet }}"
-  loop: "{{ ludus }}"
+- name: Reset range and user DNS rewrite state
+  ansible.builtin.set_fact:
+    blocky_state: "{{ blocky_state | combine({'range_rewrites': blocky_range_rewrites, 'user_rewrites': {}, 'wildcard_rewrites': {}}, recursive=True) }}"
 
-- name: Add IP address of all hosts for this range_id to DNS without range_id prefix and with home.arpa
-  ansible.builtin.uri:
-    url: http://127.0.0.1:3000/control/rewrite/add
-    method: POST
-    status_code: [200, 202]
-    return_content: true
-    body_format: json
-    headers:
-      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
-    body:
-      domain: "{{ item.hostname | regex_replace('^.*?-', '') }}.home.arpa"
-      answer: "10.{{ range_second_octet }}.{{ item.vlan }}.{{ item.ip_last_octet }}"
-  loop: "{{ ludus }}"
-
-- name: Add IP address of all hosts for this range_id to DNS with range_id prefix and with home.arpa
-  ansible.builtin.uri:
-    url: http://127.0.0.1:3000/control/rewrite/add
-    method: POST
-    status_code: [200, 202]
-    return_content: true
-    body_format: json
-    headers:
-      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
-    body:
-      domain: "{{ item.hostname }}.home.arpa"
-      answer: "10.{{ range_second_octet }}.{{ item.vlan }}.{{ item.ip_last_octet }}"
-  loop: "{{ ludus }}"
+- name: Save Blocky DNS state
+  ansible.builtin.include_tasks: tasks/router/save-blocky-state.yml
