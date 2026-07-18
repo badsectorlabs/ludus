@@ -69,9 +69,37 @@ func (c *Client) EnsureSDNZone(ctx context.Context, name, kind string, peers []s
 	return c.do(ctx, "POST", "/api2/json/cluster/sdn/zones", strings.NewReader(form.Encode()), nil)
 }
 
+func (c *Client) SDNZoneType(ctx context.Context, name string) (string, error) {
+	var r apiResp[SDNZone]
+	if err := c.do(ctx, "GET", "/api2/json/cluster/sdn/zones/"+url.PathEscape(name), nil, &r); err != nil {
+		return "", err
+	}
+	if r.Data.Type == "" {
+		return "", fmt.Errorf("sdn zone %s has no type", name)
+	}
+	return r.Data.Type, nil
+}
+
 func (c *Client) EnsureVNet(ctx context.Context, zone, name string, tag int, vlanaware bool) error {
-	if err := c.do(ctx, "GET", "/api2/json/cluster/sdn/vnets/"+url.PathEscape(name), nil, nil); err == nil {
-		return nil
+	path := "/api2/json/cluster/sdn/vnets/" + url.PathEscape(name)
+	var existing apiResp[struct {
+		VLANAware int `json:"vlanaware"`
+		Tag       int `json:"tag"`
+	}]
+	if err := c.do(ctx, "GET", path, nil, &existing); err == nil {
+		wantVlanaware := 0
+		if vlanaware {
+			wantVlanaware = 1
+		}
+		tagMismatch := tag > 0 && existing.Data.Tag != tag
+		if existing.Data.VLANAware == wantVlanaware && !tagMismatch {
+			return nil
+		}
+		form := url.Values{"vlanaware": {fmt.Sprintf("%d", wantVlanaware)}}
+		if tag > 0 {
+			form.Set("tag", fmt.Sprintf("%d", tag))
+		}
+		return c.do(ctx, "PUT", path, strings.NewReader(form.Encode()), nil)
 	}
 	form := url.Values{"vnet": {name}, "zone": {zone}}
 	if tag > 0 {

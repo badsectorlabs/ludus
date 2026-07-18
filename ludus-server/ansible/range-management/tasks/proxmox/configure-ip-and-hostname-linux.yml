@@ -132,7 +132,7 @@
 # I tried to do this with uri and json_query, but JMESPath is a mess.
 - name: Get MAC for vlan interface (Linux)
   ansible.builtin.shell: |
-    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ proxmox_vmid }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ vlan }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
+    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ proxmox_vmid }}/config" | jq -r --arg tag "tag={{ vlan }}" --arg bridge "bridge={{ ludus_nat_interface }}" --arg static_ip "{{ static_ip | default('') }}" '.data | to_entries[] | select(.key|startswith("net")).value | select(contains($tag) or (($static_ip | startswith("192.0.2.")) and contains($bridge)))' | cut -d '=' -f 2 | cut -d ',' -f 1
   register: vlan_mac_command
   delegate_to: localhost
   become: false

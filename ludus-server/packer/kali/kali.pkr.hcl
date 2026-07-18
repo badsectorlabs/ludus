@@ -72,6 +72,9 @@ variable "ansible_home" {
 variable "ludus_nat_interface" {
   type = string
 }
+variable "packer_http_bind_address" {
+  type = string
+}
 ####
 
 locals {
@@ -92,12 +95,13 @@ source "proxmox-iso" "kali" {
     "keyboard-configuration/xkb-keymap=us <wait>",
     "locale=en_US <wait>",
     "netcfg/get_hostname=kali <wait>",
-    "preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/kali-preseed.cfg <wait>",
+    "preseed/url=http://${var.packer_http_bind_address}:{{ .HTTPPort }}/kali-preseed.cfg <wait>",
     "<enter><wait>"
   ]
   boot_key_interval = "100ms"
   boot_wait         = "15s"
   http_directory    = "./http"
+  http_bind_address = "${var.packer_http_bind_address}"
 
   boot_iso {
     type              = "ide"

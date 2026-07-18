@@ -15,6 +15,7 @@ type importedUser struct{ ProxmoxUsername string }
 
 // ReconcilePVE is the subset of pveclient used by reconciliation.
 type ReconcilePVE interface {
+	SDNZoneType(ctx context.Context, name string) (string, error)
 	EnsureVNet(ctx context.Context, zone, name string, tag int, vlanaware bool) error
 	ApplySDN(context.Context) error
 	UserExists(context.Context, string) (bool, error)
@@ -27,12 +28,19 @@ func reconcileImportedState(ctx context.Context, pc ReconcilePVE, cfg ludusapi.C
 
 	var warns []string
 	var rangeNums []int
-	for _, r := range ranges {
-		name := fmt.Sprintf("r%d", r.Number)
-		if err := pc.EnsureVNet(ctx, cfg.SDNZone, name, cfg.VXLANTagBase+r.Number, true); err != nil {
-			return warns, fmt.Errorf("vnet %s: %w", name, err)
+	if len(ranges) > 0 {
+		zoneType, err := pc.SDNZoneType(ctx, cfg.SDNZone)
+		if err != nil {
+			return warns, fmt.Errorf("sdn zone type: %w", err)
 		}
-		rangeNums = append(rangeNums, r.Number)
+		for _, r := range ranges {
+			name := fmt.Sprintf("r%d", r.Number)
+			tag, vlanaware := ludusapi.RangeVNetOptionsForZone(zoneType, cfg.VXLANTagBase, r.Number)
+			if err := pc.EnsureVNet(ctx, cfg.SDNZone, name, tag, vlanaware); err != nil {
+				return warns, fmt.Errorf("vnet %s: %w", name, err)
+			}
+			rangeNums = append(rangeNums, r.Number)
+		}
 	}
 	if len(rangeNums) > 0 {
 		if err := localgen.WriteRoutes(routesPath, rangeNums); err != nil {

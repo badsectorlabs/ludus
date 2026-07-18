@@ -44,9 +44,9 @@
     vlan: 1
     static_ip: "192.0.2.{{ 100 + range_second_octet }}"
     cidr_netmask: "24"
-    default_gateway: "192.0.2.254"
+    default_gateway: "{{ ludus_nat_ip }}"
     vm_hostname: "{{ range_id }}-router"
-    primary_dns_server: "192.0.2.254"
+    primary_dns_server: "{{ ludus_nat_ip }}"
 
 - name: Setup VLANs
   tags: [network]
@@ -887,9 +887,9 @@
         bridge_interface: "{{ ludus_nat_interface }}"
         static_ip: "192.0.2.2"
         cidr_netmask: "24"
-        default_gateway: "192.0.2.254"
+        default_gateway: "{{ ludus_nat_ip }}"
         vm_hostname: "nexus"
-        primary_dns_server: "192.0.2.254"
+        primary_dns_server: "{{ ludus_nat_ip }}"
         vlan: 1
 
 - name: Configure Nexus nuget cache VM requirements
@@ -1058,9 +1058,9 @@
         bridge_interface: "{{ ludus_nat_interface }}"
         static_ip: "192.0.2.3"
         cidr_netmask: "24"
-        default_gateway: "192.0.2.254"
+        default_gateway: "{{ ludus_nat_ip }}"
         vm_hostname: "share"
-        primary_dns_server: "192.0.2.254"
+        primary_dns_server: "{{ ludus_nat_ip }}"
         vlan: 1
 
 - name: Configure Ludus share VM requirements

@@ -33,22 +33,48 @@
     chain: INPUT
     flush: true
 
-- name: Get the VM id of the router via Proxmox API
-  ansible.builtin.shell: |
-    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/cluster/resources" 'type:vm' | jq '.[] | .[] | select(.name=="{{ router.vm_name | default(range_id + '-router-debian11-x64') }}").vmid'
+- name: Set router lookup name
+  ansible.builtin.set_fact:
+    router_lookup_name: "{{ router.vm_name | default(default_router_vm_name) }}"
+  when: router_vm_id is not defined or router_node_name is not defined
+
+- name: Get router VM info via Proxmox API
+  ansible.builtin.uri:
+    url: "{{ proxmox_url }}/api2/json/cluster/resources?type=vm"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}"
+    validate_certs: false
   delegate_to: localhost
   become: false
   register: router_id_command
-  when: router_vm_id is not defined
+  changed_when: false
+  no_log: true
+  when: router_vm_id is not defined or router_node_name is not defined
+
+- name: Set router VM info from API lookup
+  ansible.builtin.set_fact:
+    router_vm_info: "{{ (router_id_command.json.data | selectattr('name', 'equalto', router_lookup_name) | list | first) | default({}) }}"
+  when: router_vm_id is not defined or router_node_name is not defined
 
 - name: Set the router_vm_id from API lookup
   ansible.builtin.set_fact:
-    router_vm_id: "{{ router_id_command.stdout }}"
+    router_vm_id: "{{ router_vm_info.vmid | default('') }}"
   when: router_vm_id is not defined
+
+- name: Set the router_node_name from API lookup
+  ansible.builtin.set_fact:
+    router_node_name: "{{ router_vm_info.node | default(hostvars['localhost']['node_name']) }}"
+  when: router_node_name is not defined
+
+- name: Fail if router is missing on source node
+  ansible.builtin.fail:
+    msg: "Router VM {{ router_lookup_name }} does not exist in the Proxmox cluster"
+  when: router_vm_id | string | length == 0
 
 - name: Get the interface with a 192.0.2.x ip (WAN)
   ansible.builtin.shell: |
-    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
+    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ router_node_name | default(hostvars['localhost']['node_name']) }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
   delegate_to: localhost
   become: false
   register: wan_interface_command
@@ -213,7 +239,7 @@
 - name: Allow the Ludus IP to hit this router from the outside for ansible
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
-    source: "192.0.2.254"
+    source: "{{ ludus_nat_ip | default('192.0.2.254') }}"
     in_interface: "{{ router_external_interface }}"
     protocol: all
     jump: ACCEPT
@@ -223,13 +249,13 @@
     numeric: true
     rule_num: 2
 
-- name: Deny range traffic to the proxmox IP of "192.0.2.254"
+- name: Deny range traffic to the proxmox NAT gateway IP
   ansible.builtin.iptables:
     chain: LUDUS_DEFAULTS
     source: "10.{{ range_second_octet }}.0.0/16"
-    destination: "192.0.2.254"
+    destination: "{{ ludus_nat_gateway | default('192.0.2.254') }}"
     protocol: all
-    comment: "Default: Deny traffic to the host IP of 192.0.2.254"
+    comment: "Default: Deny traffic to the host IP of {{ ludus_nat_gateway | default('192.0.2.254') }}"
     jump: REJECT
     state: present
     action: insert
@@ -273,12 +299,13 @@
     {{ item }}
   loop: "{{ router.iptables_commands | default([], true) }}"
 
-- name: Reset the conntrack entries to prevent previously allowed traffic to continue
-  ansible.builtin.shell: conntrack -F
-  async: 5 # Because this resets the conntrack entries, ansible will hang unless we run it async
-  poll: 1
-
 - name: Save current state of the firewall to a file
   community.general.iptables_state:
     state: saved
     path: /etc/iptables/rules.v4
+
+- name: Reset the conntrack entries to prevent previously allowed traffic to continue
+  ansible.builtin.shell: timeout 2 conntrack -F || true
+  async: 5 # Flushing conntrack can interrupt the SSH control connection.
+  poll: 0
+  changed_when: false

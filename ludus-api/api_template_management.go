@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
+	goproxmox "github.com/luthermonson/go-proxmox"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/zclconf/go-cty/cty"
 )
@@ -298,6 +299,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		`-var 'iso_storage_pool={{.ProxmoxISOStoragePool}}' ` +
 		`-var 'ansible_home={{.UsersAnsibleDir}}' ` +
 		`-var 'ludus_nat_interface={{.LudusNATInterface}}' ` +
+		`-var 'packer_http_bind_address={{.PackerHTTPBindAddress}}' ` +
 		`{{.PackerFile}}`
 
 	packerVerbose := "1"
@@ -318,6 +320,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		UsersAnsibleDir        string
 		PackerFile             string
 		LudusNATInterface      string
+		PackerHTTPBindAddress  string
 	}{
 		ludusInstallPath,
 		user.ProxmoxTokenId(),
@@ -334,6 +337,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		usersAnsibleDir,
 		packerFile,
 		ServerConfiguration.LudusNATInterface,
+		ServerConfiguration.LudusNATIP,
 	}
 
 	tmpl, err := template.New("command").Parse(tmplStr)
@@ -535,8 +539,24 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 	var templates []string
 
 	for _, vm := range allVMs {
-		if vm.Type == "qemu" && vm.Template == 1 {
-			templates = append(templates, vm.Name)
+		if vm.Type != "qemu" {
+			continue
+		}
+		if vm.Template == 1 {
+			templateName := vm.Name
+			if templateName == "" {
+				templateName, _ = templateInfoFromVMConfig(ctx, proxmoxClient, vm)
+			}
+			if templateName != "" {
+				templates = append(templates, templateName)
+			}
+			continue
+		}
+		if vm.Name == "" {
+			templateName, isTemplate := templateInfoFromVMConfig(ctx, proxmoxClient, vm)
+			if isTemplate && templateName != "" {
+				templates = append(templates, templateName)
+			}
 		}
 	}
 
@@ -597,6 +617,26 @@ func getTemplatesStatus(e *core.RequestEvent) ([]TemplateStatus, error) {
 		}
 	}
 	return templateStatusArray, nil
+}
+
+func templateInfoFromVMConfig(ctx context.Context, client *goproxmox.Client, vm *goproxmox.ClusterResource) (string, bool) {
+	if vm == nil || vm.Node == "" || vm.VMID == 0 {
+		return "", false
+	}
+	node, err := client.Node(ctx, vm.Node)
+	if err != nil {
+		logger.Debug(fmt.Sprintf("Unable to get node %s for template VMID %d: %v", vm.Node, vm.VMID, err))
+		return "", false
+	}
+	templateVM, err := node.VirtualMachine(ctx, int(vm.VMID))
+	if err != nil {
+		logger.Debug(fmt.Sprintf("Unable to get config for template VMID %d on node %s: %v", vm.VMID, vm.Node, err))
+		return "", false
+	}
+	if templateVM.VirtualMachineConfig == nil {
+		return "", false
+	}
+	return templateVM.VirtualMachineConfig.Name, templateVM.VirtualMachineConfig.Template == 1
 }
 
 func getTemplateNameArray(e *core.RequestEvent, onlyBuilt bool) ([]string, error) {

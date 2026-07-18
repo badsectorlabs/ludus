@@ -33,8 +33,13 @@ type Storage struct {
 	Content string `json:"content"`
 }
 
+type SDNZone struct {
+	Zone string `json:"zone"`
+	Type string `json:"type"`
+}
+
 type NodeStatus struct {
-	CPU     float64  `json:"cpu"`    // 0.0-1.0
+	CPU     float64  `json:"cpu"` // 0.0-1.0
 	Memory  Memory   `json:"memory"`
 	Uptime  int64    `json:"uptime"`
 	LoadAvg []string `json:"loadavg"`

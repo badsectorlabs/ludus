@@ -16,7 +16,25 @@ const (
 	SDNZoneTypeSimple = "simple" // Single-node SDN zone
 	SDNZoneTypeVXLAN  = "vxlan"  // Multi-node cluster SDN zone
 	NATVNetName       = "ludusnat"
+	NATVNetVXLANTag   = 100000
 )
+
+// RangeVNetOptionsForZone returns the Proxmox VNet options Ludus should use
+// for a range network in the given SDN zone type. Range VNets are VLAN-aware
+// because Ludus uses VM NIC VLAN tags inside each range.
+func RangeVNetOptionsForZone(zoneType string, vxlanTagBase, rangeNumber int) (tag int, vlanaware bool) {
+	if strings.EqualFold(zoneType, SDNZoneTypeVXLAN) {
+		return vxlanTagBase + rangeNumber, true
+	}
+	return 0, true
+}
+
+func NATVNetOptionsForZone(zoneType string) (tag int, vlanaware bool) {
+	if strings.EqualFold(zoneType, SDNZoneTypeVXLAN) {
+		return NATVNetVXLANTag, false
+	}
+	return 0, false
+}
 
 // IsClusterMode reports whether this Proxmox instance has more than one node.
 // Ludus always uses SDN regardless of this result; it only affects whether the
@@ -223,18 +241,18 @@ func ApplySDNChanges(client *goproxmox.Client) error {
 		return fmt.Errorf("failed to get cluster client: %w", err)
 	}
 
-	// Use library's SDNApply function - returns a Task
+	return applySDNChangesAndWait(ctx, cluster)
+}
+
+func applySDNChangesAndWait(ctx context.Context, cluster *goproxmox.Cluster) error {
 	task, err := cluster.SDNApply(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to apply SDN changes: %w", err)
 	}
-
-	// Wait for task to complete
 	err = task.Wait(ctx, 2*time.Second, 60*time.Second)
 	if err != nil {
 		return fmt.Errorf("SDN apply task failed: %w", err)
 	}
-
 	logger.Debug("Applied SDN changes successfully")
 	return nil
 }
@@ -323,15 +341,9 @@ func manageRangeVNet(rangeID string, rangeNumber int, present bool) error {
 	vnetName := fmt.Sprintf("r%d", rangeNumber) // e.g., "r1", "r2"
 	ctx := context.Background()
 
-	// Get root proxmox client for SDN operations
-	client, err := GetRootGoProxmoxClient()
+	pc, err := GetRootPVEClient()
 	if err != nil {
 		return fmt.Errorf("failed to get proxmox client: %w", err)
-	}
-
-	cluster, err := client.Cluster(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get cluster client: %w", err)
 	}
 
 	// Get configured zone name with fallback to default
@@ -341,46 +353,39 @@ func manageRangeVNet(rangeID string, rangeNumber int, present bool) error {
 	}
 
 	if present {
-		// Check if VNet already exists using library's SDNVNet function
-		_, err := cluster.SDNVNet(ctx, vnetName)
-		if err == nil {
-			logger.Debug(fmt.Sprintf("VNet %s already exists, skipping creation", vnetName))
-			return nil
-		}
-
-		// Create VNet for range using go-proxmox VNetOptions struct
-		// In cluster mode, VNets are VLAN aware and no subnet is needed
-		// Tag is required for VXLAN zones and must be unique per range
-		// Use vxlan_tag_base + rangeNumber to allow coexistence with pre-existing VXLAN VNets
-		vxlanTag := uint32(ServerConfiguration.VXLANTagBase + rangeNumber)
-		vnetOpts := &goproxmox.VNetOptions{
-			Name:      vnetName,
-			Zone:      zoneName,
-			Tag:       vxlanTag,
-			VlanAware: true,
-		}
-		err = cluster.NewSDNVNet(ctx, vnetOpts)
+		zoneType, err := pc.SDNZoneType(ctx, zoneName)
 		if err != nil {
+			return fmt.Errorf("failed to get SDN zone type for %s: %w", zoneName, err)
+		}
+		tag, vlanaware := RangeVNetOptionsForZone(zoneType, ServerConfiguration.VXLANTagBase, rangeNumber)
+
+		if err := pc.EnsureVNet(ctx, zoneName, vnetName, tag, vlanaware); err != nil {
 			return fmt.Errorf("failed to create VNet %s: %w", vnetName, err)
 		}
 
-		// Apply SDN changes using library's SDNApply (returns Task)
-		task, err := cluster.SDNApply(ctx)
+		cluster, err := pc.Raw().Cluster(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to apply SDN changes: %w", err)
+			return fmt.Errorf("failed to get cluster client: %w", err)
 		}
-		err = task.Wait(ctx, 2*time.Second, 60*time.Second)
-		if err != nil {
-			return fmt.Errorf("SDN apply task failed: %w", err)
+		if err := applySDNChangesAndWait(ctx, cluster); err != nil {
+			return err
 		}
 
-		// Add the route through the range router for this range network
-		addRouteForRangeNetworkInVNet(rangeNumber)
+		if err := addRouteForRangeNetworkInVNet(rangeNumber); err != nil {
+			return err
+		}
 
-		logger.Debug(fmt.Sprintf("Created VLAN-aware VNet %s (tag: %d) for range %s", vnetName, vxlanTag, rangeID))
+		logger.Debug(fmt.Sprintf("Created/updated VNet %s (zone type: %s, tag: %d, vlanaware: %t) for range %s", vnetName, zoneType, tag, vlanaware, rangeID))
 
 	} else {
+		client := pc.Raw()
+		cluster, err := client.Cluster(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get cluster client: %w", err)
+		}
+
 		// Delete VNet using library's DeleteSDNVNet function
+		deleted := true
 		err = cluster.DeleteSDNVNet(ctx, vnetName)
 		if err != nil {
 			// If VNet doesn't exist, that's OK
@@ -388,21 +393,20 @@ func manageRangeVNet(rangeID string, rangeNumber int, present bool) error {
 				return fmt.Errorf("failed to delete VNet %s: %w", vnetName, err)
 			}
 			logger.Debug(fmt.Sprintf("VNet %s does not exist, skipping deletion", vnetName))
-			return nil
+			deleted = false
 		}
 
-		// Apply SDN changes
-		task, err := cluster.SDNApply(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to apply SDN changes after deletion: %w", err)
-		}
-		err = task.Wait(ctx, 2*time.Second, 60*time.Second)
-		if err != nil {
-			return fmt.Errorf("SDN apply task failed: %w", err)
+		if deleted {
+			// Apply SDN changes
+			if err := applySDNChangesAndWait(ctx, cluster); err != nil {
+				return err
+			}
 		}
 
 		// Remove the route through the range router for this range network
-		removeRouteForRangeNetworkInVNet(rangeNumber)
+		if err := removeRouteForRangeNetworkInVNet(rangeNumber); err != nil {
+			return err
+		}
 
 		logger.Debug(fmt.Sprintf("Deleted VNet %s for range %s", vnetName, rangeID))
 	}
@@ -415,14 +419,9 @@ func manageRangeVNet(rangeID string, rangeNumber int, present bool) error {
 func setupNATVNet() error {
 	ctx := context.Background()
 
-	client, err := GetRootGoProxmoxClient()
+	pc, err := GetRootPVEClient()
 	if err != nil {
 		return fmt.Errorf("failed to get proxmox client: %w", err)
-	}
-
-	cluster, err := client.Cluster(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get cluster client: %w", err)
 	}
 
 	// Get configured zone name with fallback to default
@@ -431,33 +430,20 @@ func setupNATVNet() error {
 		zoneName = "ludus"
 	}
 
-	// Check if already exists using library's SDNVNet function
-	_, err = cluster.SDNVNet(ctx, NATVNetName)
-	if err == nil {
-		logger.Debug(fmt.Sprintf("VNet %s already exists, skipping creation", NATVNetName))
-		return nil // Already exists
-	}
-
-	// Create NAT VNet using go-proxmox VNetOptions
-	vnetOpts := &goproxmox.VNetOptions{
-		Name:      NATVNetName,
-		Zone:      zoneName,
-		Tag:       16777215,
-		VlanAware: true,
-	}
-	err = cluster.NewSDNVNet(ctx, vnetOpts)
+	zoneType, err := pc.SDNZoneType(ctx, zoneName)
 	if err != nil {
+		return fmt.Errorf("failed to get SDN zone type: %w", err)
+	}
+	tag, vlanaware := NATVNetOptionsForZone(zoneType)
+	if err := pc.EnsureVNet(ctx, zoneName, NATVNetName, tag, vlanaware); err != nil {
 		return fmt.Errorf("failed to create NAT VNet: %w", err)
 	}
-
-	// Apply changes using library's SDNApply
-	task, err := cluster.SDNApply(ctx)
+	cluster, err := pc.Raw().Cluster(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to apply SDN changes: %w", err)
+		return fmt.Errorf("failed to get cluster client: %w", err)
 	}
-	err = task.Wait(ctx, 2*time.Second, 60*time.Second)
-	if err != nil {
-		return fmt.Errorf("SDN apply task failed: %w", err)
+	if err := applySDNChangesAndWait(ctx, cluster); err != nil {
+		return err
 	}
 
 	// Make sure all ludus users have SDN.Use on the ludusnat vnet
@@ -551,10 +537,16 @@ fi
 		return fmt.Errorf("failed to apply block in file: %w", err)
 	}
 	if present {
-		// Add the route immediately
-		err = Run(fmt.Sprintf("ip route add 10.%d.0.0/16 via 192.0.2.%d", rangeNumber, 100+rangeNumber), "/tmp", "/tmp/sdn-routes.log")
+		// Apply the route immediately. Use replace so reruns recover cleanly from
+		// stale route entries left by interrupted range cleanup.
+		err = Run(fmt.Sprintf("ip route replace 10.%d.0.0/16 via 192.0.2.%d", rangeNumber, 100+rangeNumber), "/tmp", "/tmp/sdn-routes.log")
 		if err != nil {
 			return fmt.Errorf("failed to add route: %w", err)
+		}
+	} else {
+		err = Run(fmt.Sprintf("ip route delete 10.%d.0.0/16 via 192.0.2.%d 2>/dev/null || true", rangeNumber, 100+rangeNumber), "/tmp", "/tmp/sdn-routes.log")
+		if err != nil {
+			return fmt.Errorf("failed to remove route: %w", err)
 		}
 	}
 	return nil

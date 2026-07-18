@@ -7,15 +7,16 @@ import (
 )
 
 type DnsmasqConfig struct {
-	BindIP   string
-	Gateway  string
-	PoolLow  string
-	PoolHigh string
-	IfName   string
+	BindIP    string
+	Gateway   string
+	PoolLow   string
+	PoolHigh  string
+	IfName    string
+	Upstreams []string
 }
 
 func RenderDnsmasq(c DnsmasqConfig) string {
-	return fmt.Sprintf(`# Managed by Ludus bootstrap — do not edit
+	out := fmt.Sprintf(`# Managed by Ludus bootstrap — do not edit
 bind-interfaces
 interface=%s
 listen-address=%s
@@ -23,6 +24,14 @@ dhcp-range=%s,%s,12h
 dhcp-option=option:router,%s
 dhcp-option=option:dns-server,%s
 `, c.IfName, c.BindIP, c.PoolLow, c.PoolHigh, c.Gateway, c.BindIP)
+	if len(c.Upstreams) > 0 {
+		out += "no-resolv\n"
+		out += "filter-AAAA\n"
+		for _, upstream := range c.Upstreams {
+			out += fmt.Sprintf("server=%s\n", upstream)
+		}
+	}
+	return out
 }
 
 func WriteDnsmasq(path string, c DnsmasqConfig) error {

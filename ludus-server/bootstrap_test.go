@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"ludusapi"
@@ -49,8 +50,8 @@ func (m *mockPVE) EnsureSDNZone(_ context.Context, n, k string, _ []string) erro
 	m.calls = append(m.calls, "EnsureSDNZone:"+n+":"+k)
 	return nil
 }
-func (m *mockPVE) EnsureVNet(_ context.Context, _, n string, _ int, _ bool) error {
-	m.calls = append(m.calls, "EnsureVNet:"+n)
+func (m *mockPVE) EnsureVNet(_ context.Context, _, n string, tag int, vlanaware bool) error {
+	m.calls = append(m.calls, fmt.Sprintf("EnsureVNet:%s:%d:%t", n, tag, vlanaware))
 	return nil
 }
 func (m *mockPVE) EnsureSubnet(_ context.Context, v, c, _ string, _ bool) error {
@@ -65,10 +66,12 @@ func (m *mockPVE) ApplySDN(context.Context) error {
 func TestBootstrap_EnsureSequence_SingleNode(t *testing.T) {
 	m := &mockPVE{nodes: 1, version: pveclient.Version{Version: "8.2.4"}}
 	cfg := ludusapi.Configuration{
-		ProxmoxEndpoints:  []string{"https://10.0.0.1:8006"},
-		ProxmoxNode:       "pve",
-		SDNZone:           "ludus",
-		LudusNATInterface: "ludusnat",
+		ProxmoxEndpoints:      []string{"https://10.0.0.1:8006"},
+		ProxmoxNode:           "pve",
+		ProxmoxVMStoragePool:  "vmstore",
+		ProxmoxISOStoragePool: "isostore",
+		SDNZone:               "ludus",
+		LudusNATInterface:     "ludusnat",
 	}
 	dir := t.TempDir()
 	if err := bootstrapProxmoxObjects(t.Context(), m, cfg, dir); err != nil {
@@ -80,10 +83,13 @@ func TestBootstrap_EnsureSequence_SingleNode(t *testing.T) {
 		"EnsureGroup:ludus_users", "EnsureGroup:ludus_admins",
 		"EnsurePool:SHARED", "EnsurePool:ADMIN",
 		"EnsureSDNZone:ludus:simple",
-		"EnsureVNet:ludusnat",
+		"EnsureVNet:ludusnat:0:false",
 		"EnsureSubnet:ludusnat:192.0.2.0/24",
 		"ApplySDN",
 		"EnsureACL:/nodes:LudusPacker",
+		"EnsureACL:/vms:LudusPacker",
+		"EnsureACL:/storage/vmstore:LudusPacker",
+		"EnsureACL:/storage/isostore:LudusPacker",
 	}
 	got := map[string]bool{}
 	for _, c := range m.calls {
@@ -96,18 +102,61 @@ func TestBootstrap_EnsureSequence_SingleNode(t *testing.T) {
 	}
 }
 
+func TestBootstrap_StorageACLsAreDeduplicated(t *testing.T) {
+	m := &mockPVE{nodes: 1, version: pveclient.Version{Version: "8.2.4"}}
+	cfg := ludusapi.Configuration{
+		ProxmoxVMStoragePool:  "nfs",
+		ProxmoxISOStoragePool: "nfs",
+		SDNZone:               "ludus",
+		LudusNATInterface:     "ludusnat",
+	}
+	if err := bootstrapProxmoxObjects(t.Context(), m, cfg, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	got := 0
+	for _, c := range m.calls {
+		if c == "EnsureACL:/storage/nfs:LudusPacker" {
+			got++
+		}
+	}
+	if got != 1 {
+		t.Fatalf("expected one storage ACL for shared VM/ISO storage, got %d calls: %v", got, m.calls)
+	}
+}
+
+func TestBootstrap_PrivilegesAreAcceptedOnPVENine(t *testing.T) {
+	for role, privs := range map[string][]string{
+		"LudusPacker": privsPacker,
+		"LudusUser":   privsUser,
+		"LudusAdmin":  privsAdmin,
+	} {
+		for _, priv := range privs {
+			if priv == "VM.Monitor" {
+				t.Fatalf("%s includes removed PVE 9 privilege %q", role, priv)
+			}
+		}
+	}
+}
+
 func TestBootstrap_VXLANOnCluster(t *testing.T) {
 	m := &mockPVE{nodes: 3, version: pveclient.Version{Version: "8.2.4"}}
 	cfg := ludusapi.Configuration{ProxmoxEndpoints: []string{"https://10.0.0.1:8006"}, SDNZone: "ludus", LudusNATInterface: "ludusnat"}
 	_ = bootstrapProxmoxObjects(t.Context(), m, cfg, t.TempDir())
 	found := false
+	natTagged := false
 	for _, c := range m.calls {
 		if c == "EnsureSDNZone:ludus:vxlan" {
 			found = true
 		}
+		if c == "EnsureVNet:ludusnat:100000:false" {
+			natTagged = true
+		}
 	}
 	if !found {
 		t.Fatalf("expected vxlan zone on 3-node cluster: %v", m.calls)
+	}
+	if !natTagged {
+		t.Fatalf("expected tagged NAT VNet on vxlan cluster: %v", m.calls)
 	}
 }
 

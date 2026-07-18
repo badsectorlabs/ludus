@@ -283,3 +283,30 @@ func TestRaw_NotNil(t *testing.T) {
 		t.Fatal("Raw() should not be nil after successful New")
 	}
 }
+
+func TestRaw_FailsOverOn503(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/version" {
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": "8.0"}})
+			return
+		}
+		w.WriteHeader(503)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": "ok"})
+	}))
+	defer good.Close()
+
+	c, err := New(Config{Endpoints: []string{bad.URL, good.URL}, TokenID: "t", TokenSecret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Raw().Get(t.Context(), "/cluster/nextid", nil); err != nil {
+		t.Fatalf("expected raw failover success, got %v", err)
+	}
+	if c.ActiveEndpoint() != good.URL {
+		t.Fatalf("did not fail over: active=%s", c.ActiveEndpoint())
+	}
+}

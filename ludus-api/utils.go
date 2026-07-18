@@ -170,14 +170,20 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 	}
 
 	for _, vmResource := range allVMs {
-		rawVM := core.NewRecord(vmCollection)
-		thisVM := &models.VMs{}
-		thisVM.SetProxyRecord(rawVM)
+		vmName := vmResource.Name
+		if vmName == "" && vmResource.VMID != 0 {
+			vmName = lookupProxmoxVMName(ctx, vmResource.Node, vmResource.VMID)
+		}
+		if vmName == "" {
+			logger.Error(fmt.Sprintf("Unable to add VMID %d to database: name is blank after Proxmox lookup", vmResource.VMID))
+			continue
+		}
 
-		thisVM.SetProxmoxId(int(vmResource.VMID))
+		rawVM := core.NewRecord(vmCollection)
+		rawVM.Set("proxmoxID", int(vmResource.VMID))
 
 		// Get IP from guest agent if possible
-		thisVM.SetIp("null")
+		vmIP := "null"
 		node, err := proxmoxClient.Node(ctx, vmResource.Node)
 		if err != nil {
 			logger.Warn(fmt.Sprintf("Could not get node object for %s to fetch IP for VM %s: %s", vmResource.Node, vmResource.Name, err.Error()))
@@ -193,7 +199,7 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 						for _, ipInfo := range thisInterface.IPAddresses {
 							ipAddr := net.ParseIP(ipInfo.IPAddress)
 							if ipAddr != nil && network.Contains(ipAddr) {
-								thisVM.SetIp(ipAddr.String())
+								vmIP = ipAddr.String()
 								break interfaceLoop // IP found, no need to check other interfaces/addresses
 							}
 						}
@@ -204,24 +210,25 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 			}
 		}
 
-		if thisVM.Ip() == "null" {
+		if vmIP == "null" {
 			// Fallback: Fetch the IP address from the user's range config if the VM is set to use force_ip
-			thisVM.SetIp(GetIPForVMFromConfig(targetRange, vmResource.Name))
+			vmIP = GetIPForVMFromConfig(targetRange, vmName)
 		}
 
-		thisVM.SetRange(targetRange)
-		thisVM.SetName(vmResource.Name)
-		thisVM.SetPoweredOn(vmResource.Status == goproxmox.StatusVirtualMachineRunning)
-		thisVM.SetIsRouter(vmResource.Name == routerVMName)
-		thisVM.SetCpu(int(vmResource.MaxCPU))
-		thisVM.SetRam(int(vmResource.MaxMem / 1024 / 1024 / 1024)) // Convert bytes to GB
+		rawVM.Set("range", targetRange.Id)
+		rawVM.Set("name", vmName)
+		rawVM.Set("poweredOn", vmResource.Status == goproxmox.StatusVirtualMachineRunning)
+		rawVM.Set("ip", vmIP)
+		rawVM.Set("isRouter", vmName == routerVMName)
+		rawVM.Set("cpu", int(vmResource.MaxCPU))
+		rawVM.Set("ram", int(vmResource.MaxMem/1024/1024/1024)) // Convert bytes to GB
 
-		logger.Debug(fmt.Sprintf("Adding VM %s to range %s with range number %d", thisVM.Name(), targetRange.RangeId(), thisVM.Range().RangeNumber()))
-		err = app.Save(thisVM)
+		logger.Debug(fmt.Sprintf("Adding VM %s to range %s with range number %d", vmName, targetRange.RangeId(), targetRange.RangeNumber()))
+		err = app.Save(rawVM)
 		if err == nil {
 			rangeVMCount++
 		} else {
-			logger.Error(fmt.Sprintf("Unable to add VM %s to database: %s", thisVM.Name(), err.Error()))
+			logger.Error(fmt.Sprintf("Unable to add VM %s to database: %s", vmName, err.Error()))
 		}
 	}
 
@@ -237,6 +244,7 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 		return errors.New("unable to update range VM count: " + err.Error())
 	}
 
+	targetRange.SetNumberOfVms(rangeVMCount)
 	logger.Debug(fmt.Sprintf("Updated range %s with %d VMs", targetRange.RangeId(), rangeVMCount))
 	e.Set("rangeHasBeenUpdatedThisRequest", true)
 

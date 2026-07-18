@@ -38,23 +38,40 @@
     name: dnsmasq
     state: restarted
 
+- name: Use NAT DNS while installing AdGuardHome
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver {{ ludus_nat_ip }}
+
 - name: Install AdGuardHome
   ansible.builtin.shell: |
+    set -o pipefail
     curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
+  args:
+    executable: /bin/bash
   register: adguard_install
   failed_when: adguard_install.rc != 0 and 'the existing AdGuard Home installation is detected' not in adguard_install.stderr
+
+- name: Check AdGuardHome install directory
+  ansible.builtin.stat:
+    path: /opt/AdGuardHome
+  register: adguard_home_dir
+
+- name: Fail if AdGuardHome did not install
+  ansible.builtin.fail:
+    msg: "AdGuardHome install did not create /opt/AdGuardHome"
+  when: not adguard_home_dir.stat.isdir
 
 - name: Configure AdGuardHome
   ansible.builtin.template:
     src: AdGuardHome.yaml.j2
     dest: /opt/AdGuardHome/AdGuardHome.yaml
-  when: adguard_install.rc == 0
 
 - name: Restart AdGuardHome to take config
   ansible.builtin.service:
     name: AdGuardHome
     state: restarted
-  when: adguard_install.rc == 0
 
 - name: Drop a file to signal that we have completed configuration
   ansible.builtin.file:

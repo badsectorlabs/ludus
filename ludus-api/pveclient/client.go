@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -29,7 +30,8 @@ type Client struct {
 	endpoints []endpoint
 	activeIdx int
 	httpc     *http.Client
-	raw       *goproxmox.Client // bound to active endpoint; rebuilt on failover
+	rawHTTP   *http.Client
+	raw       *goproxmox.Client // failover-aware go-proxmox client
 	log       *slog.Logger
 	stopProbe chan struct{}
 	closeOnce sync.Once
@@ -86,6 +88,12 @@ func (c *Client) Close() {
 	c.closeOnce.Do(func() {
 		close(c.stopProbe)
 		c.httpc.CloseIdleConnections()
+		c.mu.RLock()
+		rawHTTP := c.rawHTTP
+		c.mu.RUnlock()
+		if rawHTTP != nil {
+			rawHTTP.CloseIdleConnections()
+		}
 	})
 }
 
@@ -95,8 +103,8 @@ func (c *Client) ActiveEndpoint() string {
 	return c.endpoints[c.activeIdx].url
 }
 
-// Raw returns the underlying go-proxmox client bound to the current active
-// endpoint. Callers must not cache it across requests if they want failover.
+// Raw returns the underlying go-proxmox client. Its transport rewrites requests
+// to the active endpoint and retries once on gateway failures.
 func (c *Client) Raw() *goproxmox.Client {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -104,10 +112,100 @@ func (c *Client) Raw() *goproxmox.Client {
 }
 
 func (c *Client) rebuildRaw() {
+	oldRawHTTP := c.rawHTTP
+	c.rawHTTP = &http.Client{
+		Timeout: c.cfg.Timeout,
+		Transport: &failoverTransport{
+			client: c,
+			transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: c.cfg.InsecureTLS},
+			},
+		},
+	}
 	c.raw = goproxmox.NewClient(c.endpoints[c.activeIdx].url+"/api2/json",
-		goproxmox.WithHTTPClient(c.httpc),
+		goproxmox.WithHTTPClient(c.rawHTTP),
 		goproxmox.WithAPIToken(c.cfg.TokenID, c.cfg.TokenSecret),
 	)
+	if oldRawHTTP != nil {
+		oldRawHTTP.CloseIdleConnections()
+	}
+}
+
+type failoverTransport struct {
+	client    *Client
+	transport http.RoundTripper
+}
+
+func (t *failoverTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var bodyBytes []byte
+	if req.Body != nil && req.GetBody == nil {
+		var err error
+		bodyBytes, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		req.Body.Close()
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		t.client.mu.RLock()
+		base := t.client.endpoints[t.client.activeIdx].url
+		t.client.mu.RUnlock()
+
+		outReq, err := cloneRequestForEndpoint(req, base, bodyBytes)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := t.transport.RoundTrip(outReq)
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		if !shouldFailover(err, status) {
+			return resp, err
+		}
+		if attempt == 1 {
+			if resp != nil {
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				return nil, fmt.Errorf("proxmox gateway failure after failover: %d", status)
+			}
+			return nil, err
+		}
+		if resp != nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		t.client.advance(base)
+	}
+	return nil, errors.New("pveclient: unreachable") // not hit
+}
+
+func cloneRequestForEndpoint(req *http.Request, endpoint string, bodyBytes []byte) (*http.Request, error) {
+	endpointURL, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	outReq := req.Clone(req.Context())
+	outURL := *req.URL
+	outURL.Scheme = endpointURL.Scheme
+	outURL.Host = endpointURL.Host
+	outReq.URL = &outURL
+
+	if req.Body != nil {
+		if bodyBytes != nil {
+			outReq.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			outReq.ContentLength = int64(len(bodyBytes))
+		} else {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			outReq.Body = body
+		}
+	}
+	return outReq, nil
 }
 
 func (c *Client) probe(ctx context.Context, idx int) bool {

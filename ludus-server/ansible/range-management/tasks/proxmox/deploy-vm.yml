@@ -1,3 +1,23 @@
+- name: Resolve template VMID on source node
+  ansible.builtin.uri:
+    url: "{{ proxmox_url }}/api2/json/nodes/{{ node_name }}/qemu"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}"
+    validate_certs: false
+  register: template_lookup_response
+  changed_when: false
+  no_log: true
+
+- name: Set template VMID
+  ansible.builtin.set_fact:
+    template_vmid: "{{ (template_lookup_response.json.data | selectattr('name', 'equalto', template_vm_name) | selectattr('template', 'defined') | selectattr('template', 'equalto', 1) | map(attribute='vmid') | list | first) | default('') }}"
+
+- name: Fail if template is missing on source node
+  ansible.builtin.fail:
+    msg: "VM template {{ template_vm_name }} does not exist on Proxmox node {{ node_name }}"
+  when: template_vmid | string | length == 0
+
 - name: Create a VM from a template
   community.general.proxmox_kvm:
     api_user: "{{ api_user }}"
@@ -5,6 +25,7 @@
     api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
     node: "{{ node_name }}"
+    vmid: "{{ template_vmid }}"
     # Node selection priority (computed by Go backend):
     # 1. vm_target_nodes[vm_name] - per-VM target node
     # 2. range_default_target_node - range-level default
@@ -108,7 +129,7 @@
     # Range VMs attach to range_bridge_name (e.g., 'r1' SDN VNet) when vmbr_number is set;
     # otherwise to bridge_interface (the NAT VNet, default 'ludusnat').
     bridge: "{{ range_bridge_name if (range_bridge_name is defined and vmbr_number is defined) else (bridge_interface | default('ludusnat')) }}"
-    tag: "{{ vlan | default(1) }}"
+    tag: "{{ vlan | default(1) if (range_bridge_name is defined and vmbr_number is defined) else omit }}"
     model: "{{'e1000' if 'antisandbox' in template_vm_name else 'virtio' }}" # Use virtio unless the template has 'antisandbox' in the name, then use e1000 (no driver required)
   when: clone_vm is changed
   register: network_change
@@ -170,8 +191,14 @@
   register: nodecheck
   changed_when: false
   until: >
-    nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('') |
-      regex_search('^(?!169\.254|172\.17)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') is not none
+    nodecheck.rc == 0
+    and (nodecheck.stdout | default('') | trim | length) > 0
+    and (nodecheck.stdout | default('') | trim | regex_search('^\{')) is not none
+    and
+    (
+      nodecheck.stdout | from_json | json_query('ansible_host') | default('') |
+        regex_search('^(?!169\.254|172\.17)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') is not none
+    )
     and
     (
       (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 192

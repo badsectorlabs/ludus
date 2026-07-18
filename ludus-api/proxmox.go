@@ -3,13 +3,16 @@ package ludusapi
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"ludusapi/models"
 	"ludusapi/pveclient"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -613,18 +616,254 @@ func getVMsForPool(e *core.RequestEvent, ctx context.Context, poolName string, c
 		return cachedVMsForPool.([]goproxmox.ClusterResource), nil
 	}
 
-	poolData, err := client.Pool(ctx, poolName, "qemu")
-	if err != nil {
+	type poolMember struct {
+		ID       string `json:"id,omitempty"`
+		Type     string `json:"type,omitempty"`
+		Node     string `json:"node,omitempty"`
+		Name     string `json:"name,omitempty"`
+		Status   string `json:"status,omitempty"`
+		Template uint64 `json:"template,omitempty"`
+		VMID     uint64 `json:"vmid,omitempty"`
+	}
+	var poolData struct {
+		Members []poolMember `json:"members"`
+	}
+	if err := proxmoxAPIGet(ctx, "/pools/"+url.PathEscape(poolName), &poolData); err != nil {
 		return nil, errors.New("unable to get pool by ID: " + err.Error())
 	}
 	vmsForPool := make([]goproxmox.ClusterResource, 0)
-	for _, vm := range poolData.Members {
-		if vm.Type == "qemu" && vm.Template != 1 {
-			vmsForPool = append(vmsForPool, vm)
+	for _, member := range poolData.Members {
+		if member.Type == "qemu" {
+			vm := goproxmox.ClusterResource{
+				ID:       member.ID,
+				Type:     member.Type,
+				Node:     member.Node,
+				Name:     member.Name,
+				Status:   member.Status,
+				Template: member.Template,
+				VMID:     member.VMID,
+			}
+			vm = hydratePoolVMResource(ctx, client, vm)
+			if vm.Template != 1 {
+				vmsForPool = append(vmsForPool, vm)
+			}
 		}
 	}
 	e.Set("getVMsForPool_"+poolName, vmsForPool)
 	return vmsForPool, nil
+}
+
+func hydratePoolVMResource(ctx context.Context, client *goproxmox.Client, resource goproxmox.ClusterResource) goproxmox.ClusterResource {
+	if resource.VMID == 0 && strings.HasPrefix(resource.ID, "qemu/") {
+		if vmid, err := strconv.ParseUint(strings.TrimPrefix(resource.ID, "qemu/"), 10, 64); err == nil {
+			resource.VMID = vmid
+		}
+	}
+	if resource.ID == "" && resource.VMID != 0 {
+		resource.ID = fmt.Sprintf("qemu/%d", resource.VMID)
+	}
+	if resource.Type == "" {
+		resource.Type = "qemu"
+	}
+
+	nodeName := resource.Node
+	if nodeName == "" {
+		node, err := findNodeForVM(ctx, client, resource.VMID)
+		if err != nil {
+			logger.Warn(fmt.Sprintf("Could not find node for pool VMID %d: %s", resource.VMID, err.Error()))
+			return resource
+		}
+		nodeName = node
+		resource.Node = nodeName
+	}
+
+	var status struct {
+		Name    string  `json:"name,omitempty"`
+		Status  string  `json:"status,omitempty"`
+		CPU     float64 `json:"cpu,omitempty"`
+		CPUs    uint64  `json:"cpus,omitempty"`
+		Mem     uint64  `json:"mem,omitempty"`
+		MaxMem  uint64  `json:"maxmem,omitempty"`
+		Disk    uint64  `json:"disk,omitempty"`
+		MaxDisk uint64  `json:"maxdisk,omitempty"`
+		NetIn   uint64  `json:"netin,omitempty"`
+		NetOut  uint64  `json:"netout,omitempty"`
+		Uptime  uint64  `json:"uptime,omitempty"`
+	}
+	if err := proxmoxAPIGet(ctx, fmt.Sprintf("/nodes/%s/qemu/%d/status/current", nodeName, resource.VMID), &status); err != nil {
+		logger.Warn(fmt.Sprintf("Could not get status for pool VMID %d on node %s: %s", resource.VMID, nodeName, err.Error()))
+	} else {
+		if status.Name != "" {
+			resource.Name = status.Name
+		}
+		resource.Node = nodeName
+		resource.Status = status.Status
+		resource.CPU = status.CPU
+		resource.MaxCPU = status.CPUs
+		resource.Mem = status.Mem
+		resource.MaxMem = status.MaxMem
+		resource.Disk = status.Disk
+		resource.MaxDisk = status.MaxDisk
+		resource.NetIn = status.NetIn
+		resource.NetOut = status.NetOut
+		resource.Uptime = status.Uptime
+	}
+
+	var config struct {
+		Name     string `json:"name,omitempty"`
+		Template int    `json:"template,omitempty"`
+	}
+	if err := proxmoxAPIGet(ctx, fmt.Sprintf("/nodes/%s/qemu/%d/config", nodeName, resource.VMID), &config); err != nil {
+		logger.Warn(fmt.Sprintf("Could not get config for pool VMID %d on node %s: %s", resource.VMID, nodeName, err.Error()))
+	} else {
+		if config.Name != "" {
+			resource.Name = config.Name
+		}
+		if config.Template == 1 {
+			resource.Template = 1
+		}
+	}
+
+	if resource.Name == "" && nodeName != "" && resource.VMID != 0 {
+		var nodeVMs []struct {
+			Name    string `json:"name,omitempty"`
+			Status  string `json:"status,omitempty"`
+			VMID    uint64 `json:"vmid,omitempty"`
+			CPUs    uint64 `json:"cpus,omitempty"`
+			MaxMem  uint64 `json:"maxmem,omitempty"`
+			Mem     uint64 `json:"mem,omitempty"`
+			MaxDisk uint64 `json:"maxdisk,omitempty"`
+			Disk    uint64 `json:"disk,omitempty"`
+			NetIn   uint64 `json:"netin,omitempty"`
+			NetOut  uint64 `json:"netout,omitempty"`
+			Uptime  uint64 `json:"uptime,omitempty"`
+		}
+		if err := proxmoxAPIGet(ctx, fmt.Sprintf("/nodes/%s/qemu", nodeName), &nodeVMs); err != nil {
+			logger.Warn(fmt.Sprintf("Could not get node VM list for pool VMID %d on node %s: %s", resource.VMID, nodeName, err.Error()))
+		} else {
+			for _, nodeVM := range nodeVMs {
+				if nodeVM.VMID == resource.VMID {
+					resource.Name = nodeVM.Name
+					if resource.Status == "" {
+						resource.Status = nodeVM.Status
+					}
+					if resource.MaxCPU == 0 {
+						resource.MaxCPU = nodeVM.CPUs
+					}
+					if resource.MaxMem == 0 {
+						resource.MaxMem = nodeVM.MaxMem
+					}
+					if resource.Mem == 0 {
+						resource.Mem = nodeVM.Mem
+					}
+					if resource.MaxDisk == 0 {
+						resource.MaxDisk = nodeVM.MaxDisk
+					}
+					if resource.Disk == 0 {
+						resource.Disk = nodeVM.Disk
+					}
+					if resource.NetIn == 0 {
+						resource.NetIn = nodeVM.NetIn
+					}
+					if resource.NetOut == 0 {
+						resource.NetOut = nodeVM.NetOut
+					}
+					if resource.Uptime == 0 {
+						resource.Uptime = nodeVM.Uptime
+					}
+					break
+				}
+			}
+		}
+	}
+	if resource.Name == "" {
+		logger.Warn(fmt.Sprintf("Pool VMID %d on node %s has no name after hydration", resource.VMID, nodeName))
+	}
+
+	return resource
+}
+
+func proxmoxAPIGet(ctx context.Context, path string, out interface{}) error {
+	base := strings.TrimRight(activeProxmoxEndpoint(), "/")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api2/json"+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "PVEAPIToken="+ServerConfiguration.ProxmoxTokenID+"="+ServerConfiguration.ProxmoxTokenSecret)
+
+	httpClient := http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: ServerConfiguration.ProxmoxInvalidCert},
+		},
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("proxmox API returned %s for %s", resp.Status, path)
+	}
+
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return err
+	}
+	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+		return nil
+	}
+	return json.Unmarshal(envelope.Data, out)
+}
+
+func lookupProxmoxVMName(ctx context.Context, nodeName string, vmid uint64) string {
+	if vmid == 0 {
+		return ""
+	}
+
+	if nodeName == "" {
+		var resources []struct {
+			Name string `json:"name,omitempty"`
+			Node string `json:"node,omitempty"`
+			Type string `json:"type,omitempty"`
+			VMID uint64 `json:"vmid,omitempty"`
+		}
+		if err := proxmoxAPIGet(ctx, "/cluster/resources?type=vm", &resources); err == nil {
+			for _, resource := range resources {
+				if resource.VMID == vmid && resource.Type == "qemu" {
+					if resource.Name != "" {
+						return resource.Name
+					}
+					nodeName = resource.Node
+					break
+				}
+			}
+		}
+	}
+
+	if nodeName != "" {
+		var config struct {
+			Name string `json:"name,omitempty"`
+		}
+		if err := proxmoxAPIGet(ctx, fmt.Sprintf("/nodes/%s/qemu/%d/config", nodeName, vmid), &config); err == nil && config.Name != "" {
+			return config.Name
+		}
+
+		var nodeVMs []struct {
+			Name string `json:"name,omitempty"`
+			VMID uint64 `json:"vmid,omitempty"`
+		}
+		if err := proxmoxAPIGet(ctx, fmt.Sprintf("/nodes/%s/qemu", nodeName), &nodeVMs); err == nil {
+			for _, nodeVM := range nodeVMs {
+				if nodeVM.VMID == vmid {
+					return nodeVM.Name
+				}
+			}
+		}
+	}
+
+	return ""
 }
 
 // waitForPoolEmpty waits until the specified pool has no non-template VMs.

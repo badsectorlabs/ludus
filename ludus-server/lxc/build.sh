@@ -7,6 +7,19 @@ cd "$(dirname "$0")"
 : "${PACKER_PROXMOX_VERSION:=1.2.1}"
 : "${PACKER_ANSIBLE_VERSION:=1.1.1}"
 
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: required command not found: $1" >&2
+    exit 1
+  fi
+}
+
+require_command curl
+require_command unzip
+require_command python3
+require_command ansible-galaxy
+require_command sha256sum
+
 mkdir -p deps
 if [[ ! -f deps/packer ]]; then
   curl -fsSL "https://releases.hashicorp.com/packer/${PACKER_VERSION}/packer_${PACKER_VERSION}_linux_amd64.zip" -o /tmp/packer.zip
@@ -14,12 +27,41 @@ if [[ ! -f deps/packer ]]; then
 fi
 for plugin in proxmox:${PACKER_PROXMOX_VERSION} ansible:${PACKER_ANSIBLE_VERSION}; do
   name=${plugin%%:*}; ver=${plugin##*:}
-  if [[ ! -f deps/packer-plugin-${name} ]]; then
+  rm -f "deps/packer-plugin-${name}"
+  if ! compgen -G "deps/packer-plugin-${name}_v${ver}_*" >/dev/null; then
     curl -fsSL "https://github.com/hashicorp/packer-plugin-${name}/releases/download/v${ver}/packer-plugin-${name}_v${ver}_x5.0_linux_amd64.zip" -o /tmp/pp.zip
     unzip -o /tmp/pp.zip -d deps/
-    mv deps/packer-plugin-${name}_* deps/packer-plugin-${name}
   fi
 done
+
+stage_packer_plugin() {
+  local name=$1
+  local source=$2
+  local version=$3
+  local binary
+  binary=$(find deps -maxdepth 1 -type f -name "packer-plugin-${name}_v${version}_*" | sort | head -n1)
+  if [[ -z "${binary}" ]]; then
+    echo "ERROR: packer-plugin-${name} v${version} not found in deps" >&2
+    exit 1
+  fi
+
+  local dest="deps/packer-plugins/${source}"
+  mkdir -p "${dest}"
+  cp "${binary}" "${dest}/"
+  sha256sum "${dest}/$(basename "${binary}")" | awk '{print $1}' > "${dest}/$(basename "${binary}")_SHA256SUM"
+}
+
+rm -rf deps/packer-plugins
+stage_packer_plugin proxmox github.com/hashicorp/proxmox "${PACKER_PROXMOX_VERSION}"
+stage_packer_plugin ansible github.com/hashicorp/ansible "${PACKER_ANSIBLE_VERSION}"
+
+mkdir -p deps/python-wheels
+python3 -m pip download --only-binary=:all: --dest deps/python-wheels -r python-requirements.txt
+
+rm -rf deps/collections deps/roles
+mkdir -p deps/collections deps/roles
+ansible-galaxy collection install -r ../ansible/requirements.yml -p deps/collections --force
+ansible-galaxy role install -r ../ansible/requirements.yml -p deps/roles --force
 
 if [[ ! -f ../../binaries/ludus-server ]]; then
   echo "ERROR: binaries/ludus-server not found (run 'build all' first)" >&2
@@ -27,9 +69,7 @@ if [[ ! -f ../../binaries/ludus-server ]]; then
 fi
 
 # Substitute version into dab.conf before make parses BASEDIR.
-# Work on a fresh copy from git so re-runs are idempotent.
-git checkout -- dab.conf 2>/dev/null || true
-sed -i "s/__LUDUS_VERSION__/${LUDUS_VERSION}/" dab.conf
+sed -i "s/^Version: .*/Version: ${LUDUS_VERSION}/" dab.conf
 
 make clean || true
 make LUDUS_VERSION="${LUDUS_VERSION}"

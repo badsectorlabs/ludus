@@ -90,8 +90,9 @@ print_help() {
       Default = /usr/local/bin
 
   Server (LXC) install flags — only used on a Proxmox host:
+  --server-only          Skip client download/install and only install the server LXC
   --version VER          Ludus version to install (default: latest release tag)
-  --template-file PATH   Use a local LXC template tarball (air-gapped install)
+  --template-file PATH   Use a local LXC template tarball (implies --server-only)
   --token-id ID          Proxmox API token ID (e.g. root@pam!ludus)
   --token-secret SECRET  Proxmox API token secret
   --no-prompt            Non-interactive; use defaults / supplied flags
@@ -252,6 +253,40 @@ download_file() {
   fi
   
   return "${rcode}"
+}
+
+fetch_latest_tag() {
+  local tag
+
+  if command_exists curl; then
+    tag=$(curl -s "https://gitlab.com/api/v4/projects/$PROJECT_ID/repository/tags" | grep -o '"name":"[^"]*' | cut -d'"' -f4 | head -n1)
+  elif command_exists wget; then
+    tag=$(wget -qO- "https://gitlab.com/api/v4/projects/$PROJECT_ID/repository/tags" | grep -o '"name":"[^"]*' | cut -d'"' -f4 | head -n1)
+  else
+    return 20
+  fi
+
+  if [[ -z "${tag}" ]]; then
+    return 1
+  fi
+  echo "${tag}"
+}
+
+infer_ludus_version_from_template() {
+  local name
+  local version
+
+  name=$(basename "${1}")
+  case "${name}" in
+    ludus-*-debian13-amd64.tar.zst)
+      version="${name#ludus-}"
+      version="${version%-debian13-amd64.tar.zst}"
+      echo "${version}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 #---  FUNCTION  ----------------------------------------------------------------
@@ -564,19 +599,21 @@ ludus_install_server() {
       TOK_JSON=$(pveum user token add root@pam ludus --privsep 0 --output-format json 2>/dev/null || true)
       if [[ -z "${TOK_JSON}" ]]; then
         if [[ "${NO_PROMPT:-0}" == "1" ]]; then
-          print_message "[!] Token root@pam!ludus already exists. Re-run with --token-id 'root@pam!ludus' --token-secret <secret>, or delete it first: pveum user token remove root@pam ludus" "error"
-          exit 1
-        fi
-        print_message "[!] Token 'root@pam!ludus' already exists." "warn"
-        local yn
-        read -r -p "[?] Delete and recreate it? [y/N] " yn </dev/tty
-        if [[ "${yn}" =~ ^[Yy]$ ]]; then
+          print_message "[!] Token root@pam!ludus already exists; recreating it for non-interactive install" "warn"
           pveum user token remove root@pam ludus
           TOK_JSON=$(pveum user token add root@pam ludus --privsep 0 --output-format json)
         else
-          read -r -s -p "[?] Enter existing token secret: " TOKEN_SECRET </dev/tty
-          echo
-          TOKEN_ID="root@pam!ludus"
+          print_message "[!] Token 'root@pam!ludus' already exists." "warn"
+          local yn
+          read -r -p "[?] Delete and recreate it? [y/N] " yn </dev/tty
+          if [[ "${yn}" =~ ^[Yy]$ ]]; then
+            pveum user token remove root@pam ludus
+            TOK_JSON=$(pveum user token add root@pam ludus --privsep 0 --output-format json)
+          else
+            read -r -s -p "[?] Enter existing token secret: " TOKEN_SECRET </dev/tty
+            echo
+            TOKEN_ID="root@pam!ludus"
+          fi
         fi
       fi
       if [[ -n "${TOK_JSON}" ]]; then
@@ -662,9 +699,11 @@ ludus_install_server() {
   NODE_COUNT=$(echo "${CLUSTER_JSON}" | _json 'sum(1 for n in d["data"] if n["type"]=="node")')
   ZONE_TYPE=simple
   PEERS=""
+  NAT_VNET_TAG=""
   if [[ "${NODE_COUNT}" -gt 1 ]]; then
     ZONE_TYPE=vxlan
     PEERS=$(echo "${CLUSTER_JSON}" | _json '",".join(n["ip"] for n in d["data"] if n["type"]=="node")')
+    NAT_VNET_TAG=100000
   fi
   print_message "[+] Creating SDN zone 'ludus' (${ZONE_TYPE}) ..." "info"
   if ! curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/zones/ludus" | grep -q '"zone"'; then
@@ -674,24 +713,38 @@ ludus_install_server() {
       --data-urlencode "ipam=pve" ${PEERS:+--data-urlencode "peers=${PEERS}"} >/dev/null
   fi
   if ! curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat" | grep -q '"vnet"'; then
+    local VNET_CREATE_ARGS=(--data-urlencode "vnet=ludusnat" --data-urlencode "zone=ludus")
+    [[ -n "${NAT_VNET_TAG}" ]] && VNET_CREATE_ARGS+=(--data-urlencode "tag=${NAT_VNET_TAG}")
     curl -sk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/vnets" \
-      --data-urlencode "vnet=ludusnat" --data-urlencode "zone=ludus" \
-      --data-urlencode "vlanaware=1" >/dev/null
+      "${VNET_CREATE_ARGS[@]}" >/dev/null
+  else
+    local VNET_UPDATE_ARGS=(--data-urlencode "vlanaware=0")
+    [[ -n "${NAT_VNET_TAG}" ]] && VNET_UPDATE_ARGS+=(--data-urlencode "tag=${NAT_VNET_TAG}")
+    curl -sk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat" \
+      "${VNET_UPDATE_ARGS[@]}" >/dev/null 2>&1 || true
   fi
   curl -sk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets" \
     --data-urlencode "subnet=192.0.2.0/24" --data-urlencode "type=subnet" \
     --data-urlencode "gateway=192.0.2.254" --data-urlencode "snat=1" >/dev/null 2>&1 || true
+  sysctl -w net.ipv4.ip_forward=1 >/dev/null
+  install -d -m 0755 /etc/sysctl.d
+  printf "net.ipv4.ip_forward=1\n" > /etc/sysctl.d/99-ludus-ip-forward.conf
+  if [[ -f /etc/network/interfaces ]] \
+    && ! grep -Eq '^[[:space:]]*source(-directory)?[[:space:]]+/etc/network/interfaces\.d(/|\*|[[:space:]]|$)' /etc/network/interfaces; then
+    printf "\nsource /etc/network/interfaces.d/sdn\n" >> /etc/network/interfaces
+  fi
   curl -sk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn" >/dev/null
   local _i SDN_OK=0
-  for _i in $(seq 1 30); do
-    if curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn" | grep -q '"state":"ok"'; then
+  for _i in $(seq 1 60); do
+    if ip link show ludusnat >/dev/null 2>&1 \
+      || curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn" | grep -q '"state":"ok"'; then
       SDN_OK=1
       break
     fi
     sleep 1
   done
   if [[ "${SDN_OK}" != "1" ]]; then
-    print_message "[!] SDN apply did not reach state=ok within 30s. Check: pvesh get /cluster/sdn" "error"
+    print_message "[!] SDN apply did not activate ludusnat within 60s. Check: pvesh get /cluster/sdn" "error"
     exit 1
   fi
   print_message "[+] SDN zone/vnet applied" "ok"
@@ -827,23 +880,30 @@ main() {
   local checksum_check_rcode
   local install_file_rcode
   local create_prefix_rcode
+  local latest_tag_rcode
 
   if ! command_exists grep; then
     echo "Error: 'grep' not found in path. Please install it."
     exit 1
   fi
 
-  if command_exists curl; then
-    LATEST_TAG=$(curl -s "https://gitlab.com/api/v4/projects/$PROJECT_ID/repository/tags" | grep -o '"name":"[^"]*' | cut -d'"' -f4 | head -n1)
-  elif command_exists wget; then
-    LATEST_TAG=$(wget -qO- "https://gitlab.com/api/v4/projects/$PROJECT_ID/repository/tags" | grep -o '"name":"[^"]*' | cut -d'"' -f4 | head -n1)
-  else
+  if [[ -z "${LUDUS_VERSION:-}" && -n "${TEMPLATE_FILE:-}" ]]; then
+    LUDUS_VERSION=$(infer_ludus_version_from_template "${TEMPLATE_FILE}" || true)
+  fi
+
+  if [[ "${SERVER_ONLY:-0}" != "1" || -z "${LUDUS_VERSION:-}" ]]; then
+    LATEST_TAG=$(fetch_latest_tag)
+    latest_tag_rcode="${?}"
+    if [[ "${latest_tag_rcode}" == "20" ]]; then
       echo "Error: Neither curl nor wget is available. Please install one of them."
       exit 1
+    elif [[ "${latest_tag_rcode}" != "0" ]]; then
+      echo "Error: Unable to determine latest Ludus release tag."
+      exit 1
+    fi
   fi
 
   ludus_bin_name="ludus-client"
-  ludus_base_url="https://gitlab.com/api/v4/projects/$PROJECT_ID/packages/generic/ludus/$LATEST_TAG"
   prefix="${1}"
 
   print_banner
@@ -908,6 +968,23 @@ main() {
             * ) ludus_arch="unknown";;
   esac
 
+  if [[ "${SERVER_ONLY:-0}" == "1" ]]; then
+    if [[ "${ludus_os}" != "linux" ]] || [[ "${ludus_arch}" != "amd64" ]] || ! command_exists pveversion; then
+      print_message "[!] --server-only requires an amd64 Linux Proxmox host" "error"
+      exit 1
+    fi
+    LUDUS_VERSION="${LUDUS_VERSION:-${LATEST_TAG:-}}"
+    if [[ -z "${LUDUS_VERSION}" ]]; then
+      print_message "[!] Unable to determine Ludus version. Pass --version or use a template named ludus-<version>-debian13-amd64.tar.zst" "error"
+      exit 1
+    fi
+    rm -rf "${tmpdir}"
+    print_message "[+] Installing Ludus server only (LXC mode)" "info"
+    ludus_install_server
+    exit 0
+  fi
+
+  ludus_base_url="https://gitlab.com/api/v4/projects/$PROJECT_ID/packages/generic/ludus/$LATEST_TAG"
   ludus_file="${ludus_bin_name}_${ludus_os}-${ludus_arch}-${LATEST_TAG}"
   ludus_checksum_file="ludus_${LATEST_TAG}_checksums.txt"
   ludus_url="${ludus_base_url}/${ludus_file}"
@@ -1088,8 +1165,9 @@ while [[ $# -gt 0 ]]; do
     -h|--help      ) print_help; exit 0;;
     -p|--prefix    ) INSTALL_PREFIX="$2"; shift 2;;
     # ---- server (LXC) install flags ----
+    --server-only  ) SERVER_ONLY=1; shift;;
     --version      ) LUDUS_VERSION="$2"; shift 2;;
-    --template-file) TEMPLATE_FILE="$2"; shift 2;;
+    --template-file) TEMPLATE_FILE="$2"; SERVER_ONLY=1; shift 2;;
     --token-id     ) TOKEN_ID="$2"; shift 2;;
     --token-secret ) TOKEN_SECRET="$2"; shift 2;;
     --no-prompt    ) NO_PROMPT=1; shift;;

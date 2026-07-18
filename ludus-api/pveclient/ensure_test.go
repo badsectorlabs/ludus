@@ -61,6 +61,21 @@ func TestEnsureSDNZone_Idempotent(t *testing.T) {
 	}
 }
 
+func TestSDNZoneType(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/sdn/zones/ludus", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"zone": "ludus", "type": "simple"}})
+	})
+	c := fakeAPI(t, mux)
+	zoneType, err := c.SDNZoneType(t.Context(), "ludus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if zoneType != "simple" {
+		t.Fatalf("zoneType=%q", zoneType)
+	}
+}
+
 func TestEnsureGroup_Idempotent(t *testing.T) {
 	var posts int32
 	mux := http.NewServeMux()
@@ -136,6 +151,115 @@ func TestEnsureVNet_Idempotent(t *testing.T) {
 	_ = c.EnsureVNet(t.Context(), "ludus", "ludusnat", 0, true)
 	if posts != 1 {
 		t.Fatalf("expected 1 POST, got %d", posts)
+	}
+}
+
+func TestEnsureVNet_SimpleZoneOmitsTagAndVlanAware(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/sdn/vnets/r42", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	})
+	mux.HandleFunc("/api2/json/cluster/sdn/vnets", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.Form.Get("tag"); got != "" {
+			t.Fatalf("simple zone must omit tag, got %q", got)
+		}
+		if got := r.Form.Get("vlanaware"); got != "" {
+			t.Fatalf("simple zone must omit vlanaware, got %q", got)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": nil})
+	})
+	c := fakeAPI(t, mux)
+	if err := c.EnsureVNet(t.Context(), "ludus", "r42", 0, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureVNet_VXLANIncludesTagAndVlanAware(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/sdn/vnets/r7", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	})
+	mux.HandleFunc("/api2/json/cluster/sdn/vnets", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.Form.Get("tag"); got != "4007" {
+			t.Fatalf("expected tag=4007, got %q", got)
+		}
+		if got := r.Form.Get("vlanaware"); got != "1" {
+			t.Fatalf("expected vlanaware=1, got %q", got)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": nil})
+	})
+	c := fakeAPI(t, mux)
+	if err := c.EnsureVNet(t.Context(), "ludus", "r7", 4007, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureVNet_UpdatesVlanAwareMismatch(t *testing.T) {
+	var puts int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/sdn/vnets/ludusnat", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"vnet": "ludusnat", "vlanaware": 1}})
+		case "PUT":
+			atomic.AddInt32(&puts, 1)
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if got := r.Form.Get("vlanaware"); got != "0" {
+				t.Fatalf("expected vlanaware=0, got %q", got)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	if err := c.EnsureVNet(t.Context(), "ludus", "ludusnat", 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if puts != 1 {
+		t.Fatalf("expected 1 PUT, got %d", puts)
+	}
+}
+
+func TestEnsureVNet_UpdatesTagMismatch(t *testing.T) {
+	var puts int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/cluster/sdn/vnets/r7", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"vnet": "r7", "tag": 4000, "vlanaware": 1}})
+		case "PUT":
+			atomic.AddInt32(&puts, 1)
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if got := r.Form.Get("tag"); got != "4007" {
+				t.Fatalf("expected tag=4007, got %q", got)
+			}
+			if got := r.Form.Get("vlanaware"); got != "1" {
+				t.Fatalf("expected vlanaware=1, got %q", got)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		}
+	})
+	c := fakeAPI(t, mux)
+	if err := c.EnsureVNet(t.Context(), "ludus", "r7", 4007, true); err != nil {
+		t.Fatal(err)
+	}
+	if puts != 1 {
+		t.Fatalf("expected 1 PUT, got %d", puts)
 	}
 }
 

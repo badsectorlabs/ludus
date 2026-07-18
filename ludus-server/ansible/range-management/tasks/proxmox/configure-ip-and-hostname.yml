@@ -1,3 +1,26 @@
+- name: Refresh this host from dynamic inventory
+  delegate_to: localhost
+  become: false
+  ansible.builtin.command:
+    argv:
+      - ansible-inventory
+      - -i
+      - "{{ ludus_install_path }}/ansible/range-management/proxmox.py"
+      - --host
+      - "{{ inventory_hostname }}"
+  register: refreshed_host_inventory
+  changed_when: false
+  failed_when: false
+
+- name: Set current host connection address from dynamic inventory
+  ansible.builtin.set_fact:
+    ansible_host: "{{ (refreshed_host_inventory.stdout | from_json).ansible_host }}"
+  when: >
+    refreshed_host_inventory.rc == 0
+    and (refreshed_host_inventory.stdout | default('') | trim | length) > 0
+    and (refreshed_host_inventory.stdout | default('') | trim | regex_search('^\{')) is not none
+    and ((refreshed_host_inventory.stdout | from_json).ansible_host | default('') | length) > 0
+
 - name: Include tasks for Darwin
   ansible.builtin.include_tasks:
     file: configure-ip-and-hostname-macos.yml

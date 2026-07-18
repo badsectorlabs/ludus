@@ -1,4 +1,4 @@
-{% for host in groups[range_id] | sort %}
+{% for host in (groups[range_id] | default([])) | sort %}
 {% if 'ansible_host' in hostvars[host] and hostvars[host]['ansible_host'] != "" %}
 {{ hostvars[host]['ansible_host'] }}     {{ hostvars[host]['inventory_hostname'] }}
 {{ hostvars[host]['ansible_host'] }}     {{ hostvars[host]['inventory_hostname'] | regex_replace('^.*?-', '') }}

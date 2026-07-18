@@ -15,6 +15,8 @@ RestartMaxDelaySec=1h
 RestartSteps=10
 Environment=ANSIBLE_COLLECTIONS_PATH=/opt/ludus/collections
 Environment=PATH=/opt/ludus/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=LANG=C.UTF-8
+Environment=LC_ALL=C.UTF-8
 RemoveIPC=true
 PrivateTmp=true
 NoNewPrivileges=true

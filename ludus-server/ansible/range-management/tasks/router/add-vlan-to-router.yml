@@ -1,24 +1,39 @@
-- name: Get the VM id of the router via Proxmox API
-  ansible.builtin.shell: |
-    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/cluster/resources" 'type:vm' | jq -r '.[] | .[] | select(.name=="{{ router.vm_name | default(default_router_vm_name) }}").vmid'
+- name: Set router lookup name
+  ansible.builtin.set_fact:
+    router_lookup_name: "{{ router.vm_name | default(default_router_vm_name) }}"
+  when: router_vm_id is not defined or router_node_name is not defined
+
+- name: Get router VM info via Proxmox API
+  ansible.builtin.uri:
+    url: "{{ proxmox_url }}/api2/json/cluster/resources?type=vm"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}"
+    validate_certs: false
   register: router_id_command
-  when: router_vm_id is not defined
+  changed_when: false
+  no_log: true
+  when: router_vm_id is not defined or router_node_name is not defined
+
+- name: Set router VM info from API lookup
+  ansible.builtin.set_fact:
+    router_vm_info: "{{ (router_id_command.json.data | selectattr('name', 'equalto', router_lookup_name) | list | first) | default({}) }}"
+  when: router_vm_id is not defined or router_node_name is not defined
 
 - name: Set the router_vm_id from API lookup
   ansible.builtin.set_fact:
-    router_vm_id: "{{ router_id_command.stdout }}"
+    router_vm_id: "{{ router_vm_info.vmid | default('') }}"
   when: router_vm_id is not defined
-
-- name: Get the node name of the router via Proxmox API
-  ansible.builtin.shell: |
-    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/cluster/resources" 'type:vm' | jq -r '.[] | .[] | select(.name=="{{ router.vm_name | default(default_router_vm_name) }}").node'
-  register: router_node_command
-  when: router_node_name is not defined
 
 - name: Set the router_node_name from API lookup
   ansible.builtin.set_fact:
-    router_node_name: "{{ router_node_command.stdout }}"
+    router_node_name: "{{ router_vm_info.node | default(node_name) }}"
   when: router_node_name is not defined
+
+- name: Fail if router is missing on source node
+  ansible.builtin.fail:
+    msg: "Router VM {{ router_lookup_name }} does not exist in the Proxmox cluster"
+  when: router_vm_id | string | length == 0
 
 - name: Get MAC for vlan interface
   ansible.builtin.shell: |
@@ -41,9 +56,17 @@
 
 - name: Get interface for MAC of vlan interface
   ansible.builtin.shell: |
-   curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ router_node_name | default(node_name) }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
+    set -o pipefail
+    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ router_node_name | default(node_name) }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -er --arg mac "{{ vlan_mac | lower }}" '.data.result[]? | select(."hardware-address"==$mac).name'
+  args:
+    executable: /bin/bash
   register: interface_name_command
   when: vlan_mac_command.stdout | length != 0
+  retries: 20
+  delay: 3
+  until:
+    - interface_name_command.rc == 0
+    - interface_name_command.stdout | length > 0
 
 - name: Set the interface_name_command variable
   ansible.builtin.set_fact:
@@ -93,9 +116,17 @@
 
 - name: Get interface for MAC of vlan interface
   ansible.builtin.shell: |
-   curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ router_node_name | default(node_name) }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
+    set -o pipefail
+    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ router_node_name | default(node_name) }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -er --arg mac "{{ vlan_mac | lower }}" '.data.result[]? | select(."hardware-address"==$mac).name'
+  args:
+    executable: /bin/bash
   register: interface_name_command
   when: network_add is changed
+  retries: 20
+  delay: 3
+  until:
+    - interface_name_command.rc == 0
+    - interface_name_command.stdout | length > 0
 
 - name: Set the interface_name_command variable
   ansible.builtin.set_fact:
@@ -105,9 +136,17 @@
 # 192.0.2.x is set by the proxmox build
 - name: Get the interface with a 192.0.2.x ip (WAN)
   ansible.builtin.shell: |
-    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ router_node_name | default(node_name) }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
+    set -o pipefail
+    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ router_node_name | default(node_name) }}/qemu/{{ router_vm_id }}/agent/network-get-interfaces" | jq -er '.data.result[]? | select(."ip-addresses"[]?."ip-address"|test("192.0.2")).name'
+  args:
+    executable: /bin/bash
   register: wan_interface_command
   when: network_add is changed
+  retries: 20
+  delay: 3
+  until:
+    - wan_interface_command.rc == 0
+    - wan_interface_command.stdout | length > 0
 
 - name: Set the router_external_interface variable
   ansible.builtin.set_fact:

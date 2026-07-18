@@ -18,6 +18,7 @@
 
 - name: Reboot after domain join
   ansible.windows.win_reboot:
+    reboot_timeout: 1800
   when: domain_joined.reboot_required
 
 - name: Sync time with the DC
@@ -114,6 +115,7 @@
 
 - name: Reboot after domain join (again) to apply group policy (if GPOs are enabled)
   ansible.windows.win_reboot:
+    reboot_timeout: 1800
   when:
     - domain_joined.reboot_required
     - (ludus | selectattr('vm_name', 'match', dc_vm_name))[0].windows.gpos | default([]) | length > 0

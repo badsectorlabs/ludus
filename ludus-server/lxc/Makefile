@@ -10,7 +10,7 @@ bootstrap:
 	dab bootstrap --minimal
 
 install:
-	dab install python3 python3-pip python3-venv ansible-core wireguard-tools \
+	dab install python3 python3-pip python3-venv wireguard-tools \
 	  dnsmasq nftables iproute2 openssh-client sshpass curl jq ca-certificates \
 	  git gpg dbus systemd-resolved sudo
 	# system user
@@ -18,23 +18,26 @@ install:
 	dab exec useradd -u 1001 -g 1001 -m -s /bin/bash ludus
 	# dirs
 	dab exec mkdir -p /opt/ludus/install /opt/ludus/db /opt/ludus/tls \
-	  /opt/ludus/users /opt/ludus/collections /opt/ludus/resources/packer/plugins
+	  /opt/ludus/users /opt/ludus/collections /opt/ludus/resources/global-roles \
+	  /opt/ludus/resources/packer/plugins
 	# binary + embedded trees
 	install -m 0755 ../../binaries/ludus-server $(BASEDIR)/opt/ludus/ludus-server
 	cp -r ../ansible $(BASEDIR)/opt/ludus/ansible
 	cp -r ../packer $(BASEDIR)/opt/ludus/packer
 	# python venv (air-gap)
+	install -m 0644 python-requirements.txt $(BASEDIR)/opt/ludus/install/python-requirements.txt
+	cp -r deps/python-wheels $(BASEDIR)/opt/ludus/install/python-wheels
 	dab exec python3 -m venv /opt/ludus/venv
-	dab exec /opt/ludus/venv/bin/pip install --no-cache-dir \
-	  proxmoxer==2.0.1 requests==2.32.3 netaddr==1.2.1 pywinrm==0.4.3 \
-	  dnspython==2.6.1 jmespath==1.0.1
+	dab exec /opt/ludus/venv/bin/pip install --no-index --find-links=/opt/ludus/install/python-wheels \
+	  -r /opt/ludus/install/python-requirements.txt
+	dab exec rm -rf /opt/ludus/install/python-wheels /opt/ludus/install/python-requirements.txt
 	# galaxy collections (air-gap)
-	dab exec env ANSIBLE_COLLECTIONS_PATH=/opt/ludus/collections \
-	  ansible-galaxy collection install -r /opt/ludus/ansible/requirements.yml \
-	  -p /opt/ludus/collections
+	cp -r deps/collections/ansible_collections $(BASEDIR)/opt/ludus/collections/
+	cp -r deps/roles/* $(BASEDIR)/opt/ludus/resources/global-roles/
+	chmod 0755 $(BASEDIR)/opt/ludus/ansible/range-management/proxmox.py
 	# packer + plugins
 	install -m 0755 deps/packer $(BASEDIR)/usr/local/bin/packer
-	cp deps/packer-plugin-* $(BASEDIR)/opt/ludus/resources/packer/plugins/
+	cp -r deps/packer-plugins/. $(BASEDIR)/opt/ludus/resources/packer/plugins/
 	# systemd + sysctl
 	install -m 0644 files/ludus.service $(BASEDIR)/etc/systemd/system/ludus.service
 	install -m 0644 files/ludus-admin.service $(BASEDIR)/etc/systemd/system/ludus-admin.service

@@ -94,6 +94,11 @@
 
     # Get the user up to speed with collections and roles without having to download
     # them for every user that gets added. Speeds up user creation and allows for offline usage!
+    - name: Check if ROOT ansible directory exists
+      ansible.builtin.stat:
+        path: "{{ ludus_users_dir }}/root/.ansible"
+      register: root_ansible_dir
+
     - name: Copy the ansible directory from ROOT to the user
       ansible.builtin.copy:
         src: "{{ ludus_users_dir }}/root/.ansible"
@@ -103,6 +108,7 @@
         directory_mode: '0770'
         owner: ludus
         group: ludus
+      when: root_ansible_dir.stat.isdir | default(false)
 
     - name: Chown the user's directory
       ansible.builtin.file:

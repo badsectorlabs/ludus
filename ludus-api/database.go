@@ -238,59 +238,9 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 			}
 		}()
 
-		user.SetUserNumber(findNextAvailableUserNumber(txApp))
-		if user.UserNumber() > 150 {
+		if _, _, err := provisionNewUser(txApp, user, cfg.Password); err != nil {
 			wasError = true
-			return fmt.Errorf("cannot create more than 150 users")
-		}
-
-		if err := CreateDefaultUserRangeForBootstrap(txApp, user); err != nil {
-			wasError = true
-			return fmt.Errorf("creating default range: %w", err)
-		}
-
-		extraVars := map[string]interface{}{
-			"username":    user.ProxmoxUsername(),
-			"user_id":     user.UserId(),
-			"user_number": user.UserNumber(),
-		}
-		output, err := RunAddUserPlaybookStandalone(extraVars)
-		if err != nil {
-			wasError = true
-			return fmt.Errorf("running add-user playbook: %w (output: %s)", err, output)
-		}
-
-		apiKey := GenerateAPIKey(user.UserId())
-		hashedAPIKey, err := HashString(apiKey)
-		if err != nil {
-			wasError = true
-			return fmt.Errorf("hashing API key: %w", err)
-		}
-		user.SetHashedApikey(hashedAPIKey)
-
-		tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm())
-		if err != nil {
-			wasError = true
-			return fmt.Errorf("creating Proxmox API token: %w", err)
-		}
-		encryptedTokenSecret, err := EncryptStringForDatabase(tokenSecret)
-		if err != nil {
-			wasError = true
-			return fmt.Errorf("encrypting Proxmox token: %w", err)
-		}
-		user.SetProxmoxTokenId(tokenID)
-		user.SetProxmoxTokenSecret(encryptedTokenSecret)
-
-		// Grant user and ludus_admins Proxmox pool/SDN access to the user's default range
-		// (required for range deployment, especially SDN.Use in cluster mode)
-		if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
-			wasError = true
-			return fmt.Errorf("granting Proxmox access to default range: %w", err)
-		}
-
-		if err := txApp.Save(user); err != nil {
-			wasError = true
-			return fmt.Errorf("saving user: %w", err)
+			return fmt.Errorf("provisioning initial admin: %w", err)
 		}
 
 		os.MkdirAll(fmt.Sprintf("%s/users/%s", ludusInstallPath, user.ProxmoxUsername()), 0700)

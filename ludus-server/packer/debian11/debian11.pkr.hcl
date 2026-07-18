@@ -72,6 +72,9 @@ variable "ansible_home" {
 variable "ludus_nat_interface" {
   type = string
 }
+variable "packer_http_bind_address" {
+  type = string
+}
 ####
 
 locals {
@@ -81,7 +84,7 @@ locals {
 source "proxmox-iso" "debian11" { 
   boot_command = [
     "<down><tab><wait>", # non-graphical install
-    "preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/debian-11-preseed.cfg ",
+    "preseed/url=http://${var.packer_http_bind_address}:{{ .HTTPPort }}/debian-11-preseed.cfg ",
     "<wait>language=en locale=en_US.UTF-8 ",
     "<wait>country=US keymap=us ",
     "<wait>hostname=debian11 domain=local ",
@@ -90,6 +93,7 @@ source "proxmox-iso" "debian11" {
   boot_key_interval = "100ms"
   boot_wait = "15s"
   http_directory = "./http"
+  http_bind_address = "${var.packer_http_bind_address}"
 
   boot_iso {
     type              = "ide"
@@ -143,4 +147,3 @@ build {
     skip_version_check = true
   }
 }
-

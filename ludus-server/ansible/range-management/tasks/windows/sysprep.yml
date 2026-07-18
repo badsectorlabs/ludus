@@ -67,6 +67,7 @@
 
 - name: Reboot
   ansible.windows.win_reboot:
+    reboot_timeout: 1800
   when: res.reboot_required
 
 - name: Wait for the host's control interface (WinRM via HTTPS) to come up

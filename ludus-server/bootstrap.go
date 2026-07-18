@@ -37,9 +37,9 @@ const bootstrapMarker = "/opt/ludus/install/.bootstrap-complete"
 
 // Privilege sets mirror what the legacy proxmox-install ansible (stage-3) granted.
 var (
-	privsPacker = []string{"VM.Config.Disk", "VM.Config.CPU", "VM.Config.Memory", "VM.Config.Network", "VM.Config.Options", "VM.Config.CDROM", "VM.Config.Cloudinit", "VM.Config.HWType", "VM.PowerMgmt", "VM.Audit", "VM.Allocate", "VM.Monitor", "VM.Console", "Datastore.AllocateSpace", "Datastore.AllocateTemplate", "Datastore.Audit", "Sys.Audit", "Sys.Modify", "SDN.Use", "Sys.AccessNetwork"}
-	privsUser   = append([]string{"Pool.Audit", "VM.Clone", "VM.Snapshot", "VM.Snapshot.Rollback"}, privsPacker...)
-	privsAdmin  = append([]string{"Pool.Allocate", "User.Modify", "Realm.AllocateUser", "Permissions.Modify", "SDN.Allocate"}, privsUser...)
+	privsPacker = []string{"VM.Config.Disk", "VM.Config.CPU", "VM.Config.Memory", "VM.Config.Network", "VM.Config.Options", "VM.Config.CDROM", "VM.Config.Cloudinit", "VM.Config.HWType", "VM.PowerMgmt", "VM.Audit", "VM.Allocate", "VM.Console", "VM.GuestAgent.Audit", "VM.GuestAgent.Unrestricted", "Datastore.AllocateSpace", "Datastore.AllocateTemplate", "Datastore.Audit", "Sys.Audit", "Sys.Modify", "SDN.Use", "Sys.AccessNetwork"}
+	privsUser   = append([]string{"Pool.Allocate", "Pool.Audit", "VM.Clone", "VM.Snapshot", "VM.Snapshot.Rollback"}, privsPacker...)
+	privsAdmin  = append([]string{"User.Modify", "Realm.AllocateUser", "Permissions.Modify", "SDN.Allocate"}, privsUser...)
 )
 
 // bootstrap is the entry point called from main() when the marker is absent.
@@ -128,7 +128,8 @@ func bootstrapProxmoxObjects(ctx context.Context, pc PVEClient, cfg ludusapi.Con
 	if err := pc.EnsureSDNZone(ctx, cfg.SDNZone, zoneType, peers); err != nil {
 		return fmt.Errorf("sdn zone: %w", err)
 	}
-	if err := pc.EnsureVNet(ctx, cfg.SDNZone, cfg.LudusNATInterface, 0, true); err != nil {
+	natTag, natVlanaware := ludusapi.NATVNetOptionsForZone(zoneType)
+	if err := pc.EnsureVNet(ctx, cfg.SDNZone, cfg.LudusNATInterface, natTag, natVlanaware); err != nil {
 		return fmt.Errorf("vnet %s: %w", cfg.LudusNATInterface, err)
 	}
 	if err := pc.EnsureSubnet(ctx, cfg.LudusNATInterface, "192.0.2.0/24", cfg.LudusNATGateway, true); err != nil {
@@ -146,6 +147,18 @@ func bootstrapProxmoxObjects(ctx context.Context, pc PVEClient, cfg ludusapi.Con
 		{"/pool/ADMIN", "LudusAdmin", []string{"ludus_admins"}},
 		{"/sdn/zones/" + cfg.SDNZone, "LudusUser", []string{"ludus_users", "ludus_admins"}},
 		{"/nodes", "LudusPacker", []string{"ludus_users", "ludus_admins"}},
+		{"/vms", "LudusPacker", []string{"ludus_users", "ludus_admins"}},
+	}
+	seenStorageACLs := map[string]bool{}
+	for _, storage := range []string{cfg.ProxmoxVMStoragePool, cfg.ProxmoxISOStoragePool} {
+		if storage == "" || seenStorageACLs[storage] {
+			continue
+		}
+		seenStorageACLs[storage] = true
+		acls = append(acls, struct {
+			path, role string
+			groups     []string
+		}{"/storage/" + storage, "LudusPacker", []string{"ludus_users", "ludus_admins"}})
 	}
 	for _, a := range acls {
 		if err := pc.EnsureACL(ctx, a.path, a.role, a.groups, nil); err != nil {
@@ -171,10 +184,15 @@ func bootstrapLocalState(cfg ludusapi.Configuration) error {
 	}
 	// dnsmasq
 	if err := localgen.WriteDnsmasq("/etc/dnsmasq.d/ludus.conf", localgen.DnsmasqConfig{
-		BindIP: cfg.LudusNATIP, Gateway: cfg.LudusNATGateway,
+		BindIP: cfg.LudusNATIP, Gateway: cfg.LudusNATIP, Upstreams: []string{"1.1.1.1", "8.8.8.8"},
 		PoolLow: "192.0.2.50", PoolHigh: "192.0.2.100", IfName: "eth1",
 	}); err != nil {
 		return fmt.Errorf("dnsmasq: %w", err)
+	}
+	if err := localgen.WriteNftables("/etc/nftables.conf", localgen.NftablesConfig{
+		NATCIDR: "192.0.2.0/24", OutIfName: "eth0",
+	}); err != nil {
+		return fmt.Errorf("nftables: %w", err)
 	}
 	// Dirs
 	for _, d := range []string{"/opt/ludus/users", "/opt/ludus/ci", "/opt/ludus/previous-versions", "/opt/ludus/tls"} {
@@ -187,9 +205,12 @@ func bootstrapLocalState(cfg ludusapi.Configuration) error {
 		logf("WARN: chown /opt/ludus: %v (continuing)", err)
 	}
 	// Enable services
-	for _, svc := range []string{"wg-quick@wg0", "dnsmasq"} {
+	for _, svc := range []string{"nftables", "wg-quick@wg0", "dnsmasq"} {
 		if err := exec.Command("systemctl", "enable", "--now", svc).Run(); err != nil {
 			logf("WARN: systemctl enable %s: %v (continuing)", svc, err)
+		}
+		if err := exec.Command("systemctl", "restart", svc).Run(); err != nil {
+			logf("WARN: systemctl restart %s: %v (continuing)", svc, err)
 		}
 	}
 	return nil

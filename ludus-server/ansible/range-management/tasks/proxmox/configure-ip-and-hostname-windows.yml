@@ -129,6 +129,7 @@
 - name: "Fallback - Reboot the machine to apply static IP (Fallback Method)"
   ansible.windows.win_reboot:
     msg: "Rebooting to apply fallback static IP configuration"
+    reboot_timeout: 1800
   when: old_hardware
 
 - name: "Change ansible's ip address for the host (Windows)"
@@ -197,6 +198,7 @@
 
 - name: Reboot
   ansible.windows.win_reboot:
+    reboot_timeout: 1800
   when:
     - current_hostname.stdout | trim != vm_hostname
     - res.reboot_required

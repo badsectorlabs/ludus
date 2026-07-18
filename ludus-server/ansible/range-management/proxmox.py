@@ -80,7 +80,7 @@ class ProxmoxVMList(list):
 
     def get_names(self):
         if self.ver >= 4.0:
-            return [vm['name'] for vm in self if 'template' in vm and vm['template'] != 1]
+            return [vm['name'] for vm in self if vm.get('template', 0) != 1 and vm.get('name')]
         else:
             return [vm['name'] for vm in self]
 
@@ -113,7 +113,13 @@ class ProxmoxVersion(dict):
 
 class ProxmoxPool(dict):
     def get_members_name(self):
-        return [member['name'] for member in self['members'] if (member['type'] == 'qemu' or member['type'] == 'lxc') and member['template'] != 1]
+        return [
+            member['name']
+            for member in self['members']
+            if (member['type'] == 'qemu' or member['type'] == 'lxc')
+            and member.get('template', 0) != 1
+            and member.get('name')
+        ]
 
 
 class ProxmoxAPI(object):
@@ -354,8 +360,8 @@ def check_ip_addresses(vm_name, ip_addresses):
     if valid_ips:
         return valid_ips[0]
 
-    # If the user has specified force_ip, return the IP from the config if there are no other valid IPs
-    if force_ip and config_ip is not None:
+    # Fall back to the configured static IP if the guest agent did not return a usable address.
+    if config_ip is not None:
         return config_ip
 
     # If all else fails, return None
@@ -564,8 +570,21 @@ def main_list(options, config_path):
     # pools
     for pool in proxmox_api.pools().get_names():
         all_groups.add(pool)
+        pool_data = proxmox_api.pool(pool)
+        pool_vmids = {
+            str(member['vmid'])
+            for member in pool_data['members']
+            if member['type'] in ('qemu', 'lxc')
+        }
+        pool_hosts = pool_data.get_members_name()
+        pool_hosts += [
+            host
+            for host, variables in results['_meta']['hostvars'].items()
+            if str(variables.get('proxmox_vmid')) in pool_vmids
+        ]
+        existing_hosts = results.get(pool, {}).get('hosts', [])
         results[pool] = {
-            'hosts': proxmox_api.pool(pool).get_members_name(),
+            'hosts': list(dict.fromkeys(existing_hosts + pool_hosts)),
         }
 
     # Filter based on VMIDs if needed

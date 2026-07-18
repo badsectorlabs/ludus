@@ -46,7 +46,7 @@
   ansible.windows.win_reboot:
     msg: "Installing AD. Rebooting..."
     pre_reboot_delay: 15
-    reboot_timeout: 600
+    reboot_timeout: 1800
     post_reboot_delay: 60
   when: domain_creation is changed
 
@@ -70,11 +70,18 @@
       Set-DnsClientGlobalSetting -SuffixSearchList @( "{{ netbios_name }}.{{ fqdn_tail }}", "home.arpa")
       Restart-Service DNS
 
-- name: Configure DC with raw Commands
-  ansible.windows.win_shell: "{{ item }}"
-  with_items:
-    - "wevtutil el | Select-String -notmatch \"Microsoft-Windows-LiveId\" | Foreach-Object {wevtutil cl \"$_\"}"
-    - "Set-SmbServerConfiguration -AuditSmb1Access $true -Force"
+- name: Clear DC event logs in the background
+  ansible.windows.win_shell: |
+    wevtutil el | Select-String -notmatch "Microsoft-Windows-LiveId" | Foreach-Object {wevtutil cl "$_"}
+  async: 1800
+  poll: 0
+  vars:
+    ansible_win_async_startup_timeout: 120
+  changed_when: false
+  failed_when: false
+
+- name: Configure SMB auditing
+  ansible.windows.win_shell: Set-SmbServerConfiguration -AuditSmb1Access $true -Force
 
 - name: Disable password complexity
   community.windows.win_security_policy:
@@ -208,4 +215,3 @@
 - name: Set the DNS Cache time to 2 seconds (helps DNS blocks at the router be more effective)
   ansible.windows.win_shell: |
     Set-DnsServerCache -MaxTTL 00:00:02
-
