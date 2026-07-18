@@ -31,11 +31,3 @@
       ansible.builtin.service:
         name: dnsmasq
         state: restarted
-
-    - name: Install AdGuardHome
-      ansible.builtin.shell: |
-        set -o pipefail
-        curl -sS -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
-      args:
-        executable: /bin/bash
-        creates: /opt/AdGuardHome/AdGuardHome

@@ -6,6 +6,8 @@ cd "$(dirname "$0")"
 : "${PACKER_VERSION:=1.11.2}"
 : "${PACKER_PROXMOX_VERSION:=1.2.1}"
 : "${PACKER_ANSIBLE_VERSION:=1.1.1}"
+: "${BLOCKY_VERSION:=0.30.0}"
+: "${BLOCKY_LINUX_X86_64_SHA256:=1641ec6821abd39ff61cf47f343f518c33a1973c64ad6c0deb030b0f02d9ef30}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -19,6 +21,7 @@ require_command unzip
 require_command python3
 require_command ansible-galaxy
 require_command sha256sum
+require_command tar
 
 mkdir -p deps
 if [[ ! -f deps/packer ]]; then
@@ -55,6 +58,16 @@ rm -rf deps/packer-plugins
 stage_packer_plugin proxmox github.com/hashicorp/proxmox "${PACKER_PROXMOX_VERSION}"
 stage_packer_plugin ansible github.com/hashicorp/ansible "${PACKER_ANSIBLE_VERSION}"
 
+BLOCKY_ARCHIVE="blocky_v${BLOCKY_VERSION}_Linux_x86_64.tar.gz"
+BLOCKY_DEPS_DIR="deps/blocky/${BLOCKY_VERSION}"
+if [[ ! -x "${BLOCKY_DEPS_DIR}/blocky" ]]; then
+  mkdir -p "${BLOCKY_DEPS_DIR}"
+  curl -fsSL "https://github.com/0xERR0R/blocky/releases/download/v${BLOCKY_VERSION}/${BLOCKY_ARCHIVE}" \
+    -o "/tmp/${BLOCKY_ARCHIVE}"
+  printf '%s  %s\n' "${BLOCKY_LINUX_X86_64_SHA256}" "/tmp/${BLOCKY_ARCHIVE}" | sha256sum --check --status
+  tar -xzf "/tmp/${BLOCKY_ARCHIVE}" -C "${BLOCKY_DEPS_DIR}" blocky
+fi
+
 mkdir -p deps/python-wheels
 python3 -m pip download --only-binary=:all: --dest deps/python-wheels -r python-requirements.txt
 
@@ -72,7 +85,7 @@ fi
 sed -i "s/^Version: .*/Version: ${LUDUS_VERSION}/" dab.conf
 
 make clean || true
-make LUDUS_VERSION="${LUDUS_VERSION}"
+make LUDUS_VERSION="${LUDUS_VERSION}" BLOCKY_VERSION="${BLOCKY_VERSION}"
 
 OUT="ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst"
 mv ludus_*.tar.zst "../../${OUT}" 2>/dev/null || mv *.tar.zst "../../${OUT}"

@@ -1,12 +1,22 @@
-- name: Set Blocky install variables
+- name: Set staged Blocky binary path
   ansible.builtin.set_fact:
-    blocky_version: "0.30.0"
+    blocky_staged_binary: "{{ ludus_install_path }}/resources/blocky/blocky"
 
-- name: Set Blocky install paths
-  ansible.builtin.set_fact:
-    blocky_cache_dir: "{{ ludus_install_path }}/resources/blocky"
-    blocky_archive_name: "blocky_v{{ blocky_version }}_Linux_x86_64.tar.gz"
-    blocky_release_base_url: "https://github.com/0xERR0R/blocky/releases/download/v{{ blocky_version }}"
+- name: Check for staged Blocky binary
+  ansible.builtin.stat:
+    path: "{{ blocky_staged_binary }}"
+  delegate_to: localhost
+  register: blocky_staged_binary_stat
+  run_once: true
+
+- name: Require staged Blocky binary
+  ansible.builtin.assert:
+    that:
+      - blocky_staged_binary_stat.stat.exists
+      - blocky_staged_binary_stat.stat.isreg | default(false)
+    fail_msg: "The Ludus appliance is missing the staged Blocky binary at {{ blocky_staged_binary }}."
+  delegate_to: localhost
+  run_once: true
 
 - name: Stop and disable AdGuardHome if present
   ansible.builtin.service:
@@ -15,84 +25,9 @@
     enabled: false
   failed_when: false
 
-- name: Install Blocky dependencies
-  ansible.builtin.apt:
-    name:
-      - ca-certificates
-      - curl
-      - tar
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
-
-- name: Ensure Blocky cache directory exists on the Ludus server
-  ansible.builtin.file:
-    path: "{{ blocky_cache_dir }}"
-    state: directory
-    mode: '0755'
-  delegate_to: localhost
-  run_once: true
-
-- name: Check for cached Blocky binary
-  ansible.builtin.stat:
-    path: "{{ blocky_cache_dir }}/blocky"
-  delegate_to: localhost
-  register: cached_blocky_binary
-  run_once: true
-
-- name: Check for cached Blocky archive
-  ansible.builtin.stat:
-    path: "{{ blocky_cache_dir }}/{{ blocky_archive_name }}"
-  delegate_to: localhost
-  register: cached_blocky_archive
-  run_once: true
-
-- name: Download Blocky release archive when not cached
-  ansible.builtin.get_url:
-    url: "{{ blocky_release_base_url }}/{{ blocky_archive_name }}"
-    dest: "{{ blocky_cache_dir }}/{{ blocky_archive_name }}"
-    mode: '0644'
-  delegate_to: localhost
-  run_once: true
-  when:
-    - not cached_blocky_binary.stat.exists
-    - not cached_blocky_archive.stat.exists
-
-- name: Download Blocky release checksums when archive was downloaded
-  ansible.builtin.get_url:
-    url: "{{ blocky_release_base_url }}/blocky_checksums.txt"
-    dest: "{{ blocky_cache_dir }}/blocky_checksums.txt"
-    mode: '0644'
-  delegate_to: localhost
-  run_once: true
-  when:
-    - not cached_blocky_binary.stat.exists
-    - not cached_blocky_archive.stat.exists
-
-- name: Verify downloaded Blocky archive checksum
-  ansible.builtin.shell: "sha256sum --check --ignore-missing blocky_checksums.txt"
-  args:
-    chdir: "{{ blocky_cache_dir }}"
-  delegate_to: localhost
-  run_once: true
-  changed_when: false
-  when:
-    - not cached_blocky_binary.stat.exists
-    - not cached_blocky_archive.stat.exists
-
-- name: Extract cached Blocky archive
-  ansible.builtin.unarchive:
-    src: "{{ blocky_cache_dir }}/{{ blocky_archive_name }}"
-    dest: "{{ blocky_cache_dir }}"
-    remote_src: true
-    mode: '0755'
-  delegate_to: localhost
-  run_once: true
-  when: not cached_blocky_binary.stat.exists
-
-- name: Install Blocky binary on router
+- name: Install staged Blocky binary on router
   ansible.builtin.copy:
-    src: "{{ blocky_cache_dir }}/blocky"
+    src: "{{ blocky_staged_binary }}"
     dest: /usr/local/bin/blocky
     owner: root
     group: root

@@ -1,5 +1,6 @@
 BASEDIR = $(shell dab basedir)
 LUDUS_VERSION ?= 0.0.0-dev
+BLOCKY_VERSION ?= 0.30.0
 
 .PHONY: all bootstrap install finalize clean
 
@@ -18,8 +19,9 @@ install:
 	dab exec useradd -u 1001 -g 1001 -m -s /bin/bash ludus
 	# dirs
 	dab exec mkdir -p /opt/ludus/install /opt/ludus/db /opt/ludus/tls \
-	  /opt/ludus/users /opt/ludus/resources/global-collections \
-	  /opt/ludus/resources/global-roles /opt/ludus/resources/packer/plugins
+	  /opt/ludus/users /opt/ludus/resources/blocky \
+	  /opt/ludus/resources/global-collections /opt/ludus/resources/global-roles \
+	  /opt/ludus/resources/packer/plugins
 	# binary + embedded trees
 	install -m 0755 ../../binaries/ludus-server $(BASEDIR)/opt/ludus/ludus-server
 	cp -r ../ansible $(BASEDIR)/opt/ludus/ansible
@@ -38,6 +40,8 @@ install:
 	# packer + plugins
 	install -m 0755 deps/packer $(BASEDIR)/usr/local/bin/packer
 	cp -r deps/packer-plugins/. $(BASEDIR)/opt/ludus/resources/packer/plugins/
+	# Blocky DNS binary staged for offline router deployment
+	install -m 0755 deps/blocky/$(BLOCKY_VERSION)/blocky $(BASEDIR)/opt/ludus/resources/blocky/blocky
 	# systemd + sysctl
 	install -m 0644 files/ludus.service $(BASEDIR)/etc/systemd/system/ludus.service
 	install -m 0644 files/ludus-admin.service $(BASEDIR)/etc/systemd/system/ludus-admin.service
