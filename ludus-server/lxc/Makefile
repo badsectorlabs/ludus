@@ -34,7 +34,7 @@ install:
 	# galaxy collections (air-gap)
 	cp -r deps/collections/ansible_collections $(BASEDIR)/opt/ludus/collections/
 	cp -r deps/roles/* $(BASEDIR)/opt/ludus/resources/global-roles/
-	chmod 0755 $(BASEDIR)/opt/ludus/ansible/range-management/proxmox.py
+	chmod 0755 $(BASEDIR)/opt/ludus/ansible/range-management/dynamic-inventory
 	# packer + plugins
 	install -m 0755 deps/packer $(BASEDIR)/usr/local/bin/packer
 	cp -r deps/packer-plugins/. $(BASEDIR)/opt/ludus/resources/packer/plugins/
