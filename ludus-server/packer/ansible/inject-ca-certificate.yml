@@ -1,0 +1,71 @@
+---
+- name: Add injected CA certificate to the template trust store
+  hosts: all
+  gather_facts: true
+  vars:
+    injected_ca_certificate_path: /opt/ludus/install/injected-ca-certificate.crt
+  tasks:
+    - name: Check for an injected CA certificate on the Ludus server
+      ansible.builtin.stat:
+        path: "{{ injected_ca_certificate_path }}"
+      delegate_to: localhost
+      become: false
+      register: injected_ca_certificate
+
+    - name: Add injected CA certificate on Debian-family templates
+      when:
+        - injected_ca_certificate.stat.exists
+        - ansible_facts.os_family == "Debian"
+      become: true
+      block:
+        - name: Copy injected CA certificate to the Debian trust source directory
+          ansible.builtin.copy:
+            src: "{{ injected_ca_certificate_path }}"
+            dest: /usr/local/share/ca-certificates/ludus-injected-ca-certificate.crt
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Update the Debian root trust store
+          ansible.builtin.command: update-ca-certificates
+          changed_when: true
+
+    - name: Add injected CA certificate on Red Hat-family templates
+      when:
+        - injected_ca_certificate.stat.exists
+        - ansible_facts.os_family == "RedHat"
+      become: true
+      block:
+        - name: Copy injected CA certificate to the Red Hat trust source directory
+          ansible.builtin.copy:
+            src: "{{ injected_ca_certificate_path }}"
+            dest: /etc/pki/ca-trust/source/anchors/ludus-injected-ca-certificate.crt
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Update the Red Hat root trust store
+          ansible.builtin.command: update-ca-trust extract
+          changed_when: true
+
+    - name: Add injected CA certificate on Windows templates
+      when:
+        - injected_ca_certificate.stat.exists
+        - ansible_facts.os_family == "Windows"
+      block:
+        - name: Copy injected CA certificate to the Windows template
+          ansible.windows.win_copy:
+            src: "{{ injected_ca_certificate_path }}"
+            dest: C:\Windows\Temp\ludus-injected-ca-certificate.crt
+
+        - name: Add injected CA certificate to the Windows root trust store
+          ansible.windows.win_certificate_store:
+            path: C:\Windows\Temp\ludus-injected-ca-certificate.crt
+            state: present
+            store_location: LocalMachine
+            store_name: Root
+
+        - name: Remove temporary injected CA certificate from Windows
+          ansible.windows.win_file:
+            path: C:\Windows\Temp\ludus-injected-ca-certificate.crt
+            state: absent

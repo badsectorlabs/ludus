@@ -93,6 +93,7 @@ print_help() {
   --server-only          Skip client download/install and only install the server LXC
   --version VER          Ludus version to install (default: latest release tag)
   --template-file PATH   Use a local LXC template tarball (implies --server-only)
+  --ca-certificate PATH  Copy a PEM CA certificate into the LXC for template builds
   --token-id ID          Proxmox API token ID (e.g. root@pam!ludus)
   --token-secret SECRET  Proxmox API token secret
   --no-prompt            Non-interactive; use defaults / supplied flags
@@ -676,6 +677,8 @@ ludus_install_server() {
     ISO_STORAGE=${ISO_STORAGE:-local}
     read -r -p "[?] License key [community]: " LICENSE </dev/tty
     LICENSE=${LICENSE:-community}
+    read -r -p "[?] CA certificate for template trust stores (optional path) [${CA_CERTIFICATE:-none}]: " CA_CERTIFICATE_INPUT </dev/tty
+    [[ -n "${CA_CERTIFICATE_INPUT}" ]] && CA_CERTIFICATE="${CA_CERTIFICATE_INPUT}"
   else
     ENDPOINTS=${ENDPOINTS:-${DEFAULT_EPS}}
     VMID=${VMID:-$(curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/nextid" | _json 'd["data"]')}
@@ -692,6 +695,18 @@ ludus_install_server() {
     VM_STORAGE=${VM_STORAGE:-local}
     ISO_STORAGE=${ISO_STORAGE:-local}
     LICENSE=${LICENSE:-community}
+  fi
+
+  if [[ -n "${CA_CERTIFICATE:-}" ]]; then
+    if [[ ! -f "${CA_CERTIFICATE}" || ! -r "${CA_CERTIFICATE}" || ! -s "${CA_CERTIFICATE}" ]]; then
+      print_message "[!] CA certificate must be a readable, non-empty file: ${CA_CERTIFICATE}" "error"
+      exit 1
+    fi
+    command_exists openssl || { print_message "[!] openssl is required to validate --ca-certificate" "error"; exit 1; }
+    if ! openssl x509 -in "${CA_CERTIFICATE}" -noout >/dev/null 2>&1; then
+      print_message "[!] CA certificate is not a valid PEM X.509 certificate: ${CA_CERTIFICATE}" "error"
+      exit 1
+    fi
   fi
 
   # ---- 3. SDN bootstrap --------------------------------------------------------
@@ -817,6 +832,11 @@ EOF
   pct exec "${VMID}" -- mkdir -p /opt/ludus
   pct push "${VMID}" "${CFG}" /opt/ludus/config.yml --perms 0600
   pct exec "${VMID}" -- chown ludus:ludus /opt/ludus/config.yml
+  if [[ -n "${CA_CERTIFICATE:-}" ]]; then
+    pct exec "${VMID}" -- mkdir -p /opt/ludus/install
+    pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/install/injected-ca-certificate.crt --perms 0644
+    pct exec "${VMID}" -- chown root:root /opt/ludus/install/injected-ca-certificate.crt
+  fi
   rm -f "${CFG}"
 
   if [[ -n "${IMPORT_DB:-}" ]]; then
@@ -1168,6 +1188,7 @@ while [[ $# -gt 0 ]]; do
     --server-only  ) SERVER_ONLY=1; shift;;
     --version      ) LUDUS_VERSION="$2"; shift 2;;
     --template-file) TEMPLATE_FILE="$2"; SERVER_ONLY=1; shift 2;;
+    --ca-certificate) CA_CERTIFICATE="$2"; shift 2;;
     --token-id     ) TOKEN_ID="$2"; shift 2;;
     --token-secret ) TOKEN_SECRET="$2"; shift 2;;
     --no-prompt    ) NO_PROMPT=1; shift;;
