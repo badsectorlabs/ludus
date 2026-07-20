@@ -6,7 +6,7 @@ sidebar_position: 1
 
 :::warning
 
-Ludus will be installed directly on the host. Docker should not be installed on the host as it interferes with networking.
+On standalone Debian, Ludus is installed directly on the host. On Proxmox, the current installer runs the Ludus server in an LXC; follow the [Proxmox LXC installer guide](../deployment-options/proxmox-lxc.md).
 
 :::
 
@@ -24,7 +24,7 @@ Ludus can **only** be installed on a host that meets the following requirements:
 - Has at least 32 GB of RAM
 - Has at least 200 GB of disk space (fast NVMe recommended)
 - Root access
-- Internet access (not via WiFi). Note: Bonded nics or other advanced networking is not supported. If you use these, you will need to console in and fix the network after install (edit `/etc/network/interfaces`), as Ludus assumes you have a single, standard interface.
+- Internet access during installation, unless you have staged the files and internal services listed in the [offline Proxmox LXC guide](../deployment-options/proxmox-lxc.md#install-on-an-offline-proxmox-cluster). Note: Bonded nics or other advanced networking is not supported. If you use these, you will need to console in and fix the network after install (edit `/etc/network/interfaces`), as Ludus assumes you have a single, standard interface.
 
 Machines with lower specs than listed above may work, but are not tested/supported.
 
@@ -68,7 +68,10 @@ chmod +x install.sh
 ```
 
 The `install.sh` script will install the `ludus` client, and optionally shell completions, and then prompt to install the server.
-Follow the interactive installer. If you are unsure of any option, just accept the default value. The installer will start and reboot the machine.
+Follow the interactive installer. On standalone Debian, the installer starts and reboots the machine. On Proxmox, it creates the LXC without rebooting the host.
+
+On Proxmox, use the [LXC installer guide](../deployment-options/proxmox-lxc.md)
+for the installer prompts, non-interactive options, and cluster requirements.
 
 After the reboot, the install will continue automatically. To monitor its progress, ssh into
 the machine, elevate to root, and run `ludus-install-status`.
