@@ -35,7 +35,7 @@ Synced 2h ago
 #terminal-command-local
 ludus range create -r GOAD --name GOAD --from-blueprint badsectorlabs-ludus-source-bsl/goad
 #terminal-command-local
-ludus range deploy -t GOAD
+ludus range deploy -r GOAD
 #terminal-command-local
 ludus range logs -f -r GOAD
 # Wait for the deploy to finish
