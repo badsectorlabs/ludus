@@ -105,3 +105,44 @@ func TestDo_NoFailoverOn403(t *testing.T) {
 		t.Fatalf("expected 1 hit (no retry), got %d", hits)
 	}
 }
+
+func TestDo_DoesNotReplayPOSTOnGatewayFailure(t *testing.T) {
+	badHits := 0
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/version" {
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": "9.0"}})
+			return
+		}
+		badHits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer bad.Close()
+
+	goodHits := 0
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/version" {
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": "9.0"}})
+			return
+		}
+		goodHits++
+		json.NewEncoder(w).Encode(map[string]any{"data": nil})
+	}))
+	defer good.Close()
+
+	c, err := New(Config{Endpoints: []string{bad.URL, good.URL}, TokenID: "t", TokenSecret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	err = c.do(t.Context(), http.MethodPost, "/api2/json/access/users", nil, nil)
+	if err == nil {
+		t.Fatal("expected the ambiguous write to fail")
+	}
+	if badHits != 1 || goodHits != 0 {
+		t.Fatalf("POST was replayed: bad hits=%d good hits=%d", badHits, goodHits)
+	}
+	if c.ActiveEndpoint() != good.URL {
+		t.Fatalf("next request should use failover endpoint: active=%s", c.ActiveEndpoint())
+	}
+}

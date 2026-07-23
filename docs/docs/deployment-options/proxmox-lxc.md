@@ -352,10 +352,11 @@ Those vendor payloads must also be hosted internally or repackaged into an
 internal Chocolatey package. This applies in particular to browsers, Office,
 Visual Studio workloads, and packages that always install their latest release.
 
-Office 2016, 2019, and 2021 provisioning also queries the GitHub API to choose a
-package version. Visual Studio and Office installers download large payloads
-from Microsoft. Treat those features as online-only unless their tasks and
-payload sources have been replaced with internal equivalents.
+Set `airgapped_install: true` in `/opt/ludus/config.yml` so Office 2016, 2019,
+and 2021 provisioning uses the pinned Chocolatey package version instead of
+querying the GitHub API. Visual Studio and Office installers still download
+large payloads from Microsoft unless those vendor sources are mirrored
+internally.
 
 For a range that does not need those tools, keep the Windows configuration
 small:
@@ -406,6 +407,7 @@ Before removing egress, verify all of the following:
 - The APT mirror contains all packages needed by a clean template build.
 - Nexus and every vendor payload required by the Windows package list are
   already cached or mirrored.
+- `airgapped_install: true` is set in `/opt/ludus/config.yml`.
 - User roles and custom templates have no unresolved external URLs.
 - Private CA certificates were supplied before the templates were built.
 - A complete canary range deploys while egress is blocked.

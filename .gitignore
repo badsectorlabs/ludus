@@ -1,3 +1,5 @@
+offline-*
+TEST-PLAN.md
 repomix*.txt
 repomix*.xml
 ludus-gui
@@ -58,3 +60,5 @@ crash.log
 ### Packer Patch ###
 # ignore temporary output files
 output-*/
+
+.gograph/

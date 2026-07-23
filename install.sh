@@ -94,6 +94,14 @@ print_help() {
   --version VER          Ludus version to install (default: latest release tag)
   --template-file PATH   Use a local LXC template tarball (implies --server-only)
   --ca-certificate PATH  Copy a PEM CA certificate into the LXC for template builds
+  --enterprise-plugin PATH
+                         Install a local Enterprise plugin into both services
+  --license-file PATH    Install a signed offline Enterprise license file
+  --checksum-file PATH   SHA-256 manifest covering every supplied local artifact
+  --checksum-signature PATH
+                         Detached signature for --checksum-file
+  --checksum-public-key PATH
+                         Trusted PEM public key for signature verification
   --token-id ID          Proxmox API token ID (e.g. root@pam!ludus)
   --token-secret SECRET  Proxmox API token secret
   --no-prompt            Non-interactive; use defaults / supplied flags
@@ -558,6 +566,98 @@ EOF
 }
 
 
+# Verify every local artifact before token creation or cluster mutation.
+verify_offline_inputs() {
+  local input
+  local inputs=(
+    "${TEMPLATE_FILE:-}"
+    "${CA_CERTIFICATE:-}"
+    "${ENTERPRISE_PLUGIN:-}"
+    "${LICENSE_FILE:-}"
+    "${IMPORT_DB:-}"
+  )
+
+  for input in "${inputs[@]}"; do
+    [[ -z "${input}" ]] && continue
+    if [[ ! -f "${input}" || ! -r "${input}" || ! -s "${input}" ]]; then
+      print_message "[!] Local artifact must be a readable, non-empty file: ${input}" "error"
+      exit 1
+    fi
+  done
+
+  if [[ -n "${LICENSE_FILE:-}" && -z "${ENTERPRISE_PLUGIN:-}" ]]; then
+    print_message "[!] --enterprise-plugin is required with --license-file" "error"
+    exit 1
+  fi
+  if [[ -n "${LICENSE_FILE:-}" && -z "${LICENSE:-}" ]]; then
+    print_message "[!] --license KEY is required with --license-file" "error"
+    exit 1
+  fi
+
+  if [[ -z "${CHECKSUM_FILE:-}" ]]; then
+    if [[ -n "${CHECKSUM_SIGNATURE:-}" || -n "${CHECKSUM_PUBLIC_KEY:-}" ]]; then
+      print_message "[!] --checksum-signature and --checksum-public-key require --checksum-file" "error"
+      exit 1
+    fi
+    return
+  fi
+
+  for input in "${CHECKSUM_FILE}" "${CHECKSUM_SIGNATURE:-}" "${CHECKSUM_PUBLIC_KEY:-}"; do
+    if [[ -z "${input}" || ! -f "${input}" || ! -r "${input}" || ! -s "${input}" ]]; then
+      print_message "[!] Signed checksum verification requires readable manifest, signature, and public key files" "error"
+      exit 1
+    fi
+  done
+
+  command_exists openssl || { print_message "[!] openssl is required for signed checksum verification" "error"; exit 1; }
+  if ! openssl dgst -sha256 -verify "${CHECKSUM_PUBLIC_KEY}" \
+      -signature "${CHECKSUM_SIGNATURE}" "${CHECKSUM_FILE}" >/dev/null 2>&1; then
+    print_message "[!] Artifact checksum manifest signature is invalid" "error"
+    exit 1
+  fi
+
+  for input in "${inputs[@]}"; do
+    [[ -z "${input}" ]] && continue
+    if ! python3 - "${CHECKSUM_FILE}" "${input}" <<'PY'
+import hashlib
+import hmac
+import pathlib
+import sys
+
+manifest = pathlib.Path(sys.argv[1])
+artifact = pathlib.Path(sys.argv[2])
+matches = []
+for raw_line in manifest.read_text(encoding="utf-8").splitlines():
+    fields = raw_line.split()
+    if len(fields) < 2:
+        continue
+    digest = fields[0].lower()
+    name = fields[1].lstrip("*")
+    if pathlib.PurePosixPath(name).name == artifact.name:
+        matches.append((digest, name))
+
+if len(matches) != 1:
+    raise SystemExit(f"expected one checksum entry for {artifact.name}, found {len(matches)}")
+
+expected, _ = matches[0]
+if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+    raise SystemExit(f"invalid SHA-256 entry for {artifact.name}")
+
+hasher = hashlib.sha256()
+with artifact.open("rb") as handle:
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        hasher.update(chunk)
+if not hmac.compare_digest(hasher.hexdigest(), expected):
+    raise SystemExit(f"checksum mismatch for {artifact.name}")
+PY
+    then
+      print_message "[!] Artifact checksum verification failed for ${input}" "error"
+      exit 1
+    fi
+  done
+  print_message "[+] Signed local artifact manifest verified" "ok"
+}
+
 #---  FUNCTION  ----------------------------------------------------------------
 #          NAME:  ludus_install_server
 #   DESCRIPTION:  Installs the Ludus server as an LXC container on a Proxmox
@@ -581,6 +681,8 @@ ludus_install_server() {
     print_message "[!] Proxmox 8.0+ is required (found ${PVE_VER}.x)" "error"
     exit 1
   fi
+
+  verify_offline_inputs
 
   if [[ -z "${LANGUAGE+x}" ]]; then
     export LANGUAGE=en_US.UTF-8 LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8
@@ -799,6 +901,16 @@ lxc.cgroup2.devices.allow: c 10:200 rwm
 lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
 EOF
 
+  # Proxmox VE 9 only supports pct push for running containers. Start the
+  # container, then stop Ludus before installing its configuration and local
+  # artifacts so bootstrap cannot race partially-staged inputs.
+  pct start "${VMID}" \
+    || { print_message "[!] Failed to start LXC ${VMID}" "error"; exit 1; }
+  sleep 2
+  pct exec "${VMID}" -- systemctl stop ludus-admin ludus \
+    || { print_message "[!] Failed to stop Ludus before artifact staging" "error"; exit 1; }
+
+
   # ---- 6. Configure ------------------------------------------------------------
   local CFG
   CFG=/tmp/ludus-config.$$.yml
@@ -827,20 +939,31 @@ data_directory: /opt/ludus/db
 database_encryption_key: $(head -c 24 /dev/urandom | base64 | head -c 32)
 EOF
   chmod 0600 "${CFG}"
-  pct start "${VMID}"
-  sleep 5
-  pct exec "${VMID}" -- mkdir -p /opt/ludus
-  pct push "${VMID}" "${CFG}" /opt/ludus/config.yml --perms 0600
-  pct exec "${VMID}" -- chown ludus:ludus /opt/ludus/config.yml
+  pct push "${VMID}" "${CFG}" /opt/ludus/config.yml --perms 0600 --user 1001 --group 1001
+  if [[ -n "${ENTERPRISE_PLUGIN:-}" ]]; then
+    pct push "${VMID}" "${ENTERPRISE_PLUGIN}" /opt/ludus/plugins/enterprise/ludus-enterprise.so \
+      --perms 0644 --user 1001 --group 1001
+    pct push "${VMID}" "${ENTERPRISE_PLUGIN}" /opt/ludus/plugins/enterprise/admin/ludus-enterprise.so \
+      --perms 0644 --user 0 --group 0
+  fi
+  if [[ -n "${LICENSE_FILE:-}" ]]; then
+    pct push "${VMID}" "${LICENSE_FILE}" /opt/ludus/license.lic --perms 0640 --user 1001 --group 1001
+  fi
   if [[ -n "${CA_CERTIFICATE:-}" ]]; then
-    pct exec "${VMID}" -- mkdir -p /opt/ludus/install
-    pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/install/injected-ca-certificate.crt --perms 0644
-    pct exec "${VMID}" -- chown root:root /opt/ludus/install/injected-ca-certificate.crt
+    pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/install/injected-ca-certificate.crt \
+      --perms 0644 --user 0 --group 0
+    pct push "${VMID}" "${CA_CERTIFICATE}" /usr/local/share/ca-certificates/ludus-injected-ca.crt \
+      --perms 0644 --user 0 --group 0
   fi
   rm -f "${CFG}"
 
+  if [[ -n "${CA_CERTIFICATE:-}" ]]; then
+    pct exec "${VMID}" -- update-ca-certificates
+  fi
+
   if [[ -n "${IMPORT_DB:-}" ]]; then
     print_message "[+] Importing DB/WireGuard state from ${IMPORT_DB} ..." "info"
+    pct exec "${VMID}" -- systemctl stop ludus-admin ludus
     pct push "${VMID}" "${IMPORT_DB}" /tmp/ludus-import.tar.gz
     pct exec "${VMID}" -- tar xzf /tmp/ludus-import.tar.gz -C / --strip-components=0
     pct exec "${VMID}" -- rm /tmp/ludus-import.tar.gz
@@ -1189,6 +1312,11 @@ while [[ $# -gt 0 ]]; do
     --version      ) LUDUS_VERSION="$2"; shift 2;;
     --template-file) TEMPLATE_FILE="$2"; SERVER_ONLY=1; shift 2;;
     --ca-certificate) CA_CERTIFICATE="$2"; shift 2;;
+    --enterprise-plugin) ENTERPRISE_PLUGIN="$2"; shift 2;;
+    --license-file ) LICENSE_FILE="$2"; shift 2;;
+    --checksum-file) CHECKSUM_FILE="$2"; shift 2;;
+    --checksum-signature) CHECKSUM_SIGNATURE="$2"; shift 2;;
+    --checksum-public-key) CHECKSUM_PUBLIC_KEY="$2"; shift 2;;
     --token-id     ) TOKEN_ID="$2"; shift 2;;
     --token-secret ) TOKEN_SECRET="$2"; shift 2;;
     --no-prompt    ) NO_PROMPT=1; shift;;

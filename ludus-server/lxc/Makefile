@@ -19,9 +19,10 @@ install:
 	dab exec useradd -u 1001 -g 1001 -m -s /bin/bash ludus
 	# dirs
 	dab exec mkdir -p /opt/ludus/install /opt/ludus/db /opt/ludus/tls \
-	  /opt/ludus/users /opt/ludus/resources/blocky \
+	  /opt/ludus/users /opt/ludus/plugins/enterprise/admin \
+	  /opt/ludus/resources/blocky /opt/ludus/resources/windows \
 	  /opt/ludus/resources/global-collections /opt/ludus/resources/global-roles \
-	  /opt/ludus/resources/packer/plugins
+	  /opt/ludus/resources/packer/plugins /usr/local/share/ca-certificates
 	# binary + embedded trees
 	install -m 0755 ../../binaries/ludus-server $(BASEDIR)/opt/ludus/ludus-server
 	cp -r ../ansible $(BASEDIR)/opt/ludus/ansible
@@ -42,6 +43,8 @@ install:
 	cp -r deps/packer-plugins/. $(BASEDIR)/opt/ludus/resources/packer/plugins/
 	# Blocky DNS binary staged for offline router deployment
 	install -m 0755 deps/blocky/$(BLOCKY_VERSION)/blocky $(BASEDIR)/opt/ludus/resources/blocky/blocky
+	# BGInfo payload staged for offline Windows configuration
+	install -m 0644 deps/bginfo.exe $(BASEDIR)/opt/ludus/resources/windows/bginfo.exe
 	# systemd + sysctl
 	install -m 0644 files/ludus.service $(BASEDIR)/etc/systemd/system/ludus.service
 	install -m 0644 files/ludus-admin.service $(BASEDIR)/etc/systemd/system/ludus-admin.service

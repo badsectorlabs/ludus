@@ -138,6 +138,7 @@ proxmox_token_id: ${TOKEN_ID}
 proxmox_token_secret: ${TOKEN_SECRET}
 proxmox_node: ${NODE}
 proxmox_invalid_cert: true
+airgapped_install: true
 sdn_zone: ludus
 ludus_nat_interface: ${LUDUS_NAT_BRIDGE}
 license_key: community

@@ -34,8 +34,8 @@ var UserIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,20}$`)
 // password not settable via API) on success.
 func provisionNewUser(txApp core.App, user *models.User, plaintextPassword string) (apiKey string, proxmoxWarn string, err error) {
 	user.SetUserNumber(findNextAvailableUserNumber(txApp))
-	if user.UserNumber() > 150 {
-		return "", "", fmt.Errorf("cannot create more than 150 users")
+	if user.UserNumber() > 255 {
+		return "", "", fmt.Errorf("cannot create more than 255 users")
 	}
 
 	if err := CreateDefaultUserRangeForBootstrap(txApp, user); err != nil {

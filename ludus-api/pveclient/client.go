@@ -173,6 +173,10 @@ func (t *failoverTransport) RoundTrip(req *http.Request) (*http.Response, error)
 			}
 			return nil, err
 		}
+		if !requestCanBeReplayed(req.Method) {
+			t.client.advance(base)
+			return resp, err
+		}
 		if resp != nil {
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
@@ -258,6 +262,17 @@ func (c *Client) healthLoop() {
 	}
 }
 
+// requestCanBeReplayed reports whether replaying a request on another endpoint
+// is safe after an ambiguous transport or gateway failure.
+func requestCanBeReplayed(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
 // shouldFailover returns true for transport errors and gateway HTTP codes.
 func shouldFailover(err error, status int) bool {
 	if err != nil {
@@ -268,6 +283,15 @@ func shouldFailover(err error, status int) bool {
 		return errors.As(err, &ne)
 	}
 	return status == 502 || status == 503 || status == 504
+}
+func ambiguousWriteFailure(err error) bool {
+	if shouldFailover(err, 0) {
+		return true
+	}
+	message := err.Error()
+	return strings.Contains(message, ": 502:") ||
+		strings.Contains(message, ": 503:") ||
+		strings.Contains(message, ": 504:")
 }
 
 // do performs an HTTP request against the active endpoint with one failover retry.
@@ -326,6 +350,12 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, ou
 			return fmt.Errorf("proxmox %s %s: %d: %s", method, path, status, respBody)
 		}
 		c.advance(base)
+		if !requestCanBeReplayed(method) {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("proxmox %s %s: %d: %s", method, path, status, respBody)
+		}
 	}
 	return errors.New("pveclient: unreachable") // not hit
 }

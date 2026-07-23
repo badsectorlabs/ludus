@@ -3,6 +3,7 @@ package pveclient
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -112,7 +113,24 @@ func (c *Client) CreateUser(ctx context.Context, userid, password string, groups
 	} else if realm != "pve" {
 		warning = fmt.Sprintf("@%s realm: password not set via API; create system user and run `pveum passwd %s` on a cluster node", realm, userid)
 	}
-	return warning, c.do(ctx, "POST", "/api2/json/access/users", strings.NewReader(form.Encode()), nil)
+	var createErr error
+	for range 2 {
+		createErr = c.do(ctx, http.MethodPost, "/api2/json/access/users", strings.NewReader(form.Encode()), nil)
+		if createErr == nil {
+			return warning, nil
+		}
+		if !ambiguousWriteFailure(createErr) {
+			return warning, createErr
+		}
+		exists, verifyErr := c.UserExists(ctx, userid)
+		if verifyErr != nil {
+			return warning, fmt.Errorf("%w; unable to verify whether %s was created: %v", createErr, userid, verifyErr)
+		}
+		if exists {
+			return warning, nil
+		}
+	}
+	return warning, createErr
 }
 
 func (c *Client) DeleteUser(ctx context.Context, userid string) error {

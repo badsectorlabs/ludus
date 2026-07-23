@@ -12,6 +12,7 @@ api_token_secret: "{{ proxmox_token_secret }}"
 node_name: "{{ proxmox_node }}"
 proxmox_default_behavior: compatibility
 ansible_remote_tmp: "{{ '/opt/ludus/ansible/tmp' if (lookup('env', 'USER') != 'root') else '/tmp/.ansible/tmp' }}"
+ludus_office_chocolatey_version: "16.0.20131.20090"
 
 # SDN VNet naming: 'r{range_number}'
 range_bridge_name: "r{{ range_second_octet }}"

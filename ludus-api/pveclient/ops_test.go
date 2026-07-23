@@ -121,6 +121,57 @@ func TestCreateUser_PAMRealmOmitsPassword(t *testing.T) {
 	}
 }
 
+func TestCreateUser_ReconcilesAmbiguousGatewayResponse(t *testing.T) {
+	created := false
+	badPostHits := 0
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/version" {
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": "9.0"}})
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api2/json/access/users" {
+			badPostHits++
+			created = true
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer bad.Close()
+
+	goodPostHits := 0
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/version" {
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": "9.0"}})
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api2/json/access/users/alice@pve" && created {
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"userid": "alice@pve"}})
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api2/json/access/users" {
+			goodPostHits++
+			json.NewEncoder(w).Encode(map[string]any{"data": nil})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer good.Close()
+
+	c, err := New(Config{Endpoints: []string{bad.URL, good.URL}, TokenID: "t", TokenSecret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if _, err := c.CreateUser(t.Context(), "alice@pve", "s3cret", nil); err != nil {
+		t.Fatal(err)
+	}
+	if badPostHits != 1 || goodPostHits != 0 {
+		t.Fatalf("ambiguous POST was replayed: bad hits=%d good hits=%d", badPostHits, goodPostHits)
+	}
+}
+
 func TestCreateToken(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api2/json/access/users/alice@pve/token/ludus", func(w http.ResponseWriter, r *http.Request) {

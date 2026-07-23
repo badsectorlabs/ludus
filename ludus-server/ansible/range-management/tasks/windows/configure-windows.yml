@@ -95,6 +95,7 @@
       ansible.builtin.get_url:
         url: https://live.sysinternals.com/bginfo.exe
         dest: "{{ ludus_install_path }}/resources/windows/bginfo.exe"
+        checksum: sha256:599b391980a5c9cbadd6c70ba3d5a5258db8b9d87c68b3fe587d9dc84effdf63
       delegate_to: localhost
       when: not bginfo_exists.stat.exists
 
