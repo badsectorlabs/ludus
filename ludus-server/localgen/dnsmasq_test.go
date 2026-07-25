@@ -40,3 +40,22 @@ func TestWriteDnsmasq(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWriteDnsmasqDefaultsDisablesResolvconfOverride(t *testing.T) {
+	path := t.TempDir() + "/dnsmasq"
+	if err := WriteDnsmasqDefaults(path); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"CONFIG_DIR=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new",
+		"IGNORE_RESOLVCONF=yes",
+	} {
+		if !strings.Contains(string(content), want) {
+			t.Fatalf("dnsmasq defaults missing %q:\n%s", want, content)
+		}
+	}
+}

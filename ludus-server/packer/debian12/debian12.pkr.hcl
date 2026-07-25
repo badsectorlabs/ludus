@@ -66,6 +66,10 @@ variable "proxmox_pool" {
 variable "iso_storage_pool" {
   type = string
 }
+variable "airgapped_install" {
+  type    = bool
+  default = false
+}
 variable "ansible_home" {
   type = string
 }
@@ -79,12 +83,15 @@ variable "packer_http_bind_address" {
 
 locals {
   template_description = "Debian 12 template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => debian:debian"
+  airgapped_iso_file   = "${var.iso_storage_pool}:iso/debian-12.14.0-amd64-netinst.iso"
+  injected_ca_path = "/opt/ludus/install/injected-ca-certificate.crt"
+  serve_injected_ca = var.airgapped_install && fileexists(local.injected_ca_path)
 }
 
 source "proxmox-iso" "debian12" {
   boot_command = [
     "<down><tab>", # non-graphical install
-    "<wait>preseed/url=http://${var.packer_http_bind_address}:{{ .HTTPPort }}/debian-12-preseed.cfg ",
+    "<wait>preseed/url=http://${var.packer_http_bind_address}:{{ .HTTPPort }}/preseed.cfg ",
     "<wait>language=en locale=en_US.UTF-8 ",
     "<wait>country=US keymap=us ",
     "<wait>hostname=debian12 domain=local ",
@@ -92,15 +99,29 @@ source "proxmox-iso" "debian12" {
   ]
   boot_key_interval = "100ms"
   boot_wait         = "15s"
-  http_directory    = "./http"
   http_bind_address = "${var.packer_http_bind_address}"
+  # Render the template directly into memory for the HTTP server
+  http_content = merge(
+    {
+      "/preseed.cfg" = templatefile("${path.root}/preseed.cfg.pkrtpl.hcl", {
+        airgapped_install = var.airgapped_install,
+        serve_injected_ca = local.serve_injected_ca,
+        http_address = "${var.packer_http_bind_address}:{{ .HTTPPort }}"
+      })
+    },
+    local.serve_injected_ca ? {
+      "/injected-ca-certificate.crt" = file(local.injected_ca_path)
+    } : {}
+  )
+
 
   boot_iso {
     type              = "ide"
-    iso_checksum      = "${var.iso_checksum}"
-    iso_url           = "${var.iso_url}"
-    iso_storage_pool  = "${var.iso_storage_pool}"
-    iso_download_pve  = true
+    iso_checksum      = var.iso_checksum
+    iso_file          = var.airgapped_install ? local.airgapped_iso_file : null
+    iso_url           = var.airgapped_install ? null : var.iso_url
+    iso_storage_pool  = var.iso_storage_pool
+    iso_download_pve  = var.airgapped_install ? null : true
     unmount           = true
     keep_cdrom_device = false
   }

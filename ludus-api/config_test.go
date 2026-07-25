@@ -93,3 +93,30 @@ proxmox_token_secret: abc
 		t.Fatalf("expected shimmed legacy localhost to be rejected, got: %v", err)
 	}
 }
+
+func TestConfig_LudusDNSServer(t *testing.T) {
+	c, err := loadConfigFromYAML(t, `
+proxmox_endpoints: ["https://10.0.0.5:8006"]
+proxmox_token_id: root@pam!ludus
+proxmox_token_secret: abc
+ludus_dns_server: 10.20.30.40
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.LudusDNSServer != "10.20.30.40" {
+		t.Fatalf("unexpected Ludus DNS server: %q", c.LudusDNSServer)
+	}
+}
+
+func TestConfig_RejectInvalidLudusDNSServer(t *testing.T) {
+	_, err := loadConfigFromYAML(t, `
+proxmox_endpoints: ["https://10.0.0.5:8006"]
+proxmox_token_id: root@pam!ludus
+proxmox_token_secret: abc
+ludus_dns_server: not-an-ip
+`)
+	if err == nil || !strings.Contains(err.Error(), "ludus_dns_server") {
+		t.Fatalf("expected invalid Ludus DNS server rejection, got: %v", err)
+	}
+}

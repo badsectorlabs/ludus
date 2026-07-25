@@ -1,3 +1,17 @@
+%{ if serve_injected_ca }
+
+d-i preseed/early_command string \
+    wget -q -O /tmp/internal-ca.crt http://{{ http_address }}/injected-ca-certificate.crt && \
+    mkdir -p /usr/local/share/ca-certificates && \
+    cp /tmp/internal-ca.crt /usr/local/share/ca-certificates/internal-ca.crt && \
+    if command -v update-ca-certificates >/dev/null 2>&1 && update-ca-certificates; then \
+        true; \
+    else \
+        mkdir -p /etc/ssl/certs; \
+        touch /etc/ssl/certs/ca-certificates.crt; \
+        cat /tmp/internal-ca.crt >> /etc/ssl/certs/ca-certificates.crt; \
+    fi
+%{ endif }
 d-i partman/early_command \
        string debconf-set partman-auto/disk "$(list-devices disk | head -n1)"
 
@@ -278,7 +292,7 @@ tasksel tasksel/first multiselect SSH server
 # We need at least these to continue the preseeding later on.
 # Provide also haveged so we (hopefully) have more entropy when our VM starts
 # for the first time.
-d-i pkgsel/include string haveged openssh-server sudo qemu-guest-agent python3 python3-apt acpid acpi-support dbus
+d-i pkgsel/include string haveged openssh-server sudo qemu-guest-agent python3 python3-apt acpid acpi-support dbus ca-certificates
 
 # Whether to upgrade packages after debootstrap.
 # Allowed values: none, safe-upgrade, full-upgrade

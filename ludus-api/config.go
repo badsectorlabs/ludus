@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"fmt"
 	"log"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -27,7 +28,7 @@ const (
 type Configuration struct {
 	ProxmoxNode               string        `mapstructure:"proxmox_node" yaml:"proxmox_node"`
 	ProxmoxInvalidCert        bool          `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
-	ProxmoxURL                string        `mapstructure:"proxmox_url" yaml:"proxmox_url"`           // Deprecated: use proxmox_endpoints
+	ProxmoxURL                string        `mapstructure:"proxmox_url" yaml:"proxmox_url"` // Deprecated: use proxmox_endpoints
 	ProxmoxEndpoints          []string      `mapstructure:"proxmox_endpoints" yaml:"proxmox_endpoints"`
 	ProxmoxTokenID            string        `mapstructure:"proxmox_token_id" yaml:"proxmox_token_id"`
 	ProxmoxTokenSecret        string        `mapstructure:"proxmox_token_secret" yaml:"proxmox_token_secret"`
@@ -37,6 +38,7 @@ type Configuration struct {
 	WireguardEndpoint         string        `mapstructure:"wireguard_endpoint" yaml:"wireguard_endpoint"`
 	LudusNATIP                string        `mapstructure:"ludus_nat_ip" yaml:"ludus_nat_ip"`
 	LudusNATGateway           string        `mapstructure:"ludus_nat_gateway" yaml:"ludus_nat_gateway"`
+	LudusDNSServer            string        `mapstructure:"ludus_dns_server" yaml:"ludus_dns_server"`
 	TLSCertFile               string        `mapstructure:"tls_cert_file" yaml:"tls_cert_file"`
 	TLSKeyFile                string        `mapstructure:"tls_key_file" yaml:"tls_key_file"`
 	ProxmoxVMStoragePool      string        `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
@@ -224,6 +226,11 @@ func (c *Configuration) ApplyShimAndValidate() error {
 	// Default realm (for direct-unmarshal callers like tests)
 	if c.ProxmoxUserRealm == "" {
 		c.ProxmoxUserRealm = "pve"
+	}
+	if c.LudusDNSServer != "" {
+		if _, err := netip.ParseAddr(c.LudusDNSServer); err != nil {
+			return fmt.Errorf("ludus_dns_server must be an IP address: %w", err)
+		}
 	}
 	// Validate endpoints
 	if len(c.ProxmoxEndpoints) == 0 {

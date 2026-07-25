@@ -13,7 +13,7 @@ bootstrap:
 install:
 	dab install python3 python3-pip python3-venv wireguard-tools \
 	  dnsmasq nftables iproute2 openssh-client sshpass curl jq ca-certificates \
-	  git gpg dbus systemd-resolved sudo xorriso
+	  git gpg dbus sudo xorriso
 	# system user
 	dab exec groupadd -g 1001 ludus
 	dab exec useradd -u 1001 -g 1001 -m -s /bin/bash ludus
@@ -49,7 +49,8 @@ install:
 	install -m 0644 files/ludus.service $(BASEDIR)/etc/systemd/system/ludus.service
 	install -m 0644 files/ludus-admin.service $(BASEDIR)/etc/systemd/system/ludus-admin.service
 	install -m 0644 files/99-ludus-sysctl.conf $(BASEDIR)/etc/sysctl.d/99-ludus.conf
-	dab exec systemctl enable ludus.service ludus-admin.service wg-quick@wg0 dnsmasq
+	dab exec systemctl disable dnsmasq
+	dab exec systemctl enable ludus.service ludus-admin.service wg-quick@wg0
 	dab exec chown -R ludus:ludus /opt/ludus
 
 finalize:

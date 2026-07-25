@@ -141,6 +141,7 @@ proxmox_invalid_cert: true
 airgapped_install: true
 sdn_zone: ludus
 ludus_nat_interface: ${LUDUS_NAT_BRIDGE}
+ludus_dns_server: ${PVE_API_IP}
 license_key: community
 database_encryption_key: $(head -c 24 /dev/urandom | base64 | head -c 32)
 EOF
@@ -157,6 +158,15 @@ pct exec "$VMID" -- test -f /opt/ludus/install/.bootstrap-complete \
 
 pct exec "$VMID" -- systemctl is-active ludus
 pct exec "$VMID" -- systemctl is-active ludus-admin
+pct exec "$VMID" -- grep -Fx \
+  'CONFIG_DIR=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new' \
+  /etc/default/dnsmasq
+pct exec "$VMID" -- grep -Fx 'IGNORE_RESOLVCONF=yes' /etc/default/dnsmasq
+pct exec "$VMID" -- test ! -x /sbin/resolvconf
+pct exec "$VMID" -- grep -Fx 'no-resolv' /etc/dnsmasq.d/ludus.conf
+pct exec "$VMID" -- grep -Fx "server=${PVE_API_IP}" /etc/dnsmasq.d/ludus.conf
+pct exec "$VMID" -- sh -c \
+  '! tr "\\0" " " < "/proc/$(cat /run/dnsmasq/dnsmasq.pid)/cmdline" | grep -q "/run/dnsmasq/resolv.conf"'
 
 ADMIN_API_KEY=""
 if [[ "$RUN_USER_TEST" == "1" ]]; then

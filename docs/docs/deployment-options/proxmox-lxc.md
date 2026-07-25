@@ -14,34 +14,25 @@ API token that the container uses to manage the cluster.
 
 ## Requirements
 
-Run the installer as `root` on an amd64 Proxmox VE 8 or 9 host. The host needs:
+Run the installer as `root` on an amd64 Proxmox VE 9 host. The host needs:
 
 - `bash`, `curl`, `grep`, and `python3`
 - `openssl` when using `--ca-certificate`
 - a healthy Proxmox cluster with quorum
 - a storage pool that supports LXC root filesystems
 - VM and ISO storage available to every node that will build or run VMs
-- an address on `vmbr0` for the Ludus container, supplied by DHCP or configured
-  statically
+- an address on a Proxmox bridge available on every potential LXC node, supplied
+  by DHCP or configured statically
 - working routing between the container and every Proxmox API endpoint
 
-The installer creates an unprivileged LXC with 4 vCPUs, 4 GiB of memory, 512 MiB
-of swap, and a 20 GiB root filesystem. The compressed appliance is about 200 MB;
-the exact size changes between releases.
+The installer creates an unprivileged LXC with 4 vCPUs, 4 GiB of memory, and
+512 MiB of swap. The root filesystem defaults to 20 GiB and can be enlarged
+with `--rootfs-size`. The compressed appliance size changes between releases.
 
 In a multi-node cluster, allow Proxmox SDN traffic, including VXLAN UDP 4789,
 between the nodes. The installer creates a VXLAN zone named `ludus`, a VNet
 named `ludusnat`, and the `192.0.2.0/24` subnet. Do not reuse those names or that
 subnet for unrelated infrastructure.
-
-:::warning
-
-The installer creates or reuses cluster-wide SDN objects and creates a
-non-privilege-separated `root@pam!ludus` API token by default. Review the script
-and take a Proxmox configuration backup before running it on a cluster that
-already has custom SDN configuration.
-
-:::
 
 ## Install on a connected cluster
 
@@ -61,13 +52,15 @@ The interactive installer asks for:
 | --- | --- |
 | Proxmox API endpoints | Space-separated `https://node:8006` URLs. Include every node that Ludus may manage. |
 | LXC VMID | VMID for the Ludus container. The default is the next free cluster VMID. |
-| LXC rootfs storage | Storage used for the 20 GiB container root filesystem. |
-| LXC IP and gateway | Address on `vmbr0`. A static address is recommended for an API server. |
-| WireGuard endpoint | IP address or hostname that Ludus clients use for UDP 51820. |
-| VM storage | Proxmox storage for range VMs and templates. It must be available on the intended nodes. |
-| ISO storage | Proxmox storage used while building VM templates. |
+| LXC rootfs storage and size | Storage used for the container root filesystem. The minimum supported size is 20 GiB. |
+| LXC hostname | Hostname assigned to the Ludus container. |
+| LXC bridge and VLAN | Management bridge available on every potential LXC node, plus an optional VLAN tag. |
+| LXC IP, gateway, and DNS | Static address and gateway, or DHCP with a stable reservation. An explicit internal resolver is recommended offline. |
+| WireGuard endpoint and port | Address and UDP port that Ludus clients use to reach the container. |
+| VM storage and format | Proxmox storage for range VMs and templates, plus its supported `qcow2` or `raw` disk format. |
+| ISO storage | Shared Proxmox storage used while building VM templates. |
 | License | `community` or a Ludus license key. |
-| CA certificate | Optional PEM root CA copied into templates built by Ludus. |
+| CA certificate | Optional site-supplied PEM root CA copied into the LXC and templates built by Ludus. |
 
 When run as `root`, the installer creates `root@pam!ludus` if no token was
 provided. If that token already exists, the interactive installer asks whether
@@ -103,6 +96,7 @@ VM_STORAGE=nfs ISO_STORAGE=local ./install.sh \
   --storage local-lvm \
   --ip 10.20.30.50/24 \
   --gw 10.20.30.1 \
+  --nameserver 10.20.30.53 \
   --endpoints "https://10.20.30.11:8006 https://10.20.30.12:8006 https://10.20.30.13:8006" \
   --wg-endpoint ludus.example.com \
   --license community
@@ -111,6 +105,9 @@ VM_STORAGE=nfs ISO_STORAGE=local ./install.sh \
 `--storage` selects the LXC root filesystem storage. `VM_STORAGE` and
 `ISO_STORAGE` select the range VM and ISO stores. If those environment variables
 are omitted in non-interactive mode, both default to `local`.
+
+`--nameserver` is assigned to the LXC and persisted as the upstream used by
+dnsmasq for the template network.
 
 You can supply an existing API token with `--token-id` and `--token-secret`.
 Omit both when running as `root` if the installer should create the token.
@@ -231,7 +228,9 @@ chmod 0755 /root/install.sh
 /root/install.sh \
   --template-file "/root/ludus-${VERSION}-debian13-amd64.tar.zst" \
   --version "$VERSION" \
-  --ca-certificate /root/lab-root-ca.crt
+  --bridge vmbr0 \
+  --nameserver 10.0.0.53 \
+  --ca-certificate /root/site-root-ca.crt
 ```
 
 Omit `--ca-certificate` if the environment does not use a private CA. With a
@@ -244,18 +243,18 @@ Provide these services inside the disconnected environment:
 
 | Requirement | Why it is needed |
 | --- | --- |
-| Local DNS | Proxmox nodes, the Ludus LXC, template-build VMs, and range VMs must resolve internal mirrors and each other. The default range router forwards external queries to Cloudflare DNS-over-HTTPS, which will not work without egress. |
+| Local DNS | Proxmox nodes, the Ludus LXC, template-build VMs, and range VMs must resolve internal mirrors and each other. `--nameserver` assigns the LXC resolver and dnsmasq upstream; set `router.upstream_dns` to internal resolvers for deployed ranges. |
 | Local NTP | Kerberos, Active Directory, TLS validation, package metadata, and cluster operation depend on synchronized clocks. |
 | Proxmox API reachability | The LXC must reach TCP 8006 on every configured endpoint. Proxmox nodes must remain quorate. |
 | Internal artifact service | Packer source ISOs and any files fetched by template or role provisioning must be reachable from the Proxmox nodes and build VMs. |
-| APT mirror or cache | Debian and Kali net installers need package indexes and packages. Netinst ISOs alone are not enough. |
+| APT mirror or cache | Debian and Kali net installers need package indexes and packages. The APT mirror must allow HTTP connections so the installers can access them before injected with the CA certificate |
 | Windows package source | Any requested Chocolatey, Office, Visual Studio, .NET, browser, or tool installation must be available internally. |
 | Local license file | Community edition works without license activation. Pro or Enterprise air-gapped deployments need an offline license file issued before disconnection. |
 
-The LXC has two interfaces: `eth0` on `vmbr0` and `eth1` on `ludusnat` at
-`192.0.2.253/24`. Internal mirrors must be reachable from the systems that use
-them. A mirror reachable only from a Proxmox management address may still be
-unreachable from a template-build VM or a range VM.
+The LXC has two interfaces: `eth0` on the bridge selected with `--bridge` and
+`eth1` on `ludusnat` at `192.0.2.253/24`. An optional management VLAN can be set
+with `--vlan-tag`. Internal mirrors must be reachable from the systems that use
+them; reachability from only the Proxmox management addresses is insufficient.
 
 For Pro or Enterprise, copy the signed offline license into the container and
 restart the services:
@@ -280,13 +279,14 @@ The current built-in template inputs are:
 | --- | --- |
 | Debian 11 | `debian-11.7.0-amd64-netinst.iso` and a Debian 11 APT repository |
 | Debian 12 | `debian-12.14.0-amd64-netinst.iso` and a Debian 12 APT repository |
-| Kali | `kali-linux-2026.1-installer-netinst-amd64.iso`, a Kali package repository, and the KasmVNC package used by the template playbook |
+| Kali | `kali-linux-2026.1-installer-netinst-amd64.iso`, a Kali package repository, and the pinned KasmVNC package bundled with the template |
 | Windows 11 Enterprise 22H2 | Windows Enterprise evaluation ISO and `virtio-win-0.1.240.iso` |
 | Windows Server 2022 | Windows Server evaluation ISO and `virtio-win-0.1.229.iso` |
 
-Check the corresponding `.pkr.hcl` file in the Ludus source for the authoritative
-URL and checksum. These versions change as template definitions are updated.
-Keep the checksum validation when redirecting a URL to an internal server.
+Check the corresponding `.pkr.hcl` file and bundled `http/` assets in the Ludus
+source for the authoritative inputs and checksums. These versions change as
+template definitions are updated. Keep checksum validation when redirecting an
+ISO URL to an internal server.
 
 :::warning
 
@@ -312,9 +312,11 @@ deployment, so the router does not download Blocky from GitHub.
 ### APT mirror or cache
 
 The Debian templates use netinst media, run a full package upgrade, and install
-packages from `deb.debian.org`. The Kali template installs its desktop and tools
-from Kali repositories. Prepare the exact distribution suites, components, and
-`amd64` packages referenced by the templates.
+packages from `deb.debian.org`. The Kali installer uses `kali.download`, while
+the installed system uses `http.kali.org`; the latter normally redirects back
+to `kali.download`. Internal DNS must map both names to the complete Kali
+mirror. Mirror the signed `Contents-amd64` indexes as well as package indexes
+and packages. For `debmirror`, this requires `--getcontents`.
 
 An APT caching proxy must be populated before egress is removed. A cache miss is
 an Internet request and will fail. For predictable air-gapped operation, a

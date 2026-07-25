@@ -9,6 +9,9 @@ cd "$(dirname "$0")"
 : "${BLOCKY_VERSION:=0.30.0}"
 : "${BLOCKY_LINUX_X86_64_SHA256:=1641ec6821abd39ff61cf47f343f518c33a1973c64ad6c0deb030b0f02d9ef30}"
 : "${BGINFO_SHA256:=599b391980a5c9cbadd6c70ba3d5a5258db8b9d87c68b3fe587d9dc84effdf63}"
+: "${DAB_CACHE_DIR:=}"
+: "${DAB_WGET_TIMEOUT:=60}"
+: "${DAB_WGET_TRIES:=3}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -21,6 +24,8 @@ require_command curl
 require_command unzip
 require_command python3
 require_command ansible-galaxy
+require_command install
+require_command mktemp
 require_command sha256sum
 require_command tar
 
@@ -89,9 +94,33 @@ fi
 
 # Substitute version into dab.conf before make parses BASEDIR.
 sed -i "s/^Version: .*/Version: ${LUDUS_VERSION}/" dab.conf
+if [[ -n $DAB_CACHE_DIR ]]; then
+  [[ $DAB_CACHE_DIR =~ ^/[A-Za-z0-9._/-]+$ && $DAB_CACHE_DIR != *"/../"* && $DAB_CACHE_DIR != */.. ]] || {
+    echo "ERROR: DAB_CACHE_DIR must be a simple absolute path without '..': $DAB_CACHE_DIR" >&2
+    exit 1
+  }
+  install -d -m 0755 "$DAB_CACHE_DIR"
+  sed -i "s|^CacheDir: .*|CacheDir: ${DAB_CACHE_DIR}|" dab.conf
+fi
+[[ $DAB_WGET_TIMEOUT =~ ^[1-9][0-9]*$ ]] || {
+  echo "ERROR: DAB_WGET_TIMEOUT must be a positive integer" >&2
+  exit 1
+}
+[[ $DAB_WGET_TRIES =~ ^[1-9][0-9]*$ ]] || {
+  echo "ERROR: DAB_WGET_TRIES must be a positive integer" >&2
+  exit 1
+}
+
+DAB_WGETRC=$(mktemp)
+cleanup() {
+  rm -f "$DAB_WGETRC"
+}
+trap cleanup EXIT INT TERM
+printf 'timeout = %s\ntries = %s\nretry_connrefused = on\n' \
+  "$DAB_WGET_TIMEOUT" "$DAB_WGET_TRIES" >"$DAB_WGETRC"
 
 make clean || true
-make LUDUS_VERSION="${LUDUS_VERSION}" BLOCKY_VERSION="${BLOCKY_VERSION}"
+WGETRC="$DAB_WGETRC" make LUDUS_VERSION="${LUDUS_VERSION}" BLOCKY_VERSION="${BLOCKY_VERSION}"
 
 OUT="ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst"
 mv ludus_*.tar.zst "../../${OUT}" 2>/dev/null || mv *.tar.zst "../../${OUT}"

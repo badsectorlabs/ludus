@@ -66,6 +66,10 @@ variable "proxmox_pool" {
 variable "iso_storage_pool" {
   type = string
 }
+variable "airgapped_install" {
+  type    = bool
+  default = false
+}
 variable "ansible_home" {
   type = string
 }
@@ -79,6 +83,8 @@ variable "packer_http_bind_address" {
 
 locals {
   template_description = "Windows 11 22H2 64-bit Enterprise template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => localuser:password"
+  airgapped_iso_file        = "${var.iso_storage_pool}:iso/22621.525.220925-0207.ni_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso"
+  airgapped_virtio_iso_file = "${var.iso_storage_pool}:iso/virtio-win-0.1.240.iso"
 }
 
 source "proxmox-iso" "win11-22h2-x64-enterprise" {
@@ -115,17 +121,19 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
     type             = "sata"
     index            = "4"
     iso_checksum     = "sha256:ebd48258668f7f78e026ed276c28a9d19d83e020ffa080ad69910dc86bbcbcc6"
-    iso_url          = "https://virtio-win.ludus.cloud/archive-virtio/virtio-win-0.1.240-1/virtio-win-0.1.240.iso"
-    iso_storage_pool = "${var.iso_storage_pool}"
+    iso_file         = var.airgapped_install ? local.airgapped_virtio_iso_file : null
+    iso_url          = var.airgapped_install ? null : "https://virtio-win.ludus.cloud/archive-virtio/virtio-win-0.1.240-1/virtio-win-0.1.240.iso"
+    iso_storage_pool = var.iso_storage_pool
     unmount          = true
-    iso_download_pve  = true
+    iso_download_pve = var.airgapped_install ? null : true
   }
   boot_iso {
     type              = "ide"
-    iso_checksum      = "${var.iso_checksum}"
-    iso_url           = "${var.iso_url}"
-    iso_storage_pool  = "${var.iso_storage_pool}"
-    iso_download_pve  = true
+    iso_checksum      = var.iso_checksum
+    iso_file          = var.airgapped_install ? local.airgapped_iso_file : null
+    iso_url           = var.airgapped_install ? null : var.iso_url
+    iso_storage_pool  = var.iso_storage_pool
+    iso_download_pve  = var.airgapped_install ? null : true
     unmount           = true
     keep_cdrom_device = true
   }
@@ -172,6 +180,17 @@ source "proxmox-iso" "win11-22h2-x64-enterprise" {
 
 build {
   sources = ["source.proxmox-iso.win11-22h2-x64-enterprise"]
+  provisioner "ansible" {
+    playbook_file = "../ansible/inject-ca-certificate.yml"
+    use_proxy     = false
+    user          = "${var.winrm_username}"
+    extra_arguments = [
+      "-e", "ansible_winrm_server_cert_validation=ignore",
+      "-e", "ansible_winrm_connection_timeout=300"
+    ]
+    ansible_env_vars = ["ANSIBLE_HOME=${var.ansible_home}", "ANSIBLE_LOCAL_TEMP=${var.ansible_home}/tmp", "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR=${var.ansible_home}/pc", "ANSIBLE_SSH_CONTROL_PATH_DIR=${var.ansible_home}/cp"]
+    skip_version_check = true
+  }
 
   provisioner "windows-shell" {
     scripts = ["../scripts/disablewinupdate.bat"]
@@ -191,17 +210,6 @@ build {
 
   provisioner "ansible" {
     playbook_file = "../ansible/ngen.yml"
-    use_proxy     = false
-    user          = "${var.winrm_username}"
-    extra_arguments = [
-      "-e", "ansible_winrm_server_cert_validation=ignore",
-      "-e", "ansible_winrm_connection_timeout=300"
-    ]
-    ansible_env_vars   = ["ANSIBLE_HOME=${var.ansible_home}"]
-    skip_version_check = true
-  }
-  provisioner "ansible" {
-    playbook_file = "../ansible/inject-ca-certificate.yml"
     use_proxy     = false
     user          = "${var.winrm_username}"
     extra_arguments = [

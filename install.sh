@@ -33,6 +33,16 @@ set -o nounset                              # Treat unset variables as an error
 #-------------------------------------------------------------------------------
 PROJECT_ID=54052321
 PREFIX="${PREFIX:-}"
+AIRGAPPED_INSTALL=0
+AIRGAPPED_ISO_FILENAMES=(
+  debian-11.7.0-amd64-netinst.iso
+  debian-12.14.0-amd64-netinst.iso
+  kali-linux-2026.1-installer-netinst-amd64.iso
+  22621.525.220925-0207.ni_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso
+  SERVER_EVAL_x64FRE_en-us.iso
+  virtio-win-0.1.240.iso
+  virtio-win-0.1.229.iso
+)
 
 if [[ -z "${PREFIX}" ]]; then
   INSTALL_PREFIX="/usr/local/bin"
@@ -93,24 +103,38 @@ print_help() {
   --server-only          Skip client download/install and only install the server LXC
   --version VER          Ludus version to install (default: latest release tag)
   --template-file PATH   Use a local LXC template tarball (implies --server-only)
-  --ca-certificate PATH  Copy a PEM CA certificate into the LXC for template builds
+  --airgapped            Use only signed local installation media (implies --server-only)
+  --vm-storage NAME      Storage for built VM disks (default: local)
+  --vm-storage-format FORMAT
+                         VM disk format: qcow2 or raw (default: qcow2)
+  --iso-storage NAME     Shared storage for template ISOs (required with --airgapped; default: local otherwise)
+  --iso-directory DIR    Directory containing all pinned template ISOs (implies --airgapped)
+  --ca-certificate PATH  Copy a site-supplied PEM CA certificate into LXC and template trust stores
   --enterprise-plugin PATH
                          Install a local Enterprise plugin into both services
   --license-file PATH    Install a signed offline Enterprise license file
-  --checksum-file PATH   SHA-256 manifest covering every supplied local artifact
+  --checksum-file PATH   SHA-256 manifest covering supplied release artifacts
   --checksum-signature PATH
                          Detached signature for --checksum-file
   --checksum-public-key PATH
                          Trusted PEM public key for signature verification
+  --skip-verification    Bypass signed manifest and artifact checksum verification
   --token-id ID          Proxmox API token ID (e.g. root@pam!ludus)
   --token-secret SECRET  Proxmox API token secret
   --no-prompt            Non-interactive; use defaults / supplied flags
   --vmid N               VMID for the Ludus LXC (default: cluster nextid)
+  --hostname NAME        LXC hostname (default: ludus)
   --storage NAME         Storage for the LXC rootfs (default: local-lvm)
+  --rootfs-size GIB      LXC rootfs size in GiB, minimum 20 (default: 20)
+  --bridge NAME          Proxmox bridge for LXC eth0 (default: vmbr0)
+  --vlan-tag N           Optional VLAN tag for LXC eth0 (1-4094)
   --ip CIDR|dhcp         LXC eth0 address (default: dhcp)
   --gw IP                LXC eth0 gateway (required if --ip is not dhcp)
+  --nameserver IP        DNS resolver assigned to the LXC
   --endpoints \"URL ...\"  Space-separated Proxmox API endpoints
+  --verify-proxmox-tls   Validate Proxmox endpoint certificates from the LXC
   --wg-endpoint HOST     WireGuard endpoint clients will dial
+  --wg-port N            WireGuard UDP listen/client port (default: 51820)
   --license KEY          License key (default: community)
   --import-db TARBALL    Import an existing ludus DB/WireGuard tarball
 
@@ -569,18 +593,24 @@ EOF
 # Verify every local artifact before token creation or cluster mutation.
 verify_offline_inputs() {
   local input
-  local inputs=(
+  local signed_inputs=(
     "${TEMPLATE_FILE:-}"
-    "${CA_CERTIFICATE:-}"
     "${ENTERPRISE_PLUGIN:-}"
     "${LICENSE_FILE:-}"
     "${IMPORT_DB:-}"
   )
+  if [[ "${AIRGAPPED_INSTALL:-0}" == "1" ]]; then
+    local iso_name
+    for iso_name in "${AIRGAPPED_ISO_FILENAMES[@]}"; do
+      signed_inputs+=("${ISO_DIRECTORY%/}/${iso_name}")
+    done
+  fi
 
-  for input in "${inputs[@]}"; do
+  local readable_inputs=("${signed_inputs[@]}" "${CA_CERTIFICATE:-}")
+  for input in "${readable_inputs[@]}"; do
     [[ -z "${input}" ]] && continue
     if [[ ! -f "${input}" || ! -r "${input}" || ! -s "${input}" ]]; then
-      print_message "[!] Local artifact must be a readable, non-empty file: ${input}" "error"
+      print_message "[!] Local input must be a readable, non-empty file: ${input}" "error"
       exit 1
     fi
   done
@@ -594,6 +624,15 @@ verify_offline_inputs() {
     exit 1
   fi
 
+  if [[ "${SKIP_VERIFICATION:-0}" == "1" ]]; then
+    print_message "[!] WARNING: signed release artifact verification is disabled" "warn"
+    return
+  fi
+
+  if [[ "${AIRGAPPED_INSTALL:-0}" == "1" && -z "${CHECKSUM_FILE:-}" ]]; then
+    print_message "[!] Air-gapped installation requires --checksum-file, --checksum-signature, and --checksum-public-key" "error"
+    exit 1
+  fi
   if [[ -z "${CHECKSUM_FILE:-}" ]]; then
     if [[ -n "${CHECKSUM_SIGNATURE:-}" || -n "${CHECKSUM_PUBLIC_KEY:-}" ]]; then
       print_message "[!] --checksum-signature and --checksum-public-key require --checksum-file" "error"
@@ -616,7 +655,7 @@ verify_offline_inputs() {
     exit 1
   fi
 
-  for input in "${inputs[@]}"; do
+  for input in "${signed_inputs[@]}"; do
     [[ -z "${input}" ]] && continue
     if ! python3 - "${CHECKSUM_FILE}" "${input}" <<'PY'
 import hashlib
@@ -655,7 +694,80 @@ PY
       exit 1
     fi
   done
-  print_message "[+] Signed local artifact manifest verified" "ok"
+  print_message "[+] Signed release artifact manifest verified" "ok"
+}
+
+# Return the signed manifest's SHA-256 digest for a verified local artifact.
+manifest_sha256_for() {
+  python3 - "${CHECKSUM_FILE}" "$1" <<'PY'
+import pathlib
+import sys
+
+artifact = pathlib.Path(sys.argv[2])
+matches = []
+for raw_line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    fields = raw_line.split()
+    if len(fields) >= 2 and pathlib.PurePosixPath(fields[1].lstrip("*")).name == artifact.name:
+        matches.append(fields[0].lower())
+if len(matches) != 1:
+    raise SystemExit(f"expected one checksum entry for {artifact.name}, found {len(matches)}")
+print(matches[0])
+PY
+}
+
+# Validate shared ISO storage and publish local air-gapped ISOs.
+prepare_airgapped_isos() {
+  local node storage_config storage_status iso_name iso_path digest digest_source volid content_json existing_path actual_digest
+  node=$(hostname)
+
+  if ! storage_config=$(pvesh get "/storage/${ISO_STORAGE}" --output-format json 2>/dev/null); then
+    print_message "[!] ISO storage does not exist: ${ISO_STORAGE}" "error"
+    exit 1
+  fi
+  if ! python3 -c 'import json,sys; d=json.load(sys.stdin); content=d.get("content", ""); content=",".join(content) if isinstance(content,list) else content; raise SystemExit(0 if d.get("shared") in (1,True,"1") and "iso" in content.split(",") else 1)' <<<"${storage_config}"; then
+    print_message "[!] ISO storage ${ISO_STORAGE} must be shared and support iso content" "error"
+    exit 1
+  fi
+  if ! storage_status=$(pvesh get "/nodes/${node}/storage/${ISO_STORAGE}/status" --output-format json 2>/dev/null) \
+      || ! python3 -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("active") in (1,True,"1") and d.get("enabled",1) in (1,True,"1") else 1)' <<<"${storage_status}"; then
+    print_message "[!] ISO storage ${ISO_STORAGE} is not active on ${node}" "error"
+    exit 1
+  fi
+
+  content_json=$(pvesh get "/nodes/${node}/storage/${ISO_STORAGE}/content" --content iso --output-format json) \
+    || { print_message "[!] Unable to list ISO storage ${ISO_STORAGE}" "error"; exit 1; }
+  for iso_name in "${AIRGAPPED_ISO_FILENAMES[@]}"; do
+    iso_path="${ISO_DIRECTORY%/}/${iso_name}"
+    if [[ "${SKIP_VERIFICATION:-0}" == "1" ]]; then
+      digest=$(sha256sum "${iso_path}" | cut -d' ' -f1) \
+        || { print_message "[!] Unable to checksum local ISO ${iso_name}" "error"; exit 1; }
+      digest_source="local source ISO"
+    else
+      digest=$(manifest_sha256_for "${iso_path}") \
+        || { print_message "[!] Unable to read signed checksum for ${iso_name}" "error"; exit 1; }
+      digest_source="signed manifest"
+    fi
+    volid="${ISO_STORAGE}:iso/${iso_name}"
+    if python3 -c 'import json,sys; volid=sys.argv[1]; raise SystemExit(0 if any(item.get("volid")==volid for item in json.load(sys.stdin)) else 1)' "${volid}" <<<"${content_json}"; then
+      existing_path=$(pvesm path "${volid}") \
+        || { print_message "[!] Unable to resolve existing ISO ${volid}" "error"; exit 1; }
+      actual_digest=$(sha256sum "${existing_path}" | cut -d' ' -f1) \
+        || { print_message "[!] Unable to checksum existing ISO ${volid}" "error"; exit 1; }
+      if [[ "${actual_digest}" != "${digest}" ]]; then
+        print_message "[!] Existing ISO ${volid} does not match the ${digest_source}" "error"
+        exit 1
+      fi
+      print_message "[+] ISO ${volid} already matches the ${digest_source}" "ok"
+      continue
+    fi
+    print_message "[+] Uploading ISO ${iso_name} to ${ISO_STORAGE}" "info"
+    local TMP_UPLOAD_FILE_NAME
+    TMP_UPLOAD_FILE_NAME="/var/tmp/pveupload-$(head -c3 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c6)"
+    cp "${iso_path}" "${TMP_UPLOAD_FILE_NAME}"
+    pvesh create "/nodes/${node}/storage/${ISO_STORAGE}/upload" \
+        --content iso --filename "${iso_name}" --checksum "${digest}" --checksum-algorithm sha256 --tmpfilename "${TMP_UPLOAD_FILE_NAME}" \
+      || { print_message "[!] Failed to upload ISO ${iso_name}" "error"; exit 1; }
+  done
 }
 
 #---  FUNCTION  ----------------------------------------------------------------
@@ -681,8 +793,44 @@ ludus_install_server() {
     print_message "[!] Proxmox 8.0+ is required (found ${PVE_VER}.x)" "error"
     exit 1
   fi
+  if [[ "${AIRGAPPED_INSTALL}" == "1" && -z "${TEMPLATE_FILE:-}" ]]; then
+    print_message "[!] --airgapped requires a signed local --template-file" "error"
+    exit 1
+  fi
+
+  if [[ "${NO_PROMPT:-0}" != "1" && -z "${CA_CERTIFICATE:-}" ]]; then
+    local CA_CERTIFICATE_INPUT
+    read -r -p "[?] CA certificate for template trust stores (optional path) [none]: " CA_CERTIFICATE_INPUT </dev/tty
+    [[ -n "${CA_CERTIFICATE_INPUT}" ]] && CA_CERTIFICATE="${CA_CERTIFICATE_INPUT}"
+  fi
+  if [[ -n "${CA_CERTIFICATE:-}" ]]; then
+    command_exists openssl || { print_message "[!] openssl is required to validate --ca-certificate" "error"; exit 1; }
+    if ! openssl x509 -in "${CA_CERTIFICATE}" -noout >/dev/null 2>&1; then
+      print_message "[!] CA certificate is not a valid PEM X.509 certificate: ${CA_CERTIFICATE}" "error"
+      exit 1
+    fi
+  fi
+  if [[ "${AIRGAPPED_INSTALL:-0}" == "1" ]]; then
+    if [[ -z "${ISO_DIRECTORY:-}" || ! -d "${ISO_DIRECTORY}" || ! -r "${ISO_DIRECTORY}" ]]; then
+      print_message "[!] --airgapped requires a readable --iso-directory" "error"
+      exit 1
+    fi
+    command_exists pvesh || { print_message "[!] pvesh is required for air-gapped ISO upload" "error"; exit 1; }
+    command_exists pvesm || { print_message "[!] pvesm is required for air-gapped ISO verification" "error"; exit 1; }
+    command_exists sha256sum || { print_message "[!] sha256sum is required for air-gapped ISO verification" "error"; exit 1; }
+    if [[ -z "${ISO_STORAGE:-}" && "${NO_PROMPT:-0}" != "1" ]]; then
+      read -r -p "[?] Shared ISO storage pool (required): " ISO_STORAGE </dev/tty
+    fi
+    if [[ -z "${ISO_STORAGE:-}" ]]; then
+      print_message "[!] --airgapped requires an explicit shared --iso-storage pool" "error"
+      exit 1
+    fi
+  fi
 
   verify_offline_inputs
+  if [[ "${AIRGAPPED_INSTALL:-0}" == "1" ]]; then
+    prepare_airgapped_isos
+  fi
 
   if [[ -z "${LANGUAGE+x}" ]]; then
     export LANGUAGE=en_US.UTF-8 LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8
@@ -756,11 +904,23 @@ ludus_install_server() {
     read -r -p "[?] LXC rootfs storage [${DEFAULT_STORAGE}]: " STORAGE </dev/tty
     STORAGE=${STORAGE:-${DEFAULT_STORAGE}}
 
+    read -r -p "[?] LXC hostname [${LXC_HOSTNAME:-ludus}]: " LXC_HOSTNAME_INPUT </dev/tty
+    LXC_HOSTNAME=${LXC_HOSTNAME_INPUT:-${LXC_HOSTNAME:-ludus}}
+    read -r -p "[?] LXC rootfs size in GiB [${LXC_ROOTFS_SIZE:-20}]: " LXC_ROOTFS_SIZE_INPUT </dev/tty
+    LXC_ROOTFS_SIZE=${LXC_ROOTFS_SIZE_INPUT:-${LXC_ROOTFS_SIZE:-20}}
+    read -r -p "[?] LXC management bridge [${LXC_BRIDGE:-vmbr0}]: " LXC_BRIDGE_INPUT </dev/tty
+    LXC_BRIDGE=${LXC_BRIDGE_INPUT:-${LXC_BRIDGE:-vmbr0}}
+    read -r -p "[?] LXC management VLAN tag [${LXC_VLAN_TAG:-none}]: " LXC_VLAN_TAG_INPUT </dev/tty
+    LXC_VLAN_TAG=${LXC_VLAN_TAG_INPUT:-${LXC_VLAN_TAG:-}}
+    [[ "${LXC_VLAN_TAG}" == "none" ]] && LXC_VLAN_TAG=""
+
     read -r -p "[?] LXC eth0 IP (CIDR, or 'dhcp') [dhcp]: " ETH0_IP </dev/tty
     ETH0_IP=${ETH0_IP:-dhcp}
     if [[ "${ETH0_IP}" != "dhcp" ]]; then
       read -r -p "[?] LXC eth0 gateway: " ETH0_GW </dev/tty
     fi
+    read -r -p "[?] LXC DNS resolver IP [inherit from Proxmox]: " LXC_NAMESERVER_INPUT </dev/tty
+    LXC_NAMESERVER=${LXC_NAMESERVER_INPUT:-${LXC_NAMESERVER:-}}
 
     local WG_DEFAULT=""
     if [[ "${ETH0_IP}" != "dhcp" ]]; then
@@ -772,19 +932,28 @@ ludus_install_server() {
       print_message "[!] WireGuard endpoint is required" "error"
       exit 1
     fi
+    read -r -p "[?] WireGuard UDP port [${WG_PORT:-51820}]: " WG_PORT_INPUT </dev/tty
+    WG_PORT=${WG_PORT_INPUT:-${WG_PORT:-51820}}
 
-    read -r -p "[?] VM storage pool [local]: " VM_STORAGE </dev/tty
-    VM_STORAGE=${VM_STORAGE:-local}
-    read -r -p "[?] ISO storage pool [local]: " ISO_STORAGE </dev/tty
-    ISO_STORAGE=${ISO_STORAGE:-local}
+    local VM_STORAGE_INPUT VM_STORAGE_FORMAT_INPUT ISO_STORAGE_INPUT
+    read -r -p "[?] VM storage pool [${VM_STORAGE:-local}]: " VM_STORAGE_INPUT </dev/tty
+    VM_STORAGE=${VM_STORAGE_INPUT:-${VM_STORAGE:-local}}
+    read -r -p "[?] VM storage format [${VM_STORAGE_FORMAT:-qcow2}]: " VM_STORAGE_FORMAT_INPUT </dev/tty
+    VM_STORAGE_FORMAT=${VM_STORAGE_FORMAT_INPUT:-${VM_STORAGE_FORMAT:-qcow2}}
+    if [[ "${AIRGAPPED_INSTALL:-0}" != "1" ]]; then
+      read -r -p "[?] ISO storage pool [${ISO_STORAGE:-local}]: " ISO_STORAGE_INPUT </dev/tty
+      ISO_STORAGE=${ISO_STORAGE_INPUT:-${ISO_STORAGE:-local}}
+    fi
     read -r -p "[?] License key [community]: " LICENSE </dev/tty
     LICENSE=${LICENSE:-community}
-    read -r -p "[?] CA certificate for template trust stores (optional path) [${CA_CERTIFICATE:-none}]: " CA_CERTIFICATE_INPUT </dev/tty
-    [[ -n "${CA_CERTIFICATE_INPUT}" ]] && CA_CERTIFICATE="${CA_CERTIFICATE_INPUT}"
   else
     ENDPOINTS=${ENDPOINTS:-${DEFAULT_EPS}}
     VMID=${VMID:-$(curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/nextid" | _json 'd["data"]')}
     STORAGE=${STORAGE:-local-lvm}
+    LXC_HOSTNAME=${LXC_HOSTNAME:-ludus}
+    LXC_ROOTFS_SIZE=${LXC_ROOTFS_SIZE:-20}
+    LXC_BRIDGE=${LXC_BRIDGE:-vmbr0}
+    LXC_VLAN_TAG=${LXC_VLAN_TAG:-}
     ETH0_IP=${ETH0_IP:-dhcp}
     if [[ -z "${WG_EP:-}" ]]; then
       if [[ "${ETH0_IP}" != "dhcp" ]]; then
@@ -794,22 +963,58 @@ ludus_install_server() {
         exit 1
       fi
     fi
+    WG_PORT=${WG_PORT:-51820}
     VM_STORAGE=${VM_STORAGE:-local}
+    VM_STORAGE_FORMAT=${VM_STORAGE_FORMAT:-qcow2}
     ISO_STORAGE=${ISO_STORAGE:-local}
     LICENSE=${LICENSE:-community}
   fi
 
-  if [[ -n "${CA_CERTIFICATE:-}" ]]; then
-    if [[ ! -f "${CA_CERTIFICATE}" || ! -r "${CA_CERTIFICATE}" || ! -s "${CA_CERTIFICATE}" ]]; then
-      print_message "[!] CA certificate must be a readable, non-empty file: ${CA_CERTIFICATE}" "error"
-      exit 1
-    fi
-    command_exists openssl || { print_message "[!] openssl is required to validate --ca-certificate" "error"; exit 1; }
-    if ! openssl x509 -in "${CA_CERTIFICATE}" -noout >/dev/null 2>&1; then
-      print_message "[!] CA certificate is not a valid PEM X.509 certificate: ${CA_CERTIFICATE}" "error"
-      exit 1
-    fi
+  if ! [[ "${VMID}" =~ ^[1-9][0-9]*$ ]]; then
+    print_message "[!] LXC VMID must be a positive integer" "error"
+    exit 1
   fi
+  if ! [[ "${LXC_HOSTNAME}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+    print_message "[!] LXC hostname is invalid: ${LXC_HOSTNAME}" "error"
+    exit 1
+  fi
+  if ! [[ "${LXC_ROOTFS_SIZE}" =~ ^[0-9]+$ ]] || [[ "${LXC_ROOTFS_SIZE}" -lt 20 ]]; then
+    print_message "[!] LXC rootfs size must be an integer of at least 20 GiB" "error"
+    exit 1
+  fi
+  if ! [[ "${LXC_BRIDGE}" =~ ^[A-Za-z0-9_.:-]+$ ]] || ! ip link show "${LXC_BRIDGE}" >/dev/null 2>&1; then
+    print_message "[!] LXC management bridge is invalid or unavailable on ${NODE}: ${LXC_BRIDGE}" "error"
+    exit 1
+  fi
+  if [[ -n "${LXC_VLAN_TAG}" ]] \
+      && { ! [[ "${LXC_VLAN_TAG}" =~ ^[0-9]+$ ]] \
+        || [[ "${LXC_VLAN_TAG}" -lt 1 ]] || [[ "${LXC_VLAN_TAG}" -gt 4094 ]]; }; then
+    print_message "[!] LXC VLAN tag must be between 1 and 4094" "error"
+    exit 1
+  fi
+  if [[ "${ETH0_IP}" != "dhcp" && -z "${ETH0_GW:-}" ]]; then
+    print_message "[!] --gw is required when --ip is static" "error"
+    exit 1
+  fi
+  if [[ "${ETH0_IP}" != "dhcp" ]] \
+      && ! python3 -c 'import ipaddress,sys; ipaddress.ip_interface(sys.argv[1]); ipaddress.ip_address(sys.argv[2])' "${ETH0_IP}" "${ETH0_GW}" 2>/dev/null; then
+    print_message "[!] Static LXC IP or gateway is invalid" "error"
+    exit 1
+  fi
+  if [[ -n "${LXC_NAMESERVER:-}" ]] \
+      && ! python3 -c 'import ipaddress,sys; ipaddress.ip_address(sys.argv[1])' "${LXC_NAMESERVER}" 2>/dev/null; then
+    print_message "[!] LXC DNS resolver must be an IP address" "error"
+    exit 1
+  fi
+  case "${VM_STORAGE_FORMAT}" in
+    qcow2|raw) ;;
+    *) print_message "[!] VM storage format must be qcow2 or raw" "error"; exit 1 ;;
+  esac
+  if ! [[ "${WG_PORT}" =~ ^[0-9]+$ ]] || [[ "${WG_PORT}" -lt 1 ]] || [[ "${WG_PORT}" -gt 65535 ]]; then
+    print_message "[!] WireGuard port must be between 1 and 65535" "error"
+    exit 1
+  fi
+
 
   # ---- 3. SDN bootstrap --------------------------------------------------------
   local NODE_COUNT ZONE_TYPE PEERS
@@ -885,17 +1090,27 @@ ludus_install_server() {
   fi
 
   # ---- 5. Create container -----------------------------------------------------
-  local ETH0_CFG
+  local ETH0_CFG PROXMOX_INVALID_CERT
   ETH0_CFG="ip=${ETH0_IP}"
   [[ -n "${ETH0_GW:-}" ]] && ETH0_CFG="${ETH0_CFG},gw=${ETH0_GW}"
-  print_message "[+] Creating LXC ${VMID} (rootfs on ${STORAGE}) ..." "info"
-  pct create "${VMID}" "local:vztmpl/${TMPL_NAME}" \
-    --hostname ludus --unprivileged 1 --features nesting=1,keyctl=1 \
-    --cores 4 --memory 4096 --swap 512 --rootfs "${STORAGE}:20" \
-    --net0 "name=eth0,bridge=vmbr0,${ETH0_CFG},firewall=0" \
-    --net1 "name=eth1,bridge=ludusnat,ip=192.0.2.253/24" \
-    --onboot 1 --startup order=99 \
-    || { print_message "[!] pct create failed" "error"; exit 1; }
+  [[ -n "${LXC_VLAN_TAG:-}" ]] && ETH0_CFG="${ETH0_CFG},tag=${LXC_VLAN_TAG}"
+  local -a PCT_CREATE_ARGS=(
+    --hostname "${LXC_HOSTNAME}"
+    --unprivileged 1
+    --features nesting=1,keyctl=1
+    --cores 4
+    --memory 4096
+    --swap 512
+    --rootfs "${STORAGE}:${LXC_ROOTFS_SIZE}"
+    --net0 "name=eth0,bridge=${LXC_BRIDGE},${ETH0_CFG},firewall=0"
+    --net1 "name=eth1,bridge=ludusnat,ip=192.0.2.253/24"
+    --onboot 1
+    --startup order=99
+  )
+  [[ -n "${LXC_NAMESERVER:-}" ]] && PCT_CREATE_ARGS+=(--nameserver "${LXC_NAMESERVER}")
+  print_message "[+] Creating LXC ${VMID} (rootfs on ${STORAGE}, eth0 on ${LXC_BRIDGE}) ..." "info"
+  pct create "${VMID}" "local:vztmpl/${TMPL_NAME}" "${PCT_CREATE_ARGS[@]}" \
+    || { print_message "[!] pct create failed" "error"; print_message "[!] Consider setting 'tmpdir: /var/tmp' in /etc/vzdump.conf"; exit 1; }
   cat >> "/etc/pve/lxc/${VMID}.conf" <<EOF
 lxc.cgroup2.devices.allow: c 10:200 rwm
 lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
@@ -912,8 +1127,12 @@ EOF
 
 
   # ---- 6. Configure ------------------------------------------------------------
-  local CFG
+  local CFG AIRGAPPED_CONFIG
   CFG=/tmp/ludus-config.$$.yml
+  AIRGAPPED_CONFIG=false
+  [[ "${AIRGAPPED_INSTALL}" == "1" ]] && AIRGAPPED_CONFIG=true
+  PROXMOX_INVALID_CERT=true
+  [[ "${VERIFY_PROXMOX_TLS:-0}" == "1" ]] && PROXMOX_INVALID_CERT=false
   cat > "${CFG}" <<EOF
 proxmox_endpoints:
 $(for e in ${ENDPOINTS}; do echo "  - ${e}"; done)
@@ -922,14 +1141,15 @@ proxmox_token_secret: ${TOKEN_SECRET}
 proxmox_node: ${NODE}
 proxmox_user_realm: pve
 proxmox_vm_storage_pool: ${VM_STORAGE}
-proxmox_vm_storage_format: qcow2
+proxmox_vm_storage_format: ${VM_STORAGE_FORMAT}
 proxmox_iso_storage_pool: ${ISO_STORAGE}
-proxmox_invalid_cert: true
+proxmox_invalid_cert: ${PROXMOX_INVALID_CERT}
+airgapped_install: ${AIRGAPPED_CONFIG}
 ludus_nat_interface: ludusnat
 ludus_nat_ip: 192.0.2.253
 ludus_nat_gateway: 192.0.2.254
 wireguard_endpoint: ${WG_EP}
-wireguard_port: 51820
+wireguard_port: ${WG_PORT}
 sdn_zone: ludus
 license_key: ${LICENSE}
 expose_admin_port: false
@@ -953,6 +1173,16 @@ EOF
     pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/install/injected-ca-certificate.crt \
       --perms 0644 --user 0 --group 0
     pct push "${VMID}" "${CA_CERTIFICATE}" /usr/local/share/ca-certificates/ludus-injected-ca.crt \
+      --perms 0644 --user 0 --group 0
+    pct exec "${VMID}" -- mkdir -p \
+      /opt/ludus/packer/debian11/http \
+      /opt/ludus/packer/debian12/http \
+      /opt/ludus/packer/kali/http
+    pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/packer/debian11/http/ludus-injected-ca.crt \
+      --perms 0644 --user 0 --group 0
+    pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/packer/debian12/http/ludus-injected-ca.crt \
+      --perms 0644 --user 0 --group 0
+    pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/packer/kali/http/ludus-injected-ca.crt \
       --perms 0644 --user 0 --group 0
   fi
   rm -f "${CFG}"
@@ -986,7 +1216,7 @@ EOF
     print_message "[+] Ludus is running in LXC ${VMID}" "ok"
     print_message "    API:        https://${LXC_IP}:8080" "info"
     print_message "    Admin API:  https://${LXC_IP}:8081 (localhost-only inside LXC by default)" "info"
-    print_message "    WireGuard:  ${WG_EP}:51820" "info"
+    print_message "    WireGuard:  ${WG_EP}:${WG_PORT}" "info"
     echo
     print_message "[+] Next: install ludus-client and run 'ludus user add <name>'" "info"
   else
@@ -1311,22 +1541,35 @@ while [[ $# -gt 0 ]]; do
     --server-only  ) SERVER_ONLY=1; shift;;
     --version      ) LUDUS_VERSION="$2"; shift 2;;
     --template-file) TEMPLATE_FILE="$2"; SERVER_ONLY=1; shift 2;;
+    --airgapped   ) AIRGAPPED_INSTALL=1; SERVER_ONLY=1; shift;;
+    --vm-storage  ) VM_STORAGE="$2"; shift 2;;
+    --vm-storage-format) VM_STORAGE_FORMAT="$2"; shift 2;;
+    --iso-storage ) ISO_STORAGE="$2"; shift 2;;
+    --iso-directory) ISO_DIRECTORY="$2"; AIRGAPPED_INSTALL=1; SERVER_ONLY=1; shift 2;;
     --ca-certificate) CA_CERTIFICATE="$2"; shift 2;;
     --enterprise-plugin) ENTERPRISE_PLUGIN="$2"; shift 2;;
     --license-file ) LICENSE_FILE="$2"; shift 2;;
     --checksum-file) CHECKSUM_FILE="$2"; shift 2;;
     --checksum-signature) CHECKSUM_SIGNATURE="$2"; shift 2;;
     --checksum-public-key) CHECKSUM_PUBLIC_KEY="$2"; shift 2;;
+    --skip-verification) SKIP_VERIFICATION=1; shift;;
     --token-id     ) TOKEN_ID="$2"; shift 2;;
     --token-secret ) TOKEN_SECRET="$2"; shift 2;;
     --no-prompt    ) NO_PROMPT=1; shift;;
     --vmid         ) VMID="$2"; shift 2;;
+    --hostname     ) LXC_HOSTNAME="$2"; shift 2;;
     --storage      ) STORAGE="$2"; shift 2;;
+    --rootfs-size  ) LXC_ROOTFS_SIZE="$2"; shift 2;;
+    --bridge       ) LXC_BRIDGE="$2"; shift 2;;
+    --vlan-tag     ) LXC_VLAN_TAG="$2"; shift 2;;
     --ip           ) ETH0_IP="$2"; shift 2;;
     --gw           ) ETH0_GW="$2"; shift 2;;
+    --nameserver   ) LXC_NAMESERVER="$2"; shift 2;;
     --endpoints    ) ENDPOINTS="$2"; shift 2;;
+    --verify-proxmox-tls) VERIFY_PROXMOX_TLS=1; shift;;
     --import-db    ) IMPORT_DB="$2"; shift 2;;
     --wg-endpoint  ) WG_EP="$2"; shift 2;;
+    --wg-port      ) WG_PORT="$2"; shift 2;;
     --license      ) LICENSE="$2"; shift 2;;
     *              ) print_message "Unknown option $1" "warn"; shift;;
   esac

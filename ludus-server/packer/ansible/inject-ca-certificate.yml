@@ -9,7 +9,11 @@
       ansible.builtin.stat:
         path: "{{ injected_ca_certificate_path }}"
       delegate_to: localhost
+      connection: local
       become: false
+      vars:
+        ansible_remote_tmp: "{{ lookup('env', 'ANSIBLE_HOME') }}/tmp"
+        ansible_ssh_control_path_dir: "{{ lookup('env', 'ANSIBLE_HOME') }}/cp"
       register: injected_ca_certificate
 
     - name: Add injected CA certificate on Debian-family templates

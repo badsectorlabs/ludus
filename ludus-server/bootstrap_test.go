@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
+	"ludus-server/localgen"
 	"ludusapi"
 	"ludusapi/pveclient"
 )
@@ -165,5 +168,62 @@ func TestBootstrap_RejectsOldPVE(t *testing.T) {
 	err := bootstrapProxmoxObjects(t.Context(), m, ludusapi.Configuration{SDNZone: "ludus"}, t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for PVE < 8.0")
+	}
+}
+
+func TestBootstrapDNSUsesConfiguredLXCServer(t *testing.T) {
+	resolvConf := t.TempDir() + "/resolv.conf"
+	if err := os.WriteFile(resolvConf, []byte("nameserver 1.1.1.1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	upstreams, err := dnsUpstreams("10.20.30.40", resolvConf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := localgen.RenderDnsmasq(localgen.DnsmasqConfig{
+		BindIP:    "192.0.2.253",
+		Gateway:   "192.0.2.253",
+		PoolLow:   "192.0.2.50",
+		PoolHigh:  "192.0.2.100",
+		IfName:    "eth1",
+		Upstreams: upstreams,
+	})
+	for _, want := range []string{"no-resolv", "server=10.20.30.40"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("LXC resolver configuration is missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "server=1.1.1.1") || strings.Contains(got, "server=8.8.8.8") {
+		t.Fatalf("resolv.conf or public defaults overrode LXC_DNS_SERVER:\n%s", got)
+	}
+}
+
+func TestDNSUpstreamsFallsBackToResolvConf(t *testing.T) {
+	resolvConf := t.TempDir() + "/resolv.conf"
+	if err := os.WriteFile(resolvConf, []byte(`# Managed by Proxmox
+nameserver 10.20.30.40
+nameserver 2001:0db8::53
+nameserver 10.20.30.40
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	upstreams, err := dnsUpstreams("", resolvConf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(upstreams, ",")
+	if got != "10.20.30.40,2001:db8::53" {
+		t.Fatalf("unexpected resolv.conf fallback: %s", got)
+	}
+}
+
+func TestReadDNSUpstreamsRequiresNameserver(t *testing.T) {
+	resolvConf := t.TempDir() + "/resolv.conf"
+	if err := os.WriteFile(resolvConf, []byte("search ludus.internal\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readDNSUpstreams(resolvConf); err == nil {
+		t.Fatal("expected an error when resolv.conf has no nameserver")
 	}
 }

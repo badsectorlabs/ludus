@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 
@@ -169,6 +172,59 @@ func bootstrapProxmoxObjects(ctx context.Context, pc PVEClient, cfg ludusapi.Con
 	return nil
 }
 
+func readDNSUpstreams(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var upstreams []string
+	scanner := bufio.NewScanner(file)
+	for lineNumber := 1; scanner.Scan(); lineNumber++ {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) == 0 || strings.HasPrefix(fields[0], "#") || fields[0] != "nameserver" {
+			continue
+		}
+		if len(fields) < 2 {
+			return nil, fmt.Errorf("%s:%d: nameserver address is missing", path, lineNumber)
+		}
+		address, err := netip.ParseAddr(fields[1])
+		if err != nil {
+			return nil, fmt.Errorf("%s:%d: invalid nameserver %q: %w", path, lineNumber, fields[1], err)
+		}
+		upstream := address.String()
+		duplicate := false
+		for _, existing := range upstreams {
+			if existing == upstream {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			upstreams = append(upstreams, upstream)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(upstreams) == 0 {
+		return nil, fmt.Errorf("%s contains no nameserver entries", path)
+	}
+	return upstreams, nil
+}
+
+func dnsUpstreams(configured, resolvConfPath string) ([]string, error) {
+	if configured == "" {
+		return readDNSUpstreams(resolvConfPath)
+	}
+	address, err := netip.ParseAddr(configured)
+	if err != nil {
+		return nil, fmt.Errorf("invalid configured DNS server %q: %w", configured, err)
+	}
+	return []string{address.String()}, nil
+}
+
 func bootstrapLocalState(cfg ludusapi.Configuration) error {
 	// TLS
 	hostname, _ := os.Hostname()
@@ -182,9 +238,18 @@ func bootstrapLocalState(cfg ludusapi.Configuration) error {
 	}); err != nil {
 		return fmt.Errorf("wireguard: %w", err)
 	}
-	// dnsmasq
+	// The airgap installer copies LXC_DNS_SERVER into LudusDNSServer. Use it
+	// explicitly so dnsmasq never depends on Debian's resolvconf compatibility
+	// file. Normal installs that inherit Proxmox DNS fall back to resolv.conf.
+	upstreams, err := dnsUpstreams(cfg.LudusDNSServer, "/etc/resolv.conf")
+	if err != nil {
+		return fmt.Errorf("dnsmasq upstreams: %w", err)
+	}
+	if err := localgen.WriteDnsmasqDefaults("/etc/default/dnsmasq"); err != nil {
+		return fmt.Errorf("dnsmasq defaults: %w", err)
+	}
 	if err := localgen.WriteDnsmasq("/etc/dnsmasq.d/ludus.conf", localgen.DnsmasqConfig{
-		BindIP: cfg.LudusNATIP, Gateway: cfg.LudusNATIP, Upstreams: []string{"1.1.1.1", "8.8.8.8"},
+		BindIP: cfg.LudusNATIP, Gateway: cfg.LudusNATIP, Upstreams: upstreams,
 		PoolLow: "192.0.2.50", PoolHigh: "192.0.2.100", IfName: "eth1",
 	}); err != nil {
 		return fmt.Errorf("dnsmasq: %w", err)

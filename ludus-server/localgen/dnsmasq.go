@@ -15,6 +15,11 @@ type DnsmasqConfig struct {
 	Upstreams []string
 }
 
+const dnsmasqDefaults = `# Managed by Ludus bootstrap — do not edit
+CONFIG_DIR=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new
+IGNORE_RESOLVCONF=yes
+`
+
 func RenderDnsmasq(c DnsmasqConfig) string {
 	out := fmt.Sprintf(`# Managed by Ludus bootstrap — do not edit
 bind-interfaces
@@ -39,4 +44,11 @@ func WriteDnsmasq(path string, c DnsmasqConfig) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(RenderDnsmasq(c)), 0644)
+}
+
+func WriteDnsmasqDefaults(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(dnsmasqDefaults), 0644)
 }

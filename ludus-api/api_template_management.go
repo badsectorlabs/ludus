@@ -80,7 +80,7 @@ func extractTemplateNameFromHCL(hclFile string) (string, error) {
 	if err == nil && templateName != "" {
 		return templateName, nil
 	}
-	return "", fmt.Errorf("could not find template name in %s", hclFile)
+	return "", err
 }
 
 func extractPackerTemplateName(filename string, src []byte) (string, error) {
@@ -332,7 +332,8 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		`PACKER_CONFIG_DIR={{.UsersPackerDir}} ` +
 		`PACKER_CACHE_DIR={{.UsersPackerDir}}/packer_cache ` +
 		`PKR_VAR_proxmox_password="" ` +
-		`PKR_VAR_proxmox_username="" ` +
+		`PKR_VAR_proxmox_username='{{ .ProxmoxTokenID }}' ` +
+		`PKR_VAR_airgapped_install={{ .AirgappedInstall }} ` +
 		`CHECKPOINT_DISABLE=1 PACKER_LOG={{.PackerVerbose}} ` +
 		`PACKER_LOG_PATH='{{.PackerLogFile}}' ` +
 		`TMPDIR='{{.UsersPackerDir}}/tmp' ` +
@@ -364,6 +365,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		ProxmoxVMStoragePool   string
 		ProxmoxVMStorageFormat string
 		ProxmoxISOStoragePool  string
+		AirgappedInstall       string
 		UsersAnsibleDir        string
 		PackerFile             string
 		LudusNATInterface      string
@@ -381,6 +383,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		ServerConfiguration.ProxmoxVMStoragePool,
 		ServerConfiguration.ProxmoxVMStorageFormat,
 		ServerConfiguration.ProxmoxISOStoragePool,
+		strconv.FormatBool(ServerConfiguration.AirgappedInstall),
 		usersAnsibleDir,
 		packerFile,
 		ServerConfiguration.LudusNATInterface,
