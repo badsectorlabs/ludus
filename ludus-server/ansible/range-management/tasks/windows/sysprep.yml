@@ -1,11 +1,11 @@
-- name: Check if sysprepd file exists
+- name: Check if Sysprep_succeeded.tag file exists
   ansible.windows.win_stat:
-    path: C:\ludus\sysprep\sysprepd
-  register: sysprepd_file
+    path: C:\Windows\System32\Sysprep\Sysprep_succeeded.tag
+  register: sysprep_succeeded
 
-- name: Skip tasks if sysprepd file exists
+- name: Skip tasks if Sysprep_succeeded.tag file exists
   ansible.builtin.meta: end_host
-  when: sysprepd_file.stat.exists
+  when: sysprep_succeeded.stat.exists
 
 - name: Create C:\Windows\Setup\Scripts directory
   ansible.windows.win_file:
@@ -28,10 +28,10 @@
     src: windows/sysprep/oob-disable.xml
     dest: C:\ludus\sysprep\oob-disable.xml
 
-# Sysprep can be blocked by an Edge AppX package installed for one user but
-# not provisioned for all users. Try Sysprep first so healthy machines keep
-# their installed packages. Only remove the package when the current attempt
-# reports that exact failure, then retry once.
+# Sysprep can be blocked by any AppX package installed for one user but not
+# provisioned for all users. Try Sysprep first so healthy machines keep their
+# installed packages. Only remove packages named in the current attempt's
+# error log, then retry once.
 - name: Clear previous Sysprep error log
   ansible.windows.win_file:
     path: C:\Windows\System32\Sysprep\Panther\setuperr.log
@@ -53,12 +53,12 @@
   rescue:
     # https://www.deploymentresearch.com/fixing-why-sysprep-fails-in-windows-10-due-to-windows-store-updates/
     # https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/sysprep-fails-remove-or-update-store-apps#cause
-    - name: Remove Edge AppX packages reported by the failed Sysprep attempt
+    - name: Remove AppX packages reported by the failed Sysprep attempt
       ansible.windows.win_powershell:
         script: |
           $logPath = 'C:\Windows\System32\Sysprep\Panther\setuperr.log'
           [string]$log = Get-Content -Path $logPath -Raw -ErrorAction Stop
-          $pattern = 'Package (?<package>\S*[Ee]dge\S*) was installed for a user, but not provisioned for all users'
+          $pattern = 'Package (?<package>\S+) was installed for a user, but not provisioned for all users'
           $packageNames = @(
             [regex]::Matches($log, $pattern) |
               ForEach-Object { $_.Groups['package'].Value } |
@@ -66,7 +66,7 @@
           )
 
           if ($packageNames.Count -eq 0) {
-            throw "Sysprep did not reboot and did not report an Edge AppX blocker.`n$log"
+            throw "Sysprep did not reboot and did not report an AppX package blocker.`n$log"
           }
 
           foreach ($packageName in $packageNames) {
@@ -75,7 +75,7 @@
                 Where-Object { $_.PackageFullName -eq $packageName }
             )
             if ($packages.Count -eq 0) {
-              throw "Sysprep reported Edge package '$packageName', but it is not installed."
+              throw "Sysprep reported AppX package '$packageName', but it is not installed."
             }
             foreach ($package in $packages) {
               Remove-AppxPackage -Package $package.PackageFullName -AllUsers -ErrorAction Stop
@@ -87,7 +87,7 @@
         path: C:\Windows\System32\Sysprep\Panther\setuperr.log
         state: absent
 
-    - name: Retry Sysprep after removing the blocking Edge packages
+    - name: Retry Sysprep after removing the blocking AppX packages
       ansible.windows.win_shell: C:\Windows\System32\Sysprep\sysprep.exe /generalize /quiet /reboot /oobe /unattend:C:\ludus\sysprep\oob-disable.xml
 
     - name: Wait for WinRM to stop for the retried Sysprep reboot
@@ -111,10 +111,6 @@
   register: sysprep_succeeded
   failed_when: not sysprep_succeeded.stat.exists
 
-- name: Create sysprepd file
-  ansible.windows.win_file:
-    path: C:\ludus\sysprep\sysprepd
-    state: touch
 
 - name: Hostname change after sysprep
   ansible.windows.win_hostname:
