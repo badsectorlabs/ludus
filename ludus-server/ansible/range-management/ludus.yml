@@ -79,7 +79,7 @@
   tasks:
     - name: Check for Pro entitlement
       ansible.builtin.assert:
-        that: (ludus_entitlements | default([])) is defined and "PRO_ROLES" in ludus_entitlements
+        that: '"PRO_ROLES" in (ludus_entitlements | default([], true))'
         fail_msg: "The router roles feature requires the PRO_ROLES entitlement"
       when:
         - router.roles is defined
@@ -105,7 +105,7 @@
     - name: Apply user-defined roles to the router
       ansible.builtin.include_tasks: tasks/router/user-defined-roles.yml
       when:
-        - ludus_entitlements is defined and "PRO_ROLES" in ludus_entitlements
+        - '"PRO_ROLES" in (ludus_entitlements | default([], true))'
         - router.roles is defined
         - router.roles | length > 0
 
@@ -116,7 +116,7 @@
   tasks:
     - name: Check for enterprise plugin entitlement
       ansible.builtin.assert:
-        that: ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
+        that: '"ENTERPRISE_PLUGIN" in (ludus_entitlements | default([], true))'
         fail_msg: "The outbound WireGuard feature requires the ENTERPRISE_PLUGIN entitlement"
       when:
         - router.outbound_wireguard_config is defined
@@ -125,13 +125,13 @@
     - name: Clear any outbound WireGuard related configurations
       ansible.builtin.include_tasks: tasks/router/clear-outbound-wireguard.yml
       when:
-        - ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
+        - '"ENTERPRISE_PLUGIN" in (ludus_entitlements | default([], true))'
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-outbound-wireguard.yml') != []
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-outbound-wireguard.yml') != []
     - name: Setup outbound WireGuard on the router
       ansible.builtin.include_tasks: tasks/router/setup-outbound-wireguard.yml
       when:
-        - ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
+        - '"ENTERPRISE_PLUGIN" in (ludus_entitlements | default([], true))'
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-outbound-wireguard.yml') != []
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-outbound-wireguard.yml') != []
         - router.outbound_wireguard_config is defined
@@ -144,7 +144,7 @@
   tasks:
     - name: Check for enterprise plugin entitlement
       ansible.builtin.assert:
-        that: ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
+        that: '"ENTERPRISE_PLUGIN" in (ludus_entitlements | default([], true))'
         fail_msg: "The inbound WireGuard feature requires the ENTERPRISE_PLUGIN entitlement"
       when:
         - router.inbound_wireguard is defined
@@ -154,13 +154,13 @@
     - name: Clear any inbound WireGuard related configurations
       ansible.builtin.include_tasks: tasks/router/clear-inbound-wireguard.yml
       when:
-        - ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
+        - '"ENTERPRISE_PLUGIN" in (ludus_entitlements | default([], true))'
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-inbound-wireguard.yml') != []
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-inbound-wireguard.yml') != []
     - name: Setup inbound WireGuard on the router
       ansible.builtin.include_tasks: tasks/router/setup-inbound-wireguard.yml
       when:
-        - ludus_entitlements is defined and "ENTERPRISE_PLUGIN" in ludus_entitlements
+        - '"ENTERPRISE_PLUGIN" in (ludus_entitlements | default([], true))'
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/clear-inbound-wireguard.yml') != []
         - lookup('ansible.builtin.fileglob', playbook_dir + '/tasks/router/setup-inbound-wireguard.yml') != []
         - router.inbound_wireguard is defined
