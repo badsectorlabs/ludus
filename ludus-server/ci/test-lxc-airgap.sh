@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Creates the LXC with NO default route on eth0, asserts bootstrap completes
-# and zero packets hit the egress drop counter.
+# Creates the LXC with NO default route on eth0 and asserts bootstrap completes
+# without egress. Also verifies the bundled BSL source has no remote URL.
 
 VMID=${1:?vmid}
 TMPL=${2:?template path}
@@ -60,6 +60,42 @@ api_post_in_lxc() {
     pct exec "$VMID" -- cat /tmp/ludus-api-response.json || true
     exit 1
   fi
+}
+
+run_bundled_source_test() {
+  local root_api_key
+  root_api_key=$(pct exec "$VMID" -- cat /opt/ludus/install/root-api-key)
+
+  pct exec "$VMID" -- env LUDUS_TEST_API_KEY="$root_api_key" bash -lc '
+    set -euo pipefail
+    test -f /opt/ludus/resources/sources/ludus-source-bsl.tar.gz
+
+    status=000
+    for _ in $(seq 1 30); do
+      status=$(curl -skS -o /tmp/ludus-source-bsl.json -w "%{http_code}" \
+        -H "X-API-KEY: ${LUDUS_TEST_API_KEY}" \
+        https://127.0.0.1:8081/api/v2/sources/ludus-source-bsl)
+      [[ "$status" == "200" ]] && break
+      sleep 1
+    done
+    [[ "$status" == "200" ]]
+    jq -e '"'"'
+      .sourceID == "ludus-source-bsl" and
+      .type == "upload" and
+      (.url // "") == "" and
+      .lastSyncStatus == "ok"
+    '"'"' /tmp/ludus-source-bsl.json >/dev/null
+
+    curl -skS -o /tmp/ludus-source-bsl-catalog.json \
+      -H "X-API-KEY: ${LUDUS_TEST_API_KEY}" \
+      https://127.0.0.1:8081/api/v2/sources/ludus-source-bsl/catalog
+    jq -e '"'"'
+      (.templates | length) > 0 and
+      (.localRoles | length) > 0 and
+      (.localCollections | length) > 0
+    '"'"' /tmp/ludus-source-bsl-catalog.json >/dev/null
+  '
+  echo "PASS: bundled BSL source"
 }
 
 run_user_provision_test() {
@@ -158,6 +194,7 @@ pct exec "$VMID" -- test -f /opt/ludus/install/.bootstrap-complete \
 
 pct exec "$VMID" -- systemctl is-active ludus
 pct exec "$VMID" -- systemctl is-active ludus-admin
+run_bundled_source_test
 pct exec "$VMID" -- grep -Fx \
   'CONFIG_DIR=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new' \
   /etc/default/dnsmasq

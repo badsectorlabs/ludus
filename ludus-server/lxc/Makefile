@@ -22,7 +22,8 @@ install:
 	  /opt/ludus/users /opt/ludus/plugins/enterprise/admin \
 	  /opt/ludus/resources/blocky /opt/ludus/resources/windows \
 	  /opt/ludus/resources/global-collections /opt/ludus/resources/global-roles \
-	  /opt/ludus/resources/packer/plugins /usr/local/share/ca-certificates
+	  /opt/ludus/resources/packer/plugins /opt/ludus/resources/sources \
+	  /usr/local/share/ca-certificates
 	# binary + embedded trees
 	install -m 0755 ../../binaries/ludus-server $(BASEDIR)/opt/ludus/ludus-server
 	cp -r ../ansible $(BASEDIR)/opt/ludus/ansible
@@ -37,6 +38,9 @@ install:
 	# galaxy collections (air-gap)
 	cp -r deps/collections/ansible_collections $(BASEDIR)/opt/ludus/resources/global-collections/
 	cp -r deps/roles/* $(BASEDIR)/opt/ludus/resources/global-roles/
+	# first-party source catalog (air-gap)
+	install -m 0644 deps/ludus-source-bsl.tar.gz \
+	  $(BASEDIR)/opt/ludus/resources/sources/ludus-source-bsl.tar.gz
 	chmod 0755 $(BASEDIR)/opt/ludus/ansible/range-management/dynamic-inventory
 	# packer + plugins
 	install -m 0755 deps/packer $(BASEDIR)/usr/local/bin/packer

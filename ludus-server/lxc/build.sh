@@ -9,6 +9,8 @@ cd "$(dirname "$0")"
 : "${BLOCKY_VERSION:=0.30.0}"
 : "${BLOCKY_LINUX_X86_64_SHA256:=1641ec6821abd39ff61cf47f343f518c33a1973c64ad6c0deb030b0f02d9ef30}"
 : "${BGINFO_SHA256:=599b391980a5c9cbadd6c70ba3d5a5258db8b9d87c68b3fe587d9dc84effdf63}"
+: "${LUDUS_SOURCE_BSL_URL:=https://github.com/badsectorlabs/ludus-source-bsl.git}"
+: "${LUDUS_SOURCE_BSL_REF:=main}"
 : "${DAB_CACHE_DIR:=}"
 : "${DAB_WGET_TIMEOUT:=60}"
 : "${DAB_WGET_TRIES:=3}"
@@ -24,6 +26,7 @@ require_command curl
 require_command unzip
 require_command python3
 require_command ansible-galaxy
+require_command git
 require_command install
 require_command mktemp
 require_command sha256sum
@@ -86,6 +89,15 @@ rm -rf deps/collections deps/roles
 mkdir -p deps/collections deps/roles
 ansible-galaxy collection install -r ../ansible/requirements.yml -p deps/collections --force
 ansible-galaxy role install -r ../ansible/requirements.yml -p deps/roles --force
+
+# Bundle the first-party source and all of its pinned submodules so an
+# air-gapped server can register its catalog without cloning from GitHub.
+rm -rf deps/ludus-source-bsl deps/ludus-source-bsl.tar.gz
+git clone --depth 1 --branch "${LUDUS_SOURCE_BSL_REF}" \
+  --recurse-submodules --shallow-submodules -- \
+  "${LUDUS_SOURCE_BSL_URL}" deps/ludus-source-bsl
+tar --exclude='*/.git' --exclude='*/.git/*' \
+  --format=ustar -czf deps/ludus-source-bsl.tar.gz -C deps ludus-source-bsl
 
 if [[ ! -f ../../binaries/ludus-server ]]; then
   echo "ERROR: binaries/ludus-server not found (run 'build all' first)" >&2
