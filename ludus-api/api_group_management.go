@@ -677,6 +677,7 @@ func ListGroupRanges(e *core.RequestEvent) error {
 				ProxmoxID:   int32(vm.ProxmoxId()),
 				CPU:         int32(vm.Cpu()),
 				RAM:         int32(vm.Ram()),
+				OsType:      vm.OsType(),
 			})
 		}
 		ranges = append(ranges, dto.ListGroupRangesResponseItem{

@@ -434,6 +434,7 @@ func ListRange(e *core.RequestEvent) error {
 			IsRouter:    vmRecord.IsRouter(),
 			CPU:         int32(vmRecord.Cpu()),
 			RAM:         int32(vmRecord.Ram()),
+			OsType:      vmRecord.OsType(),
 		}
 		if details {
 			if d, ok := vmDetails[int(vmRecord.ProxmoxId())]; ok {
@@ -530,6 +531,7 @@ func ListAllRanges(e *core.RequestEvent) error {
 				PoweredOn:   vmRecordObj.PoweredOn(),
 				CPU:         int32(vmRecordObj.Cpu()),
 				RAM:         int32(vmRecordObj.Ram()),
+				OsType:      vmRecordObj.OsType(),
 			}
 			if allDetails {
 				if d, ok := vmDetails[int(vmRecordObj.ProxmoxId())]; ok {
