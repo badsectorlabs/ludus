@@ -161,6 +161,61 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 			Pattern:     "/range/auto-shutdown",
 			HandlerFunc: PlaceholderHandler,
 		},
+		// Guacamole plugin routes
+		PocketBaseRoute{
+			Name:        "GetGuacamoleConfig",
+			Method:      http.MethodGet,
+			Pattern:     "/guacamole/config",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "GuacamoleStatus",
+			Method:      http.MethodGet,
+			Pattern:     "/guacamole/status",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "TriggerGuacamoleSync",
+			Method:      http.MethodPost,
+			Pattern:     "/guacamole/sync",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "GetVMGuacURL",
+			Method:      http.MethodGet,
+			Pattern:     "/guacamole/url",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "GetVMRdpURL",
+			Method:      http.MethodGet,
+			Pattern:     "/guacamole/rdp",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "GetGuacamoleSettings",
+			Method:      http.MethodGet,
+			Pattern:     "/guacamole/settings",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "UpdateGuacamoleSettings",
+			Method:      http.MethodPut,
+			Pattern:     "/guacamole/settings",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "DeployGuacamole",
+			Method:      http.MethodPost,
+			Pattern:     "/guacamole/deploy",
+			HandlerFunc: PlaceholderHandler,
+		},
+		PocketBaseRoute{
+			Name:        "TerminateGuacamole",
+			Method:      http.MethodDelete,
+			Pattern:     "/guacamole/deploy",
+			HandlerFunc: PlaceholderHandler,
+		},
 	}
 
 	RegisterRoutesWithPocketBase(se, pluginRoutes)

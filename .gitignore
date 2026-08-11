@@ -3,6 +3,12 @@ repomix*.xml
 ludus-gui
 ludus-antisandbox-plugin
 ludus-enterprise-plugin
+
+### Build artifacts ###
+# Compiled Next.js webUI output — copied here before embedding into the server binary
+ludus-api/webUI/
+# go.work backup files
+go.work.bak
 ### VScode ###
 .vscode
 

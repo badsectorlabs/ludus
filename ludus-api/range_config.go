@@ -36,6 +36,62 @@ func GetIPForVMFromConfig(targetRange *models.Range, vmName string) string {
 	return "null"
 }
 
+// GetOsTypeForVMFromConfig returns the OS type string ("linux", "windows", "macos", "other")
+// for a VM by looking up its template in the range config, then inferring OS from the template name.
+// Falls back to "linux" if the config cannot be read or the VM is not found.
+func GetOsTypeForVMFromConfig(targetRange *models.Range, vmName string) string {
+	configBytes, err := os.ReadFile(ludusInstallPath + "/ranges/" + targetRange.RangeId() + "/range-config.yml")
+	if err != nil {
+		return string(osFromTemplateName(vmName))
+	}
+
+	var config LudusConfig
+	err = yaml.Unmarshal(configBytes, &config)
+	if err != nil {
+		return string(osFromTemplateName(vmName))
+	}
+
+	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
+
+	for _, vm := range config.Ludus {
+		vmNameToCompare := rangeIDTemplateRegex.ReplaceAllString(vm.VMName, targetRange.RangeId())
+		if vmNameToCompare == vmName {
+			return string(osFromTemplateName(vm.Template))
+		}
+	}
+
+	// Fallback: infer from VM name directly
+	return string(osFromTemplateName(vmName))
+}
+
+// GetStaticIPForVMFromConfig returns the deterministic static IP for a VM
+// computed from its VLAN and ip_last_octet in the range config.
+// This is used when the guest agent hasn't reported an IP yet (VM powered off).
+// Returns "null" if the VM is not found in the config.
+func GetStaticIPForVMFromConfig(targetRange *models.Range, vmName string) string {
+	configBytes, err := os.ReadFile(ludusInstallPath + "/ranges/" + targetRange.RangeId() + "/range-config.yml")
+	if err != nil {
+		return "null"
+	}
+
+	var config LudusConfig
+	err = yaml.Unmarshal(configBytes, &config)
+	if err != nil {
+		return "null"
+	}
+
+	rangeIDTemplateRegex := regexp.MustCompile(`{{\s*range_id\s*}}`)
+
+	for _, vm := range config.Ludus {
+		vmNameToCompare := rangeIDTemplateRegex.ReplaceAllString(vm.VMName, targetRange.RangeId())
+		if vmNameToCompare == vmName && vm.VLAN > 0 && vm.IPLastOctet > 0 {
+			return fmt.Sprintf("10.%d.%d.%d", targetRange.RangeNumber(), vm.VLAN, vm.IPLastOctet)
+		}
+	}
+
+	return "null"
+}
+
 // GetRouterVMName returns the router VM name for the given range
 // TODO parse the vm descriptions to get the router and not depend on the config file or name
 func GetRouterVMName(targetRange *models.Range) (string, error) {

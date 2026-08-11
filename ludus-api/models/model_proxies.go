@@ -869,6 +869,14 @@ func (p *VMs) SetRam(ram int) {
 	p.Set("ram", ram)
 }
 
+func (p *VMs) OsType() string {
+	return p.GetString("osType")
+}
+
+func (p *VMs) SetOsType(osType string) {
+	p.Set("osType", osType)
+}
+
 func (p *VMs) Created() types.DateTime {
 	return p.GetDateTime("created")
 }

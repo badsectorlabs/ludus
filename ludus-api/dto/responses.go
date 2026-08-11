@@ -74,6 +74,7 @@ type CreateRangeResponseResultVMsItem struct {
 	IsRouter    bool   `json:"isRouter,omitempty"`
 	CPU         int32  `json:"cpu"`
 	RAM         int32  `json:"ram"`
+	OsType      string `json:"osType,omitempty"`
 }
 type DeleteRangeResponse struct {
 	Result string `json:"result,omitempty"`
@@ -239,6 +240,7 @@ type ListAllRangeResponseItemVMsItem struct {
 	PoweredOn     bool   `json:"poweredOn"`
 	CPU           int32  `json:"cpu"`
 	RAM           int32  `json:"ram"`
+	OsType        string `json:"osType,omitempty"`
 	OsVersion     string `json:"osVersion,omitempty"`
 	LicenseStatus string `json:"licenseStatus,omitempty"`
 	LastUpdate    string `json:"lastUpdate,omitempty"`
@@ -288,6 +290,7 @@ type ListGroupRangesResponseItemVMsItem struct {
 	ProxmoxID   int32  `json:"proxmoxID"`
 	CPU         int32  `json:"cpu"`
 	RAM         int32  `json:"ram"`
+	OsType      string `json:"osType,omitempty"`
 }
 type ListGroupsResponseItem struct {
 	Name        string `json:"name"`
@@ -328,6 +331,7 @@ type ListRangeResponseVMsItem struct {
 	CPU           int32  `json:"cpu"`
 	RAM           int32  `json:"ram"`
 	ID            int32  `json:"ID"`
+	OsType        string `json:"osType,omitempty"`
 	OsVersion     string `json:"osVersion,omitempty"`
 	LicenseStatus string `json:"licenseStatus,omitempty"`
 	LastUpdate    string `json:"lastUpdate,omitempty"`
