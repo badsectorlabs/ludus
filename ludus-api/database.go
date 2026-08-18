@@ -491,7 +491,9 @@ func generateUserIDFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEvent) 
 
 	candidate := base
 	for n := 2; ; n++ {
-		if !userIDInUse(candidate) && !slices.Contains(reservedInitialAdminUserIDs, candidate) {
+		if !userIDInUse(candidate) &&
+			!slices.Contains(reservedInitialAdminUserIDs, candidate) &&
+			!poolExists(candidate) {
 			return candidate
 		}
 		candidate = base + strconv.Itoa(n)
@@ -500,6 +502,20 @@ func generateUserIDFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEvent) 
 
 func populateUserFieldsFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEvent) error {
 	if e.Record != nil {
+		// User was found by email fallback (not by providerId lookup). If a stale
+		// _externalAuths row exists for this user+provider with a different providerId
+		// (e.g. IdP account was deleted and recreated, rotating the subject UUID),
+		// delete it so oauth2Submit can insert the updated link cleanly.
+		existingLink, err := e.App.FindFirstExternalAuthByExpr(dbx.HashExp{
+			"collectionRef": e.Record.Collection().Id,
+			"recordRef":     e.Record.Id,
+			"provider":      e.ProviderName,
+		})
+		if err == nil && existingLink != nil && existingLink.ProviderId() != e.OAuth2User.Id {
+			if err := e.App.Delete(existingLink); err != nil {
+				return fmt.Errorf("removing stale OAuth2 provider link: %w", err)
+			}
+		}
 		return e.Next()
 	}
 
@@ -518,18 +534,20 @@ func populateUserFieldsFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEve
 
 	userID := generateUserIDFromOAuth2Provider(e)
 	password := security.RandomString(15)
-	proxmoxUsername := strings.ReplaceAll(strings.ToLower(name), " ", "-")
 
-	matchingUsers, err := e.App.CountRecords("users", dbx.HashExp{"proxmoxUsername": proxmoxUsername})
-	if err != nil {
-		return fmt.Errorf("checking if proxmox username exists: %w", err)
+	baseUsername := strings.ReplaceAll(strings.ToLower(name), " ", "-")
+	proxmoxUsername := baseUsername
+	for n := 2; ; n++ {
+		count, err := e.App.CountRecords("users", dbx.HashExp{"proxmoxUsername": proxmoxUsername})
+		if err != nil {
+			return fmt.Errorf("checking if proxmox username exists: %w", err)
+		}
+		if count == 0 && !userExistsOnHostSystem(proxmoxUsername) {
+			break
+		}
+		proxmoxUsername = baseUsername + strconv.Itoa(n)
 	}
-	if matchingUsers > 0 {
-		return fmt.Errorf("user with proxmox username %s already exists", proxmoxUsername)
-	}
-	if userExistsOnHostSystem(proxmoxUsername) {
-		return fmt.Errorf("username %s already exists on the host system", proxmoxUsername)
-	}
+
 	if poolExists(userID) {
 		return fmt.Errorf("pool %s already exists", userID)
 	}
