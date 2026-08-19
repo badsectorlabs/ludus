@@ -178,6 +178,7 @@ stages:
   # reported as an error by ansible-galaxy's benign path/version-compat warnings)
   - |
     if [[ "$(ludus user list --json | jq -r '.[].isAdmin')" == "true" ]]; then
+      ludus ansible collection rm community.proxmox --global || true # In the event this is a retry, remove the collection if it was already installed
       ludus ansible collection add community.proxmox --global
       ludus ansible collection list | grep community.proxmox | grep true
       # A bundled collection installed --global is a clean no-op, not an error
