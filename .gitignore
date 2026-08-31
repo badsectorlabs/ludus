@@ -58,3 +58,8 @@ crash.log
 ### Packer Patch ###
 # ignore temporary output files
 output-*/
+
+### Ludus test VM checkout ###
+.ludus-testing-vm.json
+.ludus-testing-tunnel.json
+.ludus-dev-env
