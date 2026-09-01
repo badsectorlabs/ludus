@@ -20,8 +20,8 @@ Ansible calls dynamic inventory scripts in two modes:
 
 | Flag             | What Ansible expects                                                            | Implementation        |
 |------------------|----------------------------------------------------------------------------------|-----------------------|
-| `--list`         | JSON with `all`, `_meta.hostvars`, and one key per group.                       | `mainList` in `main.go` |
-| `--host <name>`  | JSON object of hostvars for a single host (`{}` if unknown).                    | `mainHost` in `main.go` |
+| `--list`         | JSON with `all`, `_meta.hostvars`, and one key per group. On Proxmox API errors this is an empty inventory object, never empty stdout. | `mainList` in `main.go` |
+| `--host <name>`  | JSON object of hostvars (`{}` if unknown, out of range, or not ready). Auth/config failures still print this object before exiting. | `mainHost` in `main.go` |
 
 `--list` performs:
 
@@ -31,7 +31,7 @@ Ansible calls dynamic inventory scripts in two modes:
    - `GET /nodes/{node}/{type}/{vmid}/config` — for the `description`/notes JSON and (for LXC) the `net0` line.
    - For running qemu VMs: `agent network-get-interfaces` and `agent os-info` via the QEMU guest agent.
 
-`--host` applies the same range filter as `--list`, then reuses `buildHostVars` against the cluster-resources list so a single-host lookup avoids per-node inventory walks.
+`--host` applies the same visibility rules as `--list`, then reuses `buildHostVars` against the cluster-resources list so a single-host lookup avoids per-node inventory walks.
 
 ## Configuration
 
@@ -63,7 +63,7 @@ These environment variables are set by `ludus-api` before invoking ansible-playb
 
 ### Range filtering
 
-When `LUDUS_RANGE_ID` is set and `LUDUS_RETURN_ALL_RANGES` is false, the inventory only returns VMs that belong to that pool (plus the `ADMIN` pool for admins). VMs outside the range are skipped before the per-VM config/agent calls are made — this both prevents leakage and keeps the call count bounded.
+When `LUDUS_RANGE_ID` is set and `LUDUS_RETURN_ALL_RANGES` is false, the inventory only returns VMs that belong to that pool (plus the `ADMIN` pool for admins), or whose name matches an entry in the caller's range config. The range-config match covers VMs that exist on the cluster but are not in the pool yet (just-cloned). Anything else is skipped before the per-VM config/agent calls — this both prevents leakage and keeps the call count bounded.
 
 The requested `LUDUS_RANGE_ID` is always emitted as a group, even when the pool is missing or empty, so playbooks can target it without conditional logic.
 

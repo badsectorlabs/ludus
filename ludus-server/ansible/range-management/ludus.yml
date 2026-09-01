@@ -274,11 +274,16 @@
           - "{{ item }}"
       register: nodecheck
       changed_when: false
+      # ansible-inventory can return empty/non-JSON stdout while the VM is still
+      # registering; from_json would raise and abort the retry loop.
+      failed_when: false
       until: >
-        nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('') |
+        nodecheck.stdout | default('') | regex_search('^\s*\{') is not none
+        and
+        nodecheck.stdout | from_json | json_query('ansible_host') | default('') |
           regex_search('^(?!169\.254|172\.17)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') is not none
         and
-          (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 10
+          (nodecheck.stdout | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 10
       retries: 30
       delay: 5
       loop: "{{ vms_without_ip | default([]) }}"
@@ -382,6 +387,7 @@
 - name: Sysprep Windows VMs
   tags: [sysprep]
   hosts: "{{ hostvars['localhost']['sysprep_vms'] | default([]) }}"
+  strategy: host_pinned # Don't wait for the whole range to finish each step (some boxes sysprep faster than others) 
   tasks:
     - name: Sysprep a VM
       ansible.builtin.include_tasks: tasks/windows/sysprep.yml

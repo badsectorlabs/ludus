@@ -1,3 +1,6 @@
+.gograph
+.ansible-home
+.ansible-tmp
 repomix*.txt
 repomix*.xml
 ludus-gui

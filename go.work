@@ -2,7 +2,9 @@ go 1.25.0
 
 use (
 	./dynamic-inventory
+	./ludus-antisandbox-plugin
 	./ludus-api
 	./ludus-client
+	./ludus-enterprise-plugin
 	./ludus-server
 )

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"sort"
@@ -466,6 +468,136 @@ func TestMainHost_UnknownHostReturnsEmpty(t *testing.T) {
 	hv := mainHost(context.Background(), client, "no-such-host")
 	if len(hv) != 0 {
 		t.Errorf("expected empty map for unknown host, got %v", hv)
+	}
+}
+
+func writeRangeConfig(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	cfgPath := dir + "/range.yml"
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LUDUS_RANGE_CONFIG", cfgPath)
+}
+
+func TestMainList_ResourcesErrorReturnsValidInventory(t *testing.T) {
+	resetLudusEnv(t)
+	t.Setenv("LUDUS_RANGE_ID", "TEST7")
+	defer gock.Off()
+
+	gock.New(mockBase).
+		Get("^/pools/$").
+		MatchParam("poolid", "TEST7").
+		Reply(200).
+		JSON(`{"data":[{"poolid":"TEST7","members":[]}]}`)
+	gock.New(mockBase).
+		Get("^/cluster/resources$").
+		Reply(500).
+		JSON(`{"errors":"temporary failure"}`)
+
+	client := newMockClient()
+	got := mainList(context.Background(), client)
+
+	if _, ok := got["all"].(map[string]interface{}); !ok {
+		t.Fatalf("expected 'all' group on API error, got %#v", got["all"])
+	}
+	if _, ok := got["_meta"].(map[string]interface{}); !ok {
+		t.Fatalf("expected _meta on API error, got %#v", got["_meta"])
+	}
+	if _, ok := got["TEST7"].(map[string]interface{}); !ok {
+		t.Errorf("rangeID group TEST7 should still be emitted on API error")
+	}
+}
+
+func TestMainList_IncludesRangeConfigVMBeforePoolMembership(t *testing.T) {
+	resetLudusEnv(t)
+	t.Setenv("LUDUS_RANGE_ID", "TEST7")
+	t.Setenv("LUDUS_RANGE_NUMBER", "7")
+	writeRangeConfig(t, `ludus:
+  - vm_name: "{{ range_id }}-web"
+    vlan: 10
+    ip_last_octet: 5
+    linux: true
+`)
+	defer gock.Off()
+
+	gock.New(mockBase).
+		Get("^/pools/$").
+		MatchParam("poolid", "TEST7").
+		Reply(200).
+		JSON(`{"data":[{"poolid":"TEST7","members":[]}]}`)
+	gock.New(mockBase).
+		Get("^/cluster/resources$").
+		Reply(200).
+		JSON(`{"data":[
+			{"type":"qemu","vmid":100,"name":"TEST7-web","node":"node1","status":"stopped","template":0},
+			{"type":"qemu","vmid":500,"name":"OTHER-leaky","node":"node1","status":"stopped","template":0}
+		]}`)
+	gock.New(mockBase).
+		Get("^/nodes/node1/qemu/100/config$").
+		Reply(200).
+		JSON(`{"data":{}}`)
+
+	client := newMockClient()
+	got := mainList(context.Background(), client)
+
+	all, _ := got["all"].(map[string]interface{})
+	hosts, _ := all["hosts"].([]string)
+	if !contains(hosts, "TEST7-web") {
+		t.Errorf("pending pool member TEST7-web missing from all.hosts: %v", hosts)
+	}
+	if contains(hosts, "OTHER-leaky") {
+		t.Errorf("out-of-range OTHER-leaky leaked into all.hosts: %v", hosts)
+	}
+}
+
+func TestMainHost_IncludesRangeConfigVMBeforePoolMembership(t *testing.T) {
+	resetLudusEnv(t)
+	t.Setenv("LUDUS_RANGE_ID", "TEST7")
+	t.Setenv("LUDUS_RANGE_NUMBER", "7")
+	writeRangeConfig(t, `ludus:
+  - vm_name: "{{ range_id }}-web"
+    vlan: 10
+    ip_last_octet: 5
+    linux: true
+`)
+	defer gock.Off()
+
+	gock.New(mockBase).
+		Get("^/pools/$").
+		MatchParam("poolid", "TEST7").
+		Reply(200).
+		JSON(`{"data":[{"poolid":"TEST7","members":[]}]}`)
+	gock.New(mockBase).
+		Get("^/cluster/resources$").
+		Reply(200).
+		JSON(`{"data":[
+			{"type":"qemu","vmid":100,"name":"TEST7-web","node":"node1","status":"stopped","template":0}
+		]}`)
+	gock.New(mockBase).
+		Get("^/nodes/node1/qemu/100/config$").
+		Reply(200).
+		JSON(`{"data":{}}`)
+
+	client := newMockClient()
+	hv := mainHost(context.Background(), client, "TEST7-web")
+	if hv["proxmox_name"] != "TEST7-web" {
+		t.Errorf("pending pool member --host = %#v, want proxmox_name=TEST7-web", hv)
+	}
+}
+
+func TestWriteJSON_EmptyHostvarsIsObject(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeJSON(&buf, emptyHostvars(), false); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if got != "{}\n" {
+		t.Errorf("empty --host JSON = %q, want %q", got, "{}\n")
+	}
+	if err := json.Unmarshal(buf.Bytes(), &map[string]interface{}{}); err != nil {
+		t.Errorf("empty --host JSON is not parseable: %v", err)
 	}
 }
 

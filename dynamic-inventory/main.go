@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -120,6 +121,60 @@ type LudusConfig struct {
 	Ludus []LudusVM `yaml:"ludus"`
 }
 
+// emptyHostvars is the Ansible --host contract for "unknown / not ready": a JSON object.
+func emptyHostvars() map[string]interface{} {
+	return map[string]interface{}{}
+}
+
+// emptyInventory is a parseable --list payload with no hosts. Emitting this (instead of
+// exiting with empty stdout) keeps ansible-inventory from returning non-JSON to callers.
+func emptyInventory(env ludusEnv) map[string]interface{} {
+	results := map[string]interface{}{
+		"all":   map[string]interface{}{"hosts": []string{}},
+		"_meta": map[string]interface{}{"hostvars": map[string]map[string]interface{}{}},
+	}
+	if env.RangeID != "" {
+		results[env.RangeID] = map[string]interface{}{"hosts": []string{}}
+	}
+	return results
+}
+
+func fallbackOutput(opts Options) interface{} {
+	if opts.Host != "" {
+		return emptyHostvars()
+	}
+	return emptyInventory(loadLudusEnv())
+}
+
+func writeJSON(w io.Writer, v interface{}, pretty bool) error {
+	enc := json.NewEncoder(w)
+	if pretty {
+		enc.SetIndent("", "  ")
+	}
+	return enc.Encode(v)
+}
+
+// failInventory writes the Ansible-required JSON to stdout, the reason to stderr, then
+// exits. ansible-inventory discards stdout on a non-zero exit, so --host probes still
+// need a JSON object here for direct script invocation.
+func failInventory(opts Options, pretty bool, format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, format, args...)
+	if err := writeJSON(os.Stdout, fallbackOutput(opts), pretty); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to encode fallback output: %v\n", err)
+	}
+	os.Exit(1)
+}
+
+// vmVisible reports whether a cluster VM should be emitted. Range-filtered runs include
+// pool members plus names from the caller's range config so a just-cloned VM is visible
+// before Proxmox pool membership catches up.
+func vmVisible(env ludusEnv, vmidStr, vmName string, validVMIDs map[string]bool) bool {
+	if !rangeFilterEnabled(env) {
+		return true
+	}
+	return validVMIDs[vmidStr] || env.findLudusVM(vmName) != nil
+}
+
 func main() {
 	opts := Options{}
 
@@ -137,8 +192,7 @@ func main() {
 	opts.Validate = !*trustInvalidCerts
 
 	if opts.URL == "" || opts.Username == "" || (opts.Password == "" && (opts.Token == "" || opts.Secret == "")) {
-		fmt.Fprintln(os.Stderr, "Missing mandatory parameters. Check --url, --username, and auth method (--password OR --token and --secret).")
-		os.Exit(1)
+		failInventory(opts, opts.Pretty, "Missing mandatory parameters. Check --url, --username, and auth method (--password OR --token and --secret).\n")
 	}
 
 	if !strings.HasSuffix(opts.URL, "/") {
@@ -169,8 +223,7 @@ func main() {
 	// Authenticate if using password
 	if opts.Token == "" || opts.Secret == "" {
 		if err := client.CreateSession(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "Auth failed: %v\n", err)
-			os.Exit(1)
+			failInventory(opts, opts.Pretty, "Auth failed: %v\n", err)
 		}
 	}
 
@@ -184,13 +237,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	enc := json.NewEncoder(os.Stdout)
-	if opts.Pretty {
-		enc.SetIndent("", "  ")
-	}
-	if err := enc.Encode(output); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to encode output: %v\n", err)
-		os.Exit(1)
+	if err := writeJSON(os.Stdout, output, opts.Pretty); err != nil {
+		failInventory(opts, opts.Pretty, "Failed to encode output: %v\n", err)
 	}
 }
 
@@ -206,7 +254,7 @@ func mainList(ctx context.Context, client *proxmox.Client) map[string]interface{
 	resources, err := fetchVMResources(ctx, client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get cluster resources: %v\n", err)
-		os.Exit(1)
+		return emptyInventory(env)
 	}
 
 	var wg sync.WaitGroup
@@ -220,8 +268,7 @@ func mainList(ctx context.Context, client *proxmox.Client) map[string]interface{
 
 		vmidStr := fmt.Sprintf("%d", res.VMID)
 
-		// Strict range filtering early exit to completely prevent leakage
-		if rangeFilterEnabled(env) && !validVMIDs[vmidStr] {
+		if !vmVisible(env, vmidStr, res.Name, validVMIDs) {
 			continue
 		}
 
@@ -230,6 +277,11 @@ func mainList(ctx context.Context, client *proxmox.Client) map[string]interface{
 		go func(r *proxmox.ClusterResource) {
 			defer wg.Done()
 			defer func() { <-semaphore }()
+			defer func() {
+				if rec := recover(); rec != nil {
+					fmt.Fprintf(os.Stderr, "panic building hostvars for %s: %v\n", r.Name, rec)
+				}
+			}()
 
 			vmName, isTemplate, hvars := buildHostVars(ctx, client, env, r)
 
@@ -496,7 +548,7 @@ func mainHost(ctx context.Context, client *proxmox.Client, targetHost string) ma
 	resources, err := fetchVMResources(ctx, client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get cluster resources: %v\n", err)
-		return map[string]interface{}{}
+		return emptyHostvars()
 	}
 
 	var target *proxmox.ClusterResource
@@ -505,15 +557,15 @@ func mainHost(ctx context.Context, client *proxmox.Client, targetHost string) ma
 			continue
 		}
 		if r.Type == "qemu" || r.Type == "lxc" || r.Type == "openvz" {
-			if rangeFilterEnabled(env) && !validVMIDs[fmt.Sprintf("%d", r.VMID)] {
-				return map[string]interface{}{}
+			if !vmVisible(env, fmt.Sprintf("%d", r.VMID), r.Name, validVMIDs) {
+				return emptyHostvars()
 			}
 			target = r
 			break
 		}
 	}
 	if target == nil {
-		return map[string]interface{}{}
+		return emptyHostvars()
 	}
 
 	_, _, hvars := buildHostVars(ctx, client, env, target)
