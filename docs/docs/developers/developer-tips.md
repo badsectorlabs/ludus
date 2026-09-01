@@ -39,10 +39,14 @@ The script **always** sets the `LUDUS_ENABLE_SUPERADMIN` variable to enable the 
 
 ## testing.sh
 
-Developers with key-based SSH access to a Proxmox host containing Ludus test VMs can reserve one for a branch. Set `LUDUS_TESTING_PROXMOX_HOST` once in the shell, or pass `-H <proxmox-host>` to an individual command. The `-H` option takes precedence over the environment variable.
+Developers use a normal Proxmox-host SSH account for `ProxyJump` and a privilege-separated Proxmox API token for VM inventory, tags, power, and snapshots. The SSH account needs no sudo access. Store the API URL, token ID, token secret, and optional CA path in the mode `0600` file `~/.config/ludus/testing-pve.json`; see the root `DEVELOPERS.md` guide for the required role and administrator setup.
+
+If `ca_file` is omitted, the Proxmox API certificate is checked against the operating system trust store. Validation is enabled by default. `LUDUS_TESTING_PVE_INSECURE=true` disables it for isolated hosts with intentionally untrusted certificates.
+
+Set `LUDUS_TESTING_PROXMOX_HOST` to the normal SSH account, or pass `-H <user@proxmox-host>` to an individual command. The option takes precedence over the environment variable.
 
 ```shell-session
-export LUDUS_TESTING_PROXMOX_HOST=<proxmox-host>
+export LUDUS_TESTING_PROXMOX_HOST=<user@proxmox-host>
 
 # List test VMs currently tagged "available"
 ./testing.sh list
@@ -82,7 +86,7 @@ ludus user list
 
 This sets `LUDUS_URL` to `https://127.0.0.1:<selected-ludus-port>` and `LUDUS_API_KEY` to the development user's key. Start the tunnel before using the local client.
 
-Release rolls the VM back to its newest `ludus-v*` snapshot and updates it from the latest public Ludus release. If that release does not match the restored snapshot, release creates a new snapshot before replacing all VM tags with `available`. If any restore, update, or snapshot step fails, the VM remains checked out so the failure can be inspected and the release retried.
+Release rolls the VM back through the Proxmox API, starts it if necessary, and updates it to the latest public Ludus release over root SSH to the VM. If that release does not match the restored snapshot, release creates a new snapshot before replacing all VM tags with `available`. If any restore, update, or snapshot step fails, the VM remains checked out so the failure can be inspected and the release retried.
 
 ## DEBUG logging
 

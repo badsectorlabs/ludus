@@ -8,6 +8,13 @@ TUNNEL_STATE_FILE=${LUDUS_TESTING_TUNNEL_STATE_FILE:-"$SCRIPT_DIR/.ludus-testing
 TUNNEL_TMP_ROOT=${TMPDIR:-/tmp}
 TUNNEL_TMP_ROOT=${TUNNEL_TMP_ROOT%/}
 PROXMOX_HOST=${LUDUS_TESTING_PROXMOX_HOST:-}
+PVE_CONFIG_FILE=${LUDUS_TESTING_PVE_CONFIG:-"$HOME/.config/ludus/testing-pve.json"}
+PVE_API_URL=${LUDUS_TESTING_PVE_API_URL:-}
+PVE_TOKEN_ID=${LUDUS_TESTING_PVE_TOKEN_ID:-}
+PVE_TOKEN_SECRET=${LUDUS_TESTING_PVE_TOKEN_SECRET:-}
+PVE_CA_FILE=${LUDUS_TESTING_PVE_CA_FILE:-}
+PVE_INSECURE=${LUDUS_TESTING_PVE_INSECURE:-false}
+PVE_CURL_TLS_MODE=system
 RELEASE_API="https://gitlab.com/api/v4/projects/54052321/releases/permalink/latest"
 AVAILABLE_TAG="available"
 IN_USE_TAG="in-use"
@@ -31,6 +38,12 @@ Options:
 
 Environment:
   LUDUS_TESTING_PROXMOX_HOST  Default Proxmox SSH host
+  LUDUS_TESTING_PVE_CONFIG    API credential file (default: ~/.config/ludus/testing-pve.json)
+  LUDUS_TESTING_PVE_API_URL   Proxmox API base URL
+  LUDUS_TESTING_PVE_TOKEN_ID  Proxmox API token ID
+  LUDUS_TESTING_PVE_TOKEN_SECRET  Proxmox API token secret
+  LUDUS_TESTING_PVE_CA_FILE   Optional Proxmox CA certificate
+  LUDUS_TESTING_PVE_INSECURE  Skip API certificate validation (default: false)
 
 Commands:
   list             List available Ludus test VMs
@@ -52,6 +65,49 @@ require_commands() {
     for command_name in "$@"; do
         command -v "$command_name" >/dev/null 2>&1 || die "required command not found: $command_name"
     done
+}
+
+load_pve_config() {
+    local config
+
+    if [ -f "$PVE_CONFIG_FILE" ]; then
+        config=$(jq -ce '
+            select(
+                .version == 1 and
+                (.api_url | type) == "string" and
+                (.token_id | type) == "string" and
+                (.token_secret | type) == "string"
+            )
+        ' "$PVE_CONFIG_FILE") || die "invalid Proxmox API config at $PVE_CONFIG_FILE"
+        [ -n "$PVE_API_URL" ] || PVE_API_URL=$(printf '%s\n' "$config" | jq -r '.api_url')
+        [ -n "$PVE_TOKEN_ID" ] || PVE_TOKEN_ID=$(printf '%s\n' "$config" | jq -r '.token_id')
+        [ -n "$PVE_TOKEN_SECRET" ] || PVE_TOKEN_SECRET=$(printf '%s\n' "$config" | jq -r '.token_secret')
+        [ -n "$PVE_CA_FILE" ] || PVE_CA_FILE=$(printf '%s\n' "$config" | jq -r '.ca_file // empty')
+    fi
+
+    PVE_API_URL=${PVE_API_URL%/}
+    case "$PVE_API_URL" in
+        https://*) ;;
+        *) die "a valid HTTPS Proxmox API URL is required" ;;
+    esac
+    [ -n "$PVE_TOKEN_ID" ] || die "a Proxmox API token ID is required"
+    [ -n "$PVE_TOKEN_SECRET" ] || die "a Proxmox API token secret is required"
+
+    PVE_CURL_TLS_MODE=system
+    case "$PVE_INSECURE" in
+        1|true|TRUE|yes|YES)
+            PVE_CURL_TLS_MODE=insecure
+            ;;
+        0|false|FALSE|no|NO|'')
+            if [ -n "$PVE_CA_FILE" ]; then
+                [ -r "$PVE_CA_FILE" ] || die "Proxmox CA file is not readable: $PVE_CA_FILE"
+                PVE_CURL_TLS_MODE=ca-file
+            fi
+            ;;
+        *)
+            die "LUDUS_TESTING_PVE_INSECURE must be true or false"
+            ;;
+    esac
 }
 
 validate_vmid() {
@@ -106,47 +162,90 @@ choose_local_port() {
     die "no available $label port found"
 }
 
-ssh_remote() {
-    local stdin_mode=$1
-    local remote_command=""
-    local argument
-    local quoted_argument
+pve_api() {
+    local method=$1
+    local path=$2
+    local response
+    local curl_args
 
-    shift
-    for argument in "$@"; do
-        printf -v quoted_argument '%q' "$argument"
-        if [ -n "$remote_command" ]; then
-            remote_command="${remote_command} ${quoted_argument}"
-        else
-            remote_command=$quoted_argument
-        fi
-    done
-
-    if [ "$stdin_mode" = "with-stdin" ]; then
-        ssh "$PROXMOX_HOST" "$remote_command"
-    else
-        ssh -n "$PROXMOX_HOST" "$remote_command"
-    fi
+    shift 2
+    curl_args=(-fsS
+        --request "$method"
+        --header "Authorization: PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}")
+    case "$PVE_CURL_TLS_MODE" in
+        insecure) curl_args+=(--insecure) ;;
+        ca-file) curl_args+=(--cacert "$PVE_CA_FILE") ;;
+    esac
+    response=$(curl "${curl_args[@]}" \
+        "$@" \
+        "${PVE_API_URL}/api2/json${path}") || return 1
+    printf '%s\n' "$response" | jq -c '
+        if has("data") then .data else error("Proxmox API response has no data field") end
+    '
 }
 
-pvesh_get() {
-    ssh_remote no-stdin sudo -n pvesh get "$@" --output-format json
+urlencode() {
+    jq -rn --arg value "$1" '$value | @uri'
+}
+
+wait_for_pve_task() {
+    local node=$1
+    local upid=$2
+    local attempts=${LUDUS_TESTING_PVE_TASK_ATTEMPTS:-180}
+    local delay=${LUDUS_TESTING_PVE_TASK_DELAY:-5}
+    local encoded_upid task_status status exit_status
+    local attempt=0
+
+    encoded_upid=$(urlencode "$upid")
+    while [ "$attempt" -lt "$attempts" ]; do
+        task_status=$(pve_api GET "/nodes/${node}/tasks/${encoded_upid}/status")
+        status=$(printf '%s\n' "$task_status" | jq -r '.status')
+        if [ "$status" = "stopped" ]; then
+            exit_status=$(printf '%s\n' "$task_status" | jq -r '.exitstatus // empty')
+            [ "$exit_status" = "OK" ] || {
+                echo "Error: Proxmox task failed: ${exit_status:-unknown error}" >&2
+                return 1
+            }
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep "$delay"
+    done
+
+    echo "Error: timed out waiting for Proxmox task $upid" >&2
+    return 1
+}
+
+run_pve_task() {
+    local node=$1
+    local method=$2
+    local path=$3
+    local upid
+
+    shift 3
+    upid=$(pve_api "$method" "$path" "$@" | jq -er '
+        select(type == "string" and length > 0)
+    ') || {
+        echo "Error: Proxmox API did not return a task ID for $path" >&2
+        return 1
+    }
+    wait_for_pve_task "$node" "$upid"
 }
 
 get_resources() {
-    pvesh_get /cluster/resources --type vm
+    pve_api GET /cluster/resources --get --data-urlencode type=vm
 }
 
 get_vm_config() {
     local node=$1
     local vmid=$2
-    pvesh_get "/nodes/${node}/qemu/${vmid}/config"
+    pve_api GET "/nodes/${node}/qemu/${vmid}/config"
 }
 
 get_vm_snapshots() {
     local node=$1
     local vmid=$2
-    pvesh_get "/nodes/${node}/qemu/${vmid}/snapshot"
+    pve_api GET "/nodes/${node}/qemu/${vmid}/snapshot"
 }
 
 set_vm_tags() {
@@ -154,8 +253,9 @@ set_vm_tags() {
     local vmid=$2
     local tags=$3
     local digest=$4
-    ssh_remote no-stdin sudo -n pvesh set "/nodes/${node}/qemu/${vmid}/config" \
-        --tags "$tags" --digest "$digest" >/dev/null
+    pve_api PUT "/nodes/${node}/qemu/${vmid}/config" \
+        --data-urlencode "tags=$tags" \
+        --data-urlencode "digest=$digest" >/dev/null
 }
 
 find_vm_resource() {
@@ -684,18 +784,48 @@ latest_release_snapshot() {
     '
 }
 
+ssh_guest() {
+    local stdin_mode=$1
+    local ip=$2
+    local remote_command=""
+    local argument quoted_argument
+
+    shift 2
+    for argument in "$@"; do
+        printf -v quoted_argument '%q' "$argument"
+        if [ -n "$remote_command" ]; then
+            remote_command="${remote_command} ${quoted_argument}"
+        else
+            remote_command=$quoted_argument
+        fi
+    done
+
+    if [ "$stdin_mode" = "with-stdin" ]; then
+        ssh -J "$PROXMOX_HOST" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            "root@$ip" "$remote_command"
+    else
+        ssh -n -J "$PROXMOX_HOST" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            "root@$ip" "$remote_command"
+    fi
+}
+
 ensure_vm_running() {
-    local vmid=$1
+    local node=$1
+    local vmid=$2
     local status
 
-    status=$(ssh_remote no-stdin sudo -n qm status "$vmid")
+    status=$(pve_api GET "/nodes/${node}/qemu/${vmid}/status/current" | jq -er '.status')
     case "$status" in
-        "status: running")
+        running)
             return 0
             ;;
-        "status: stopped")
+        stopped)
             echo "Starting VM $vmid..."
-            ssh_remote no-stdin sudo -n qm start "$vmid"
+            run_pve_task "$node" POST "/nodes/${node}/qemu/${vmid}/status/start"
             ;;
         *)
             echo "Error: could not determine VM $vmid status: $status" >&2
@@ -704,26 +834,26 @@ ensure_vm_running() {
     esac
 }
 
-wait_for_guest_agent() {
-    local vmid=$1
-    local attempts=${LUDUS_TESTING_AGENT_ATTEMPTS:-60}
-    local delay=${LUDUS_TESTING_AGENT_DELAY:-5}
+wait_for_guest_ssh() {
+    local ip=$1
+    local attempts=${LUDUS_TESTING_SSH_ATTEMPTS:-60}
+    local delay=${LUDUS_TESTING_SSH_DELAY:-5}
     local attempt=0
 
     while [ "$attempt" -lt "$attempts" ]; do
-        if ssh_remote no-stdin sudo -n qm agent "$vmid" ping >/dev/null 2>&1; then
+        if ssh_guest no-stdin "$ip" true >/dev/null 2>&1; then
             return 0
         fi
         attempt=$((attempt + 1))
         sleep "$delay"
     done
 
-    echo "Error: QEMU guest agent did not become ready for VM $vmid" >&2
+    echo "Error: SSH did not become ready for test VM $ip" >&2
     return 1
 }
 
 update_guest() {
-    local vmid=$1
+    local ip=$1
     local release=$2
     local guest_script result
 
@@ -751,21 +881,12 @@ GUEST_SCRIPT
 )
 
     if ! result=$(printf '%s\n' "$guest_script" | \
-        ssh_remote with-stdin sudo -n qm guest exec "$vmid" \
-            --pass-stdin 1 --timeout 0 -- /bin/bash -s -- "$release"); then
-        echo "Error: failed to execute the public release update in VM $vmid" >&2
+        ssh_guest with-stdin "$ip" /bin/bash -s -- "$release"); then
+        echo "Error: failed to execute the public release update in VM $ip" >&2
         return 1
     fi
 
-    if ! printf '%s\n' "$result" | jq -e '
-        (.exited // 0) == 1 and (.exitcode // -1) == 0
-    ' >/dev/null; then
-        echo "Error: public release update failed in VM $vmid" >&2
-        printf '%s\n' "$result" | jq -r '."out-data" // empty, ."err-data" // empty' >&2 || true
-        return 1
-    fi
-
-    printf '%s\n' "$result" | jq -r '."out-data" // empty'
+    printf '%s\n' "$result"
 }
 
 restore_checkout_tags() {
@@ -796,7 +917,7 @@ release_exit() {
 release_vm() {
     local requested_vmid=$1
     local state state_vmid state_ip state_host resource resources config ip snapshots snapshot
-    local release snapshot_release_name digest
+    local release snapshot_release_name digest encoded_snapshot
 
     [ -f "$STATE_FILE" ] || die "no VM checkout state found at $STATE_FILE"
     state=$(jq -ce '
@@ -849,21 +970,26 @@ release_vm() {
     snapshot_release_name="ludus-v${snapshot_release_name}"
 
     echo "Rolling VM $state_vmid back to $snapshot..."
-    ssh_remote no-stdin sudo -n qm rollback "$state_vmid" "$snapshot"
+    encoded_snapshot=$(urlencode "$snapshot")
+    run_pve_task "$RELEASE_NODE" POST \
+        "/nodes/${RELEASE_NODE}/qemu/${state_vmid}/snapshot/${encoded_snapshot}/rollback"
 
     # Snapshot rollback can restore old VM tags. Reassert ownership before any
     # fallible update work so a failed release never returns the VM to the pool.
     mark_checked_out "$RELEASE_NODE" "$state_vmid" "$RELEASE_BRANCH_TAG"
-    ensure_vm_running "$state_vmid"
-    wait_for_guest_agent "$state_vmid"
+    ensure_vm_running "$RELEASE_NODE" "$state_vmid"
+    wait_for_guest_ssh "$ip"
 
     echo "Updating VM $state_vmid to public Ludus release $release..."
-    update_guest "$state_vmid" "$release"
+    update_guest "$ip" "$release"
 
     if [ "$snapshot" != "$snapshot_release_name" ]; then
         echo "Creating release snapshot $snapshot_release_name..."
-        ssh_remote no-stdin sudo -n qm snapshot "$state_vmid" "$snapshot_release_name" \
-            --vmstate true --description "Ludus public release $release"
+        run_pve_task "$RELEASE_NODE" POST \
+            "/nodes/${RELEASE_NODE}/qemu/${state_vmid}/snapshot" \
+            --data-urlencode "snapname=$snapshot_release_name" \
+            --data-urlencode vmstate=1 \
+            --data-urlencode "description=Ludus public release $release"
     fi
 
     config=$(get_vm_config "$RELEASE_NODE" "$state_vmid")
@@ -918,16 +1044,19 @@ main() {
             ;;
         list)
             [ "$#" -eq 1 ] || { usage >&2; exit 1; }
-            require_commands ssh jq
+            require_commands curl jq
+            load_pve_config
             list_vms
             ;;
         checkout)
-            require_commands ssh jq git nc
+            require_commands curl jq git nc
+            load_pve_config
             checkout_command "$@"
             ;;
         release)
             [ "$#" -eq 2 ] || { usage >&2; exit 1; }
-            require_commands ssh jq curl
+            require_commands curl jq ssh
+            load_pve_config
             validate_vmid "$2"
             trap release_exit EXIT
             release_vm "$2"

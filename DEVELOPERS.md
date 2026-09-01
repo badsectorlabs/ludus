@@ -4,15 +4,80 @@ This workflow uses a shared Ludus test VM on a Proxmox host. A VM is checked out
 
 ## Prerequisites
 
-- Key-based SSH access to the Proxmox host and its Ludus test VMs.
+- Key-based normal-user SSH access to the Proxmox host for `ProxyJump`.
+- Key-based root SSH access to the Ludus test VMs.
+- A privilege-separated Proxmox API token scoped to the test VM resource pool.
 - A local Ludus client.
 - Local `bash`, `curl`, `git`, `jq`, `nc`, `rsync`, and `ssh` commands.
 - An available test VM cloned from `ci-seed-integration`.
 
+## One-time Proxmox administrator setup
+
+Normal developers do not need root access to the Proxmox host. A Proxmox administrator must perform the one-time setup:
+
+1. Create a resource pool and add only the Ludus test VMs.
+2. Create a role with these privileges:
+   - `Pool.Audit`
+   - `VM.Audit`
+   - `VM.Config.Options`
+   - `VM.PowerMgmt`
+   - `VM.Snapshot`
+   - `VM.Snapshot.Rollback`
+3. Create or register each developer's Proxmox user.
+4. Assign the role to both the user and a privilege-separated API token at the test pool path.
+5. Give the developer the token value and the Proxmox cluster CA certificate through a secure channel.
+
+Example administrator commands:
+
+```bash
+pveum pool add LUDUS --comment "Ludus development test VMs"
+pveum pool modify LUDUS --vms 1008,1009,1010,1011
+
+pveum role add LudusTestingUser \
+  --privs "Pool.Audit VM.Audit VM.Config.Options VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback"
+
+pveum user add developer@pam --comment "Ludus testing pool developer"
+pveum acl modify /pool/LUDUS \
+  --users developer@pam \
+  --roles LudusTestingUser \
+  --propagate 1
+
+pveum user token add developer@pam ludus-testing \
+  --privsep 1 \
+  --expire <unix-expiration-time>
+
+pveum acl modify /pool/LUDUS \
+  --tokens 'developer@pam!ludus-testing' \
+  --roles LudusTestingUser \
+  --propagate 1
+```
+
+The PAM user must also exist as a normal Unix account when it is used for SSH. It needs no sudo privileges. SSH forwarding must be allowed so it can act as a jump host.
+
+The API token does not need QEMU Guest Agent privileges. Release updates run over the developer's root SSH access to the checked-out test VM.
+
+## Developer API configuration
+
+Store the token in `~/.config/ludus/testing-pve.json` with mode `0600`:
+
+```json
+{
+  "version": 1,
+  "api_url": "https://proxmox.example:8006",
+  "token_id": "developer@pam!ludus-testing",
+  "token_secret": "<token-secret>",
+  "ca_file": "/home/developer/.config/ludus/pve-root-ca.pem"
+}
+```
+
+The API URL must be reachable from the development workstation. When `ca_file` is omitted, `testing.sh` validates the server certificate with the operating system trust store. Never store the token secret in the repository or a worktree.
+
+The individual values can instead be supplied through `LUDUS_TESTING_PVE_API_URL`, `LUDUS_TESTING_PVE_TOKEN_ID`, `LUDUS_TESTING_PVE_TOKEN_SECRET`, and `LUDUS_TESTING_PVE_CA_FILE`. Certificate validation is enabled by default. For an isolated development host with an intentionally untrusted certificate, set `LUDUS_TESTING_PVE_INSECURE=true`; do not use that override when a trusted certificate or CA file is available.
+
 Set the Proxmox SSH host once for the current shell:
 
 ```bash
-export LUDUS_TESTING_PROXMOX_HOST=your-proxmox-host
+export LUDUS_TESTING_PROXMOX_HOST=developer@your-proxmox-host
 ```
 
 Every `testing.sh` command also accepts `-H <proxmox-host>`. The command-line option overrides `LUDUS_TESTING_PROXMOX_HOST`.
@@ -136,7 +201,7 @@ Release:
 1. verifies that the VM is checked out by this worktree;
 2. rolls back the newest `ludus-v*` snapshot;
 3. starts the VM if the rollback leaves it stopped;
-4. updates Ludus to the latest public release through QEMU Guest Agent;
+4. updates Ludus to the latest public release over root SSH to the test VM;
 5. creates a new release snapshot when the public release differs from the restored snapshot;
 6. replaces all VM tags with `available` and removes `.ludus-testing-vm.json`.
 
@@ -145,7 +210,7 @@ The rollback discards development changes on the VM. If rollback, update, or sna
 ## Typical session
 
 ```bash
-export LUDUS_TESTING_PROXMOX_HOST=your-proxmox-host
+export LUDUS_TESTING_PROXMOX_HOST=developer@your-proxmox-host
 
 ./testing.sh list
 ./testing.sh checkout 1008
