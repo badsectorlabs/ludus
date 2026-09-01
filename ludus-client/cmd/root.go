@@ -112,16 +112,13 @@ func initConfig() {
 	} else {
 		logger.Logger.Debug("No config file found - using defaults")
 	}
-	logger.Logger.Debug("--- Configuration from cli and read from file ---")
-	for s, i := range viper.AllSettings() {
-		logger.Logger.Debug(fmt.Sprintf("\t%s = %s", s, i))
-		// Not sure why this is required, but without it config values are overwritten by defaults
-		if s == "url" {
-			url = fmt.Sprintf("%s", i)
-		} else if s == "proxy" {
-			proxy = fmt.Sprintf("%s", i)
-		}
+	url = viper.GetString("url")
+	proxy = viper.GetString("proxy")
+	verify = viper.GetBool("verify")
 
+	logger.Logger.Debug("--- Configuration from cli and read from file ---")
+	for setting, value := range viper.AllSettings() {
+		logger.Logger.Debug(fmt.Sprintf("\t%s = %v", setting, value))
 	}
 	logger.Logger.Debug("---")
 
