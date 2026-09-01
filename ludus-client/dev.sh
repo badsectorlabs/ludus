@@ -25,7 +25,11 @@ pushd .
 # cd to the directory of the script
 cd "$(dirname "$0")" || exit
 
-GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+if [ -n "${LUDUS_DEV_GIT_COMMIT:-}" ]; then
+    GIT_COMMIT_SHORT_HASH=$LUDUS_DEV_GIT_COMMIT
+else
+    GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+fi
 export GIT_COMMIT_SHORT_HASH
 if [ -z "$VERSION_STRING" ]; then
     VERSION_STRING=$(git rev-parse --abbrev-ref HEAD)
