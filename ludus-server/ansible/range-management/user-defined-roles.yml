@@ -10,7 +10,7 @@
       ludus_role_dependency_resolver:
         ludus_config_object: "{{ ludus | default([]) }}"
         router_config_object: "{{ router | default({}) }}"
-        range_id: "{{ range_id }}"
+        default_router_vm_name: "{{ default_router_vm_name }}"
       register: resolved_role_order
 
     - name: Display resolved role order

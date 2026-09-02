@@ -39,15 +39,13 @@ The script **always** sets the `LUDUS_ENABLE_SUPERADMIN` variable to enable the 
 
 ## testing.sh
 
-Developers use a normal Proxmox-host SSH account for `ProxyJump` and a privilege-separated Proxmox API token for VM inventory, tags, power, and snapshots. The SSH account needs no sudo access. Store the API URL, token ID, token secret, and optional CA path in the mode `0600` file `~/.config/ludus/testing-pve.json`; see the root `DEVELOPERS.md` guide for the required role and administrator setup.
+Developers use a normal Proxmox-host SSH account for `ProxyJump` and a privilege-separated Proxmox API token for VM inventory, tags, power, and snapshots. The SSH account needs no sudo access. Store the SSH host, API URL, token ID, token secret, and optional CA path in the mode `0600` file `~/.config/ludus/testing-pve.json`; see the root `DEVELOPERS.md` guide for the required role and administrator setup.
 
 If `ca_file` is omitted, the Proxmox API certificate is checked against the operating system trust store. Validation is enabled by default. `LUDUS_TESTING_PVE_INSECURE=true` disables it for isolated hosts with intentionally untrusted certificates.
 
-Set `LUDUS_TESTING_PROXMOX_HOST` to the normal SSH account, or pass `-H <user@proxmox-host>` to an individual command. The option takes precedence over the environment variable.
+`LUDUS_TESTING_PROXMOX_HOST` overrides the configured `ssh_host`, and `-H <user@proxmox-host>` overrides both.
 
 ```shell-session
-export LUDUS_TESTING_PROXMOX_HOST=<user@proxmox-host>
-
 # List test VMs currently tagged "available"
 ./testing.sh list
 

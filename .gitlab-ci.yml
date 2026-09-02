@@ -280,13 +280,13 @@ stages:
   - ludus range status | grep "${LUDUS_USER_ID}-kali" | grep 'Off'
   - ludus range status | grep "${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1" | grep 'Off'
   - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'Off'
-  - ludus range status | grep "${LUDUS_USER_ID}-router-debian11-x64" | grep 'Off'
+  - ludus range status | grep "${LUDUS_USER_ID}-router-debian13-x64" | grep 'Off'
   - ludus power on -n all
   - timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true" ]]; do sleep 5; done'
   - ludus range status | grep "${LUDUS_USER_ID}-kali" | grep 'On'
   - ludus range status | grep "${LUDUS_USER_ID}-ad-win11-22h2-enterprise-x64-1" | grep 'On'
   - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'
-  - ludus range status | grep "${LUDUS_USER_ID}-router-debian11-x64" | grep 'On'
+  - ludus range status | grep "${LUDUS_USER_ID}-router-debian13-x64" | grep 'On'
 
 .template-tests: &template-tests # `templates add` CLI tests. The bundled template library moved to the ludus-source-bsl source; a throwaway fixture exercises add/force/ownership, and an embedded (server-included) template covers the build smoke-test.
   - ludus templates list --json | jq -r '.[] | select(.name == "ci-add-test-template") | .name' | grep -q 'ci-add-test-template' && ludus templates rm -n "ci-add-test-template" || echo "No ci-add-test template on the server"
@@ -780,6 +780,7 @@ templates build:
       when: never
     - changes:
         - ludus-server/packer/**/*
+        - ludus-server/ansible/range-management/ludus.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
@@ -826,6 +827,7 @@ templates check:
       when: never
     - changes:
         - ludus-server/packer/**/*
+        - ludus-server/ansible/range-management/ludus.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: clean_install
@@ -1876,14 +1878,14 @@ post-deploy ranges-as-admin:
     - ludus range rm-range -r CIA-share-assign-test --no-prompt
     # 3) Router VM exists but powered off: assign fails with clear message
     - ludus range revoke CIU CIA || true
-    - ludus power off -n CIA-router-debian11-x64
-    - timeout 120 bash -c 'until [[ $(ludus range list --json | jq -r ".VMs[] | select(.name == \"CIA-router-debian11-x64\") | .poweredOn") == "false" ]]; do sleep 5; done'
+    - ludus power off -n CIA-router-debian13-x64
+    - timeout 120 bash -c 'until [[ $(ludus range list --json | jq -r ".VMs[] | select(.name == \"CIA-router-debian13-x64\") | .poweredOn") == "false" ]]; do sleep 5; done'
     - set +o pipefail
     - ludus range assign CIU CIA 2>&1 | grep -F "The range router you are sharing access to must be accessible. Make sure the router is powered on and accessible."
     - set -o pipefail
     - '! ludus range users CIA | grep CIU'
-    - ludus power on -n CIA-router-debian11-x64
-    - timeout 180 bash -c 'until [[ $(ludus range list --json | jq -r ".VMs[] | select(.name == \"CIA-router-debian11-x64\") | .poweredOn") == "true" ]]; do sleep 5; done'
+    - ludus power on -n CIA-router-debian13-x64
+    - timeout 180 bash -c 'until [[ $(ludus range list --json | jq -r ".VMs[] | select(.name == \"CIA-router-debian13-x64\") | .poweredOn") == "true" ]]; do sleep 5; done'
     # Deploy a simple range, then delete it to verify deleting a range with VMs works
     - ludus power off -n all -r CIA # power off range CIA as it is not used again
     - ludus range create -n "CIA Test Range" -r CIA-test
@@ -2655,7 +2657,7 @@ cluster-templates-build:
     max: 2
   script:
     - *ci-setup-cluster-admin
-    - ludus templates build -n debian-11-x64-server-template
+    - ludus templates build -n debian-13-x64-server-template
 
 cluster-templates-check:
   stage: test
@@ -2675,11 +2677,11 @@ cluster-templates-check:
   script:
     - *ci-setup-cluster-admin
     # If there is no template building process, start one
-    - pgrep -f 'packer' || ludus templates build -n debian-11-x64-server-template
-    # Wait for the debian 11 template to build
-    - while [ $(ludus templates list --json | jq '[.[] | select(.name == "debian-11-x64-server-template") | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
+    - pgrep -f 'packer' || ludus templates build -n debian-13-x64-server-template
+    # Wait for the debian 13 template to build
+    - while [ $(ludus templates list --json | jq '[.[] | select(.name == "debian-13-x64-server-template") | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
     - ludus templates list
-    - export DEB11_TEMPLATE_VMID=$(sudo qm list | grep debian-11-x64-server-template | head -1 | awk '{print $1}')
+    - export DEB13_TEMPLATE_VMID=$(sudo qm list | grep debian-13-x64-server-template | head -1 | awk '{print $1}')
     # Verify templates are accessible from both nodes
     - test $(sudo pvesh get /nodes/ludus/storage/ceph/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1
     - test $(sudo pvesh get /nodes/ludus2/storage/ceph/content --output-format=json | jq '[.[] | select(.vmid == 100)] | length' || echo 0) -eq 1

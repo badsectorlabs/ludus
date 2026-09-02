@@ -34,11 +34,11 @@ Usage: $0 [-H <proxmox-host>] list
        $0 [-H <proxmox-host>] tunnel stop
 
 Options:
-  -H <host>        Proxmox SSH host; overrides LUDUS_TESTING_PROXMOX_HOST
+  -H <host>        Proxmox SSH host; overrides the environment and JSON config
 
 Environment:
-  LUDUS_TESTING_PROXMOX_HOST  Default Proxmox SSH host
-  LUDUS_TESTING_PVE_CONFIG    API credential file (default: ~/.config/ludus/testing-pve.json)
+  LUDUS_TESTING_PROXMOX_HOST  Default Proxmox SSH host; overrides JSON config
+  LUDUS_TESTING_PVE_CONFIG    JSON config file (default: ~/.config/ludus/testing-pve.json)
   LUDUS_TESTING_PVE_API_URL   Proxmox API base URL
   LUDUS_TESTING_PVE_TOKEN_ID  Proxmox API token ID
   LUDUS_TESTING_PVE_TOKEN_SECRET  Proxmox API token secret
@@ -67,6 +67,20 @@ require_commands() {
     done
 }
 
+load_proxmox_host() {
+    local config_host
+
+    [ -z "$PROXMOX_HOST" ] || return
+    [ -f "$PVE_CONFIG_FILE" ] || return
+
+    config_host=$(jq -er '
+        if .version != 1 then error("unsupported version") else . end
+        | (.ssh_host // "")
+        | if type == "string" then . else error("ssh_host must be a string") end
+    ' "$PVE_CONFIG_FILE") || die "invalid Proxmox SSH host config at $PVE_CONFIG_FILE"
+    PROXMOX_HOST=$config_host
+}
+
 load_pve_config() {
     local config
 
@@ -76,7 +90,8 @@ load_pve_config() {
                 .version == 1 and
                 (.api_url | type) == "string" and
                 (.token_id | type) == "string" and
-                (.token_secret | type) == "string"
+                (.token_secret | type) == "string" and
+                ((.ssh_host // "") | type) == "string"
             )
         ' "$PVE_CONFIG_FILE") || die "invalid Proxmox API config at $PVE_CONFIG_FILE"
         [ -n "$PVE_API_URL" ] || PVE_API_URL=$(printf '%s\n' "$config" | jq -r '.api_url')
@@ -1029,13 +1044,17 @@ main() {
     shift $((OPTIND - 1))
 
     command=${1:-}
-    if [ "$command" != "status" ]; then
-        case "$PROXMOX_HOST" in
-            ''|'-'*|*[!A-Za-z0-9._@:-]*)
-                die "a valid Proxmox SSH host is required with -H or LUDUS_TESTING_PROXMOX_HOST"
-                ;;
-        esac
-    fi
+    case "$command" in
+        list|checkout|release|tunnel)
+            require_commands jq
+            load_proxmox_host
+            case "$PROXMOX_HOST" in
+                ''|'-'*|*[!A-Za-z0-9._@:-]*)
+                    die "a valid Proxmox SSH host is required with -H, LUDUS_TESTING_PROXMOX_HOST, or ssh_host in $PVE_CONFIG_FILE"
+                    ;;
+            esac
+            ;;
+    esac
     case "$command" in
         status)
             [ "$#" -eq 1 ] || { usage >&2; exit 1; }

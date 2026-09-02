@@ -43,8 +43,8 @@ ludus templates list
 +------------------------------------+--------------+
 |              TEMPLATE              |    STATUS    |
 +------------------------------------+--------------+
-| debian-11-x64-server-template      | ❌ NOT BUILT |
 | debian-12-x64-server-template      | ❌ NOT BUILT |
+| debian-13-x64-server-template      | ❌ NOT BUILT |
 | kali-x64-desktop-template          | ❌ NOT BUILT |
 | win11-22h2-x64-enterprise-template | ❌ NOT BUILT |
 | win2022-server-x64-template        | ❌ NOT BUILT |
@@ -71,11 +71,9 @@ To check the status of the template build, you can run `templates status`, `temp
 ```shell-session
 #terminal-command-ludus
 ludus templates logs -f
-2024/08/16 20:11:17 ui: ==> proxmox-iso.debian11: Retrieving ISO
-2024/08/16 20:11:17 ui: ==> proxmox-iso.debian11: Trying https://cdimage.debian.org/cdimage/archive/11.7.0/amd64/iso-cd/debian-11.7.0-amd64-netinst.iso
-2024/08/16 20:11:17 ui: ==> proxmox-iso.debian11: Trying https://cdimage.debian.org/cdimage/archive/11.7.0/amd64/iso-cd/debian-11.7.0-amd64-netinst.iso?checksum=sha512%4460ef6470f6d8ae193c268e213d33a6a5a0da90c2d30c1024784faa4e4473f0c9b546a41e2d34c43fbbd43542ae4fb93cfd5cb6ac9b88a476f1a6877c478674
-2024/08/16 20:11:18 ui: ==> proxmox-iso.debian11: https://cdimage.debian.org/cdimage/archive/11.7.0/amd64/iso-cd/debian-11.7.0-amd64-netinst.iso?checksum=sha512%4460ef6470f6d8ae193c268e213d33a6a5a0da90c2d30c1024784faa4e4473f0c9b546a41e2d34c43fbbd43542ae4fb93cfd5cb6ac9b88a476f1a6877c478674 => /opt/ludus/users/john-doe/packer/packer_cache/50c7c8865f6fecec41b10c36bf86b3bd9bdb1eaf.iso
-2024/08/16 20:11:22 ui: ==> proxmox-iso.debian11: Creating VM
+2026/09/01 12:58:17 ui: ==> proxmox-iso.debian13: Retrieving ISO
+2026/09/01 12:58:17 ui: ==> proxmox-iso.debian13: Trying https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.6.0-amd64-netinst.iso
+2026/09/01 12:58:27 ui: ==> proxmox-iso.debian13: Creating VM
 ...
 ```
 

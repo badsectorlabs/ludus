@@ -63,6 +63,7 @@ Store the token in `~/.config/ludus/testing-pve.json` with mode `0600`:
 ```json
 {
   "version": 1,
+  "ssh_host": "developer@your-proxmox-host",
   "api_url": "https://proxmox.example:8006",
   "token_id": "developer@pam!ludus-testing",
   "token_secret": "<token-secret>",
@@ -70,17 +71,9 @@ Store the token in `~/.config/ludus/testing-pve.json` with mode `0600`:
 }
 ```
 
-The API URL must be reachable from the development workstation. When `ca_file` is omitted, `testing.sh` validates the server certificate with the operating system trust store. Never store the token secret in the repository or a worktree.
+The API URL must be reachable from the development workstation. `ssh_host` is the normal Proxmox-host SSH account used for `ProxyJump`; it needs no sudo privileges. When `ca_file` is omitted, `testing.sh` validates the server certificate with the operating system trust store. Never store the token secret in the repository or a worktree.
 
-The individual values can instead be supplied through `LUDUS_TESTING_PVE_API_URL`, `LUDUS_TESTING_PVE_TOKEN_ID`, `LUDUS_TESTING_PVE_TOKEN_SECRET`, and `LUDUS_TESTING_PVE_CA_FILE`. Certificate validation is enabled by default. For an isolated development host with an intentionally untrusted certificate, set `LUDUS_TESTING_PVE_INSECURE=true`; do not use that override when a trusted certificate or CA file is available.
-
-Set the Proxmox SSH host once for the current shell:
-
-```bash
-export LUDUS_TESTING_PROXMOX_HOST=developer@your-proxmox-host
-```
-
-Every `testing.sh` command also accepts `-H <proxmox-host>`. The command-line option overrides `LUDUS_TESTING_PROXMOX_HOST`.
+The individual API values can instead be supplied through `LUDUS_TESTING_PVE_API_URL`, `LUDUS_TESTING_PVE_TOKEN_ID`, `LUDUS_TESTING_PVE_TOKEN_SECRET`, and `LUDUS_TESTING_PVE_CA_FILE`. `LUDUS_TESTING_PROXMOX_HOST` overrides the configured `ssh_host`, and `-H <proxmox-host>` overrides both. Certificate validation is enabled by default. For an isolated development host with an intentionally untrusted certificate, set `LUDUS_TESTING_PVE_INSECURE=true`; do not use that override when a trusted certificate or CA file is available.
 
 ## Complete flow
 
@@ -210,8 +203,6 @@ The rollback discards development changes on the VM. If rollback, update, or sna
 ## Typical session
 
 ```bash
-export LUDUS_TESTING_PROXMOX_HOST=developer@your-proxmox-host
-
 ./testing.sh list
 ./testing.sh checkout 1008
 ./testing.sh tunnel start

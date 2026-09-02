@@ -10,7 +10,7 @@
     - name: Wait for the router VM to be available
       ansible.builtin.include_tasks: tasks/proxmox/wait-for-vm-availability-linux.yml
   vars:
-    template_vm_name: "{{ router.template | default('debian-11-x64-server-template') }}"
+    template_vm_name: "{{ router.template | default(default_router_vm_name) }}"
     vm_name: "{{ router.vm_name | default(default_router_vm_name) }}"
     # In cluster mode (SDN): use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
     bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
@@ -886,7 +886,7 @@
     - name: Deploy VM
       ansible.builtin.include_tasks: tasks/proxmox/deploy-vm.yml
       vars:
-        template_vm_name: debian-11-x64-server-template
+        template_vm_name: debian-13-x64-server-template
         vm_name: ADMIN-nexus-3-oss
         # In cluster mode: use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
         bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"
