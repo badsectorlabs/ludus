@@ -7,10 +7,12 @@
   tasks:
     - name: Deploy router VM
       ansible.builtin.include_tasks: tasks/proxmox/deploy-vm.yml
+    - name: Refresh inventory after router VM deployment
+      ansible.builtin.meta: refresh_inventory
     - name: Wait for the router VM to be available
       ansible.builtin.include_tasks: tasks/proxmox/wait-for-vm-availability-linux.yml
   vars:
-    template_vm_name: "{{ router.template | default(default_router_vm_name) }}"
+    template_vm_name: "{{ router.template | default(default_router_template_name) }}"
     vm_name: "{{ router.vm_name | default(default_router_vm_name) }}"
     # In cluster mode (SDN): use 'ludusnat' VNet; in non-cluster mode: use ludus_nat_interface (vmbr1000)
     bridge_interface: "{{ 'ludusnat' if ludus_cluster_mode else ludus_nat_interface }}"

@@ -49,7 +49,7 @@ ludus:
 
   - vm_name: "{{ range_id }}-redirector"
     hostname: "{{ range_id }}-redirector"
-    template: debian-12-x64-server-template
+    template: debian-13-x64-server-template
     vlan: 20
     ip_last_octet: 1
     ram_gb: 4

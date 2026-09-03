@@ -1,7 +1,7 @@
 ludus:
   - vm_name: deb1-CITEST
     hostname: deb1
-    template: debian-11-x64-server-template
+    template: debian-13-x64-server-template
     vlan: 10
     ip_last_octet: 10
     ram_gb: 4
@@ -10,7 +10,7 @@ ludus:
     target_node: ludus
   - vm_name: deb2-CITEST
     hostname: deb2
-    template: debian-11-x64-server-template
+    template: debian-13-x64-server-template
     vlan: 10
     ip_last_octet: 11
     ram_gb: 4

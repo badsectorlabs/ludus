@@ -6,6 +6,7 @@
     sysctl_set: true
     state: present
     reload: true
+    sysctl_file: /etc/sysctl.d/99-ludus-router.conf
 
 - name: Disable ipv6
   become: true
@@ -15,6 +16,7 @@
     sysctl_set: true
     state: present
     reload: true
+    sysctl_file: /etc/sysctl.d/99-ludus-router.conf
 
 - name: Install dnsmasq, ca-certificates, and iptables-persistent
   ansible.builtin.apt:

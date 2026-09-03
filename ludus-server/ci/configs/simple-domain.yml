@@ -35,6 +35,11 @@ ludus:
       snapshot: false
       block_internet: false
 
+router:
+  vm_name: "{{ range_id }}-router-debian13-x64"
+  hostname: "{{ range_id }}-router"
+  template: debian-13-x64-server-template
+
 network:
   inter_vlan_default: REJECT
   rules:
