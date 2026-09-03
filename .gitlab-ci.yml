@@ -221,7 +221,7 @@ stages:
   # Validate that WIN10 cannot reach the internet
   - qm_guest_exec_retry "$WIN11VMID" ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
   # Sometimes the DNS lookup is cached from the test above, so test for a DNS failure or a connect failure
-  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
+  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://google.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|Timeout was reached'
   - ludus testing allow -i 8.8.8.8
   - ludus testing status
   # Validate that 8.8.8.8 is in the allowedIPs list
@@ -236,13 +236,13 @@ stages:
   - 'ludus testing status --json | jq -e ''.allowedDomains | any(startswith("google.com"))'''
   # This sometimes takes a few seconds - try 3 times 5 seconds apart
   - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
-  - qm_guest_exec_retry "$WIN11VMID" curl https://example.com/ | egrep 'Could not resolve host|Failed to connect to example.com'
+  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://example.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|Timeout was reached'
   # Deny google.com and 8.8.8.8 and check that they are not reachable
   - ludus testing deny -d google.com
   - ludus testing deny -i 8.8.8.8
   # Validate that google.com and 8.8.8.8 are no longer in the allowed lists
   - 'ludus testing status --json | jq -e ''(.allowedDomains | any(startswith("google.com")) | not) and (.allowedIPs | index("8.8.8.8") | not)'''
-  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | egrep 'Could not resolve host|Failed to connect to google.com'
+  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://google.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|Timeout was reached'
   - qm_guest_exec_retry "$WIN11VMID" ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
   - ludus testing stop
   - ludus testing status
