@@ -55,7 +55,7 @@ extra_vars:
         block_internet: false
 
   router:
-    vm_name: "{{ range_id }}-router-debian11-x64"
+    vm_name: "{{ range_id }}-router-debian13-x64"
     hostname: "{{ range_id }}-router"
     ram_gb: 2
     ram_min_gb: 0.5

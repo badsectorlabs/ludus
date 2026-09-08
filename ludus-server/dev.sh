@@ -62,7 +62,11 @@ if [ -d "../ludus-api/webUI" ]; then
     fi
 fi
 
-GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+if [ -n "${LUDUS_DEV_GIT_COMMIT:-}" ]; then
+    GIT_COMMIT_SHORT_HASH=$LUDUS_DEV_GIT_COMMIT
+else
+    GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
+fi
 if [ -z "$VERSION_STRING" ]; then
     VERSION_STRING=$(git rev-parse --abbrev-ref HEAD)
 fi
