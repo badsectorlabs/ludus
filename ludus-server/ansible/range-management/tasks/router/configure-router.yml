@@ -6,6 +6,7 @@
     sysctl_set: true
     state: present
     reload: true
+    sysctl_file: /etc/sysctl.d/99-ludus-router.conf
 
 - name: Disable ipv6
   become: true
@@ -15,6 +16,7 @@
     sysctl_set: true
     state: present
     reload: true
+    sysctl_file: /etc/sysctl.d/99-ludus-router.conf
 
 - name: Install dnsmasq, ca-certificates, and iptables-persistent
   ansible.builtin.apt:
@@ -26,21 +28,15 @@
       - curl
       - conntrack
     state: present
-
-- name: Disable DNS in dnsmasq (only use it for DHCP)
-  ansible.builtin.lineinfile:
-    path: /etc/dnsmasq.conf
-    line: 'port=0'
-    create: true
-
-- name: Restart dnsmasq service to pick up changes
-  ansible.builtin.service:
-    name: dnsmasq
-    state: restarted
+    update_cache: true
+    cache_valid_time: 3600
 
 - name: Install AdGuardHome
   ansible.builtin.shell: |
+    set -o pipefail
     curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
+  args:
+    executable: /bin/bash
   register: adguard_install
   failed_when: adguard_install.rc != 0 and 'the existing AdGuard Home installation is detected' not in adguard_install.stderr
 
@@ -55,6 +51,17 @@
     name: AdGuardHome
     state: restarted
   when: adguard_install.rc == 0
+
+- name: Disable DNS in dnsmasq (only use it for DHCP)
+  ansible.builtin.lineinfile:
+    path: /etc/dnsmasq.conf
+    line: 'port=0'
+    create: true
+
+- name: Restart dnsmasq service to pick up changes
+  ansible.builtin.service:
+    name: dnsmasq
+    state: restarted
 
 - name: Drop a file to signal that we have completed configuration
   ansible.builtin.file:

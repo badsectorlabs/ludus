@@ -36,14 +36,19 @@ func GetIPForVMFromConfig(targetRange *models.Range, vmName string) string {
 	return "null"
 }
 
+func defaultRouterVMName(rangeID string) string {
+	return fmt.Sprintf("%s-router-debian13-x64", rangeID)
+}
+
 // GetRouterVMName returns the router VM name for the given range
 // TODO parse the vm descriptions to get the router and not depend on the config file or name
 func GetRouterVMName(targetRange *models.Range) (string, error) {
+	defaultVMName := defaultRouterVMName(targetRange.RangeId())
 
 	configBytes, err := os.ReadFile(ludusInstallPath + "/ranges/" + targetRange.RangeId() + "/range-config.yml")
 	if err != nil {
 		// If no config file exists, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeId()), nil
+		return defaultVMName, nil
 	}
 
 	// Parse the YAML to get router configuration
@@ -51,33 +56,33 @@ func GetRouterVMName(targetRange *models.Range) (string, error) {
 	err = yaml.Unmarshal(configBytes, &config)
 	if err != nil {
 		// If parsing fails, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeId()), nil
+		return defaultVMName, nil
 	}
 
 	// Check if router section exists
 	routerSection, exists := config["router"]
 	if !exists {
 		// If no router section, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeId()), nil
+		return defaultVMName, nil
 	}
 
 	router, ok := routerSection.(map[string]interface{})
 	if !ok {
 		// If router section is not a map, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeId()), nil
+		return defaultVMName, nil
 	}
 
 	// Get router VM name
 	vmName, exists := router["vm_name"]
 	if !exists {
 		// If no vm_name specified, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeId()), nil
+		return defaultVMName, nil
 	}
 
 	vmNameStr, ok := vmName.(string)
 	if !ok {
 		// If vm_name is not a string, return default router name
-		return fmt.Sprintf("%s-router-debian11-x64", targetRange.RangeId()), nil
+		return defaultVMName, nil
 	}
 
 	// Replace range_id template with actual range ID

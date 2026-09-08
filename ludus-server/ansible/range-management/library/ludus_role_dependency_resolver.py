@@ -5,7 +5,7 @@ from collections import OrderedDict
 
 DOCUMENTATION = r'''
 ---
-module: ludus_dependency_resolver
+module: ludus_role_dependency_resolver
 short_description: Resolve dependencies in Ludus configuration
 description:
     - This module reads a Ludus configuration array and returns an ordered array of VM names and role names
@@ -23,18 +23,19 @@ options:
             - the Router configuration object
         required: false
         type: dict
-    range_id:
+    default_router_vm_name:
         description:
-            - Range ID used to derive the default router VM name when router.vm_name is not set
+            - Default router VM name to use when router.vm_name is not set
         required: true
         type: str
 '''
 
 EXAMPLES = r'''
 - name: Resolve Ludus dependencies
-  ludus_dependency_resolver:
+  ludus_role_dependency_resolver:
     ludus_config_object: "{{ ludus }}"
-  register: result
+    router_config_object: "{{ router | default({}) }}"
+    default_router_vm_name: "{{ default_router_vm_name }}"
 '''
 
 RETURN = r'''
@@ -124,14 +125,13 @@ def main():
         argument_spec=dict(
             ludus_config_object=dict(type='list', required=True),
             router_config_object=dict(type='dict', required=False),
-            range_id=dict(type='str', required=True),
+            default_router_vm_name=dict(type='str', required=True),
         )
     )
 
     ludus = module.params['ludus_config_object']
     router = module.params['router_config_object']
-    range_id = module.params['range_id']
-    default_router_vm_name = f"{range_id}-router-debian11-x64"
+    default_router_vm_name = module.params['default_router_vm_name']
     try:
         graph, nodes = parse_ludus_config(ludus, router, default_router_vm_name)
         order = topological_sort(graph, nodes)
