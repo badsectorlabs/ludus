@@ -289,16 +289,19 @@ run_remote_in_dir . rm -rf \
 
 # If the enterprise plugin exists, build it first
 if [ -d "./ludus-enterprise-plugin" ] && [ "$SKIP_PLUGINS" != true ]; then
+    echo "[+] Building enterprise plugin"
     run_remote_in_dir ludus-enterprise-plugin ./dev.sh
 fi
 
 # If the anti-sandbox plugin exists, build it before the Ludus server
 if [ -d "./ludus-antisandbox-plugin" ] && [ "$SKIP_PLUGINS" != true ]; then
+    echo "[+] Building anti-sandbox plugin"
     run_remote_in_dir ludus-antisandbox-plugin ./dev.sh
 fi
 
 # If the web UI exists, build it before the Ludus server
 if [ -d "./ludus-gui" ] && [ "$BUILD_WEB_UI" = true ]; then
+    echo "[+] Building web UI"
     run_remote_in_dir ludus-gui ./dev.sh
 fi
 
