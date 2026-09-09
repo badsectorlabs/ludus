@@ -1,5 +1,8 @@
 offline-*
 TEST-PLAN.md
+.gograph
+.ansible-home
+.ansible-tmp
 repomix*.txt
 repomix*.xml
 ludus-gui
@@ -61,4 +64,7 @@ crash.log
 # ignore temporary output files
 output-*/
 
-.gograph/
+### Ludus test VM checkout ###
+.ludus-testing-vm.json
+.ludus-testing-tunnel.json
+.ludus-dev-env

@@ -6,6 +6,7 @@
     sysctl_set: true
     state: present
     reload: true
+    sysctl_file: /etc/sysctl.d/99-ludus-router.conf
 
 - name: Disable ipv6
   become: true
@@ -15,6 +16,7 @@
     sysctl_set: true
     state: present
     reload: true
+    sysctl_file: /etc/sysctl.d/99-ludus-router.conf
 
 - name: Install dnsmasq, ca-certificates, and iptables-persistent
   ansible.builtin.apt:
@@ -27,6 +29,17 @@
       - conntrack
       - tar
     state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install Blocky
+  ansible.builtin.include_tasks: tasks/router/ensure-blocky.yml
+
+- name: Load Blocky DNS state
+  ansible.builtin.include_tasks: tasks/router/load-blocky-state.yml
+
+- name: Save initial Blocky DNS state
+  ansible.builtin.include_tasks: tasks/router/save-blocky-state.yml
 
 - name: Disable DNS in dnsmasq (only use it for DHCP)
   ansible.builtin.lineinfile:
@@ -38,15 +51,6 @@
   ansible.builtin.service:
     name: dnsmasq
     state: restarted
-
-- name: Install Blocky
-  ansible.builtin.include_tasks: tasks/router/ensure-blocky.yml
-
-- name: Load Blocky DNS state
-  ansible.builtin.include_tasks: tasks/router/load-blocky-state.yml
-
-- name: Save initial Blocky DNS state
-  ansible.builtin.include_tasks: tasks/router/save-blocky-state.yml
 
 - name: Drop a file to signal that we have completed configuration
   ansible.builtin.file:

@@ -16,7 +16,7 @@ Ludus supports highly customized templates if that is your preferred option, but
 
 Ludus comes with 5 builtin templates:
 
-- debian11
+- debian13
 - debian12
 - kali
 - win11-22h2-x64-enterprise
@@ -35,7 +35,7 @@ local:~$ ludus templates list
 +------------------------------------+-------+
 |              TEMPLATE              | BUILT |
 +------------------------------------+-------+
-| debian-11-x64-server-template      | TRUE  |
+| debian-13-x64-server-template      | TRUE  |
 | debian-12-x64-server-template      | TRUE  |
 | kali-x64-desktop-template          | TRUE  |
 | win11-22h2-x64-enterprise-template | TRUE  |

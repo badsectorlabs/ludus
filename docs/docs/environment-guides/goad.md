@@ -35,7 +35,7 @@ Synced 2h ago
 #terminal-command-local
 ludus range create -r GOAD --name GOAD --from-blueprint badsectorlabs-ludus-source-bsl/goad
 #terminal-command-local
-ludus range deploy -t GOAD
+ludus range deploy -r GOAD
 #terminal-command-local
 ludus range logs -f -r GOAD
 # Wait for the deploy to finish
@@ -84,7 +84,7 @@ ludus templates list
 +----------------------------------------+-------+
 |                TEMPLATE                | BUILT |
 +----------------------------------------+-------+
-| debian-11-x64-server-template          | TRUE  |
+| debian-13-x64-server-template          | TRUE  |
 | debian-12-x64-server-template          | TRUE  |
 | kali-x64-desktop-template              | TRUE  |
 | win11-22h2-x64-enterprise-template     | TRUE  |

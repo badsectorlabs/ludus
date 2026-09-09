@@ -3839,7 +3839,7 @@ paths:
                   properties:
                     name:
                       type: string
-                      example: debian-11-x64-server-template
+                      example: debian-13-x64-server-template
                     built:
                       type: boolean
                       example: false

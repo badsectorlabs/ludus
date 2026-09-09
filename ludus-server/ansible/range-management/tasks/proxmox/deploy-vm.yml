@@ -190,6 +190,9 @@
       - "{{ vm_name }}"
   register: nodecheck
   changed_when: false
+  # ansible-inventory can return empty/non-JSON stdout while the VM is still
+  # registering; from_json would raise and abort the retry loop.
+  failed_when: false
   until: >
     nodecheck.rc == 0
     and (nodecheck.stdout | default('') | trim | length) > 0
@@ -201,12 +204,12 @@
     )
     and
     (
-      (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 192
+      (nodecheck.stdout | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 192
       or
       (
-        (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[-1] | int >= 100
+        (nodecheck.stdout | from_json | json_query('ansible_host') | default('')).split('.')[-1] | int >= 100
         and
-        (nodecheck.stdout | default('') | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 10
+        (nodecheck.stdout | from_json | json_query('ansible_host') | default('')).split('.')[0] | int == 10
       )
     )
   retries: 30

@@ -32,85 +32,263 @@
 # provisioned for all users. Try Sysprep first so healthy machines keep their
 # installed packages. Only remove packages named in the current attempt's
 # error log, then retry once.
-- name: Clear previous Sysprep error log
-  ansible.windows.win_file:
-    path: C:\Windows\System32\Sysprep\Panther\setuperr.log
-    state: absent
-
+#
+# A successful Sysprep reboots and drops WinRM before Ansible can always read
+# the async result. A failed Sysprep stays reachable and returns a nonzero rc.
+# If both result files exist after a failure, the success tag takes precedence.
 - name: Generalize the Windows VM
+  vars:
+    ludus_sysprep_argv:
+      - C:\Windows\System32\Sysprep\sysprep.exe
+      - /generalize
+      - /quiet
+      - /reboot
+      - /oobe
+      - /unattend:C:\ludus\sysprep\oob-disable.xml
+    ludus_sysprep_marker_script: |
+      $succeededTag = [bool](Test-Path -LiteralPath 'C:\Windows\System32\Sysprep\Sysprep_succeeded.tag')
+      $errorLog = [bool](Test-Path -LiteralPath 'C:\Windows\System32\Sysprep\Panther\setuperr.log')
+      $Ansible.Result = @{
+        succeeded_tag = $succeededTag
+        error_log = $errorLog
+      }
+      $Ansible.Changed = $false
   block:
-    - name: Run Sysprep
-      ansible.windows.win_shell: C:\Windows\System32\Sysprep\sysprep.exe /generalize /quiet /reboot /oobe /unattend:C:\ludus\sysprep\oob-disable.xml
-
-    - name: Wait for WinRM to stop for the Sysprep reboot
-      ansible.builtin.wait_for:
-        host: "{{ ansible_host }}"
-        port: 5986
-        state: stopped
-        timeout: 180
-      delegate_to: localhost
-
-  rescue:
-    # https://www.deploymentresearch.com/fixing-why-sysprep-fails-in-windows-10-due-to-windows-store-updates/
-    # https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/sysprep-fails-remove-or-update-store-apps#cause
-    - name: Remove AppX packages reported by the failed Sysprep attempt
-      ansible.windows.win_powershell:
-        script: |
-          $logPath = 'C:\Windows\System32\Sysprep\Panther\setuperr.log'
-          [string]$log = Get-Content -Path $logPath -Raw -ErrorAction Stop
-          $pattern = 'Package (?<package>\S+) was installed for a user, but not provisioned for all users'
-          $packageNames = @(
-            [regex]::Matches($log, $pattern) |
-              ForEach-Object { $_.Groups['package'].Value } |
-              Sort-Object -Unique
-          )
-
-          if ($packageNames.Count -eq 0) {
-            throw "Sysprep did not reboot and did not report an AppX package blocker.`n$log"
-          }
-
-          foreach ($packageName in $packageNames) {
-            $packages = @(
-              Get-AppxPackage -AllUsers |
-                Where-Object { $_.PackageFullName -eq $packageName }
-            )
-            if ($packages.Count -eq 0) {
-              throw "Sysprep reported AppX package '$packageName', but it is not installed."
-            }
-            foreach ($package in $packages) {
-              Remove-AppxPackage -Package $package.PackageFullName -AllUsers -ErrorAction Stop
-            }
-          }
-
-    - name: Clear Sysprep error log before retry
+    - name: Clear previous Sysprep result files
       ansible.windows.win_file:
-        path: C:\Windows\System32\Sysprep\Panther\setuperr.log
+        path: "{{ item }}"
         state: absent
+      loop:
+        - C:\Windows\System32\Sysprep\Sysprep_succeeded.tag
+        - C:\Windows\System32\Sysprep\Panther\setuperr.log
 
-    - name: Retry Sysprep after removing the blocking AppX packages
-      ansible.windows.win_shell: C:\Windows\System32\Sysprep\sysprep.exe /generalize /quiet /reboot /oobe /unattend:C:\ludus\sysprep\oob-disable.xml
+    - name: Start Sysprep
+      ansible.windows.win_command:
+        argv: "{{ ludus_sysprep_argv }}"
+      async: 900
+      poll: 0
+      register: ludus_sysprep_job
 
-    - name: Wait for WinRM to stop for the retried Sysprep reboot
-      ansible.builtin.wait_for:
-        host: "{{ ansible_host }}"
-        port: 5986
-        state: stopped
-        timeout: 180
-      delegate_to: localhost
+    - name: Wait for Sysprep to fail or reboot
+      block:
+        - name: Poll the Sysprep job
+          ansible.builtin.async_status:
+            jid: "{{ ludus_sysprep_job.ansible_job_id }}"
+          register: ludus_sysprep_command
+          until: ludus_sysprep_command is finished
+          retries: 60
+          delay: 15
+          failed_when: false
+          ignore_unreachable: true
+      rescue:
+        # A successful reboot can surface as a FAILED connection exception
+        # instead of UNREACHABLE, so normalize it to a result without an rc.
+        - name: Record the Sysprep connection loss
+          ansible.builtin.set_fact:
+            ludus_sysprep_command:
+              connection_lost: true
 
-- name: Wait for WinRM credentials to work after Sysprep
+    - name: Initialize Sysprep result inspection
+      ansible.builtin.set_fact:
+        ludus_sysprep_failed_in_place: false
+        ludus_sysprep_result_connection_lost: false
+
+    # Some Windows 11 builds return rc=0 for AppX validation failures. If the
+    # async job completed while WinRM is still available, the result files—not
+    # rc—determine the outcome. A connection loss means the reboot started.
+    - name: Inspect a completed Sysprep job
+      when: ludus_sysprep_command.rc is defined
+      block:
+        - name: Read Sysprep result files
+          ansible.windows.win_powershell:
+            script: "{{ ludus_sysprep_marker_script }}"
+          register: ludus_sysprep_markers
+          changed_when: false
+          ignore_unreachable: true
+
+        - name: Record a connection loss while reading Sysprep results
+          when: ludus_sysprep_markers.unreachable | default(false) | bool
+          ansible.builtin.set_fact:
+            ludus_sysprep_result_connection_lost: true
+
+        - name: Record the Sysprep result files
+          when: ludus_sysprep_markers.result is defined
+          ansible.builtin.set_fact:
+            ludus_sysprep_failed_in_place: >-
+              {{
+                (ludus_sysprep_markers.result.error_log | default(false) | bool)
+                and not (ludus_sysprep_markers.result.succeeded_tag | default(false) | bool)
+              }}
+
+      rescue:
+        - name: Treat a connection loss while reading results as a reboot
+          ansible.builtin.set_fact:
+            ludus_sysprep_failed_in_place: false
+            ludus_sysprep_result_connection_lost: true
+
+    - name: Fail when Sysprep produced no result file
+      when:
+        - ludus_sysprep_command.rc is defined
+        - not (ludus_sysprep_result_connection_lost | bool)
+        - not (ludus_sysprep_markers.result.succeeded_tag | default(false) | bool)
+        - not (ludus_sysprep_markers.result.error_log | default(false) | bool)
+      ansible.builtin.fail:
+        msg: >-
+          Sysprep exited without creating Sysprep_succeeded.tag or setuperr.log.
+          rc={{ ludus_sysprep_command.rc | default('unknown') }},
+          stdout={{ ludus_sysprep_command.stdout | default('') }},
+          stderr={{ ludus_sysprep_command.stderr | default('') }}
+
+    - name: Remove AppX packages and retry Sysprep
+      when: ludus_sysprep_failed_in_place | bool
+      block:
+        # https://www.deploymentresearch.com/fixing-why-sysprep-fails-in-windows-10-due-to-windows-store-updates/
+        # https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/sysprep-fails-remove-or-update-store-apps#cause
+        - name: Remove AppX packages reported by the failed Sysprep attempt
+          ansible.windows.win_powershell:
+            script: |
+              $logPath = 'C:\Windows\System32\Sysprep\Panther\setuperr.log'
+              [string]$log = Get-Content -Path $logPath -Raw -ErrorAction Stop
+              $pattern = 'Package (?<package>\S+) was installed for a user, but not provisioned for all users'
+              $packageNames = @(
+                [regex]::Matches($log, $pattern) |
+                  ForEach-Object { $_.Groups['package'].Value } |
+                  Sort-Object -Unique
+              )
+
+              if ($packageNames.Count -eq 0) {
+                throw "Sysprep failed and did not report an AppX package blocker.`n$log"
+              }
+
+              foreach ($packageName in $packageNames) {
+                $packages = @(
+                  Get-AppxPackage -AllUsers |
+                    Where-Object { $_.PackageFullName -eq $packageName }
+                )
+                if ($packages.Count -eq 0) {
+                  throw "Sysprep reported AppX package '$packageName', but it is not installed."
+                }
+                foreach ($package in $packages) {
+                  Remove-AppxPackage -Package $package.PackageFullName -AllUsers -ErrorAction Stop
+                }
+              }
+
+        - name: Clear Sysprep result files before retry
+          ansible.windows.win_file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - C:\Windows\System32\Sysprep\Sysprep_succeeded.tag
+            - C:\Windows\System32\Sysprep\Panther\setuperr.log
+
+        - name: Start the Sysprep retry
+          ansible.windows.win_command:
+            argv: "{{ ludus_sysprep_argv }}"
+          async: 900
+          poll: 0
+          register: ludus_sysprep_retry_job
+
+        - name: Wait for the Sysprep retry to fail or reboot
+          block:
+            - name: Poll the Sysprep retry job
+              ansible.builtin.async_status:
+                jid: "{{ ludus_sysprep_retry_job.ansible_job_id }}"
+              register: ludus_sysprep_retry_command
+              until: ludus_sysprep_retry_command is finished
+              retries: 60
+              delay: 15
+              failed_when: false
+              ignore_unreachable: true
+          rescue:
+            - name: Record the Sysprep retry connection loss
+              ansible.builtin.set_fact:
+                ludus_sysprep_retry_command:
+                  connection_lost: true
+
+        - name: Initialize Sysprep retry result inspection
+          ansible.builtin.set_fact:
+            ludus_sysprep_failed_in_place: false
+            ludus_sysprep_retry_result_connection_lost: false
+
+        - name: Inspect a completed Sysprep retry job
+          when: ludus_sysprep_retry_command.rc is defined
+          block:
+            - name: Read the Sysprep retry result files
+              ansible.windows.win_powershell:
+                script: "{{ ludus_sysprep_marker_script }}"
+              register: ludus_sysprep_retry_markers
+              changed_when: false
+              ignore_unreachable: true
+
+            - name: Record a connection loss while reading Sysprep retry results
+              when: ludus_sysprep_retry_markers.unreachable | default(false) | bool
+              ansible.builtin.set_fact:
+                ludus_sysprep_retry_result_connection_lost: true
+
+            - name: Record the Sysprep retry result files
+              when: ludus_sysprep_retry_markers.result is defined
+              ansible.builtin.set_fact:
+                ludus_sysprep_failed_in_place: >-
+                  {{
+                    (ludus_sysprep_retry_markers.result.error_log | default(false) | bool)
+                    and not (ludus_sysprep_retry_markers.result.succeeded_tag | default(false) | bool)
+                  }}
+
+          rescue:
+            - name: Treat a connection loss while reading retry results as a reboot
+              ansible.builtin.set_fact:
+                ludus_sysprep_failed_in_place: false
+                ludus_sysprep_retry_result_connection_lost: true
+
+        - name: Fail when the Sysprep retry produced no result file
+          when:
+            - ludus_sysprep_retry_command.rc is defined
+            - not (ludus_sysprep_retry_result_connection_lost | bool)
+            - not (ludus_sysprep_retry_markers.result.succeeded_tag | default(false) | bool)
+            - not (ludus_sysprep_retry_markers.result.error_log | default(false) | bool)
+          ansible.builtin.fail:
+            msg: >-
+              The Sysprep retry exited without creating Sysprep_succeeded.tag or setuperr.log.
+              rc={{ ludus_sysprep_retry_command.rc | default('unknown') }},
+              stdout={{ ludus_sysprep_retry_command.stdout | default('') }},
+              stderr={{ ludus_sysprep_retry_command.stderr | default('') }}
+
+- name: Discard the pre-Sysprep WinRM connection
+  ansible.builtin.meta: reset_connection
+
+- name: Wait for Windows to reboot and WinRM to become usable
+  when: not (ludus_sysprep_failed_in_place | bool)
   ansible.builtin.wait_for_connection:
     delay: 60
     timeout: 1800
     sleep: 10
     connect_timeout: 5
 
-- name: Verify Windows reports that Sysprep succeeded
+- name: Verify Sysprep succeeded
   ansible.windows.win_stat:
     path: C:\Windows\System32\Sysprep\Sysprep_succeeded.tag
   register: sysprep_succeeded
-  failed_when: not sysprep_succeeded.stat.exists
 
+- name: If sysprep did not succeed print error log
+  when: not sysprep_succeeded.stat.exists | default(false)
+  block:
+    - name: Read Sysprep error log
+      ansible.windows.slurp:
+        src: C:\Windows\System32\Sysprep\Panther\setuperr.log
+      register: sysprep_error_log
+      ignore_errors: true
+
+    - name: Decode Sysprep error log
+      ansible.builtin.set_fact:
+        sysprep_error_log_decoded: "{{ sysprep_error_log['content'] | b64decode if sysprep_error_log is defined and sysprep_error_log['content'] is defined else '' }}"
+
+    - name: Fail the play with error log
+      ansible.builtin.fail:
+        msg: |-
+          Sysprep failed! The file C:\Windows\System32\Sysprep\Sysprep_succeeded.tag does not exist after running sysprep.
+          Sysprep error log (setuperr.log):
+
+          {{ sysprep_error_log_decoded | default('Unable to fetch the error log.') }}
 
 - name: Hostname change after sysprep
   ansible.windows.win_hostname:
