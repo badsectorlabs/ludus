@@ -12,6 +12,9 @@ import (
 )
 
 func updateLudus() {
+	if err := refuseLegacyHostUpdate(); err != nil {
+		log.Fatal(err)
+	}
 	// Check for running ansible or packer processes
 	// This assumes that ludus is the only thing that would run
 	// packer or ansible on the system - an ok assumption for
@@ -191,6 +194,9 @@ func checkDirAndReplaceFiles() {
 	}
 
 	extractDirectory(embeddedPackerDir, "packer")
+	if err := preserveInjectedCA(); err != nil {
+		log.Fatalf("Restore injected CA to packer HTTP seeds: %v", err)
+	}
 	if userExists("ludus") {
 		Run(fmt.Sprintf("chown -R ludus:ludus %s/packer", ludusInstallPath), false, true)
 	}

@@ -13,7 +13,7 @@ bootstrap:
 install:
 	dab install python3 python3-pip python3-venv wireguard-tools \
 	  dnsmasq nftables iproute2 openssh-client sshpass curl jq ca-certificates \
-	  git gpg dbus sudo xorriso
+	  git gpg dbus sudo xorriso vim
 	# system user
 	dab exec groupadd -g 1001 ludus
 	dab exec useradd -u 1001 -g 1001 -m -s /bin/bash ludus
@@ -26,6 +26,7 @@ install:
 	  /usr/local/share/ca-certificates
 	# binary + embedded trees
 	install -m 0755 ../../binaries/ludus-server $(BASEDIR)/opt/ludus/ludus-server
+	install -m 0700 migrate-host.sh $(BASEDIR)/opt/ludus/install/migrate-host.sh
 	cp -r ../ansible $(BASEDIR)/opt/ludus/ansible
 	cp -r ../packer $(BASEDIR)/opt/ludus/packer
 	# python venv (air-gap)

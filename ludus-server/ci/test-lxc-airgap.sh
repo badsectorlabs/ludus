@@ -63,10 +63,8 @@ api_post_in_lxc() {
 }
 
 run_bundled_source_test() {
-  local root_api_key
-  root_api_key=$(pct exec "$VMID" -- cat /opt/ludus/install/root-api-key)
 
-  pct exec "$VMID" -- env LUDUS_TEST_API_KEY="$root_api_key" bash -lc '
+  pct exec "$VMID" -- env LUDUS_TEST_API_KEY="$ADMIN_API_KEY" bash -lc '
     set -euo pipefail
     test -f /opt/ludus/resources/sources/ludus-source-bsl.tar.gz
 
@@ -74,7 +72,7 @@ run_bundled_source_test() {
     for _ in $(seq 1 30); do
       status=$(curl -skS -o /tmp/ludus-source-bsl.json -w "%{http_code}" \
         -H "X-API-KEY: ${LUDUS_TEST_API_KEY}" \
-        https://127.0.0.1:8081/api/v2/sources/ludus-source-bsl)
+        https://127.0.0.1:8080/api/v2/sources/ludus-source-bsl)
       [[ "$status" == "200" ]] && break
       sleep 1
     done
@@ -88,7 +86,7 @@ run_bundled_source_test() {
 
     curl -skS -o /tmp/ludus-source-bsl-catalog.json \
       -H "X-API-KEY: ${LUDUS_TEST_API_KEY}" \
-      https://127.0.0.1:8081/api/v2/sources/ludus-source-bsl/catalog
+      https://127.0.0.1:8080/api/v2/sources/ludus-source-bsl/catalog
     jq -e '"'"'
       (.templates | length) > 0 and
       (.localRoles | length) > 0 and
@@ -194,7 +192,6 @@ pct exec "$VMID" -- test -f /opt/ludus/install/.bootstrap-complete \
 
 pct exec "$VMID" -- systemctl is-active ludus
 pct exec "$VMID" -- systemctl is-active ludus-admin
-run_bundled_source_test
 pct exec "$VMID" -- grep -Fx \
   'CONFIG_DIR=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new' \
   /etc/default/dnsmasq
@@ -208,6 +205,9 @@ pct exec "$VMID" -- sh -c \
 ADMIN_API_KEY=""
 if [[ "$RUN_USER_TEST" == "1" ]]; then
   run_user_provision_test
+  run_bundled_source_test
+else
+  echo "Skipping source API check: enable RUN_USER_TEST for an authenticated admin user"
 fi
 if [[ "$RUN_RANGE_TEST" == "1" ]]; then
   run_range_create_test

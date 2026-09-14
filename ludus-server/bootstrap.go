@@ -63,8 +63,14 @@ func bootstrap(ctx context.Context, cfg ludusapi.Configuration) error {
 		return err
 	}
 	dbPath := filepath.Join(cfg.DataDirectory, "data.db")
-	ranges := loadImportedRanges(dbPath)
-	users := loadImportedUsers(dbPath)
+	ranges, err := loadImportedRanges(dbPath)
+	if err != nil {
+		return fmt.Errorf("read imported ranges: %w", err)
+	}
+	users, err := loadImportedUsers(dbPath)
+	if err != nil {
+		return fmt.Errorf("read imported users: %w", err)
+	}
 	if len(ranges) > 0 || len(users) > 0 {
 		logf("bootstrap: reconciling imported DB (%d ranges, %d users)", len(ranges), len(users))
 		warns, err := reconcileImportedState(ctx, pc, cfg, ranges, users, "/etc/network/if-up.d/ludus-routes")
@@ -73,6 +79,13 @@ func bootstrap(ctx context.Context, cfg ludusapi.Configuration) error {
 		}
 		for _, w := range warns {
 			logf("WARN: %s", w)
+		}
+		if len(ranges) > 0 {
+			routes := exec.Command("/etc/network/if-up.d/ludus-routes")
+			routes.Env = append(os.Environ(), "IFACE=eth1")
+			if output, err := routes.CombinedOutput(); err != nil {
+				return fmt.Errorf("apply imported routes: %w: %s", err, output)
+			}
 		}
 	}
 	if !wgKeyExisted && len(users) > 0 {
@@ -267,15 +280,23 @@ func bootstrapLocalState(cfg ludusapi.Configuration) error {
 	}
 	// chown -R ludus:ludus /opt/ludus so the non-root ludus.service can read/write.
 	if err := exec.Command("chown", "-R", "ludus:ludus", "/opt/ludus").Run(); err != nil {
-		logf("WARN: chown /opt/ludus: %v (continuing)", err)
+		return fmt.Errorf("chown /opt/ludus: %w", err)
+	}
+	if fileExists("/opt/ludus/install/root-api-key") {
+		if err := os.Chown("/opt/ludus/install/root-api-key", 0, 0); err != nil {
+			return err
+		}
+		if err := os.Chmod("/opt/ludus/install/root-api-key", 0400); err != nil {
+			return err
+		}
 	}
 	// Enable services
 	for _, svc := range []string{"nftables", "wg-quick@wg0", "dnsmasq"} {
 		if err := exec.Command("systemctl", "enable", "--now", svc).Run(); err != nil {
-			logf("WARN: systemctl enable %s: %v (continuing)", svc, err)
+			return fmt.Errorf("enable %s: %w", svc, err)
 		}
 		if err := exec.Command("systemctl", "restart", svc).Run(); err != nil {
-			logf("WARN: systemctl restart %s: %v (continuing)", svc, err)
+			return fmt.Errorf("restart %s: %w", svc, err)
 		}
 	}
 	return nil
@@ -316,43 +337,52 @@ func queryPocketBase(dbPath, q string) (*sql.DB, *sql.Rows, error) {
 	return db, rows, nil
 }
 
-// loadImportedRanges reads range numbers from a pre-existing PocketBase DB.
-// Returns nil on any error (missing file, schema mismatch) — bootstrap treats
-// "no imported state" as the safe default.
-func loadImportedRanges(dbPath string) []importedRange {
+// A missing DB is a fresh appliance. An existing but unreadable DB must never
+// be mistaken for an empty installation and marked successfully bootstrapped.
+func loadImportedRanges(dbPath string) ([]importedRange, error) {
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
 	db, rows, err := queryPocketBase(dbPath, "SELECT rangeNumber FROM ranges")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer db.Close()
 	defer rows.Close()
 	var out []importedRange
 	for rows.Next() {
 		var n int
-		if err := rows.Scan(&n); err == nil {
-			out = append(out, importedRange{Number: n})
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
 		}
+		out = append(out, importedRange{Number: n})
 	}
-	return out
+	return out, rows.Err()
 }
 
-// loadImportedUsers reads Proxmox userids (username@realm) from a pre-existing
-// PocketBase DB, excluding the synthetic ROOT user.
-func loadImportedUsers(dbPath string) []importedUser {
+func loadImportedUsers(dbPath string) ([]importedUser, error) {
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
 	db, rows, err := queryPocketBase(dbPath, "SELECT proxmoxUsername, proxmoxRealm FROM users WHERE userID != 'ROOT'")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer db.Close()
 	defer rows.Close()
 	var out []importedUser
 	for rows.Next() {
 		var name, realm string
-		if err := rows.Scan(&name, &realm); err == nil {
-			out = append(out, importedUser{ProxmoxUsername: name + "@" + realm})
+		if err := rows.Scan(&name, &realm); err != nil {
+			return nil, err
 		}
+		out = append(out, importedUser{ProxmoxUsername: name + "@" + realm})
 	}
-	return out
+	return out, rows.Err()
 }
 
 // Compile-time assertion that *pveclient.Client satisfies PVEClient.

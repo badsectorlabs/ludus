@@ -11,6 +11,7 @@ cd "$(dirname "$0")"
 : "${BGINFO_SHA256:=599b391980a5c9cbadd6c70ba3d5a5258db8b9d87c68b3fe587d9dc84effdf63}"
 : "${LUDUS_SOURCE_BSL_URL:=https://github.com/badsectorlabs/ludus-source-bsl.git}"
 : "${LUDUS_SOURCE_BSL_REF:=main}"
+: "${LUDUS_SOURCE_BSL_ARCHIVE:=}"
 : "${DAB_CACHE_DIR:=}"
 : "${DAB_WGET_TIMEOUT:=60}"
 : "${DAB_WGET_TRIES:=3}"
@@ -92,12 +93,23 @@ ansible-galaxy role install -r ../ansible/requirements.yml -p deps/roles --force
 
 # Bundle the first-party source and all of its pinned submodules so an
 # air-gapped server can register its catalog without cloning from GitHub.
-rm -rf deps/ludus-source-bsl deps/ludus-source-bsl.tar.gz
-git clone --depth 1 --branch "${LUDUS_SOURCE_BSL_REF}" \
-  --recurse-submodules --shallow-submodules -- \
-  "${LUDUS_SOURCE_BSL_URL}" deps/ludus-source-bsl
-tar --exclude='*/.git' --exclude='*/.git/*' \
-  --format=ustar -czf deps/ludus-source-bsl.tar.gz -C deps ludus-source-bsl
+rm -rf deps/ludus-source-bsl
+if [[ -n $LUDUS_SOURCE_BSL_ARCHIVE ]]; then
+  [[ -f $LUDUS_SOURCE_BSL_ARCHIVE && -r $LUDUS_SOURCE_BSL_ARCHIVE && -s $LUDUS_SOURCE_BSL_ARCHIVE ]] || {
+    echo "ERROR: LUDUS_SOURCE_BSL_ARCHIVE is not a readable, non-empty file: $LUDUS_SOURCE_BSL_ARCHIVE" >&2
+    exit 1
+  }
+  tar -tzf "$LUDUS_SOURCE_BSL_ARCHIVE" >/dev/null
+  install -m 0644 "$LUDUS_SOURCE_BSL_ARCHIVE" deps/ludus-source-bsl.tar.gz
+  echo "Using local ludus-source-bsl archive: $LUDUS_SOURCE_BSL_ARCHIVE"
+else
+  rm -f deps/ludus-source-bsl.tar.gz
+  git clone --depth 1 --branch "${LUDUS_SOURCE_BSL_REF}" \
+    --recurse-submodules --shallow-submodules -- \
+    "${LUDUS_SOURCE_BSL_URL}" deps/ludus-source-bsl
+  tar --exclude='*/.git' --exclude='*/.git/*' \
+    --format=ustar -czf deps/ludus-source-bsl.tar.gz -C deps ludus-source-bsl
+fi
 
 if [[ ! -f ../../binaries/ludus-server ]]; then
   echo "ERROR: binaries/ludus-server not found (run 'build all' first)" >&2

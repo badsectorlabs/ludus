@@ -27,14 +27,16 @@ RELEASE_BRANCH_TAG=""
 usage() {
     cat <<EOF
 Usage: $0 [-H <proxmox-host>] list
-       $0 [-H <proxmox-host>] checkout <VMID> [--ludus-port <port>] [--proxmox-port <port>] [--ssh-port <port>]
+       $0 [-H <proxmox-host>] checkout <VMID> [--baseline <snapshot>] [--ludus-port <port>] [--proxmox-port <port>] [--ssh-port <port>]
        $0 [-H <proxmox-host>] release <VMID>
        $0 status
-       $0 [-H <proxmox-host>] tunnel start
+       $0 [-H <proxmox-host>] tunnel start [--ludus-host <IP>]
        $0 [-H <proxmox-host>] tunnel stop
 
 Options:
   -H <host>        Proxmox SSH host; overrides the environment and JSON config
+  --baseline <snapshot>  Restore this existing snapshot on release without updating Ludus
+  --ludus-host <IP>      Ludus forwarding target as seen by the test VM (default: 127.0.0.1)
 
 Environment:
   LUDUS_TESTING_PROXMOX_HOST  Default Proxmox SSH host; overrides JSON config
@@ -48,8 +50,8 @@ Environment:
 Commands:
   list             List available Ludus test VMs
   checkout <VMID>  Reserve a VM and select its local tunnel ports
-  release <VMID>   Restore, update, snapshot if needed, and release a VM
-  tunnel start     Forward test VM ports 8080, 8006, and 22 to localhost
+  release <VMID>   Restore the baseline, or restore/update the public release, and release
+  tunnel start     Forward Ludus 8080 and test VM ports 8006 and 22 to localhost
   tunnel stop      Stop the test VM SSH tunnel
   status           Show this worktree's VM checkout and dev tunnel status
 EOF
@@ -180,11 +182,12 @@ choose_local_port() {
 pve_api() {
     local method=$1
     local path=$2
-    local response
+    local response http_status
     local curl_args
 
     shift 2
-    curl_args=(-fsS
+    PVE_API_ERROR=""
+    curl_args=(-sS --write-out $'\n%{http_code}'
         --request "$method"
         --header "Authorization: PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}")
     case "$PVE_CURL_TLS_MODE" in
@@ -194,6 +197,17 @@ pve_api() {
     response=$(curl "${curl_args[@]}" \
         "$@" \
         "${PVE_API_URL}/api2/json${path}") || return 1
+    http_status=${response##*$'\n'}
+    response=${response%$'\n'*}
+    case "$http_status" in
+        2[0-9][0-9]) ;;
+        *)
+            PVE_API_ERROR=$(printf '%s\n' "$response" | jq -r '.message // ((.errors // "Request failed") | tostring)' 2>/dev/null) \
+                || PVE_API_ERROR="Invalid error response"
+            echo "Error: Proxmox API $method $path returned HTTP $http_status: $PVE_API_ERROR" >&2
+            return 1
+            ;;
+    esac
     printf '%s\n' "$response" | jq -c '
         if has("data") then .data else error("Proxmox API response has no data field") end
     '
@@ -268,9 +282,23 @@ set_vm_tags() {
     local vmid=$2
     local tags=$3
     local digest=$4
-    pve_api PUT "/nodes/${node}/qemu/${vmid}/config" \
-        --data-urlencode "tags=$tags" \
-        --data-urlencode "digest=$digest" >/dev/null
+    local attempt
+    # Snapshot restore can finish before a guest-start hook releases the config
+    # lock. Retry only confirmed lock failures, retaining the original digest.
+    for attempt in 1 2 3 4 5 6; do
+        if pve_api PUT "/nodes/${node}/qemu/${vmid}/config" \
+            --data-urlencode "tags=$tags" \
+            --data-urlencode "digest=$digest" >/dev/null; then
+            return 0
+        fi
+        case "$PVE_API_ERROR" in
+            *"can't lock file "*"got timeout"*)
+                [ "$attempt" -lt 6 ] || return 1
+                sleep 1
+                ;;
+            *) return 1 ;;
+        esac
+    done
 }
 
 find_vm_resource() {
@@ -335,6 +363,7 @@ write_state() {
     local ludus_port=$7
     local proxmox_port=$8
     local ssh_port=$9
+    local baseline_snapshot=${10}
     local temp_file
 
     temp_file=$(mktemp "${STATE_FILE}.tmp.XXXXXX") || return 1
@@ -347,6 +376,7 @@ write_state() {
         --arg ip "$ip" \
         --arg branch "$branch" \
         --arg branch_tag "$branch_tag" \
+        --arg baseline_snapshot "$baseline_snapshot" \
         --argjson ludus_port "$ludus_port" \
         --argjson proxmox_port "$proxmox_port" \
         --argjson ssh_port "$ssh_port" \
@@ -366,7 +396,7 @@ write_state() {
                 ssh: $ssh_port
             },
             checked_out_at: $checked_out_at
-        }' >"$temp_file"; then
+        } + (if $baseline_snapshot == "" then {} else {baseline_snapshot: $baseline_snapshot} end)' >"$temp_file"; then
         rm -f "$temp_file"
         return 1
     fi
@@ -430,6 +460,8 @@ checkout_vm() {
     local ludus_port=$2
     local proxmox_port=$3
     local ssh_port=$4
+    local baseline_snapshot=$5
+    local snapshots
     local resources resource node name status config ip digest
     local branch branch_tag cleanup_config cleanup_digest
 
@@ -452,10 +484,17 @@ checkout_vm() {
     config_has_tag "$config" "$AVAILABLE_TAG" || die "VM $vmid is not available"
     digest=$(printf '%s\n' "$config" | jq -er '.digest')
 
+    if [ -n "$baseline_snapshot" ]; then
+        snapshots=$(get_vm_snapshots "$node" "$vmid")
+        printf '%s\n' "$snapshots" | jq -e --arg snapshot "$baseline_snapshot" \
+            'any(.[]; .name == $snapshot and .name != "current")' >/dev/null || \
+            die "VM $vmid has no baseline snapshot named $baseline_snapshot"
+    fi
+
     set_vm_tags "$node" "$vmid" "${IN_USE_TAG};${branch_tag}" "$digest"
 
     if ! write_state "$vmid" "$node" "$name" "$ip" "$branch" "$branch_tag" \
-        "$ludus_port" "$proxmox_port" "$ssh_port"; then
+        "$ludus_port" "$proxmox_port" "$ssh_port" "$baseline_snapshot"; then
         echo "Error: could not write checkout state; returning VM $vmid to the pool" >&2
         if cleanup_config=$(get_vm_config "$node" "$vmid") && \
             cleanup_digest=$(printf '%s\n' "$cleanup_config" | jq -er '.digest'); then
@@ -470,11 +509,17 @@ checkout_vm() {
         echo "Proxmox branch tag: $branch_tag"
     fi
     echo "Local ports: Ludus $ludus_port, Proxmox $proxmox_port, SSH $ssh_port"
-    echo "Run ./dev.sh without -t to sync and build on this VM."
+    if [ -n "$baseline_snapshot" ]; then
+        echo "Release baseline: $baseline_snapshot (no public Ludus update)"
+        echo "Run ./dev.sh -B to build a candidate without changing installed Ludus."
+    else
+        echo "Run ./dev.sh without -t to sync and build on this VM."
+    fi
 }
 
 checkout_command() {
     local vmid=""
+    local baseline_snapshot=""
     local ludus_port=8080
     local proxmox_port=8006
     local ssh_port=2222
@@ -485,6 +530,16 @@ checkout_command() {
     shift
     while [ "$#" -gt 0 ]; do
         case "$1" in
+            --baseline)
+                [ "$#" -ge 2 ] && [ -n "$2" ] || die "--baseline requires a snapshot name"
+                baseline_snapshot=$2
+                shift 2
+                ;;
+            --baseline=*)
+                baseline_snapshot=${1#*=}
+                [ -n "$baseline_snapshot" ] || die "--baseline requires a snapshot name"
+                shift
+                ;;
             --ludus-port)
                 [ "$#" -ge 2 ] || die "--ludus-port requires a value"
                 ludus_port=$2
@@ -539,7 +594,7 @@ checkout_command() {
     choose_local_port "$ssh_port" "$ssh_explicit" "SSH" "$ludus_port" "$proxmox_port"
     ssh_port=$SELECTED_PORT
 
-    checkout_vm "$vmid" "$ludus_port" "$proxmox_port" "$ssh_port"
+    checkout_vm "$vmid" "$ludus_port" "$proxmox_port" "$ssh_port" "$baseline_snapshot"
 }
 
 read_tunnel_state() {
@@ -550,6 +605,7 @@ read_tunnel_state() {
             (.ip | type) == "string" and
             (.proxmox_host | type) == "string" and
             (.target | type) == "string" and
+            ((.ludus_host // "127.0.0.1") | type) == "string" and
             (.control_socket | type) == "string" and
             (.ports.ludus | type) == "number" and
             (.ports.proxmox | type) == "number" and
@@ -567,6 +623,7 @@ write_tunnel_state() {
     local ludus_port=$5
     local proxmox_port=$6
     local ssh_port=$7
+    local ludus_host=$8
     local temp_file
 
     temp_file=$(mktemp "${TUNNEL_STATE_FILE}.tmp.XXXXXX") || return 1
@@ -576,6 +633,7 @@ write_tunnel_state() {
         --arg ip "$ip" \
         --arg proxmox_host "$PROXMOX_HOST" \
         --arg target "$target" \
+        --arg ludus_host "$ludus_host" \
         --arg control_socket "$control_socket" \
         --argjson ludus_port "$ludus_port" \
         --argjson proxmox_port "$proxmox_port" \
@@ -587,6 +645,7 @@ write_tunnel_state() {
             ip: $ip,
             proxmox_host: $proxmox_host,
             target: $target,
+            ludus_host: $ludus_host,
             control_socket: $control_socket,
             ports: {
                 ludus: $ludus_port,
@@ -620,9 +679,33 @@ cleanup_tunnel_files() {
 }
 
 tunnel_start() {
+    local ludus_host=127.0.0.1
+    local ludus_forward_host
     local checkout_state checkout_host vmid ip target
     local ludus_port proxmox_port ssh_port
     local tunnel_state control_socket tunnel_directory
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --ludus-host)
+                [ "$#" -ge 2 ] || die "--ludus-host requires an IP"
+                ludus_host=$2
+                shift 2
+                ;;
+            --ludus-host=*)
+                ludus_host=${1#*=}
+                shift
+                ;;
+            *) die "unknown tunnel start option: $1" ;;
+        esac
+    done
+    case "$ludus_host" in
+        ''|'-'*|*[!A-Za-z0-9._:-]*) die "invalid Ludus target IP: $ludus_host" ;;
+    esac
+    ludus_forward_host=$ludus_host
+    case "$ludus_host" in
+        *:*) ludus_forward_host="[$ludus_host]" ;;
+    esac
 
     if [ -f "$TUNNEL_STATE_FILE" ]; then
         tunnel_state=$(read_tunnel_state) || die "invalid tunnel state at $TUNNEL_STATE_FILE"
@@ -669,7 +752,7 @@ tunnel_start() {
         -o StrictHostKeyChecking=accept-new \
         -o ExitOnForwardFailure=yes \
         -J "$PROXMOX_HOST" \
-        -L "127.0.0.1:${ludus_port}:127.0.0.1:8080" \
+        -L "127.0.0.1:${ludus_port}:${ludus_forward_host}:8080" \
         -L "127.0.0.1:${proxmox_port}:127.0.0.1:8006" \
         -L "127.0.0.1:${ssh_port}:127.0.0.1:22" \
         "$target"; then
@@ -678,14 +761,14 @@ tunnel_start() {
     fi
 
     if ! write_tunnel_state "$vmid" "$ip" "$target" "$control_socket" \
-        "$ludus_port" "$proxmox_port" "$ssh_port"; then
+        "$ludus_port" "$proxmox_port" "$ssh_port" "$ludus_host"; then
         ssh -S "$control_socket" -O exit "$target" >/dev/null 2>&1 || true
         cleanup_tunnel_files "$control_socket"
         die "could not record the SSH tunnel state"
     fi
 
     echo "SSH tunnel started for VM $vmid ($ip):"
-    echo "  localhost:$ludus_port -> 127.0.0.1:8080"
+    echo "  localhost:$ludus_port -> $ludus_forward_host:8080"
     echo "  localhost:$proxmox_port -> 127.0.0.1:8006"
     echo "  localhost:$ssh_port -> 127.0.0.1:22"
 }
@@ -718,7 +801,7 @@ tunnel_stop() {
 testing_status() {
     local status_code=0
     local checkout_state tunnel_state
-    local target control_socket
+    local target control_socket ludus_host
     local ludus_port proxmox_port ssh_port
 
     echo "VM checkout:"
@@ -751,6 +834,7 @@ testing_status() {
         printf '  branch tag: %s\n' "$(printf '%s\n' "$checkout_state" | jq -r '.branch_tag')"
         printf '  Proxmox host: %s\n' "$(printf '%s\n' "$checkout_state" | jq -r '.proxmox_host')"
         printf '  checked out at: %s\n' "$(printf '%s\n' "$checkout_state" | jq -r '.checked_out_at')"
+        printf '  release baseline: %s\n' "$(printf '%s\n' "$checkout_state" | jq -r '.baseline_snapshot // "latest public Ludus release"')"
         printf '  local Ludus port: %s\n' "$(printf '%s\n' "$checkout_state" | jq -r '.ports.ludus')"
         printf '  local Proxmox port: %s\n' "$(printf '%s\n' "$checkout_state" | jq -r '.ports.proxmox')"
         printf '  local SSH port: %s\n' "$(printf '%s\n' "$checkout_state" | jq -r '.ports.ssh')"
@@ -766,6 +850,10 @@ testing_status() {
     else
         target=$(printf '%s\n' "$tunnel_state" | jq -er '.target')
         control_socket=$(printf '%s\n' "$tunnel_state" | jq -er '.control_socket')
+        ludus_host=$(printf '%s\n' "$tunnel_state" | jq -r '.ludus_host // "127.0.0.1"')
+        case "$ludus_host" in
+            *:*) ludus_host="[$ludus_host]" ;;
+        esac
         ludus_port=$(printf '%s\n' "$tunnel_state" | jq -r '.ports.ludus')
         proxmox_port=$(printf '%s\n' "$tunnel_state" | jq -r '.ports.proxmox')
         ssh_port=$(printf '%s\n' "$tunnel_state" | jq -r '.ports.ssh')
@@ -779,7 +867,7 @@ testing_status() {
         printf '  IP: %s\n' "$(printf '%s\n' "$tunnel_state" | jq -r '.ip')"
         printf '  Proxmox host: %s\n' "$(printf '%s\n' "$tunnel_state" | jq -r '.proxmox_host')"
         printf '  started at: %s\n' "$(printf '%s\n' "$tunnel_state" | jq -r '.started_at')"
-        echo "  localhost:$ludus_port -> 127.0.0.1:8080"
+        echo "  localhost:$ludus_port -> $ludus_host:8080"
         echo "  localhost:$proxmox_port -> 127.0.0.1:8006"
         echo "  localhost:$ssh_port -> 127.0.0.1:22"
     fi
@@ -932,16 +1020,19 @@ release_exit() {
 release_vm() {
     local requested_vmid=$1
     local state state_vmid state_ip state_host resource resources config ip snapshots snapshot
-    local release snapshot_release_name digest encoded_snapshot
+    local release="" snapshot_release_name digest encoded_snapshot baseline_snapshot
 
     [ -f "$STATE_FILE" ] || die "no VM checkout state found at $STATE_FILE"
+    [ ! -e "$TUNNEL_STATE_FILE" ] || die "stop this worktree's tunnel before releasing the VM"
     state=$(jq -ce '
         select(
             .version == 1 and
             (.vmid | type) == "number" and
             (.ip | type) == "string" and
             (.proxmox_host | type) == "string" and
-            (.branch_tag | type) == "string"
+            (.branch_tag | type) == "string" and
+            ((has("baseline_snapshot") | not) or
+                (.baseline_snapshot | type == "string" and length > 0))
         )
     ' "$STATE_FILE") || die "invalid VM checkout state at $STATE_FILE"
 
@@ -955,6 +1046,7 @@ release_vm() {
     RELEASE_VMID=$state_vmid
     RELEASE_BRANCH_TAG=$(printf '%s\n' "$state" | jq -er '.branch_tag')
     state_ip=$(printf '%s\n' "$state" | jq -er '.ip')
+    baseline_snapshot=$(printf '%s\n' "$state" | jq -r '.baseline_snapshot // empty')
 
     resources=$(get_resources)
     resource=$(find_vm_resource "$resources" "$state_vmid") || die "VM $state_vmid is not a Ludus test VM"
@@ -971,18 +1063,23 @@ release_vm() {
         "${IN_USE_TAG};${RELEASE_BRANCH_TAG}" "$digest"
     RELEASE_ACTIVE=true
 
-    release=$(latest_public_release)
-    case "$release" in
-        ''|*[!A-Za-z0-9._+-]*) die "latest public release has an unsafe tag: $release" ;;
-    esac
-
     snapshots=$(get_vm_snapshots "$RELEASE_NODE" "$state_vmid")
-    snapshot=$(latest_release_snapshot "$snapshots") || \
-        die "VM $state_vmid has no ludus-v* snapshot to restore"
-
-    snapshot_release_name=${release#v}
-    snapshot_release_name=$(printf '%s' "$snapshot_release_name" | tr '.+' '--')
-    snapshot_release_name="ludus-v${snapshot_release_name}"
+    if [ -n "$baseline_snapshot" ]; then
+        snapshot=$baseline_snapshot
+        printf '%s\n' "$snapshots" | jq -e --arg snapshot "$snapshot" \
+            'any(.[]; .name == $snapshot and .name != "current")' >/dev/null || \
+            die "VM $state_vmid no longer has baseline snapshot $snapshot"
+    else
+        release=$(latest_public_release)
+        case "$release" in
+            ''|*[!A-Za-z0-9._+-]*) die "latest public release has an unsafe tag: $release" ;;
+        esac
+        snapshot=$(latest_release_snapshot "$snapshots") || \
+            die "VM $state_vmid has no ludus-v* snapshot to restore"
+        snapshot_release_name=${release#v}
+        snapshot_release_name=$(printf '%s' "$snapshot_release_name" | tr '.+' '--')
+        snapshot_release_name="ludus-v${snapshot_release_name}"
+    fi
 
     echo "Rolling VM $state_vmid back to $snapshot..."
     encoded_snapshot=$(urlencode "$snapshot")
@@ -990,21 +1087,23 @@ release_vm() {
         "/nodes/${RELEASE_NODE}/qemu/${state_vmid}/snapshot/${encoded_snapshot}/rollback"
 
     # Snapshot rollback can restore old VM tags. Reassert ownership before any
-    # fallible update work so a failed release never returns the VM to the pool.
+    # fallible work so a failed release never returns the VM to the pool.
     mark_checked_out "$RELEASE_NODE" "$state_vmid" "$RELEASE_BRANCH_TAG"
     ensure_vm_running "$RELEASE_NODE" "$state_vmid"
     wait_for_guest_ssh "$ip"
 
-    echo "Updating VM $state_vmid to public Ludus release $release..."
-    update_guest "$ip" "$release"
+    if [ -z "$baseline_snapshot" ]; then
+        echo "Updating VM $state_vmid to public Ludus release $release..."
+        update_guest "$ip" "$release"
 
-    if [ "$snapshot" != "$snapshot_release_name" ]; then
-        echo "Creating release snapshot $snapshot_release_name..."
-        run_pve_task "$RELEASE_NODE" POST \
-            "/nodes/${RELEASE_NODE}/qemu/${state_vmid}/snapshot" \
-            --data-urlencode "snapname=$snapshot_release_name" \
-            --data-urlencode vmstate=1 \
-            --data-urlencode "description=Ludus public release $release"
+        if [ "$snapshot" != "$snapshot_release_name" ]; then
+            echo "Creating release snapshot $snapshot_release_name..."
+            run_pve_task "$RELEASE_NODE" POST \
+                "/nodes/${RELEASE_NODE}/qemu/${state_vmid}/snapshot" \
+                --data-urlencode "snapname=$snapshot_release_name" \
+                --data-urlencode vmstate=1 \
+                --data-urlencode "description=Ludus public release $release"
+        fi
     fi
 
     config=$(get_vm_config "$RELEASE_NODE" "$state_vmid")
@@ -1014,7 +1113,11 @@ release_vm() {
     RELEASE_ACTIVE=false
 
     rm -f "$STATE_FILE"
-    echo "Released VM $state_vmid at public Ludus release $release."
+    if [ -n "$baseline_snapshot" ]; then
+        echo "Released VM $state_vmid at baseline $baseline_snapshot (no public Ludus update)."
+    else
+        echo "Released VM $state_vmid at public Ludus release $release."
+    fi
 }
 
 main() {
@@ -1081,11 +1184,17 @@ main() {
             release_vm "$2"
             ;;
         tunnel)
-            [ "$#" -eq 2 ] || { usage >&2; exit 1; }
+            [ "$#" -ge 2 ] || { usage >&2; exit 1; }
             require_commands ssh jq
             case "$2" in
-                start) tunnel_start ;;
-                stop) tunnel_stop ;;
+                start)
+                    shift 2
+                    tunnel_start "$@"
+                    ;;
+                stop)
+                    [ "$#" -eq 2 ] || { usage >&2; exit 1; }
+                    tunnel_stop
+                    ;;
                 *)
                     usage >&2
                     exit 1

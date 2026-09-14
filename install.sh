@@ -35,6 +35,7 @@ PROJECT_ID=54052321
 PREFIX="${PREFIX:-}"
 AIRGAPPED_INSTALL=0
 AIRGAPPED_ISO_FILENAMES=(
+  debian-13.6.0-amd64-netinst.iso
   debian-11.7.0-amd64-netinst.iso
   debian-12.14.0-amd64-netinst.iso
   kali-linux-2026.1-installer-netinst-amd64.iso
@@ -136,7 +137,8 @@ print_help() {
   --wg-endpoint HOST     WireGuard endpoint clients will dial
   --wg-port N            WireGuard UDP listen/client port (default: 51820)
   --license KEY          License key (default: community)
-  --import-db TARBALL    Import an existing ludus DB/WireGuard tarball
+  --migrate-host         Migrate the existing host install, preserving state and endpoints
+  --import-db TARBALL    Import a complete --export-state archive before bootstrap
 
   -h, --help
       Prints this helpful message and exit."
@@ -782,6 +784,13 @@ prepare_airgapped_isos() {
 #                 exits non-zero on failure
 #-------------------------------------------------------------------------------
 ludus_install_server() {
+  set -Eeuo pipefail
+  umask 077
+  [[ ${EUID} == 0 ]] || { print_message "[!] Server installation must run as root" "error"; exit 1; }
+  LUDUS_NAT_IP=${LUDUS_NAT_IP:-192.0.2.253}
+  LUDUS_NAT_GATEWAY=${LUDUS_NAT_GATEWAY:-192.0.2.254}
+  LUDUS_API_PORT=${LUDUS_API_PORT:-8080}
+  LUDUS_ADMIN_PORT=${LUDUS_ADMIN_PORT:-8081}
   # ---- 0. Preflight ------------------------------------------------------------
   command_exists pveversion || { print_message "[!] Not a Proxmox host (pveversion not found)" "error"; exit 1; }
   command_exists curl       || { print_message "[!] curl is required" "error"; exit 1; }
@@ -795,6 +804,16 @@ ludus_install_server() {
   fi
   if [[ "${AIRGAPPED_INSTALL}" == "1" && -z "${TEMPLATE_FILE:-}" ]]; then
     print_message "[!] --airgapped requires a signed local --template-file" "error"
+    exit 1
+  fi
+  if [[ -f /opt/ludus/config.yml && ${MIGRATE_HOST:-0} != 1 && ! -f /opt/ludus/install/.bootstrap-complete ]]; then
+    print_message "[!] Existing host install detected. Use --migrate-host to preserve it; --update is not a migration." "error"
+    exit 1
+  fi
+  VMID=${VMID:-$(pvesh get /cluster/nextid --output-format json | python3 -c 'import json,sys; print(json.load(sys.stdin))')}
+  [[ $VMID =~ ^[1-9][0-9]*$ ]] || { print_message "[!] Invalid LXC VMID" "error"; exit 1; }
+  if pvesh get /cluster/resources --type vm --output-format json | python3 -c 'import json,sys; sys.exit(0 if any(int(v["vmid"])==int(sys.argv[1]) for v in json.load(sys.stdin)) else 1)' "$VMID"; then
+    print_message "[!] VMID ${VMID} already exists; no credentials or guest state were changed" "error"
     exit 1
   fi
 
@@ -832,6 +851,39 @@ ludus_install_server() {
     prepare_airgapped_isos
   fi
 
+  # ---- 4. Template -------------------------------------------------------------
+  local TMPL_NAME TMPL_CACHE R2_BASE
+  TMPL_NAME="ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst"
+  TMPL_CACHE="/var/lib/vz/template/cache/${TMPL_NAME}"
+  install -d -m 0755 /var/lib/vz/template/cache
+  if [[ -n "${TEMPLATE_FILE:-}" ]]; then
+    print_message "[+] Using local template ${TEMPLATE_FILE}" "info"
+    [[ "${TEMPLATE_FILE}" -ef "${TMPL_CACHE}" ]] || cp "${TEMPLATE_FILE}" "${TMPL_CACHE}"
+  elif [[ ! -f "${TMPL_CACHE}" ]]; then
+    print_message "[+] Downloading LXC template ${TMPL_NAME} ..." "info"
+    R2_BASE="${LUDUS_R2_BASE:-https://lxc.ludus.cloud}"
+    curl -fL "${R2_BASE}/ludus-lxc/${LUDUS_VERSION}/${TMPL_NAME}" -o "${TMPL_CACHE}"
+    curl -fsSL "${R2_BASE}/ludus-lxc/${LUDUS_VERSION}/checksums.txt" -o /tmp/ludus-checksums.txt
+    ( cd /var/lib/vz/template/cache && sha256sum -c /tmp/ludus-checksums.txt --ignore-missing ) \
+      || { print_message "[!] Template checksum verification failed" "error"; exit 1; }
+  else
+    print_message "[+] Template ${TMPL_NAME} already present in cache" "info"
+  fi
+
+  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    install -d -m 0700 /var/lib/ludus-migration
+    MIGRATION_DIR=$(mktemp -d /var/lib/ludus-migration/upgrade.XXXXXXXX)
+    tar --zstd -tf "$TMPL_CACHE" >"$MIGRATION_DIR/template-files"
+    local MEMBER TARGET
+    for TARGET in opt/ludus/ludus-server opt/ludus/install/migrate-host.sh; do
+      MEMBER=$(python3 -c 'import sys; names=[n.strip() for n in open(sys.argv[1]) if n.strip().removeprefix("./")==sys.argv[2]]; assert len(names)==1, "Appliance lacks host migration support"; print(names[0])' "$MIGRATION_DIR/template-files" "$TARGET")
+      tar --zstd -xOf "$TMPL_CACHE" "$MEMBER" >"$MIGRATION_DIR/${TARGET##*/}"
+      chmod 0700 "$MIGRATION_DIR/${TARGET##*/}"
+    done
+    source "$MIGRATION_DIR/migrate-host.sh"
+    migration_prepare
+  fi
+
   if [[ -z "${LANGUAGE+x}" ]]; then
     export LANGUAGE=en_US.UTF-8 LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8
   fi
@@ -842,39 +894,18 @@ ludus_install_server() {
   local NODE
   NODE=$(hostname)
 
-  # ---- 1. Token ----------------------------------------------------------------
-  if [[ -z "${TOKEN_ID:-}" || -z "${TOKEN_SECRET:-}" ]]; then
-    if [[ "${EUID}" -eq 0 ]]; then
-      print_message "[+] Generating API token root@pam!ludus ..." "info"
-      local TOK_JSON
-      TOK_JSON=$(pveum user token add root@pam ludus --privsep 0 --output-format json 2>/dev/null || true)
-      if [[ -z "${TOK_JSON}" ]]; then
-        if [[ "${NO_PROMPT:-0}" == "1" ]]; then
-          print_message "[!] Token root@pam!ludus already exists; recreating it for non-interactive install" "warn"
-          pveum user token remove root@pam ludus
-          TOK_JSON=$(pveum user token add root@pam ludus --privsep 0 --output-format json)
-        else
-          print_message "[!] Token 'root@pam!ludus' already exists." "warn"
-          local yn
-          read -r -p "[?] Delete and recreate it? [y/N] " yn </dev/tty
-          if [[ "${yn}" =~ ^[Yy]$ ]]; then
-            pveum user token remove root@pam ludus
-            TOK_JSON=$(pveum user token add root@pam ludus --privsep 0 --output-format json)
-          else
-            read -r -s -p "[?] Enter existing token secret: " TOKEN_SECRET </dev/tty
-            echo
-            TOKEN_ID="root@pam!ludus"
-          fi
-        fi
-      fi
-      if [[ -n "${TOK_JSON}" ]]; then
-        TOKEN_ID=$(echo "${TOK_JSON}"     | _json 'd["full-tokenid"]')
-        TOKEN_SECRET=$(echo "${TOK_JSON}" | _json 'd["value"]')
-      fi
-    else
-      read -r -p  "[?] Proxmox API token ID (e.g. root@pam!ludus): " TOKEN_ID </dev/tty
-      read -r -sp "[?] Proxmox API token secret: " TOKEN_SECRET </dev/tty; echo
-    fi
+  # Use an installation-specific token. Never rotate a token used by another
+  # container, particularly when a retry later fails on an occupied VMID.
+  if [[ -z "${TOKEN_ID:-}" && -z "${TOKEN_SECRET:-}" ]]; then
+    local TOK_JSON
+    print_message "[+] Generating API token root@pam!ludus-lxc-${VMID} ..." "info"
+    TOK_JSON=$(pveum user token add root@pam "ludus-lxc-${VMID}" --privsep 0 --output-format json) \
+      || { print_message "[!] Token already exists. Supply its secret or choose a new VMID; existing tokens are never revoked." "error"; exit 1; }
+    TOKEN_ID=$(echo "${TOK_JSON}" | _json 'd["full-tokenid"]')
+    TOKEN_SECRET=$(echo "${TOK_JSON}" | _json 'd["value"]')
+  elif [[ -z "${TOKEN_ID:-}" || -z "${TOKEN_SECRET:-}" ]]; then
+    print_message "[!] --token-id and --token-secret must be supplied together" "error"
+    exit 1
   fi
 
   local AUTH EP_LOCAL
@@ -896,7 +927,7 @@ ludus_install_server() {
     read -r -p "[?] Proxmox API endpoints (space-separated) [${DEFAULT_EPS}]: " ENDPOINTS </dev/tty
     ENDPOINTS=${ENDPOINTS:-${DEFAULT_EPS}}
 
-    DEFAULT_VMID=$(curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/nextid" | _json 'd["data"]')
+    DEFAULT_VMID=${VMID}
     read -r -p "[?] LXC VMID [${DEFAULT_VMID}]: " VMID </dev/tty
     VMID=${VMID:-${DEFAULT_VMID}}
 
@@ -914,10 +945,13 @@ ludus_install_server() {
     LXC_VLAN_TAG=${LXC_VLAN_TAG_INPUT:-${LXC_VLAN_TAG:-}}
     [[ "${LXC_VLAN_TAG}" == "none" ]] && LXC_VLAN_TAG=""
 
-    read -r -p "[?] LXC eth0 IP (CIDR, or 'dhcp') [dhcp]: " ETH0_IP </dev/tty
-    ETH0_IP=${ETH0_IP:-dhcp}
+    local ETH0_IP_INPUT
+    read -r -p "[?] LXC eth0 IP (CIDR, or 'dhcp') [${ETH0_IP:-dhcp}]: " ETH0_IP_INPUT </dev/tty
+    ETH0_IP=${ETH0_IP_INPUT:-${ETH0_IP:-dhcp}}
     if [[ "${ETH0_IP}" != "dhcp" ]]; then
-      read -r -p "[?] LXC eth0 gateway: " ETH0_GW </dev/tty
+      local ETH0_GW_INPUT
+      read -r -p "[?] LXC eth0 gateway [${ETH0_GW:-}]: " ETH0_GW_INPUT </dev/tty
+      ETH0_GW=${ETH0_GW_INPUT:-${ETH0_GW:-}}
     fi
     read -r -p "[?] LXC DNS resolver IP [inherit from Proxmox]: " LXC_NAMESERVER_INPUT </dev/tty
     LXC_NAMESERVER=${LXC_NAMESERVER_INPUT:-${LXC_NAMESERVER:-}}
@@ -949,7 +983,7 @@ ludus_install_server() {
   else
     ENDPOINTS=${ENDPOINTS:-${DEFAULT_EPS}}
     VMID=${VMID:-$(curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/nextid" | _json 'd["data"]')}
-    STORAGE=${STORAGE:-local-lvm}
+    STORAGE=${STORAGE:-$(curl -fsk -H "${AUTH}" "${EP_LOCAL}/api2/json/nodes/${NODE}/storage?content=rootdir" | _json 'next((s["storage"] for s in d["data"] if s["storage"]=="local-lvm" and s.get("active")), next((s["storage"] for s in d["data"] if s.get("active")), ""))')}
     LXC_HOSTNAME=${LXC_HOSTNAME:-ludus}
     LXC_ROOTFS_SIZE=${LXC_ROOTFS_SIZE:-20}
     LXC_BRIDGE=${LXC_BRIDGE:-vmbr0}
@@ -1014,6 +1048,16 @@ ludus_install_server() {
     print_message "[!] WireGuard port must be between 1 and 65535" "error"
     exit 1
   fi
+  curl -fsk -H "${AUTH}" "${EP_LOCAL}/api2/json/nodes/${NODE}/storage?content=rootdir" \
+    | python3 -c 'import json,sys; sys.exit(0 if any(s["storage"]==sys.argv[1] and s.get("active") for s in json.load(sys.stdin)["data"]) else 1)' "$STORAGE" \
+    || { print_message "[!] Storage ${STORAGE} is not available for container root filesystems" "error"; exit 1; }
+  if pvesh get /cluster/resources --type vm --output-format json | python3 -c 'import json,sys; sys.exit(0 if any(int(v["vmid"])==int(sys.argv[1]) for v in json.load(sys.stdin)) else 1)' "$VMID"; then
+    print_message "[!] VMID ${VMID} is occupied; refusing to modify its state" "error"
+    exit 1
+  fi
+  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    migration_cutover
+  fi
 
 
   # ---- 3. SDN bootstrap --------------------------------------------------------
@@ -1045,21 +1089,28 @@ ludus_install_server() {
     curl -sk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat" \
       "${VNET_UPDATE_ARGS[@]}" >/dev/null 2>&1 || true
   fi
-  curl -sk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets" \
-    --data-urlencode "subnet=192.0.2.0/24" --data-urlencode "type=subnet" \
-    --data-urlencode "gateway=192.0.2.254" --data-urlencode "snat=1" >/dev/null 2>&1 || true
+  local SUBNET_ID
+  SUBNET_ID=$(curl -fsk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets" | _json 'next((s["subnet"] for s in d["data"] if s["subnet"].endswith("-192.0.2.0-24")), "")')
+  if [[ -n $SUBNET_ID ]]; then
+    curl -fsk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets/${SUBNET_ID}" \
+      --data-urlencode "gateway=${LUDUS_NAT_GATEWAY}" --data-urlencode "snat=1" >/dev/null
+  else
+    curl -fsk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets" \
+      --data-urlencode "subnet=192.0.2.0/24" --data-urlencode "type=subnet" \
+      --data-urlencode "gateway=${LUDUS_NAT_GATEWAY}" --data-urlencode "snat=1" >/dev/null
+  fi
   sysctl -w net.ipv4.ip_forward=1 >/dev/null
   install -d -m 0755 /etc/sysctl.d
   printf "net.ipv4.ip_forward=1\n" > /etc/sysctl.d/99-ludus-ip-forward.conf
   if [[ -f /etc/network/interfaces ]] \
-    && ! grep -Eq '^[[:space:]]*source(-directory)?[[:space:]]+/etc/network/interfaces\.d(/|\*|[[:space:]]|$)' /etc/network/interfaces; then
+    && ! grep -Eq '^[[:space:]]*(source[[:space:]]+/etc/network/interfaces\.d/(\*|sdn)|source-directory[[:space:]]+/etc/network/interfaces\.d/?)([[:space:]]|$)' /etc/network/interfaces; then
     printf "\nsource /etc/network/interfaces.d/sdn\n" >> /etc/network/interfaces
   fi
-  curl -sk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn" >/dev/null
-  local _i SDN_OK=0
+  curl -fsk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn" >/dev/null
+  local _i SDN_OK=0 SDN_ADDRESSES
   for _i in $(seq 1 60); do
-    if ip link show ludusnat >/dev/null 2>&1 \
-      || curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn" | grep -q '"state":"ok"'; then
+    if SDN_ADDRESSES=$(ip -j -4 address show dev ludusnat 2>/dev/null) \
+      && printf '%s\n' "$SDN_ADDRESSES" | python3 -c 'import json,sys; sys.exit(0 if any(a.get("local")==sys.argv[1] for n in json.load(sys.stdin) for a in n.get("addr_info",[])) else 1)' "$LUDUS_NAT_GATEWAY"; then
       SDN_OK=1
       break
     fi
@@ -1070,24 +1121,11 @@ ludus_install_server() {
     exit 1
   fi
   print_message "[+] SDN zone/vnet applied" "ok"
-
-  # ---- 4. Template -------------------------------------------------------------
-  local TMPL_NAME TMPL_CACHE R2_BASE
-  TMPL_NAME="ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst"
-  TMPL_CACHE="/var/lib/vz/template/cache/${TMPL_NAME}"
-  if [[ -n "${TEMPLATE_FILE:-}" ]]; then
-    print_message "[+] Using local template ${TEMPLATE_FILE}" "info"
-    cp "${TEMPLATE_FILE}" "${TMPL_CACHE}"
-  elif [[ ! -f "${TMPL_CACHE}" ]]; then
-    print_message "[+] Downloading LXC template ${TMPL_NAME} ..." "info"
-    R2_BASE="${LUDUS_R2_BASE:-https://lxc.ludus.cloud}"
-    curl -fL "${R2_BASE}/ludus-lxc/${LUDUS_VERSION}/${TMPL_NAME}" -o "${TMPL_CACHE}"
-    curl -fsSL "${R2_BASE}/ludus-lxc/${LUDUS_VERSION}/checksums.txt" -o /tmp/ludus-checksums.txt
-    ( cd /var/lib/vz/template/cache && sha256sum -c /tmp/ludus-checksums.txt --ignore-missing ) \
-      || { print_message "[!] Template checksum verification failed" "error"; exit 1; }
-  else
-    print_message "[+] Template ${TMPL_NAME} already present in cache" "info"
+  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    migration_forwarding start
+    migration_reset_wireguard_sessions
   fi
+
 
   # ---- 5. Create container -----------------------------------------------------
   local ETH0_CFG PROXMOX_INVALID_CERT
@@ -1103,14 +1141,16 @@ ludus_install_server() {
     --swap 512
     --rootfs "${STORAGE}:${LXC_ROOTFS_SIZE}"
     --net0 "name=eth0,bridge=${LXC_BRIDGE},${ETH0_CFG},firewall=0"
-    --net1 "name=eth1,bridge=ludusnat,ip=192.0.2.253/24"
+    --net1 "name=eth1,bridge=ludusnat,ip=${LUDUS_NAT_IP}/24"
     --onboot 1
     --startup order=99
   )
   [[ -n "${LXC_NAMESERVER:-}" ]] && PCT_CREATE_ARGS+=(--nameserver "${LXC_NAMESERVER}")
   print_message "[+] Creating LXC ${VMID} (rootfs on ${STORAGE}, eth0 on ${LXC_BRIDGE}) ..." "info"
-  pct create "${VMID}" "local:vztmpl/${TMPL_NAME}" "${PCT_CREATE_ARGS[@]}" \
-    || { print_message "[!] pct create failed" "error"; print_message "[!] Consider setting 'tmpdir: /var/tmp' in /etc/vzdump.conf"; exit 1; }
+  # lxc-usernsexec must traverse the rootfs directories created by pct.
+  (umask 022; pct create "${VMID}" "local:vztmpl/${TMPL_NAME}" "${PCT_CREATE_ARGS[@]}") \
+    || { print_message "[!] pct create failed; check the selected storage and /etc/vzdump.conf tmpdir" "error"; exit 1; }
+  [[ ${MIGRATE_HOST:-0} != 1 ]] || touch "$MIGRATION_DIR/container-created"
   cat >> "/etc/pve/lxc/${VMID}.conf" <<EOF
 lxc.cgroup2.devices.allow: c 10:200 rwm
 lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
@@ -1128,7 +1168,7 @@ EOF
 
   # ---- 6. Configure ------------------------------------------------------------
   local CFG AIRGAPPED_CONFIG
-  CFG=/tmp/ludus-config.$$.yml
+  CFG=$(mktemp /tmp/ludus-config.XXXXXXXX.yml)
   AIRGAPPED_CONFIG=false
   [[ "${AIRGAPPED_INSTALL}" == "1" ]] && AIRGAPPED_CONFIG=true
   PROXMOX_INVALID_CERT=true
@@ -1146,17 +1186,19 @@ proxmox_iso_storage_pool: ${ISO_STORAGE}
 proxmox_invalid_cert: ${PROXMOX_INVALID_CERT}
 airgapped_install: ${AIRGAPPED_CONFIG}
 ludus_nat_interface: ludusnat
-ludus_nat_ip: 192.0.2.253
-ludus_nat_gateway: 192.0.2.254
+ludus_nat_ip: ${LUDUS_NAT_IP}
+ludus_nat_gateway: ${LUDUS_NAT_GATEWAY}
 wireguard_endpoint: ${WG_EP}
 wireguard_port: ${WG_PORT}
 sdn_zone: ludus
 license_key: ${LICENSE}
 expose_admin_port: false
-port: 8080
-admin_port: 8081
+port: ${LUDUS_API_PORT}
+admin_port: ${LUDUS_ADMIN_PORT}
 data_directory: /opt/ludus/db
-database_encryption_key: $(head -c 24 /dev/urandom | base64 | head -c 32)
+tls_cert_file: /opt/ludus/tls/server.crt
+tls_key_file: /opt/ludus/tls/server.key
+database_encryption_key: $(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
 EOF
   chmod 0600 "${CFG}"
   pct push "${VMID}" "${CFG}" /opt/ludus/config.yml --perms 0600 --user 1001 --group 1001
@@ -1177,10 +1219,13 @@ EOF
     pct exec "${VMID}" -- mkdir -p \
       /opt/ludus/packer/debian11/http \
       /opt/ludus/packer/debian12/http \
+      /opt/ludus/packer/debian13/http \
       /opt/ludus/packer/kali/http
     pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/packer/debian11/http/ludus-injected-ca.crt \
       --perms 0644 --user 0 --group 0
     pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/packer/debian12/http/ludus-injected-ca.crt \
+      --perms 0644 --user 0 --group 0
+    pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/packer/debian13/http/ludus-injected-ca.crt \
       --perms 0644 --user 0 --group 0
     pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/packer/kali/http/ludus-injected-ca.crt \
       --perms 0644 --user 0 --group 0
@@ -1195,7 +1240,7 @@ EOF
     print_message "[+] Importing DB/WireGuard state from ${IMPORT_DB} ..." "info"
     pct exec "${VMID}" -- systemctl stop ludus-admin ludus
     pct push "${VMID}" "${IMPORT_DB}" /tmp/ludus-import.tar.gz
-    pct exec "${VMID}" -- tar xzf /tmp/ludus-import.tar.gz -C / --strip-components=0
+    pct exec "${VMID}" -- /opt/ludus/ludus-server --import-state /tmp/ludus-import.tar.gz
     pct exec "${VMID}" -- rm /tmp/ludus-import.tar.gz
   fi
 
@@ -1207,6 +1252,27 @@ EOF
     fi
     sleep 5
   done
+  pct exec "${VMID}" -- test -f /opt/ludus/install/.bootstrap-complete \
+    || { print_message "[!] Bootstrap did not complete; see /opt/ludus/install/install.log inside the container" "error"; exit 1; }
+  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    migration_move_nics
+  fi
+  local API_READY=0
+  for _i in $(seq 1 60); do
+    if pct exec "${VMID}" -- systemctl is-active --quiet ludus ludus-admin \
+      && pct exec "${VMID}" -- curl -fkSs --max-time 5 "https://127.0.0.1:${LUDUS_API_PORT}/api/health" >/dev/null 2>&1 \
+      && pct exec "${VMID}" -- bash -c 'printf "X-API-KEY: %s\n" "$(cat /opt/ludus/install/root-api-key)" | curl -fkSs --max-time 5 --header @- "https://127.0.0.1:$1/api/v2/user/all"' _ "${LUDUS_ADMIN_PORT}" >/dev/null 2>&1; then
+      API_READY=1
+      break
+    fi
+    sleep 2
+  done
+  [[ $API_READY == 1 ]] || { print_message "[!] Ludus API services did not become healthy" "error"; exit 1; }
+  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    curl -fkSs --max-time 10 "https://127.0.0.1:${LUDUS_API_PORT}/api/health" >/dev/null \
+      || { print_message "[!] Original API endpoint is not reachable after forwarding" "error"; exit 1; }
+    migration_commit
+  fi
 
   # ---- 7. Output ---------------------------------------------------------------
   if pct exec "${VMID}" -- test -f /opt/ludus/install/.bootstrap-complete; then
@@ -1214,8 +1280,8 @@ EOF
     LXC_IP=$(pct exec "${VMID}" -- hostname -I | awk '{print $1}')
     echo
     print_message "[+] Ludus is running in LXC ${VMID}" "ok"
-    print_message "    API:        https://${LXC_IP}:8080" "info"
-    print_message "    Admin API:  https://${LXC_IP}:8081 (localhost-only inside LXC by default)" "info"
+    print_message "    API:        https://${LXC_IP}:${LUDUS_API_PORT}" "info"
+    print_message "    Admin API:  https://${LXC_IP}:${LUDUS_ADMIN_PORT} (localhost-only inside LXC by default)" "info"
     print_message "    WireGuard:  ${WG_EP}:${WG_PORT}" "info"
     echo
     print_message "[+] Next: install ludus-client and run 'ludus user add <name>'" "info"
@@ -1539,6 +1605,7 @@ while [[ $# -gt 0 ]]; do
     -p|--prefix    ) INSTALL_PREFIX="$2"; shift 2;;
     # ---- server (LXC) install flags ----
     --server-only  ) SERVER_ONLY=1; shift;;
+    --migrate-host ) MIGRATE_HOST=1; SERVER_ONLY=1; shift;;
     --version      ) LUDUS_VERSION="$2"; shift 2;;
     --template-file) TEMPLATE_FILE="$2"; SERVER_ONLY=1; shift 2;;
     --airgapped   ) AIRGAPPED_INSTALL=1; SERVER_ONLY=1; shift;;

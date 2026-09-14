@@ -8,9 +8,9 @@ import (
 
 func RenderRoutes(rangeNumbers []int) string {
 	var b strings.Builder
-	b.WriteString("#!/bin/sh\n# Managed by Ludus bootstrap — do not edit\n")
+	b.WriteString("#!/bin/sh\n")
 	for _, n := range rangeNumbers {
-		fmt.Fprintf(&b, "ip route replace 10.%d.0.0/16 via 192.0.2.%d\n", n, 100+n)
+		fmt.Fprintf(&b, "# LUDUS MANAGED BLOCK FOR RANGE %d BEGIN\nif [ \"$IFACE\" = \"eth1\" ]; then\n\tip route replace 10.%d.0.0/16 via 192.0.2.%d\nfi\n# LUDUS MANAGED BLOCK FOR RANGE %d END\n", n, n, 100+n, n)
 	}
 	return b.String()
 }

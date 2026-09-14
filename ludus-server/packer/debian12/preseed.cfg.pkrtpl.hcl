@@ -1,7 +1,7 @@
 %{ if serve_injected_ca }
 
 d-i preseed/early_command string \
-    wget -q -O /tmp/internal-ca.crt http://{{ http_address }}/injected-ca-certificate.crt && \
+    wget -q -O /tmp/internal-ca.crt http://${http_address}/injected-ca-certificate.crt && \
     mkdir -p /usr/local/share/ca-certificates && \
     cp /tmp/internal-ca.crt /usr/local/share/ca-certificates/internal-ca.crt && \
     if command -v update-ca-certificates >/dev/null 2>&1 && update-ca-certificates; then \

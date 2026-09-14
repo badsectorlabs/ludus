@@ -100,13 +100,15 @@ source "proxmox-iso" "debian12" {
   boot_key_interval = "100ms"
   boot_wait         = "15s"
   http_bind_address = "${var.packer_http_bind_address}"
+  http_port_min = 8090
+  http_port_max = 8090
   # Render the template directly into memory for the HTTP server
   http_content = merge(
     {
       "/preseed.cfg" = templatefile("${path.root}/preseed.cfg.pkrtpl.hcl", {
         airgapped_install = var.airgapped_install,
         serve_injected_ca = local.serve_injected_ca,
-        http_address = "${var.packer_http_bind_address}:{{ .HTTPPort }}"
+        http_address = "${var.packer_http_bind_address}:8090"
       })
     },
     local.serve_injected_ca ? {
