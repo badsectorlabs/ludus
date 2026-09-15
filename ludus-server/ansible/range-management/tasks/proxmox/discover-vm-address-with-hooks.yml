@@ -28,7 +28,7 @@
   when:
     - clone_vm is changed
     - not unmanaged
-    - ludus_vm_start_hook_handled | default(false) | bool
+    - (ludus_vm_hooks | default({})).get(vm_name, {}).get('address', false) | bool
 
 - name: Record bootstrap address returned by VM hooks
   ansible.builtin.set_fact:

@@ -276,8 +276,9 @@ func DeleteRangeVMs(e *core.RequestEvent) error {
 			logger.Error(fmt.Sprintf("Error destroying VM %d: %s", int(vm.VMID), err.Error()))
 			// A lifecycle hook can veto deletion. Do not report success or
 			// change range/testing state when a provider rejected cleanup.
-			// Keep the historical best-effort behavior without delete hooks.
-			if server.hasBeforeDeleteVMHooks() {
+			// Ordinary Proxmox errors retain the historical best-effort behavior.
+			var hookErr *vmDeleteHookError
+			if errors.As(err, &hookErr) {
 				rangeRecord.SetRangeState(previousRangeState)
 				if destroyedVMs {
 					rangeRecord.SetRangeState(LudusRangeStateError)

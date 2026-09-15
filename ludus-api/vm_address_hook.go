@@ -35,8 +35,12 @@ func (s *Server) runVMAddressHooks(ctx context.Context, request VMHookRequest) (
 		if !ok {
 			continue
 		}
-		if err := ctx.Err(); err != nil {
+		selected, err := pluginSelectsVM(ctx, plugin, request)
+		if err != nil {
 			return VMAddressHookResult{}, err
+		}
+		if !selected {
+			continue
 		}
 		if !plugin.Initialized() {
 			return VMAddressHookResult{}, fmt.Errorf("plugin %s registered an address hook but is not initialized", plugin.Name())

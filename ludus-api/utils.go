@@ -148,26 +148,34 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 	// rows. If a lifecycle provider is unhealthy, the previous coherent range
 	// view remains intact instead of being cleared by a partially completed
 	// refresh.
+	requests := make([]VMHookRequest, 0, len(allVMs))
+	for _, vmResource := range allVMs {
+		requests = append(requests, VMHookRequest{
+			Source: StartVMSourceAPI, RangeID: targetRange.RangeId(), VMID: int(vmResource.VMID),
+			VMName: vmResource.Name, Node: vmResource.Node, Pool: vmResource.Pool, Status: vmResource.Status,
+		})
+	}
+	// Provider work gets its own bounded budget, without consuming the
+	// ordinary Proxmox guest-agent discovery timeout below.
+	deadline, _ := ctx.Deadline()
+	remainingProxmoxTime := time.Until(deadline)
+	cancel()
+	hookContext, cancelHooks := context.WithTimeout(context.Background(), 60*time.Second)
+	statuses, statusErr := server.resolveVMStatuses(hookContext, requests)
+	cancelHooks()
+	if statusErr != nil {
+		return fmt.Errorf("resolve lifecycle status: %w", statusErr)
+	}
 	poweredOnByVMID := make(map[int]bool, len(allVMs))
 	for _, vmResource := range allVMs {
 		poweredOn := vmResource.Status == goproxmox.StatusVirtualMachineRunning
-		resolvedStatus, handled, statusErr := server.resolveVMStatus(ctx, VMHookRequest{
-			Source:  StartVMSourceAPI,
-			RangeID: targetRange.RangeId(),
-			VMID:    int(vmResource.VMID),
-			VMName:  vmResource.Name,
-			Node:    vmResource.Node,
-			Pool:    vmResource.Pool,
-			Status:  vmResource.Status,
-		})
-		if statusErr != nil {
-			return fmt.Errorf("resolve lifecycle status for VM %s: %w", vmResource.Name, statusErr)
-		}
-		if handled {
-			poweredOn = resolvedStatus == VMStatusRunning || resolvedStatus == VMStatusStarting
+		if status, handled := statuses[int(vmResource.VMID)]; handled {
+			poweredOn = status == VMStatusRunning || status == VMStatusStarting
 		}
 		poweredOnByVMID[int(vmResource.VMID)] = poweredOn
 	}
+	ctx, cancel = context.WithTimeout(context.Background(), remainingProxmoxTime)
+	defer cancel()
 
 	// Clear the DB of any previous VMs for this range
 	logger.Debug(fmt.Sprintf("Clearing VMs for range %s with range number %d", targetRange.RangeId(), targetRange.RangeNumber()))

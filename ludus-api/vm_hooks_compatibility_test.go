@@ -80,6 +80,8 @@ func TestVMLifecycleProxmoxFallbackCompatibility(t *testing.T) {
 		{"unrelated capability", []LudusPlugin{&statusOnlyVMTestPlugin{}}, "different-range", 0},
 		{"legacy template", []LudusPlugin{&legacyVMTestPlugin{}}, "", 1},
 		{"declining hooks", []LudusPlugin{&continuingVMTestPlugin{}}, "actual-range", 0},
+		{"unselected VM in another pool", []LudusPlugin{&scopedVMTestPlugin{}}, "different-range", 0},
+		{"unselected template", []LudusPlugin{&scopedVMTestPlugin{}}, "", 1},
 	}
 	for _, tc := range cases {
 		for _, action := range []string{"on", "off", "delete", "already-on", "already-off"} {
@@ -149,7 +151,7 @@ func TestVMLifecycleProxmoxFallbackCompatibility(t *testing.T) {
 					t.Fatalf("changed result: %s; legacy: %s", gotErr, baselineErr)
 				}
 				// Delete hooks require an extra verified metadata lookup; absent hooks must not.
-				if tc.name == "declining hooks" && action == "delete" {
+				if s.hasBeforeDeleteVMHooks() && action == "delete" {
 					paths = paths[2:]
 				}
 				if !reflect.DeepEqual(paths, baselinePaths) {

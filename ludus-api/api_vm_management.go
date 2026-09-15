@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -34,6 +35,22 @@ func DestroyVM(e *core.RequestEvent) error {
 	defer cancel()
 
 	if server.hasBeforeDeleteVMHooks() {
+		if os.Geteuid() != 0 {
+			resource, lookupErr := getVMResource(ctx, proxmoxClient, vmID)
+			if lookupErr != nil {
+				return JSONError(e, http.StatusInternalServerError, lookupErr.Error())
+			}
+			selected, selectErr := server.selectsVMForDelete(ctx, VMHookRequest{
+				Source: StartVMSourceAPI, RangeID: resource.Pool, Pool: resource.Pool,
+				VMID: vmID, VMName: resource.Name, Node: resource.Node, Status: resource.Status,
+			})
+			if selectErr != nil {
+				return JSONError(e, http.StatusInternalServerError, selectErr.Error())
+			}
+			if selected {
+				return proxyToAdmin(e)
+			}
+		}
 		usersRange, rangeErr := GetRange(e)
 		if rangeErr != nil {
 			return rangeErr
@@ -61,21 +78,24 @@ func (s *Server) DestroyVM(ctx context.Context, proxmoxClient *goproxmox.Client,
 	if err != nil {
 		return err
 	}
+	request := VMHookRequest{
+		Source: StartVMSourceAPI, RangeID: resource.Pool, VMID: vmID,
+		VMName: resource.Name, Node: resource.Node, Pool: resource.Pool, Status: resource.Status,
+	}
+	selected, err := s.selectsVMForDelete(ctx, request)
+	if err != nil {
+		return err
+	}
+	if !selected {
+		return destroyVM(ctx, proxmoxClient, vmID)
+	}
 	if resource.Type != "qemu" || resource.Template == 1 {
-		return fmt.Errorf("VMID %d is not a QEMU range VM", vmID)
+		return &vmDeleteHookError{fmt.Errorf("VMID %d is not a QEMU range VM", vmID)}
 	}
 	if resource.Pool != rangeID {
-		return fmt.Errorf("VMID %d belongs to pool %q, not range %q", vmID, resource.Pool, rangeID)
+		return &vmDeleteHookError{fmt.Errorf("VMID %d belongs to pool %q, not range %q", vmID, resource.Pool, rangeID)}
 	}
-	if err := s.runBeforeDeleteVMHooks(ctx, VMHookRequest{
-		Source:  StartVMSourceAPI,
-		RangeID: rangeID,
-		VMID:    vmID,
-		VMName:  resource.Name,
-		Node:    resource.Node,
-		Pool:    resource.Pool,
-		Status:  resource.Status,
-	}); err != nil {
+	if err := s.runBeforeDeleteVMHooks(ctx, request); err != nil {
 		return err
 	}
 	return destroyVM(ctx, proxmoxClient, vmID)

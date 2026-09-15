@@ -119,6 +119,25 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	// Merge userVars with any extraVars provided
 	maps.Copy(userVars, extraVars)
 
+	// Select hooks from plugin configuration before deployment, independently
+	// of whether the privileged service is currently reachable.
+	vmNames := make([]string, 0, len(vmTargetNodes)+1)
+	for name := range vmTargetNodes {
+		if name != "" {
+			vmNames = append(vmNames, name)
+		}
+	}
+	if routerName, routerErr := GetRouterVMName(usersRange); routerErr == nil {
+		vmNames = append(vmNames, routerName)
+	}
+	hookContext, cancelHookSelection := context.WithTimeout(context.Background(), 10*time.Second)
+	hooks, hookErr := s.deploymentVMHooks(hookContext, usersRange.RangeId(), vmNames)
+	cancelHookSelection()
+	if hookErr != nil {
+		return "", hookErr
+	}
+	userVars["ludus_vm_hooks"] = hooks
+
 	// Always include the ludus, server, and user configs
 	var serverAndUserConfigs []string
 	if FileExists(rangeConfigPath) {

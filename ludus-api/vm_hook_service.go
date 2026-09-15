@@ -190,6 +190,7 @@ func (s *Server) StartVMHookService() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/start", s.handleVMHookServiceStart)
 	mux.HandleFunc("/v1/status", s.handleVMHookServiceStatus)
+	mux.HandleFunc("/v1/statuses", s.handleVMHookServiceStatuses)
 	mux.HandleFunc("/v1/address", s.handleVMHookServiceAddress)
 	service := &http.Server{
 		Handler:           mux,
@@ -367,50 +368,10 @@ func (s *Server) handleVMHookServiceStatus(response http.ResponseWriter, request
 	writeVMHookServiceResponse(response, http.StatusOK, vmHookServiceResponse{Handled: handled, Status: status})
 }
 
-func callVMHookStatusService(ctx context.Context, request VMHookRequest) (VMStatus, bool, error) {
-	body, err := json.Marshal(vmHookServiceRequest{RangeID: request.RangeID, VMID: vmHookServiceVMID(request.VMID), VMName: request.VMName})
-	if err != nil {
-		return "", false, err
-	}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", VMHookServiceSocket)
-		},
-	}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/status", bytes.NewReader(body))
-	if err != nil {
-		return "", false, err
-	}
-	httpRequest.Header.Set("Content-Type", "application/json")
-	response, err := client.Do(httpRequest)
-	if err != nil {
-		return "", false, fmt.Errorf("call root VM hook service: %w", err)
-	}
-	defer response.Body.Close()
-	limited := io.LimitReader(response.Body, 64*1024)
-	var result vmHookServiceResponse
-	if err := json.NewDecoder(limited).Decode(&result); err != nil {
-		return "", false, fmt.Errorf("decode root VM hook response: %w", err)
-	}
-	if response.StatusCode != http.StatusOK {
-		if result.Error == "" {
-			result.Error = response.Status
-		}
-		return "", false, fmt.Errorf("root VM hook service rejected status: %s", result.Error)
-	}
-	return result.Status, result.Handled, nil
-}
-
 func (s *Server) resolveVMStatus(ctx context.Context, request VMHookRequest) (VMStatus, bool, error) {
-	if !s.hasVMStatusHooks() {
-		return "", false, nil
-	}
-	if os.Geteuid() == 0 {
-		return s.runVMStatusHooks(ctx, request)
-	}
-	return callVMHookStatusService(ctx, request)
+	statuses, err := s.resolveVMStatuses(ctx, []VMHookRequest{request})
+	status, handled := statuses[request.VMID]
+	return status, handled, err
 }
 
 func getVMResource(ctx context.Context, client *goproxmox.Client, vmID int) (*goproxmox.ClusterResource, error) {

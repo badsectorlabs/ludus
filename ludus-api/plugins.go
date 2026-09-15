@@ -188,6 +188,13 @@ func (s *Server) runStartVMHooks(ctx context.Context, request StartVMHookRequest
 		if !ok {
 			continue
 		}
+		selected, err := pluginSelectsVM(ctx, plugin, request)
+		if err != nil {
+			return false, err
+		}
+		if !selected {
+			continue
+		}
 		if !plugin.Initialized() {
 			return false, fmt.Errorf("plugin %s registered a start VM hook but is not initialized", plugin.Name())
 		}
@@ -215,6 +222,13 @@ func (s *Server) runStopVMHooks(ctx context.Context, request VMHookRequest) (boo
 		if !ok {
 			continue
 		}
+		selected, err := pluginSelectsVM(ctx, plugin, request)
+		if err != nil {
+			return false, err
+		}
+		if !selected {
+			continue
+		}
 		if !plugin.Initialized() {
 			return false, fmt.Errorf("plugin %s registered a stop VM hook but is not initialized", plugin.Name())
 		}
@@ -240,6 +254,13 @@ func (s *Server) runVMStatusHooks(ctx context.Context, request VMHookRequest) (V
 	for _, plugin := range s.plugins {
 		handler, ok := plugin.(VMStatusHook)
 		if !ok {
+			continue
+		}
+		selected, err := pluginSelectsVM(ctx, plugin, request)
+		if err != nil {
+			return "", false, err
+		}
+		if !selected {
 			continue
 		}
 		if !plugin.Initialized() {
@@ -273,11 +294,18 @@ func (s *Server) runBeforeDeleteVMHooks(ctx context.Context, request VMHookReque
 		if !ok {
 			continue
 		}
+		selected, err := pluginSelectsVM(ctx, plugin, request)
+		if err != nil {
+			return &vmDeleteHookError{err}
+		}
+		if !selected {
+			continue
+		}
 		if !plugin.Initialized() {
-			return fmt.Errorf("plugin %s registered a before-delete VM hook but is not initialized", plugin.Name())
+			return &vmDeleteHookError{fmt.Errorf("plugin %s registered a before-delete VM hook but is not initialized", plugin.Name())}
 		}
 		if err := handler.BeforeDeleteVM(ctx, request); err != nil {
-			return fmt.Errorf("plugin %s rejected deletion of VMID %d: %w", plugin.Name(), request.VMID, err)
+			return &vmDeleteHookError{fmt.Errorf("plugin %s rejected deletion of VMID %d: %w", plugin.Name(), request.VMID, err)}
 		}
 	}
 	return nil

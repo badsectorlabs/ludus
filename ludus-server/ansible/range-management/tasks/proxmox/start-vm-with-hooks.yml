@@ -3,13 +3,6 @@
   ansible.builtin.set_fact:
     ludus_vm_start_hook_handled: false
 
-- name: Check for the Ludus VM lifecycle hook service
-  ansible.builtin.stat:
-    path: /run/ludus/vm-hooks.sock
-  delegate_to: localhost
-  register: ludus_vm_hook_socket
-  changed_when: false
-
 - name: Offer VM start to Ludus lifecycle hooks
   ansible.builtin.uri:
     url: http://localhost/v1/start
@@ -27,7 +20,7 @@
   delegate_to: localhost
   register: ludus_vm_start_hook
   changed_when: ludus_vm_start_hook.json.handled | default(false) | bool
-  when: ludus_vm_hook_socket.stat.issock | default(false)
+  when: (ludus_vm_hooks | default({})).get(vm_name | default(inventory_hostname), {}).get('start', false) | bool
 
 - name: Record whether a lifecycle hook handled VM start
   ansible.builtin.set_fact:
