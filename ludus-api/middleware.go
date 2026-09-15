@@ -192,10 +192,16 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 // This function makes sure the request is to a user endpoint if the server is running as root (i.e. the admin port)
 func limitRootEndpoints(e *core.RequestEvent) error {
 	logger.Debug(fmt.Sprintf("Request: %s %s", e.Request.Method, e.Request.URL.Path))
+	startVMHookEndpoint := e.Request.URL.Path == APIBasePath+"/range/poweron" && e.Request.Method == http.MethodPut
+	stopVMHookEndpoint := e.Request.URL.Path == APIBasePath+"/range/poweroff" && e.Request.Method == http.MethodPut
+	deleteVMHookEndpoint := strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/vm/") && e.Request.Method == http.MethodDelete
 	if os.Geteuid() == 0 &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") &&
+		!(startVMHookEndpoint && server.hasStartVMHooks()) &&
+		!(stopVMHookEndpoint && server.hasStopVMHooks()) &&
+		!(deleteVMHookEndpoint && server.hasBeforeDeleteVMHooks()) &&
 		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) &&
 		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") &&
@@ -205,6 +211,9 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 		(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") ||
+			(startVMHookEndpoint && server.hasStartVMHooks()) ||
+			(stopVMHookEndpoint && server.hasStopVMHooks()) ||
+			(deleteVMHookEndpoint && server.hasBeforeDeleteVMHooks()) ||
 			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) ||
 			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") ||

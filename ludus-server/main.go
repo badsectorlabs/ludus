@@ -92,6 +92,9 @@ func serve() {
 
 	// Initialize plugins
 	server.InitializePlugins()
+	if err := server.StartVMHookService(); err != nil {
+		log.Fatalf("Error starting VM hook service: %v", err)
+	}
 
 	// Start all registered scheduler jobs
 	server.Scheduler.Start()
@@ -157,6 +160,9 @@ func serve() {
 		}
 	}
 	server.Scheduler.Stop()
+	if err := server.StopVMHookService(); err != nil {
+		logger.Error(fmt.Sprintf("Error stopping VM hook service: %v", err))
+	}
 	server.ShutdownPlugins()
 
 }

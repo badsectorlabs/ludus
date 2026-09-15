@@ -1,6 +1,7 @@
 package ludusapi
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -22,6 +23,74 @@ type LudusPlugin interface {
 	Shutdown() error
 	Initialized() bool
 	RoutesRegistered() bool
+}
+
+// StartVMHook is an optional plugin capability. Plugins that do not implement
+// it continue to use the normal Proxmox start path without any changes.
+//
+// Hooks run in plugin load order. Returning StartVMHandled stops dispatch and
+// tells Ludus that the plugin completed the start. Returning an error fails the
+// request closed; Ludus will not fall back to an ordinary Proxmox start.
+type StartVMHook interface {
+	StartVM(context.Context, StartVMHookRequest) (StartVMHookResult, error)
+}
+
+type VMHookRequest struct {
+	Source  string
+	RangeID string
+	VMID    int
+	VMName  string
+	Node    string
+	Pool    string
+	Status  string
+}
+
+type StartVMHookRequest = VMHookRequest
+
+type StartVMHookResult uint8
+
+const (
+	StartVMContinue StartVMHookResult = iota
+	StartVMHandled
+)
+
+const StartVMSourceAPI = "api"
+
+const StartVMSourceDeployment = "deployment"
+
+const StartVMSourceDeploymentFirstBoot = "deployment-first-boot"
+
+// StopVMHook is the stop-side equivalent of StartVMHook. A handled result
+// means the plugin has stopped the VM and Ludus must not call Proxmox Stop.
+type StopVMHook interface {
+	StopVM(context.Context, VMHookRequest) (StartVMHookResult, error)
+}
+
+// VMStatusHook lets a provider replace Proxmox's reported runtime status.
+// This is necessary when the provider owns a QEMU process that is launched
+// through a private runtime rather than the ordinary API start operation.
+type VMStatusHook interface {
+	VMStatus(context.Context, VMHookRequest) (VMStatusHookResult, error)
+}
+
+type VMStatus string
+
+const (
+	VMStatusRunning  VMStatus = "running"
+	VMStatusStopped  VMStatus = "stopped"
+	VMStatusStarting VMStatus = "starting"
+	VMStatusStopping VMStatus = "stopping"
+)
+
+type VMStatusHookResult struct {
+	Decision StartVMHookResult
+	Status   VMStatus
+}
+
+// BeforeDeleteVMHook prepares plugin-owned runtime state for deletion. Every
+// registered hook runs; returning an error vetoes the Proxmox delete.
+type BeforeDeleteVMHook interface {
+	BeforeDeleteVM(context.Context, VMHookRequest) error
 }
 
 type Server struct {
@@ -71,6 +140,147 @@ func (s *Server) LoadPlugin(path string) error {
 
 func (s *Server) RegisterPlugin(p LudusPlugin) {
 	s.plugins = append(s.plugins, p)
+}
+
+func (s *Server) hasStartVMHooks() bool {
+	for _, plugin := range s.plugins {
+		if _, ok := plugin.(StartVMHook); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) hasStopVMHooks() bool {
+	for _, plugin := range s.plugins {
+		if _, ok := plugin.(StopVMHook); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) hasVMStatusHooks() bool {
+	for _, plugin := range s.plugins {
+		if _, ok := plugin.(VMStatusHook); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) hasBeforeDeleteVMHooks() bool {
+	for _, plugin := range s.plugins {
+		if _, ok := plugin.(BeforeDeleteVMHook); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) hasVMLifecycleHooks() bool {
+	return s.hasStartVMHooks() || s.hasStopVMHooks() || s.hasVMStatusHooks() || s.hasBeforeDeleteVMHooks() || s.hasVMAddressHooks()
+}
+
+func (s *Server) runStartVMHooks(ctx context.Context, request StartVMHookRequest) (bool, error) {
+	for _, plugin := range s.plugins {
+		handler, ok := plugin.(StartVMHook)
+		if !ok {
+			continue
+		}
+		if !plugin.Initialized() {
+			return false, fmt.Errorf("plugin %s registered a start VM hook but is not initialized", plugin.Name())
+		}
+
+		result, err := handler.StartVM(ctx, request)
+		if err != nil {
+			return false, fmt.Errorf("plugin %s rejected start of VMID %d: %w", plugin.Name(), request.VMID, err)
+		}
+		switch result {
+		case StartVMContinue:
+			continue
+		case StartVMHandled:
+			logger.Debug(fmt.Sprintf("Plugin %s handled start of VMID %d", plugin.Name(), request.VMID))
+			return true, nil
+		default:
+			return false, fmt.Errorf("plugin %s returned invalid start VM hook result %d for VMID %d", plugin.Name(), result, request.VMID)
+		}
+	}
+	return false, nil
+}
+
+func (s *Server) runStopVMHooks(ctx context.Context, request VMHookRequest) (bool, error) {
+	for _, plugin := range s.plugins {
+		handler, ok := plugin.(StopVMHook)
+		if !ok {
+			continue
+		}
+		if !plugin.Initialized() {
+			return false, fmt.Errorf("plugin %s registered a stop VM hook but is not initialized", plugin.Name())
+		}
+
+		result, err := handler.StopVM(ctx, request)
+		if err != nil {
+			return false, fmt.Errorf("plugin %s rejected stop of VMID %d: %w", plugin.Name(), request.VMID, err)
+		}
+		switch result {
+		case StartVMContinue:
+			continue
+		case StartVMHandled:
+			logger.Debug(fmt.Sprintf("Plugin %s handled stop of VMID %d", plugin.Name(), request.VMID))
+			return true, nil
+		default:
+			return false, fmt.Errorf("plugin %s returned invalid stop VM hook result %d for VMID %d", plugin.Name(), result, request.VMID)
+		}
+	}
+	return false, nil
+}
+
+func (s *Server) runVMStatusHooks(ctx context.Context, request VMHookRequest) (VMStatus, bool, error) {
+	for _, plugin := range s.plugins {
+		handler, ok := plugin.(VMStatusHook)
+		if !ok {
+			continue
+		}
+		if !plugin.Initialized() {
+			return "", false, fmt.Errorf("plugin %s registered a VM status hook but is not initialized", plugin.Name())
+		}
+
+		result, err := handler.VMStatus(ctx, request)
+		if err != nil {
+			return "", false, fmt.Errorf("plugin %s failed status for VMID %d: %w", plugin.Name(), request.VMID, err)
+		}
+		switch result.Decision {
+		case StartVMContinue:
+			continue
+		case StartVMHandled:
+			switch result.Status {
+			case VMStatusRunning, VMStatusStopped, VMStatusStarting, VMStatusStopping:
+				return result.Status, true, nil
+			default:
+				return "", false, fmt.Errorf("plugin %s returned invalid status %q for VMID %d", plugin.Name(), result.Status, request.VMID)
+			}
+		default:
+			return "", false, fmt.Errorf("plugin %s returned invalid VM status hook result %d for VMID %d", plugin.Name(), result.Decision, request.VMID)
+		}
+	}
+	return "", false, nil
+}
+
+func (s *Server) runBeforeDeleteVMHooks(ctx context.Context, request VMHookRequest) error {
+	for _, plugin := range s.plugins {
+		handler, ok := plugin.(BeforeDeleteVMHook)
+		if !ok {
+			continue
+		}
+		if !plugin.Initialized() {
+			return fmt.Errorf("plugin %s registered a before-delete VM hook but is not initialized", plugin.Name())
+		}
+		if err := handler.BeforeDeleteVM(ctx, request); err != nil {
+			return fmt.Errorf("plugin %s rejected deletion of VMID %d: %w", plugin.Name(), request.VMID, err)
+		}
+	}
+	return nil
 }
 
 func (s *Server) InitializePlugins() {

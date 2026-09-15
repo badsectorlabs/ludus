@@ -84,7 +84,7 @@ func PowerAction(e *core.RequestEvent, action string) error {
 	}
 
 	if action == "off" {
-		errs := PowerOffVMs(context.Background(), proxmoxClient, vmids)
+		errs := server.PowerOffVMs(context.Background(), proxmoxClient, usersRange.RangeId(), vmids)
 		if len(errs) > 0 {
 			var errStrs []string
 			for _, err := range errs {
@@ -93,7 +93,7 @@ func PowerAction(e *core.RequestEvent, action string) error {
 			return JSONError(e, http.StatusInternalServerError, "Unable to power off VMs: "+strings.Join(errStrs, ", "))
 		}
 	} else {
-		errs := PowerOnVMs(context.Background(), proxmoxClient, vmids)
+		errs := server.PowerOnVMs(context.Background(), proxmoxClient, usersRange.RangeId(), vmids)
 		if len(errs) > 0 {
 			var errStrs []string
 			for _, err := range errs {

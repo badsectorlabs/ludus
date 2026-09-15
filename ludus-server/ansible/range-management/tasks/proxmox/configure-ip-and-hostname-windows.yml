@@ -67,6 +67,13 @@
 ## Windows ##
 #############
 # Static IP - Windows
+# The async process must start before Ansible can send it the IP-change script.
+# Keep an explicitly configured startup timeout; this is separate from async: 100.
+- name: Allow Windows async tasks time to start
+  ansible.builtin.set_fact:
+    ansible_win_async_startup_timeout: 90
+  when: ansible_win_async_startup_timeout is not defined
+
 - name: Modern Method - Set up static IP address (Windows 8+/Server 2012+)
   ansible.windows.win_shell: |
     $eAdapter = Get-NetIpAddress -InterfaceAlias 'Ethernet*'
@@ -77,7 +84,7 @@
   poll: 0
   ignore_errors: true
   when: windows_version_type.stdout | trim == "modern"
-  register: potential_error_old_hardware
+  register: windows_modern_ip_result
 
 - name: Legacy Method - Set up static IP address (Windows 7/Server 2008 R2 and earlier)
   ansible.windows.win_shell: |
@@ -88,7 +95,11 @@
   poll: 0
   ignore_errors: true
   when: windows_version_type.stdout | trim == "legacy"
-  register: potential_error_old_hardware
+  register: windows_legacy_ip_result
+
+- name: Preserve the result of the selected Windows IP method
+  ansible.builtin.set_fact:
+    potential_error_old_hardware: "{{ windows_modern_ip_result if windows_version_type.stdout | trim == 'modern' else windows_legacy_ip_result }}"
 
 - name: Set old_hardware fact (Windows)
   ansible.builtin.set_fact:
@@ -131,10 +142,6 @@
     msg: "Rebooting to apply fallback static IP configuration"
   when: old_hardware
 
-- name: "Change ansible's ip address for the host (Windows)"
-  ansible.builtin.set_fact:
-    ansible_host: "{{ static_ip }}"
-
 - name: Wait for the host's network interface to come back up (Windows)
   ansible.builtin.wait_for:
     host: "{{ static_ip }}"
@@ -144,6 +151,10 @@
   delegate_to: localhost
   become: false
   register: wait_result
+
+- name: "Change ansible's ip address for the host (Windows)"
+  ansible.builtin.set_fact:
+    ansible_host: "{{ static_ip }}"
 
 - name: Clean up static IP script after reboot
   ansible.windows.win_file:

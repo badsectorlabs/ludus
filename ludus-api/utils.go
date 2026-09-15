@@ -144,6 +144,31 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 		return err
 	}
 
+	// Resolve provider-owned runtime status before replacing any persisted VM
+	// rows. If a lifecycle provider is unhealthy, the previous coherent range
+	// view remains intact instead of being cleared by a partially completed
+	// refresh.
+	poweredOnByVMID := make(map[int]bool, len(allVMs))
+	for _, vmResource := range allVMs {
+		poweredOn := vmResource.Status == goproxmox.StatusVirtualMachineRunning
+		resolvedStatus, handled, statusErr := server.resolveVMStatus(ctx, VMHookRequest{
+			Source:  StartVMSourceAPI,
+			RangeID: targetRange.RangeId(),
+			VMID:    int(vmResource.VMID),
+			VMName:  vmResource.Name,
+			Node:    vmResource.Node,
+			Pool:    vmResource.Pool,
+			Status:  vmResource.Status,
+		})
+		if statusErr != nil {
+			return fmt.Errorf("resolve lifecycle status for VM %s: %w", vmResource.Name, statusErr)
+		}
+		if handled {
+			poweredOn = resolvedStatus == VMStatusRunning || resolvedStatus == VMStatusStarting
+		}
+		poweredOnByVMID[int(vmResource.VMID)] = poweredOn
+	}
+
 	// Clear the DB of any previous VMs for this range
 	logger.Debug(fmt.Sprintf("Clearing VMs for range %s with range number %d", targetRange.RangeId(), targetRange.RangeNumber()))
 	_, err = app.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").
@@ -213,7 +238,7 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 
 		thisVM.SetRange(targetRange)
 		thisVM.SetName(vmResource.Name)
-		thisVM.SetPoweredOn(vmResource.Status == goproxmox.StatusVirtualMachineRunning)
+		thisVM.SetPoweredOn(poweredOnByVMID[int(vmResource.VMID)])
 		thisVM.SetIsRouter(vmResource.Name == routerVMName)
 		thisVM.SetCpu(int(vmResource.MaxCPU))
 		thisVM.SetRam(int(vmResource.MaxMem / 1024 / 1024 / 1024)) // Convert bytes to GB

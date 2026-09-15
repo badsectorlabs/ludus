@@ -563,14 +563,39 @@ func removeUserFromProxmox(username string, realm string) error {
 // vmids: A slice of integers representing the VMIDs to be powered off.
 // returns: A slice of errors encountered during the process. If the slice is empty, all operations were successful.
 func PowerOffVMs(ctx context.Context, client *goproxmox.Client, vmids []int) []error {
-	return PowerActionVMs(ctx, client, vmids, "off")
+	return powerActionVMs(ctx, client, vmids, "off", "", nil)
 }
 
 func PowerOnVMs(ctx context.Context, client *goproxmox.Client, vmids []int) []error {
-	return PowerActionVMs(ctx, client, vmids, "on")
+	return powerActionVMs(ctx, client, vmids, "on", "", nil)
 }
 
 func PowerActionVMs(ctx context.Context, client *goproxmox.Client, vmids []int, action string) []error {
+	return powerActionVMs(ctx, client, vmids, action, "", nil)
+}
+
+// PowerOnVMs runs optional plugin start hooks before falling back to the normal
+// Proxmox start. The package-level PowerOnVMs function remains hook-free for
+// callers that do not have an authenticated range context.
+func (s *Server) PowerOnVMs(ctx context.Context, client *goproxmox.Client, rangeID string, vmids []int) []error {
+	if !s.hasStartVMHooks() {
+		return PowerOnVMs(ctx, client, vmids)
+	}
+	return powerActionVMs(ctx, client, vmids, "on", rangeID, s.runStartVMHooks)
+}
+
+// PowerOffVMs runs optional plugin stop hooks before falling back to the normal
+// Proxmox stop path.
+func (s *Server) PowerOffVMs(ctx context.Context, client *goproxmox.Client, rangeID string, vmids []int) []error {
+	if !s.hasStopVMHooks() {
+		return PowerOffVMs(ctx, client, vmids)
+	}
+	return powerActionVMs(ctx, client, vmids, "off", rangeID, s.runStopVMHooks)
+}
+
+type vmActionHookRunner func(context.Context, VMHookRequest) (bool, error)
+
+func powerActionVMs(ctx context.Context, client *goproxmox.Client, vmids []int, action string, rangeID string, runVMActionHooks vmActionHookRunner) []error {
 
 	// 1. Get a client for the Proxmox cluster.
 	cluster, err := client.Cluster(ctx)
@@ -584,11 +609,11 @@ func PowerActionVMs(ctx context.Context, client *goproxmox.Client, vmids []int, 
 		return []error{fmt.Errorf("failed to list VMs in the cluster: %w", err)}
 	}
 
-	// 3. Create a map for quick lookup of a VMID to its node name.
-	vmNodeMap := make(map[int]string)
+	// 3. Create a map for quick lookup of a VMID to its cluster metadata.
+	vmResourceMap := make(map[int]*goproxmox.ClusterResource)
 	for _, res := range resources {
-		if res.Type == "qemu" { // Assuming we are targeting QEMU VMs
-			vmNodeMap[int(res.VMID)] = res.Node
+		if res.Type == "qemu" && (runVMActionHooks == nil || res.Template != 1) {
+			vmResourceMap[int(res.VMID)] = res
 		}
 	}
 
@@ -602,11 +627,35 @@ func PowerActionVMs(ctx context.Context, client *goproxmox.Client, vmids []int, 
 		go func(id int) {
 			defer wg.Done()
 
-			// 5. Find the node for the current VMID.
-			nodeName, found := vmNodeMap[id]
+			// 5. Find the cluster metadata for the current VMID.
+			resource, found := vmResourceMap[id]
 			if !found {
 				errChan <- fmt.Errorf("VMID %d not found in the cluster", id)
 				return
+			}
+			if rangeID != "" && resource.Pool != rangeID {
+				errChan <- fmt.Errorf("VMID %d belongs to pool %q, not authenticated range %q", id, resource.Pool, rangeID)
+				return
+			}
+			nodeName := resource.Node
+
+			if (action == "on" || action == "off") && runVMActionHooks != nil {
+				handled, err := runVMActionHooks(ctx, VMHookRequest{
+					Source:  StartVMSourceAPI,
+					RangeID: rangeID,
+					VMID:    id,
+					VMName:  resource.Name,
+					Node:    resource.Node,
+					Pool:    resource.Pool,
+					Status:  resource.Status,
+				})
+				if err != nil {
+					errChan <- err
+					return
+				}
+				if handled {
+					return
+				}
 			}
 
 			// 6. Get the specific node object.
@@ -760,6 +809,12 @@ func getVMsForPool(e *core.RequestEvent, ctx context.Context, poolName string, c
 	vmsForPool := make([]goproxmox.ClusterResource, 0)
 	for _, vm := range poolData.Members {
 		if vm.Type == "qemu" && vm.Template != 1 {
+			// The pool endpoint omits this redundant field from its members.
+			// Preserve the membership established by that scoped API response
+			// when passing the resource to lifecycle ownership checks.
+			if vm.Pool == "" {
+				vm.Pool = poolName
+			}
 			vmsForPool = append(vmsForPool, vm)
 		}
 	}

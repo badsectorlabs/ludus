@@ -33,13 +33,52 @@ func DestroyVM(e *core.RequestEvent) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	err = destroyVM(ctx, proxmoxClient, vmID)
+	if server.hasBeforeDeleteVMHooks() {
+		usersRange, rangeErr := GetRange(e)
+		if rangeErr != nil {
+			return rangeErr
+		}
+		err = server.DestroyVM(ctx, proxmoxClient, usersRange.RangeId(), vmID)
+	} else {
+		// Preserve deletion by VMID using the caller's Proxmox permissions.
+		err = destroyVM(ctx, proxmoxClient, vmID)
+	}
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, "Unable to destroy VM: "+err.Error())
 	}
 
 	logger.Debug(fmt.Sprintf("VM %d destroyed successfully", vmID))
 	return JSONResult(e, http.StatusOK, fmt.Sprintf("VM %d destroyed successfully", vmID))
+}
+
+// DestroyVM runs plugin cleanup hooks against verified cluster metadata before
+// performing the ordinary Proxmox stop-and-delete operation.
+func (s *Server) DestroyVM(ctx context.Context, proxmoxClient *goproxmox.Client, rangeID string, vmID int) error {
+	if !s.hasBeforeDeleteVMHooks() {
+		return destroyVM(ctx, proxmoxClient, vmID)
+	}
+	resource, err := getVMResource(ctx, proxmoxClient, vmID)
+	if err != nil {
+		return err
+	}
+	if resource.Type != "qemu" || resource.Template == 1 {
+		return fmt.Errorf("VMID %d is not a QEMU range VM", vmID)
+	}
+	if resource.Pool != rangeID {
+		return fmt.Errorf("VMID %d belongs to pool %q, not range %q", vmID, resource.Pool, rangeID)
+	}
+	if err := s.runBeforeDeleteVMHooks(ctx, VMHookRequest{
+		Source:  StartVMSourceAPI,
+		RangeID: rangeID,
+		VMID:    vmID,
+		VMName:  resource.Name,
+		Node:    resource.Node,
+		Pool:    resource.Pool,
+		Status:  resource.Status,
+	}); err != nil {
+		return err
+	}
+	return destroyVM(ctx, proxmoxClient, vmID)
 }
 
 func destroyVM(ctx context.Context, proxmoxClient *goproxmox.Client, vmID int) error {

@@ -115,19 +115,9 @@
   register: network_change
 
 - name: Start the VM
-  community.general.proxmox_kvm:
-    api_user: "{{ api_user }}"
-    api_token_id: "{{ proxmox_token_id }}"
-    api_token_secret: "{{ proxmox_token_secret }}"
-    api_host: "{{ api_host }}"
-    node: "{{ effective_target_node }}"
-    vmid: "{{ vm_id }}"
-    state: started
+  ansible.builtin.include_tasks: start-vm-with-hooks.yml
   # This is required or ansible will attempt to start a VM that doesn't exist
   when: clone_vm is successful
-  # But sometimes it fails anyway?
-  retries: 3
-  delay: 5
 
 - name: Wait for VM to be running, and try to start it if not running after 20 seconds
   block:
@@ -146,14 +136,12 @@
       delay: 5
   rescue:
     - name: Start the VM
-      community.general.proxmox_kvm:
-        api_user: "{{ api_user }}"
-        api_token_id: "{{ proxmox_token_id }}"
-        api_token_secret: "{{ proxmox_token_secret }}"
-        api_host: "{{ api_host }}"
-        node: "{{ effective_target_node }}"
-        vmid: "{{ vm_id }}"
-        state: started
+      ansible.builtin.include_tasks: start-vm-with-hooks.yml
+      vars:
+        ludus_vm_start_retries: 0
+
+- name: Discover an optional plugin bootstrap address
+  ansible.builtin.include_tasks: discover-vm-address-with-hooks.yml
 
 # The 'until' is a way to fail if the VM has a self-assigned 169.254.0.0/16 or a Docker 172.17.0.0/16 IP
 # Since all VMs are created with DHCP, we need to check that the last octet of the IP address is >= 100 if it starts with 10
@@ -190,12 +178,12 @@
     )
   retries: 30
   delay: 5
-  when: clone_vm is changed and not unmanaged
+  when: clone_vm is changed and not unmanaged and not ludus_vm_address_hook_handled
 
 - name: Save off the IP for use with checking on the WinRM/SSH connectivity
   ansible.builtin.set_fact:
     last_deployed_ip: "{{ (nodecheck.stdout | from_json).ansible_host | default('') | ansible.utils.ipaddr }}"
-  when: clone_vm is changed and not unmanaged
+  when: clone_vm is changed and not unmanaged and not ludus_vm_address_hook_handled
 
 # The VM interface update changes the IP of the VM with DHCP, without this the inventory has the old IP still
 - name: Refresh inventory if needed
