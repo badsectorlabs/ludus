@@ -334,6 +334,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		`PKR_VAR_proxmox_password="" ` +
 		`PKR_VAR_proxmox_username='{{ .ProxmoxTokenID }}' ` +
 		`PKR_VAR_airgapped_install={{ .AirgappedInstall }} ` +
+		`PKR_VAR_packer_http_bind_address='{{.PackerHTTPBindAddress}}' ` +
 		`CHECKPOINT_DISABLE=1 PACKER_LOG={{.PackerVerbose}} ` +
 		`PACKER_LOG_PATH='{{.PackerLogFile}}' ` +
 		`TMPDIR='{{.UsersPackerDir}}/tmp' ` +
@@ -347,7 +348,6 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		`-var 'iso_storage_pool={{.ProxmoxISOStoragePool}}' ` +
 		`-var 'ansible_home={{.UsersAnsibleDir}}' ` +
 		`-var 'ludus_nat_interface={{.LudusNATInterface}}' ` +
-		`-var 'packer_http_bind_address={{.PackerHTTPBindAddress}}' ` +
 		`{{.PackerFile}}`
 
 	packerVerbose := "1"

@@ -221,7 +221,7 @@ stages:
   # Validate that WIN10 cannot reach the internet
   - qm_guest_exec_retry "$WIN11VMID" ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
   # Sometimes the DNS lookup is cached from the test above, so test for a DNS failure or a connect failure
-  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://google.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|Timeout was reached'
+  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://google.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|[Tt]imeout'
   - ludus testing allow -i 8.8.8.8
   - ludus testing status
   # Validate that 8.8.8.8 is in the allowedIPs list
@@ -234,15 +234,17 @@ stages:
   - ludus testing status
   # Validate that google.com is in the allowedDomains list
   - 'ludus testing status --json | jq -e ''.allowedDomains | any(startswith("google.com"))'''
-  # This sometimes takes a few seconds - try 3 times 5 seconds apart
-  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
-  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://example.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|Timeout was reached'
+  # Use the IP pinned by the allow command so an upstream DNS cache cannot
+  # return a different Google address during the assertion.
+  - export ALLOWED_GOOGLE_IP="$(ludus testing status --json | jq -r '.allowedDomains[] | select(startswith("google.com ("))' | cut -d '(' -f2 | tr -d ')')"
+  - qm_guest_exec_retry "$WIN11VMID" curl --resolve "google.com:443:${ALLOWED_GOOGLE_IP}" https://google.com/ | grep 'HTML'
+  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://example.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|[Tt]imeout'
   # Deny google.com and 8.8.8.8 and check that they are not reachable
   - ludus testing deny -d google.com
   - ludus testing deny -i 8.8.8.8
   # Validate that google.com and 8.8.8.8 are no longer in the allowed lists
   - 'ludus testing status --json | jq -e ''(.allowedDomains | any(startswith("google.com")) | not) and (.allowedIPs | index("8.8.8.8") | not)'''
-  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://google.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|Timeout was reached'
+  - qm_guest_exec_retry "$WIN11VMID" curl --resolve "google.com:443:${ALLOWED_GOOGLE_IP}" --connect-timeout 5 --max-time 10 https://google.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|[Tt]imeout'
   - qm_guest_exec_retry "$WIN11VMID" ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
   - ludus testing stop
   - ludus testing status
@@ -290,8 +292,8 @@ stages:
 
 .template-tests: &template-tests # `templates add` CLI tests. The bundled template library moved to the ludus-source-bsl source; a throwaway fixture exercises add/force/ownership, and an embedded (server-included) template covers the build smoke-test.
   - ludus templates list --json | jq -r '.[] | select(.name == "ci-add-test-template") | .name' | grep -q 'ci-add-test-template' && ludus templates rm -n "ci-add-test-template" || echo "No ci-add-test template on the server"
-  # Remove the debian10 template if it exists (retry)
-  - ludus templates list --json | jq -r '.[] | select(.name == "debian-10-x64-server-template") | .name' | grep -q 'debian-10-x64-server-template' && ludus templates rm -n "debian-10-x64-server-template" || echo "No debian10 on the server"
+  # Remove the Ubuntu template if it exists (retry)
+  - ludus templates list --json | jq -r '.[] | select(.name == "ubuntu-22.04-x64-server-template") | .name' | grep -q 'ubuntu-22.04-x64-server-template' && ludus templates rm -n "ubuntu-22.04-x64-server-template" || echo "No Ubuntu 22.04 template on the server"
   - ludus templates list
   - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test
   - ludus templates list
@@ -306,10 +308,10 @@ stages:
   - set -o pipefail
   - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test --force
   - ludus templates rm -n "ci-add-test-template"
-  - ludus source add https://github.com/badsectorlabs/ludus-source-bsl --templates debian-10-x64-server-template
-  - ludus templates build -n debian-10-x64-server-template
+  - ludus source add https://github.com/badsectorlabs/ludus-source-bsl --templates ubuntu-22.04-x64-server-template
+  - ludus templates build -n ubuntu-22.04-x64-server-template
   - ludus templates status
-  - ludus templates status | grep debian-10-x64-server-template
+  - ludus templates status | grep ubuntu-22.04-x64-server-template
   - ludus templates status | grep continuous-integration-
   # Wait for the template to build
   - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
