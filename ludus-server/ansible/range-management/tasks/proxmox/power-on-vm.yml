@@ -1,7 +1,3 @@
-- name: Reset VM lifecycle hook result
-  ansible.builtin.set_fact:
-    ludus_vm_start_hook_handled: false
-
 - name: Offer VM start to Ludus lifecycle hooks
   ansible.builtin.uri:
     url: http://localhost/v1/start
@@ -19,11 +15,7 @@
   changed_when: ludus_vm_start_hook.json.handled | default(false) | bool
   when: (ludus_vm_hooks | default({})).get(vm_name | default(inventory_hostname), {}).get('start', false) | bool
 
-- name: Record whether a lifecycle hook handled VM start
-  ansible.builtin.set_fact:
-    ludus_vm_start_hook_handled: "{{ ludus_vm_start_hook.json.handled | default(false) | bool }}"
-
-- name: Power on the VM through Proxmox
+- name: Power on the VM
   community.general.proxmox_kvm:
     api_user: "{{ api_user }}"
     api_token_id: "{{ proxmox_token_id }}"
@@ -32,4 +24,4 @@
     name: "{{ vm_name | default((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first)) }}"
     state: started
     timeout: 300
-  when: not ludus_vm_start_hook_handled
+  when: not (ludus_vm_start_hook.json.handled | default(false) | bool)

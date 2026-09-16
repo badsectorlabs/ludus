@@ -150,9 +150,15 @@ func TestVMLifecycleProxmoxFallbackCompatibility(t *testing.T) {
 				if gotErr != baselineErr {
 					t.Fatalf("changed result: %s; legacy: %s", gotErr, baselineErr)
 				}
-				// Delete hooks require an extra verified metadata lookup; absent hooks must not.
+				// The package-level and hook-aware paths share implementation;
+				// this compares their fallback behavior, not an independent old binary.
+				// Explicitly verify the extra read-only lookup before comparing the rest.
 				if s.hasBeforeDeleteVMHooks() && action == "delete" {
-					paths = paths[2:]
+					lookup := []string{"GET /cluster/status", "GET /cluster/resources?type=vm"}
+					if len(paths) < len(lookup) || !reflect.DeepEqual(paths[:len(lookup)], lookup) {
+						t.Fatalf("unexpected metadata lookup: %v", paths)
+					}
+					paths = paths[len(lookup):]
 				}
 				if !reflect.DeepEqual(paths, baselinePaths) {
 					t.Fatalf("changed requests: %v; legacy: %v", paths, baselinePaths)
@@ -178,22 +184,22 @@ func TestVMLifecycleProxmoxFallbackCompatibility(t *testing.T) {
 
 func TestPoolResourceMembershipReachesLifecycleHooks(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/pools/" || r.URL.Query().Get("poolid") != "HOOKLAB" || r.URL.Query().Get("type") != "qemu" {
+		if r.URL.Path != "/pools/" || r.URL.Query().Get("poolid") != "test-range" || r.URL.Query().Get("type") != "qemu" {
 			t.Errorf("unexpected request: %s", r.URL)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"data":[{"poolid":"HOOKLAB","members":[{"vmid":114,"name":"HOOKLAB-windows","type":"qemu","status":"running"},{"vmid":115,"name":"template","type":"qemu","template":1},{"vmid":116,"name":"container","type":"lxc"}]}]}`)
+		fmt.Fprint(w, `{"data":[{"poolid":"test-range","members":[{"vmid":201,"name":"test-range-windows","type":"qemu","status":"running"},{"vmid":202,"name":"template","type":"qemu","template":1},{"vmid":203,"name":"container","type":"lxc"}]}]}`)
 	}))
 	defer api.Close()
 	event := &core.RequestEvent{}
-	resources, err := getVMsForPool(event, context.Background(), "HOOKLAB", goproxmox.NewClient(api.URL))
+	resources, err := getVMsForPool(event, context.Background(), "test-range", goproxmox.NewClient(api.URL))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resources) != 1 || resources[0].Pool != "HOOKLAB" || int(resources[0].VMID) != 114 {
+	if len(resources) != 1 || resources[0].Pool != "test-range" || int(resources[0].VMID) != 201 {
 		t.Fatalf("pool membership was lost: %+v", resources)
 	}
-	cached, err := getVMsForPool(event, context.Background(), "HOOKLAB", nil)
+	cached, err := getVMsForPool(event, context.Background(), "test-range", nil)
 	if err != nil || !reflect.DeepEqual(cached, resources) {
 		t.Fatalf("cached membership: %+v, %v", cached, err)
 	}

@@ -228,6 +228,35 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 
 }
 
+// Reuse the existing authenticated admin proxy after VM-specific selection.
+func proxyToAdmin(e *core.RequestEvent) error {
+	// First clear all the headers to prevent sending 2x of each header
+	for k := range e.Response.Header() {
+		e.Response.Header().Del(k)
+	}
+	// Strip PocketBase's RereadableReadCloser before proxying.
+	// PocketBase wraps every request body in a RereadableReadCloser
+	// (see pocketbase/tools/router/router.go:141) that buffers bytes
+	// as they're read and rewinds on EOF. When Go's HTTP transport
+	// writes the proxied request, it reads ContentLength bytes then
+	// checks for leftovers — triggering the rewind and reading the
+	// buffered copy again, producing ContentLength=N with Body length 2N.
+	// See: https://github.com/pocketbase/pocketbase/blob/master/tools/router/rereadable_read_closer.go
+	if e.Request.Body != nil {
+		bodyBytes, err := io.ReadAll(e.Request.Body)
+		if err == nil {
+			e.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			e.Request.ContentLength = int64(len(bodyBytes))
+		}
+	}
+	// Reverse proxy to the admin API
+	adminProxy.ServeHTTP(e.Response, e.Request)
+
+	// Abort the middleware chain to prevent the user-facing server
+	// from also handling the request and writing a second response.
+	return nil
+}
+
 // auth is only bypassed when all three conditions are met: exact path match, root process, localhost origin. Every other request on the admin API still requires authentication.
 func isInternalProvisionRequest(e *core.RequestEvent) bool {
 	if e.Request.URL.Path != APIBasePath+"/user/provision-oauth2" || os.Geteuid() != 0 {
@@ -264,33 +293,4 @@ func restrictPocketBaseEndpoints(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "Superadmin access is disabled. Enable it by setting the LUDUS_ENABLE_SUPERADMIN environment variable to 'ill-be-careful'.")
 	}
 	return e.Next()
-}
-
-// Reuse the existing authenticated admin proxy after VM-specific selection.
-func proxyToAdmin(e *core.RequestEvent) error {
-	// First clear all the headers to prevent sending 2x of each header
-	for k := range e.Response.Header() {
-		e.Response.Header().Del(k)
-	}
-	// Strip PocketBase's RereadableReadCloser before proxying.
-	// PocketBase wraps every request body in a RereadableReadCloser
-	// (see pocketbase/tools/router/router.go:141) that buffers bytes
-	// as they're read and rewinds on EOF. When Go's HTTP transport
-	// writes the proxied request, it reads ContentLength bytes then
-	// checks for leftovers — triggering the rewind and reading the
-	// buffered copy again, producing ContentLength=N with Body length 2N.
-	// See: https://github.com/pocketbase/pocketbase/blob/master/tools/router/rereadable_read_closer.go
-	if e.Request.Body != nil {
-		bodyBytes, err := io.ReadAll(e.Request.Body)
-		if err == nil {
-			e.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-			e.Request.ContentLength = int64(len(bodyBytes))
-		}
-	}
-	// Reverse proxy to the admin API
-	adminProxy.ServeHTTP(e.Response, e.Request)
-
-	// Abort the middleware chain to prevent the user-facing server
-	// from also handling the request and writing a second response.
-	return nil
 }

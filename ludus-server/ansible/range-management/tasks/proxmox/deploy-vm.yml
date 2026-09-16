@@ -114,10 +114,24 @@
   when: clone_vm is changed
   register: network_change
 
-- name: Start the VM
-  ansible.builtin.include_tasks: start-vm-with-hooks.yml
-  # This is required or ansible will attempt to start a VM that doesn't exist
+- name: Run optional VM start hooks
+  ansible.builtin.include_tasks: run-vm-start-hook.yml
   when: clone_vm is successful
+
+- name: Start the VM
+  community.general.proxmox_kvm:
+    api_user: "{{ api_user }}"
+    api_token_id: "{{ proxmox_token_id }}"
+    api_token_secret: "{{ proxmox_token_secret }}"
+    api_host: "{{ api_host }}"
+    node: "{{ effective_target_node }}"
+    vmid: "{{ vm_id }}"
+    state: started
+  # This is required or ansible will attempt to start a VM that doesn't exist
+  when: clone_vm is successful and not (ludus_vm_start_hook.json.handled | default(false) | bool)
+  # But sometimes it fails anyway?
+  retries: 3
+  delay: 5
 
 - name: Wait for VM to be running, and try to start it if not running after 20 seconds
   block:
@@ -135,10 +149,19 @@
       retries: 2
       delay: 5
   rescue:
+    - name: Run optional VM start hooks
+      ansible.builtin.include_tasks: run-vm-start-hook.yml
+
     - name: Start the VM
-      ansible.builtin.include_tasks: start-vm-with-hooks.yml
-      vars:
-        ludus_vm_start_retries: 0
+      community.general.proxmox_kvm:
+        api_user: "{{ api_user }}"
+        api_token_id: "{{ proxmox_token_id }}"
+        api_token_secret: "{{ proxmox_token_secret }}"
+        api_host: "{{ api_host }}"
+        node: "{{ effective_target_node }}"
+        vmid: "{{ vm_id }}"
+        state: started
+      when: not (ludus_vm_start_hook.json.handled | default(false) | bool)
 
 - name: Discover an optional plugin bootstrap address
   ansible.builtin.include_tasks: discover-vm-address-with-hooks.yml
