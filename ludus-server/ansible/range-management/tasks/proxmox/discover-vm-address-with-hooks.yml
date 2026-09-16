@@ -1,0 +1,47 @@
+---
+- name: Reset VM address discovery result
+  ansible.builtin.set_fact:
+    ludus_vm_address_hook_handled: false
+
+- name: Discover bootstrap address through optional VM hooks
+  ansible.builtin.uri:
+    url: http://localhost/v1/address
+    unix_socket: /run/ludus/vm-hooks.sock
+    method: POST
+    body_format: json
+    body:
+      rangeId: "{{ vm_pool | default(range_id) }}"
+      vmId: "{{ vm_id }}"
+      vmName: "{{ vm_name }}"
+      firstBoot: true
+    return_content: true
+    status_code: 200
+    timeout: 45
+  delegate_to: localhost
+  register: ludus_vm_address_hook
+  changed_when: false
+  until: >-
+    not (ludus_vm_address_hook.json.handled | default(false) | bool)
+    or (ludus_vm_address_hook.json.ready | default(false) | bool)
+  retries: 60
+  delay: 5
+  when:
+    - clone_vm is changed
+    - not unmanaged
+    - (ludus_vm_hooks | default({})).get(vm_name, {}).get('address', false) | bool
+
+- name: Record bootstrap address returned by VM hooks
+  ansible.builtin.set_fact:
+    ludus_vm_address_hook_handled: true
+    last_deployed_ip: "{{ ludus_vm_address_hook.json.address }}"
+  when:
+    - ludus_vm_address_hook is not skipped
+    - ludus_vm_address_hook.json.handled | default(false) | bool
+    - ludus_vm_address_hook.json.ready | default(false) | bool
+
+- name: Use bootstrap address until normal provisioning sets the static IP
+  ansible.builtin.set_fact:
+    ansible_host: "{{ last_deployed_ip }}"
+  delegate_to: "{{ vm_name }}"
+  delegate_facts: true
+  when: ludus_vm_address_hook_handled

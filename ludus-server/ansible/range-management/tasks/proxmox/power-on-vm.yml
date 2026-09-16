@@ -1,3 +1,20 @@
+- name: Offer VM start to Ludus lifecycle hooks
+  ansible.builtin.uri:
+    url: http://localhost/v1/start
+    unix_socket: /run/ludus/vm-hooks.sock
+    method: POST
+    body_format: json
+    body:
+      rangeId: "{{ range_id }}"
+      vmName: "{{ vm_name | default((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first)) }}"
+    return_content: true
+    status_code: 200
+    timeout: 1500
+  delegate_to: localhost
+  register: ludus_vm_start_hook
+  changed_when: ludus_vm_start_hook.json.handled | default(false) | bool
+  when: (ludus_vm_hooks | default({})).get(vm_name | default(inventory_hostname), {}).get('start', false) | bool
+
 - name: Power on the VM
   community.general.proxmox_kvm:
     api_user: "{{ api_user }}"
@@ -7,3 +24,4 @@
     name: "{{ vm_name | default((ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first)) }}"
     state: started
     timeout: 300
+  when: not (ludus_vm_start_hook.json.handled | default(false) | bool)

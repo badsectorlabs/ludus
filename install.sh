@@ -35,7 +35,7 @@ PROJECT_ID=54052321
 PREFIX="${PREFIX:-}"
 AIRGAPPED_INSTALL=0
 AIRGAPPED_ISO_FILENAMES=(
-  debian-13.6.0-amd64-netinst.iso
+  debian-13.7.0-amd64-netinst.iso
   debian-11.7.0-amd64-netinst.iso
   debian-12.14.0-amd64-netinst.iso
   kali-linux-2026.1-installer-netinst-amd64.iso

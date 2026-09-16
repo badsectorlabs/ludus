@@ -1,6 +1,7 @@
 package pluginrpc
 
 import (
+	"fmt"
 	"net/rpc"
 	"time"
 
@@ -28,6 +29,75 @@ type Metadata struct {
 	Name    string
 	Version string
 	Routes  []Route
+	VMHooks VMHookCapabilities
+}
+
+// VMHookCapabilities advertises optional VM lifecycle operations. All fields
+// default to false so plugins built before lifecycle hooks continue to load and
+// are never called for these operations.
+type VMHookCapabilities struct {
+	Select       bool
+	Start        bool
+	Stop         bool
+	Status       bool
+	BeforeDelete bool
+	Address      bool
+}
+
+type VMHookOperation string
+
+const (
+	VMHookSelect       VMHookOperation = "select"
+	VMHookStart        VMHookOperation = "start"
+	VMHookStop         VMHookOperation = "stop"
+	VMHookStatus       VMHookOperation = "status"
+	VMHookBeforeDelete VMHookOperation = "before-delete"
+	VMHookAddress      VMHookOperation = "address"
+)
+
+type VMHookRequest struct {
+	Operation VMHookOperation
+	Source    string
+	RangeID   string
+	VMID      int
+	VMName    string
+	Node      string
+	Pool      string
+	Status    string
+}
+
+type VMHookDecision uint8
+
+const (
+	VMHookContinue VMHookDecision = iota
+	VMHookHandled
+)
+
+type VMStatus string
+
+const (
+	VMStatusRunning  VMStatus = "running"
+	VMStatusStopped  VMStatus = "stopped"
+	VMStatusStarting VMStatus = "starting"
+	VMStatusStopping VMStatus = "stopping"
+)
+
+type VMHookResponse struct {
+	Decision VMHookDecision
+	Selected bool
+	Status   VMStatus
+	Ready    bool
+	Address  string
+}
+
+// VMHookImplementation is optional. Plugins only need to implement it when
+// their metadata advertises at least one VM hook capability.
+type VMHookImplementation interface {
+	VMHook(VMHookRequest) (VMHookResponse, error)
+}
+
+type VMHookClient interface {
+	VMHook(VMHookRequest) (VMHookResponse, error)
 }
 
 type ServerState struct {
@@ -159,6 +229,12 @@ func (c *RPCClient) RunJob(name string) (JobResponse, error) {
 	return response, err
 }
 
+func (c *RPCClient) VMHook(request VMHookRequest) (VMHookResponse, error) {
+	var response VMHookResponse
+	err := c.client.Call("Plugin.VMHook", request, &response)
+	return response, err
+}
+
 func (c *RPCClient) Shutdown() error {
 	return c.client.Call("Plugin.Shutdown", new(struct{}), new(struct{}))
 }
@@ -188,6 +264,16 @@ func (s *RPCServer) Handle(request Request, response *Response) error {
 func (s *RPCServer) RunJob(name string, response *JobResponse) error {
 	var err error
 	*response, err = s.Impl.RunJob(name)
+	return err
+}
+
+func (s *RPCServer) VMHook(request VMHookRequest, response *VMHookResponse) error {
+	implementation, ok := s.Impl.(VMHookImplementation)
+	if !ok {
+		return fmt.Errorf("plugin does not implement VM lifecycle hooks")
+	}
+	var err error
+	*response, err = implementation.VMHook(request)
 	return err
 }
 

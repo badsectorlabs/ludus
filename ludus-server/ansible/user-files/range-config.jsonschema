@@ -277,7 +277,7 @@
                     "not": {
                         "anyOf": [
                             { "required": ["linux"] },
-                            { "required": ["macOS"] }
+                            { "required": ["macos"] }
                         ]
                     }
                 },
@@ -286,12 +286,12 @@
                     "not": {
                         "anyOf": [
                             { "required": ["windows"] },
-                            { "required": ["macOS"] }
+                            { "required": ["macos"] }
                         ]
                     }
                 },
                 {
-                    "required": ["macOS"],
+                    "required": ["macos"],
                     "not": {
                         "anyOf": [
                             { "required": ["windows"] },
@@ -381,7 +381,7 @@
                         }
                     ]
                 },
-                "macOS": {
+                "macos": {
                     "type": "boolean",
                     "description": "Set this to true for macOS VMs - leave undefined or false for Windows/Linux VMs"
                 },

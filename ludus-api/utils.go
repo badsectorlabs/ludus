@@ -142,6 +142,38 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 		return err
 	}
 
+	poweredOnByVMID := make(map[int]bool, len(allVMs))
+	for _, vmResource := range allVMs {
+		poweredOnByVMID[int(vmResource.VMID)] = vmResource.Status == goproxmox.StatusVirtualMachineRunning
+	}
+	if server.hasVMStatusHooks() {
+		// Resolve provider-owned runtime status before replacing any persisted
+		// VM rows. A failed provider leaves the previous range view intact.
+		requests := make([]VMHookRequest, 0, len(allVMs))
+		for _, vmResource := range allVMs {
+			requests = append(requests, VMHookRequest{
+				Source: StartVMSourceAPI, RangeID: targetRange.RangeId(), VMID: int(vmResource.VMID),
+				VMName: vmResource.Name, Node: vmResource.Node, Pool: vmResource.Pool, Status: vmResource.Status,
+			})
+		}
+		// Provider work gets its own budget without consuming the ordinary
+		// Proxmox guest-agent discovery timeout below.
+		deadline, _ := ctx.Deadline()
+		remainingProxmoxTime := time.Until(deadline)
+		cancel()
+		hookContext, cancelHooks := context.WithTimeout(context.Background(), 60*time.Second)
+		statuses, statusErr := server.resolveVMStatuses(hookContext, requests)
+		cancelHooks()
+		if statusErr != nil {
+			return fmt.Errorf("resolve lifecycle status: %w", statusErr)
+		}
+		for vmID, status := range statuses {
+			poweredOnByVMID[vmID] = status == VMStatusRunning || status == VMStatusStarting
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), remainingProxmoxTime)
+		defer cancel()
+	}
+
 	// Clear the DB of any previous VMs for this range
 	logger.Debug(fmt.Sprintf("Clearing VMs for range %s with range number %d", targetRange.RangeId(), targetRange.RangeNumber()))
 	_, err = app.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").
@@ -217,7 +249,7 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 
 		rawVM.Set("range", targetRange.Id)
 		rawVM.Set("name", vmName)
-		rawVM.Set("poweredOn", vmResource.Status == goproxmox.StatusVirtualMachineRunning)
+		rawVM.Set("poweredOn", poweredOnByVMID[int(vmResource.VMID)])
 		rawVM.Set("ip", vmIP)
 		rawVM.Set("isRouter", vmName == routerVMName)
 		rawVM.Set("cpu", int(vmResource.MaxCPU))

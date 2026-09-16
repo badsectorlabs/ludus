@@ -138,7 +138,9 @@ func TestRPCPluginInteroperability(t *testing.T) {
 	}))
 	defer apiServer.Close()
 	ConfigMu.Lock()
-	ServerConfiguration.ProxmoxURL = apiServer.URL
+	ServerConfiguration.ProxmoxEndpoints = []string{apiServer.URL}
+	ServerConfiguration.ProxmoxTokenID = "root@pam!rpc"
+	ServerConfiguration.ProxmoxTokenSecret = "rpc-proxmox-token"
 	ConfigMu.Unlock()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))

@@ -66,6 +66,50 @@ A protocol mismatch produces a plugin loading error. This is separate from Go
 package compatibility: changing an unrelated function in `ludus-api` no longer
 prevents an otherwise compatible plugin from loading.
 
+## Optional VM lifecycle hooks
+
+A plugin advertises lifecycle support through `Metadata.VMHooks`. Every field
+defaults to false. Ludus skips lifecycle RPC entirely for plugins that omit the
+metadata, which preserves the normal Proxmox start, stop, status, address, and
+delete paths.
+
+Plugins can advertise `Start`, `Stop`, `Status`, `BeforeDelete`, and `Address`.
+Set `Select` when only some VMs belong to the plugin. Ludus first sends a
+`VMHookSelect` request for each candidate VM and dispatches the operation only
+when the plugin returns `Selected: true`. The selector can use the range ID and
+VM name to read the range's arbitrary YAML during deployment planning, when a
+VMID may not exist yet. Ludus verifies the VMID, name, type, and pool against
+Proxmox again before privileged runtime operations.
+
+Lifecycle support is an optional interface on the plugin implementation:
+
+```go
+func (p *Plugin) Metadata() (pluginrpc.Metadata, error) {
+	return pluginrpc.Metadata{
+		Name: "example",
+		VMHooks: pluginrpc.VMHookCapabilities{
+			Select: true,
+			Start:  true,
+		},
+	}, nil
+}
+
+func (p *Plugin) VMHook(request pluginrpc.VMHookRequest) (pluginrpc.VMHookResponse, error) {
+	switch request.Operation {
+	case pluginrpc.VMHookSelect:
+		return pluginrpc.VMHookResponse{Selected: pluginOwnsVM(request)}, nil
+	case pluginrpc.VMHookStart:
+		return pluginrpc.VMHookResponse{Decision: pluginrpc.VMHookHandled}, startVM(request)
+	default:
+		return pluginrpc.VMHookResponse{Decision: pluginrpc.VMHookContinue}, nil
+	}
+}
+```
+
+Plugins without lifecycle metadata do not implement `VMHook`. Adding the
+optional fields therefore does not require rebuilding or changing existing RPC
+plugins.
+
 ## Artifact names and installation
 
 Ludus uses these executable names:

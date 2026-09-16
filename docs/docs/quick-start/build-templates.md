@@ -72,7 +72,7 @@ To check the status of the template build, you can run `templates status`, `temp
 #terminal-command-ludus
 ludus templates logs -f
 2026/09/01 12:58:17 ui: ==> proxmox-iso.debian13: Retrieving ISO
-2026/09/01 12:58:17 ui: ==> proxmox-iso.debian13: Trying https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.6.0-amd64-netinst.iso
+2026/09/01 12:58:17 ui: ==> proxmox-iso.debian13: Trying https://cdimage.debian.org/debian-cd/13.7.0/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso
 2026/09/01 12:58:27 ui: ==> proxmox-iso.debian13: Creating VM
 ...
 ```

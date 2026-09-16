@@ -182,6 +182,27 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	// Merge userVars with any extraVars provided
 	maps.Copy(userVars, extraVars)
 
+	if s.hasStartVMHooks() || s.hasVMAddressHooks() {
+		// Select hooks from plugin configuration before deployment,
+		// independently of whether the privileged service is reachable.
+		vmNames := make([]string, 0, len(vmTargetNodes)+1)
+		for name := range vmTargetNodes {
+			if name != "" {
+				vmNames = append(vmNames, name)
+			}
+		}
+		if routerName, routerErr := GetRouterVMName(usersRange); routerErr == nil {
+			vmNames = append(vmNames, routerName)
+		}
+		hookContext, cancelHookSelection := context.WithTimeout(context.Background(), 10*time.Second)
+		hooks, hookErr := s.deploymentVMHooks(hookContext, usersRange.RangeId(), vmNames)
+		cancelHookSelection()
+		if hookErr != nil {
+			return "", hookErr
+		}
+		userVars["ludus_vm_hooks"] = hooks
+	}
+
 	// proxmox_token_secret must not appear on argv (visible in ps).
 	// Move it to a 0600 temp JSON file passed via --extra-vars @file.
 	secretFilePath, err := writeSecretExtraVarsFile(userVars)
