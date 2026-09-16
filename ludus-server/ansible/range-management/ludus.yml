@@ -323,7 +323,7 @@
         label: "{{ item.vm_name }}"
       when:
         - item.unmanaged is not defined or (item.unmanaged is defined and not item.unmanaged)
-        - (item.linux is defined and item.linux) or (item.macos is defined and item.macos)
+        - (item.linux is defined and item.linux != false) or (item.macos is defined and item.macos != false)
 
 - name: Configure IP and Hostname for all VMs
   tags: [assign-ip]
