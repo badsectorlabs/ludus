@@ -995,6 +995,7 @@ range deploy-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
+        - ludus-api/ansible.go
         - ludus-client/cmd/range.go
         - ludus-server/ansible/range-management/**/*
         - ludus-server/ansible/user-management/**/*
@@ -1010,6 +1011,8 @@ range deploy-admin:
       - job_execution_timeout
   script:
     - *ci-setup-admin
+    # A partial defaults dictionary must inherit the server's domain credentials.
+    - ludus range config set -f /opt/ludus/ci/configs/simple-domain-partial-defaults.yml
     - ludus range config get
     - ludus range deploy
     - *wait-for-range-success
@@ -1019,6 +1022,11 @@ range deploy-admin:
     - export valid_last_octets=(1 11 21 254)
     - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
+    - |
+      DC_VMID=$(ludus range list --json | jq -er '.VMs[] | select(.name | endswith("-ad-dc-win2022-server-x64-1")) | .proxmoxID')
+      qm_guest_exec_retry "$DC_VMID" powershell.exe -NoProfile -NonInteractive -Command \
+        '$ErrorActionPreference = "Stop"; @{ username = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon").DefaultUserName; timezone = (Get-TimeZone).Id } | ConvertTo-Json -Compress' \
+        | jq -e '.exitcode == 0 and (."out-data" | fromjson | .username == "domainadmin" and .timezone == "W. Europe Standard Time")'
 
 #######################
 # POST-DEPLOY - ADMIN #

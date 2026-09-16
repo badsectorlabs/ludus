@@ -25,10 +25,9 @@ import (
 	yaml "sigs.k8s.io/yaml"
 )
 
-func getMergedDefaults(rangeConfigPath string) map[string]interface{} {
+func getMergedDefaults(serverConfigPath, rangeConfigPath string) map[string]interface{} {
 	mergedDefaults := map[string]interface{}{}
 
-	serverConfigPath := fmt.Sprintf("%s/ansible/server-config.yml", ludusInstallPath)
 	serverConfigBytes, err := os.ReadFile(serverConfigPath)
 	if err != nil {
 		logger.Debug(fmt.Sprintf("Failed to read server config for defaults merge: %v", err))
@@ -66,6 +65,24 @@ func getMergedDefaults(rangeConfigPath string) map[string]interface{} {
 	}
 
 	return mergedDefaults
+}
+
+func ansibleConfigExtraVars(installPath, rangeConfigPath string) ([]string, error) {
+	serverConfigPath := fmt.Sprintf("%s/ansible/server-config.yml", installPath)
+	configs := []string{"@" + installPath + "/config.yml", "@" + serverConfigPath}
+	if rangeConfigPath != "" {
+		configs = append(configs, "@"+rangeConfigPath)
+	}
+
+	defaults, err := json.Marshal(map[string]interface{}{
+		"defaults": getMergedDefaults(serverConfigPath, rangeConfigPath),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encoding merged defaults: %w", err)
+	}
+	// go-ansible emits ExtraVars before ExtraVarsFile. Put this defaults-only
+	// JSON after the configs so a partial range dictionary cannot replace it.
+	return append(configs, string(defaults)), nil
 }
 
 // Runs an ansible playbook with an arbitrary amount of extraVars
@@ -112,29 +129,25 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		"ludus_cluster_mode":        UseSDN,
 	}
 
-	// Extra vars files are merged at top-level only; without this, a user-provided
-	// partial defaults object replaces all server defaults.
-	userVars["defaults"] = getMergedDefaults(rangeConfigPath)
-
 	// Merge userVars with any extraVars provided
 	maps.Copy(userVars, extraVars)
 
-	// Always include the ludus, server, and user configs
-	var serverAndUserConfigs []string
-	if FileExists(rangeConfigPath) {
-		// The @ prefix is used to tell ansible to use the file as a local file
-		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), "@" + rangeConfigPath}
-	} else {
-		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
-	}
 	// root has no range config and cannot use the dynamic inventory
 	var inventory string
 	if user.UserId() == "ROOT" {
-		serverAndUserConfigs = []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
+		rangeConfigPath = ""
 		inventory = "127.0.0.1"
 	} else {
 		// For regular Ludus users, provide the dynamic inventory
 		inventory = ludusInstallPath + "/ansible/range-management/dynamic-inventory"
+		if !FileExists(rangeConfigPath) {
+			rangeConfigPath = ""
+		}
+	}
+
+	serverAndUserConfigs, err := ansibleConfigExtraVars(ludusInstallPath, rangeConfigPath)
+	if err != nil {
+		return "", err
 	}
 
 	// Check if the user specified a limit, and if so, make sure it has 'localhost' in it
@@ -566,12 +579,14 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 		"access_grants_array":   accessGrantsArray,
 		"ludus_testing_enabled": usersRange.TestingEnabled(),
 	}
-	userVars["defaults"] = getMergedDefaults(fmt.Sprintf("%s/ranges/%s/.tmp-range-config.yml", ludusInstallPath, usersRange.RangeId()))
 
 	// Always include the ludus, server, and user configs
 	// Use .tmp-range-config.yml since this function is called during PutConfig before the file is renamed
-	rangeDir := fmt.Sprintf("@%s/ranges/%s/", ludusInstallPath, usersRange.RangeId())
-	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath), rangeDir + ".tmp-range-config.yml"}
+	rangeConfigPath := fmt.Sprintf("%s/ranges/%s/.tmp-range-config.yml", ludusInstallPath, usersRange.RangeId())
+	serverAndUserConfigs, err := ansibleConfigExtraVars(ludusInstallPath, rangeConfigPath)
+	if err != nil {
+		return "", err
+	}
 	inventory := "127.0.0.1"
 
 	ansibleExecute := execute.NewDefaultExecute(
