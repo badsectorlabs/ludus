@@ -6,6 +6,7 @@ import (
 	"ludusapi/dto"
 	"ludusapi/models"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -342,18 +343,20 @@ func reflectRoleVersionToGalaxyInfo(roleDir string) (string, error) {
 	return version, nil
 }
 
-// isGitCollectionSource reports whether a collection identifier names a git
-// source rather than a galaxy FQCN — true for any URL (has "://"), an
-// scp-style ssh ref (git@…), or an explicit git+ prefix.
+// isGitCollectionSource recognizes explicit Git sources and bare repository URLs.
+// HTTP(S) .tar.gz artifacts are downloads; other bare URLs retain Git compatibility.
 func isGitCollectionSource(c string) bool {
+	if u, err := url.Parse(c); err == nil &&
+		(u.Scheme == "http" || u.Scheme == "https") && strings.HasSuffix(u.Path, ".tar.gz") {
+		return false
+	}
 	return strings.Contains(c, "://") || strings.HasPrefix(c, "git@") || strings.HasPrefix(c, "git+")
 }
 
 // buildCollectionInstallArg renders the positional argument for
 // `ansible-galaxy collection install`. Galaxy collections use the pin form
-// (name:==version); git sources use git+<url>,<ref>. Bare https URLs get a
-// git+ prefix since ansible-galaxy rejects them otherwise; git@ / already-
-// git+ strings are passed through unchanged.
+// (name:==version); git sources use git+<url>,<ref>. HTTP(S) archives are passed
+// through unchanged: their version is determined by the artifact.
 func buildCollectionInstallArg(collection, version string) string {
 	if isGitCollectionSource(collection) {
 		src := collection
@@ -365,7 +368,7 @@ func buildCollectionInstallArg(collection, version string) string {
 		}
 		return src
 	}
-	if version != "" {
+	if version != "" && !strings.Contains(collection, "://") {
 		return fmt.Sprintf("%s:==%s", collection, version)
 	}
 	return collection
@@ -411,12 +414,8 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 		return JSONResult(e, http.StatusCreated, "Successfully removed: "+collectionBody.Collection)
 	}
 
-	// action == "" or "install": pass the source string straight to
-	// ansible-galaxy, the same way the role endpoint does — a git URL installs
-	// from git, an FQCN installs from galaxy. No separate type flag: the
-	// string's shape is the signal.
+	// The source's format selects an archive download, Git install, or Galaxy install.
 	collectionString := buildCollectionInstallArg(collectionBody.Collection, collectionBody.Version)
-
 	// Make sure the collection string is escaped
 	collectionString = shellescape.Quote(collectionString)
 

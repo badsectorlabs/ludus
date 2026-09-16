@@ -97,6 +97,8 @@ ludus ansible collection list
 ludus ansible collection rm community.windows
 ```
 
+HTTP(S) URLs whose path ends in `.tar.gz` are downloaded as collection artifacts; query strings are preserved. Other URLs retain Git-source handling. Use an explicit `git+` prefix for a Git repository whose path ends in `.tar.gz`. `--version` pins Galaxy collections or selects Git refs; an archive's version comes from its metadata.
+
 Roles bundled in a collection can be used in a range config — reference them in the `roles:` key by their fully-qualified name (e.g. `badsectorlabs.ludus_windows_utils.ludus_ad_password_policy`).
 
 ## Ludus Specific Roles
