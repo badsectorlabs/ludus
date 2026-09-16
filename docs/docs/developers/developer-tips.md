@@ -6,7 +6,7 @@ title: "🪄 Developer Tips and Tricks"
 
 ## dev.sh
 
-When modifying Ludus itself, it's helpfully to quickly build and test your changes on a development machine.
+When modifying Ludus itself, it is helpful to build and test changes quickly on a development machine.
 
 To do this, you can use the `./dev.sh` script in the root of the Ludus repository.
 
@@ -31,9 +31,16 @@ Usage: ./dev.sh [-h] [-l] [-a] [-t target] [-n lines] [-c] [-d] [-p] [-w] [-s] [
 
 Examples:
   # Build and install client remotely; Build and install Ludus server with debug mode, skip plugins
-  ./dev.sh -t ludus-dev-hostname -C -d -s 
+  ./dev.sh -t ludus-dev-hostname -C -d -s
 ```
-This script copies your current code to the target machine via rsync at `~/ludus-dev` then calls the `dev.sh` scripts in `ludus-server` or `ludus-client` respectively with appropriate options.
+The script copies the current checkout to `~/ludus-dev` on the target machine, then runs the relevant component `dev.sh` scripts. If the enterprise or anti-sandbox source directory is present and `-s` is not set, it builds that plugin before building the server.
+
+The enterprise plugins are standalone RPC executables named
+`ludus-enterprise.plugin` and `ludus-antisandbox.plugin`. Their development
+scripts use normal CGO-free `go build` commands and copy the results into the
+appropriate `/opt/ludus/plugins/enterprise` directory. The plugin build no
+longer has to match the server's exact `ludus-api` build. See
+[RPC plugins](./rpc-plugins.md) for the protocol and testing workflow.
 
 The script **always** sets the `LUDUS_ENABLE_SUPERADMIN` variable to enable the [PocketBase web interface](../administration/pocketbase.md).
 

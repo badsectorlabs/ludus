@@ -22,29 +22,35 @@ git checkout tags/$STABLE_VERSION
 
 ### Building without embedded documentation
 
-Assuming a Debian 12/13 or Proxmox 8/9 host, install the build dependencies 
+Assuming a Debian 12/13 or Proxmox 8/9 host, install the Go version declared in `go.work`:
 
 ```shell
-# Install Go
-wget https://go.dev/dl/go1.24.0.linux-amd64.tar.gz
-rm -rf /usr/local/go && tar -C /usr/local -xzf go1.24.0.linux-amd64.tar.gz
+# Install Go 1.25
+GO_VERSION=1.25.12
+wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
+rm -rf /usr/local/go && tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 ```
 
-Build Ludus
+Build the dynamic inventory executable first because it is embedded in the server binary, then build Ludus:
 
 ```shell
 git clone https://gitlab.com/badsectorlabs/ludus.git
 cd ludus
 export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
 export VERSION=$(git rev-parse --abbrev-ref HEAD)
-cd ludus-server
-GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-no-docs -X main.VersionString=$VERSION" -o ludus-server
+cd dynamic-inventory
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+  -o ../ludus-server/ansible/range-management/dynamic-inventory .
+cd ../ludus-server
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath \
+  -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-no-docs -X main.VersionString=$VERSION" \
+  -o ludus-server .
 ```
 
 ### Building with embedded documentation
 
-Assuming a Debian 12/13 or Proxmox 8/9 host, install the build dependencies 
+Assuming a Debian 12/13 or Proxmox 8/9 host, install Yarn and the Go version declared in `go.work`:
 
 ```shell
 # Install yarn
@@ -52,13 +58,14 @@ echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.lis
 wget -qO- https://dl.yarnpkg.com/debian/pubkey.gpg | tee /etc/apt/trusted.gpg.d/dl.yarnpkg.com.asc
 apt update
 apt install yarn
-# Install Go
-wget https://go.dev/dl/go1.24.0.linux-amd64.tar.gz
-rm -rf /usr/local/go && tar -C /usr/local -xzf go1.24.0.linux-amd64.tar.gz
+# Install Go 1.25
+GO_VERSION=1.25.12
+wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
+rm -rf /usr/local/go && tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 ```
 
-Build Ludus
+Build Ludus:
 
 ```shell
 # Get the code
@@ -66,6 +73,11 @@ git clone https://gitlab.com/badsectorlabs/ludus.git
 cd ludus
 export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short HEAD)
 export VERSION=$(git rev-parse --abbrev-ref HEAD)
+# Build the dynamic inventory binary that the server embeds
+cd dynamic-inventory
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+  -o ../ludus-server/ansible/range-management/dynamic-inventory .
+cd ..
 # Build the docs
 cd docs
 yarn install
@@ -73,12 +85,36 @@ yarn build
 # Remove videos to make the binary smaller
 rm -f ./build/video/*
 rm -f ./build/img/hardware/Debian_12_RAID0.mp4
-# Move the docs to the location the server expects to embed them
-mv ./build ../ludus-server/src/docs
+# Move the docs to the location ludus-api expects to embed
+mv ./build ../ludus-api/docs
 cd ../ludus-server
 # Build Ludus
-GOOS=linux GOARCH=amd64 go build -tags=embeddocs -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-with-docs -X main.VersionString=$VERSION" -o ludus-server
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags=embeddocs -trimpath \
+  -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-with-docs -X main.VersionString=$VERSION" \
+  -o ludus-server .
 ```
+
+## Enterprise plugins
+
+The enterprise and anti-sandbox plugins are standalone RPC executables. They
+are built with normal `go build` commands rather than `-buildmode=plugin`, and
+they do not need CGO or the server's exact `ludus-api` source revision.
+
+The plugin source directories are available only in an authorized development
+checkout. Build both executables from the workspace root:
+
+```shell
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" \
+  -o ludus-enterprise-plugin/ludus-enterprise.plugin \
+  ./ludus-enterprise-plugin
+
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" \
+  -o ludus-antisandbox-plugin/ludus-antisandbox.plugin \
+  ./ludus-antisandbox-plugin
+```
+
+See [RPC plugins](./rpc-plugins.md) for installation paths, protocol
+compatibility, route registration, and real-process integration testing.
 
 ## Client
 

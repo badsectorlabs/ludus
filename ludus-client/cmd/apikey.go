@@ -30,8 +30,8 @@ is more secure than writing unencrypted to a file.`,
 		// set API key in the system keyring
 		err := keyring.Set(keyringService, url, apiKey)
 		if err != nil {
-			logger.Logger.Fatalf("Failed to set the api key in the in system keyring." +
-				"\nYou can set the LUDUS_API_KEY env variable if you are on a headless system.\n\n" + err.Error())
+			logger.Logger.Fatalf("Failed to set the API key in the system keyring."+
+				"\nYou can set the LUDUS_API_KEY environment variable if you are on a headless system.\n\n%v", err)
 		}
 		logger.Logger.Info("Ludus API key set successfully")
 	},

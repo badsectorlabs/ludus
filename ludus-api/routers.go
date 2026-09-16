@@ -77,6 +77,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		DefaultDev:           os.Getenv("LUDUS_DEBUG_DATABASE") == "1",
 		DefaultDataDir:       ServerConfiguration.DataDirectory,
 		DefaultEncryptionEnv: "LUDUS_DB_ENCRYPTION_PASSWORD",
+		DBConnect:            connectLudusSQLite,
 	}
 	PB = pocketbase.NewWithConfig(pbConfig)
 	app = PB.App
@@ -288,6 +289,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		RegisterRoutesWithPocketBase(se, routes)
 		RegisterPluginPlaceholderRoutes(se)
+		registerPluginLogHistoryRoutes(se, ludusInstallPath)
 		return se.Next()
 	})
 

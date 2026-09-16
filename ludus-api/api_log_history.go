@@ -109,15 +109,15 @@ func createRunningLogHistory(app core.App, userID string, rangeID string, templa
 	return record.Id
 }
 
-func finalizeRunningLogHistoryByID(app core.App, logID string, status string, logFilePath string, endTime time.Time) {
+func finalizeRunningLogHistoryByID(app core.App, logID string, status string, logFilePath string, endTime time.Time) error {
 	if logID == "" {
-		return
+		return nil
 	}
 
 	record, err := app.FindRecordById("logs", logID)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Failed to find running log history record %s: %v", logID, err))
-		return
+		return err
 	}
 	if record.GetString("status") == "aborted" && status != "aborted" {
 		status = "aborted"
@@ -134,6 +134,7 @@ func finalizeRunningLogHistoryByID(app core.App, logID string, status string, lo
 		logFile, fileErr := filesystem.NewFileFromBytes(logBytes, logFileName)
 		if fileErr != nil {
 			logger.Error(fmt.Sprintf("Failed to create log file for history finalization: %v", fileErr))
+			readErr = fileErr
 		} else {
 			record.Set("log", logFile)
 		}
@@ -143,7 +144,7 @@ func finalizeRunningLogHistoryByID(app core.App, logID string, status string, lo
 
 	if err := app.Save(record); err != nil {
 		logger.Error(fmt.Sprintf("Failed to finalize log history record %s: %v", logID, err))
-		return
+		return err
 	}
 	runningLogFilePathByLogID.Delete(logID)
 	if rangeID := record.GetString("range"); rangeID != "" {
@@ -158,6 +159,7 @@ func finalizeRunningLogHistoryByID(app core.App, logID string, status string, lo
 			}
 		}
 	}
+	return readErr
 }
 
 func finalizeRunningRangeLogHistory(app core.App, rangeID string, status string, logFilePath string, endTime time.Time) {
@@ -429,6 +431,10 @@ func GetRangeLogHistoryByID(e *core.RequestEvent) error {
 			if logPath, pathOK := logPathRaw.(string); pathOK {
 				logContent, err = os.ReadFile(logPath)
 			}
+		} else {
+			// Anti-sandbox runs in the admin host, whose in-memory log map
+			// is not shared with the regular API serving range history.
+			logContent, err = os.ReadFile(filepath.Join(ludusInstallPath, "ranges", targetRange.RangeId(), "ansible.log"))
 		}
 	}
 	if err != nil {

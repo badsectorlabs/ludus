@@ -3,9 +3,13 @@ package main
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
+	"fmt"
+	"log"
 	"math/big"
 	"os"
 	"time"
@@ -44,4 +48,33 @@ func generateSelfSignedCert() {
 	keyOut, _ := os.Create(ludusInstallPath + "/key.pem")
 	pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
 	keyOut.Close()
+}
+
+func serverCertificatePaths() (string, string) {
+	certPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pveproxy-ssl.pem"
+	keyPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pveproxy-ssl.key"
+	if !fileExists(certPath) || !fileExists(keyPath) {
+		certPath = "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.pem"
+		keyPath = "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.key"
+	}
+	if !fileExists(certPath) || !fileExists(keyPath) {
+		log.Println("Could not find/read " + certPath + " or " + keyPath)
+		generateSelfSignedCert()
+		certPath = ludusInstallPath + "/cert.pem"
+		keyPath = ludusInstallPath + "/key.pem"
+	}
+	return certPath, keyPath
+}
+
+func certificateSHA256(certPath string) (string, error) {
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return "", fmt.Errorf("read TLS certificate: %w", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "", fmt.Errorf("decode TLS certificate %s", certPath)
+	}
+	fingerprint := sha256.Sum256(block.Bytes)
+	return hex.EncodeToString(fingerprint[:]), nil
 }

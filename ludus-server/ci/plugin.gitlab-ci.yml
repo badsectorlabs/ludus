@@ -1,0 +1,76 @@
+# Shared by the enterprise and anti-sandbox plugin projects.
+# Include this file from badsectorlabs/ludus, then extend the hidden jobs below.
+
+.ludus-plugin-runner:
+  tags:
+    - ludus-proxmox-runner-parallel
+  interruptible: true
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+
+.ludus-rpc-plugin-build:
+  extends: .ludus-plugin-runner
+  stage: build
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_user
+    LUDUS_REPOSITORY_REF: main
+  artifacts:
+    paths:
+      - binaries/
+    expire_in: 1 week
+  script:
+    - test -n "$LUDUS_PLUGIN_MODULE" || (echo "LUDUS_PLUGIN_MODULE is required" >&2; exit 1)
+    - test -n "$LUDUS_PLUGIN_BINARY" || (echo "LUDUS_PLUGIN_BINARY is required" >&2; exit 1)
+    - test -n "$LUDUS_PLUGIN_TEST_ENV" || (echo "LUDUS_PLUGIN_TEST_ENV is required" >&2; exit 1)
+    - export LUDUS_PLUGIN_WORKSPACE="/tmp/ludus-plugin-${CI_PIPELINE_ID}-${CI_JOB_ID}"
+    - rm -rf "$LUDUS_PLUGIN_WORKSPACE" binaries
+    - mkdir -p "$LUDUS_PLUGIN_WORKSPACE" binaries
+    - git clone --depth 1 --branch "$LUDUS_REPOSITORY_REF" https://gitlab.com/badsectorlabs/ludus.git "$LUDUS_PLUGIN_WORKSPACE/ludus"
+    - rm -rf "$LUDUS_PLUGIN_WORKSPACE/ludus/$LUDUS_PLUGIN_MODULE"
+    - cp -a "$CI_PROJECT_DIR" "$LUDUS_PLUGIN_WORKSPACE/ludus/$LUDUS_PLUGIN_MODULE"
+    - cd "$LUDUS_PLUGIN_WORKSPACE/ludus"
+    - go work edit -dropuse ./ludus-enterprise-plugin -dropuse ./ludus-antisandbox-plugin
+    - go work use "./$LUDUS_PLUGIN_MODULE"
+    - cd "$LUDUS_PLUGIN_MODULE"
+    - go test -count=1 ./...
+    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.VersionString=${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}" -o "$LUDUS_PLUGIN_BINARY" .
+    - export LUDUS_PLUGIN_PATH="$PWD/$LUDUS_PLUGIN_BINARY"
+    - cd ../ludus-api
+    - env "$LUDUS_PLUGIN_TEST_ENV=$LUDUS_PLUGIN_PATH" go test -count=1 -run '^TestRPCPluginInteroperability$' -v
+    - cd ../dynamic-inventory
+    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o ../ludus-server/ansible/range-management/dynamic-inventory .
+    - cd ../ludus-server
+    - CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${CI_COMMIT_SHORT_SHA} -X main.VersionString=${CI_COMMIT_REF_SLUG}" -o "$CI_PROJECT_DIR/binaries/ludus-server" .
+    - cd ../ludus-client
+    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$CI_PROJECT_DIR/binaries/ludus-client" .
+    - install -m 0755 "$LUDUS_PLUGIN_PATH" "$CI_PROJECT_DIR/binaries/$LUDUS_PLUGIN_BINARY"
+    - rm -rf "$LUDUS_PLUGIN_WORKSPACE"
+
+.ludus-rpc-plugin-functional:
+  extends: .ludus-plugin-runner
+  stage: test
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: range_built_user
+  timeout: 4h
+  retry:
+    max: 1
+    when:
+      - script_failure
+      - job_execution_timeout
+      - runner_system_failure
+
+.ludus-plugin-release-vm:
+  extends: .ludus-plugin-runner
+  stage: release-claim
+  dependencies: []
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh

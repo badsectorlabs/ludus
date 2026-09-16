@@ -145,15 +145,29 @@ func GetGoProxmoxClientForUserUsingToken(e *core.RequestEvent) (*goproxmox.Clien
 	return client, nil
 }
 
+var pluginRootProxmoxMu sync.Mutex
+var pluginRootProxmoxClient *goproxmox.Client
+
 func GetRootGoProxmoxClient() (*goproxmox.Client, error) {
 
-	rawCachedClient := app.Store().Get("proxmoxClient_root")
-	cachedClient, ok := rawCachedClient.(*goproxmox.Client)
-	if ok {
+	dataClient, _ := PluginPocketBase()
+	if dataClient != nil {
+		pluginRootProxmoxMu.Lock()
+		defer pluginRootProxmoxMu.Unlock()
+		if pluginRootProxmoxClient != nil {
+			return pluginRootProxmoxClient, nil
+		}
+	} else if cachedClient, ok := app.Store().Get("proxmoxClient_root").(*goproxmox.Client); ok {
 		return cachedClient, nil
 	}
 
-	rootUserRecord, err := app.FindFirstRecordByData("users", "userID", "ROOT")
+	var rootUserRecord *core.Record
+	var err error
+	if dataClient != nil {
+		rootUserRecord, err = dataClient.FindFirstRecordByData(context.Background(), "users", "userID", "ROOT")
+	} else {
+		rootUserRecord, err = app.FindFirstRecordByData("users", "userID", "ROOT")
+	}
 	if err != nil {
 		return nil, errors.New("unable to get root user object: " + err.Error())
 	}
@@ -185,7 +199,11 @@ func GetRootGoProxmoxClient() (*goproxmox.Client, error) {
 		goproxmox.WithLogger(customLogger),
 	)
 
-	app.Store().Set("proxmoxClient_root", client)
+	if dataClient != nil {
+		pluginRootProxmoxClient = client
+	} else {
+		app.Store().Set("proxmoxClient_root", client)
+	}
 	return client, nil
 }
 

@@ -189,9 +189,15 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	return e.Next()
 }
 
-// This function makes sure the request is to a user endpoint if the server is running as root (i.e. the admin port)
+// Route Ludus API requests between the regular and admin services.
 func limitRootEndpoints(e *core.RequestEvent) error {
 	logger.Debug(fmt.Sprintf("Request: %s %s", e.Request.Method, e.Request.URL.Path))
+	// PocketBase routes enforce their own authentication and collection rules.
+	// Admin plugins use these routes to access their parent's records.
+	if e.Request.URL.Path != APIBasePath && !strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/") {
+		return e.Next()
+	}
+
 	if os.Geteuid() == 0 &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") &&
