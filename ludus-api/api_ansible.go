@@ -415,9 +415,8 @@ func ActionCollectionFromInternet(e *core.RequestEvent) error {
 	}
 
 	// The source's format selects an archive download, Git install, or Galaxy install.
+	// exec.Command receives literal arguments; shell quotes would become part of the URL.
 	collectionString := buildCollectionInstallArg(collectionBody.Collection, collectionBody.Version)
-	// Make sure the collection string is escaped
-	collectionString = shellescape.Quote(collectionString)
 
 	scopePath := ""
 	if collectionBody.Global {
