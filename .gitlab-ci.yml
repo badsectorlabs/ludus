@@ -21,9 +21,10 @@ stages:
     for attempt in 1 2 3; do
       if sudo qm guest exec "$vmid" -- "$@"; then
         return 0
+      else
+        exit_code=$?
       fi
 
-      exit_code=$?
       if [[ "$attempt" -eq 3 ]]; then
         return "$exit_code"
       fi
