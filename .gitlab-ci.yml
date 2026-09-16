@@ -551,6 +551,7 @@ go-unit-tests:
     - if: $CI_COMMIT_TAG
   script:
     - cd ludus-api && go test ./... -v -race -coverprofile=coverage.out
+    - cd ../dynamic-inventory && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o ../ludus-server/ansible/range-management/dynamic-inventory
     - cd ../ludus-server && go test ./... -v -race
   coverage: '/coverage: \d+(?:\.\d+)?% of statements/'
   artifacts:
