@@ -154,59 +154,28 @@ func PBLookupRecordID(client *resty.Client, collection, field, value string) (st
 }
 
 func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
-
-	var result []byte
-	var error bool = false
-
 	if err != nil {
 		logger.Logger.Fatal(err)
-		error = true
-	}
-
-	if resp.StatusCode() == 403 || resp.StatusCode() == 409 || resp.StatusCode() == 404 || resp.StatusCode() == 413 {
-		// Try to parse as PocketBase error first, then fall back to simple error format
-		err := prettyPrintPocketBaseError(resp.Body())
-		if err != nil {
-			// Not a PocketBase error, try simple error format
-			prettyPrintError(resp.String())
-		}
-		error = true
-	}
-
-	if resp.StatusCode() == 400 {
-		// Try to parse as PocketBase error first, then fall back to simple error format
-		err := prettyPrintPocketBaseError(resp.Body())
-		if err != nil {
-			// Not a PocketBase error, try simple error format
-			prettyPrintError(resp.String())
-		}
-		error = true
 	}
 
 	if resp.StatusCode() == 401 {
 		logger.Logger.Errorf("Error with request. Check your API key with --verbose")
-		prettyPrintError(resp.String())
-		error = true
 	}
 
-	if resp.StatusCode() == 500 || resp.StatusCode() == 502 {
+	if resp.StatusCode() >= 500 {
 		logger.Logger.Error("Error from server!")
-		err := prettyPrintPocketBaseError(resp.Body())
-		if err != nil {
+	}
+
+	if resp.IsError() {
+		// Try to parse as a PocketBase error first, then fall back to the
+		// simpler {"error":"..."} response used by Ludus handlers.
+		if err := prettyPrintPocketBaseError(resp.Body()); err != nil {
 			prettyPrintError(resp.String())
 		}
-		error = true
-	}
-
-	if error {
 		return nil, false
 	}
 
-	if resp.StatusCode() == 200 || resp.StatusCode() == 201 {
-		result = resp.Body()
-	}
-
-	return result, true
+	return resp.Body(), true
 }
 
 func GenericGet(client *resty.Client, apiPath string) ([]byte, bool) {
