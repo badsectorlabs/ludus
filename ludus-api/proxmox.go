@@ -96,18 +96,33 @@ func GetGoProxmoxClientForUserUsingToken(e *core.RequestEvent) (*goproxmox.Clien
 }
 
 var (
-	rootPVEClient     *pveclient.Client
-	rootPVEClientOnce sync.Once
-	rootPVEClientErr  error
+	rootPVEClient   *pveclient.Client
+	rootPVEClientMu sync.Mutex
 )
 
 // GetRootPVEClient returns the singleton failover-aware Proxmox client built
 // from ServerConfiguration. Callers should prefer this over GetRootGoProxmoxClient.
 func GetRootPVEClient() (*pveclient.Client, error) {
-	rootPVEClientOnce.Do(func() {
-		rootPVEClient, rootPVEClientErr = pveclient.New(ServerConfiguration.PVEClientConfig())
-	})
-	return rootPVEClient, rootPVEClientErr
+	rootPVEClientMu.Lock()
+	defer rootPVEClientMu.Unlock()
+	if rootPVEClient != nil {
+		return rootPVEClient, nil
+	}
+	client, err := pveclient.New(ServerConfiguration.PVEClientConfig())
+	if err != nil {
+		return nil, err
+	}
+	rootPVEClient = client
+	return rootPVEClient, nil
+}
+
+func closeRootPVEClient() {
+	rootPVEClientMu.Lock()
+	defer rootPVEClientMu.Unlock()
+	if rootPVEClient != nil {
+		rootPVEClient.Close()
+		rootPVEClient = nil
+	}
 }
 
 func GetRootGoProxmoxClient() (*goproxmox.Client, error) {

@@ -653,7 +653,13 @@ func CreateDefaultUserRangeForBootstrap(txApp core.App, user *models.User) error
 
 // GetRangeObjectByNumber gets a range object by range number (for multi-range support)
 func GetRangeObjectByNumber(rangeNumber int) (*models.Range, error) {
-	rawRangeRecord, err := app.FindFirstRecordByData("ranges", "rangeNumber", rangeNumber)
+	var rawRangeRecord *core.Record
+	var err error
+	if client, clientErr := PluginPocketBase(); clientErr == nil {
+		rawRangeRecord, err = client.FindFirstRecordByData(context.Background(), "ranges", "rangeNumber", rangeNumber)
+	} else {
+		rawRangeRecord, err = app.FindFirstRecordByData("ranges", "rangeNumber", rangeNumber)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("error finding range: %w", err)
 	}

@@ -16,12 +16,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/denisbrodbeck/machineid"
 	"github.com/keygen-sh/keygen-go/v3"
 	"github.com/pocketbase/pocketbase/core"
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -35,7 +35,29 @@ const (
 	LicenseAccount                          = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
 	LicensePublicKey                        = "70cb26141f38840b8f3f499d4875a829a9d251bd3337278995832b9ea4e39d12"
 	BinaryPublicKey                         = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
+	EnterprisePluginFilename                = "ludus-enterprise.plugin"
+	AntiSandboxPluginFilename               = "ludus-antisandbox.plugin"
+	EnterprisePluginName                    = "Ludus Enterprise"
+	AntiSandboxPluginName                   = "Ludus Enterprise Anti-Sandbox Plugin"
 )
+
+type licensedPluginSpec struct {
+	name         string
+	artifactBase string
+	filename     string
+	targetDir    string
+	packageUUID  string
+}
+
+type pluginReleaseLookupFunc func(context.Context, string, string) (*keygen.Release, error)
+type pluginReleaseDownloadFunc func(*keygen.Release, licensedPluginSpec) error
+
+type licensedPluginReleases []keygen.Release
+
+// SetData implements the JSON:API collection decoder required by the Keygen client.
+func (releases *licensedPluginReleases) SetData(to func(interface{}) error) error {
+	return to(releases)
+}
 
 func (s *Server) checkLicense() {
 	keygen.Account = LicenseAccount
@@ -57,13 +79,7 @@ func (s *Server) checkLicense() {
 	}
 	ctx := context.Background()
 
-	var pluginsDir string
-	if os.Geteuid() == 0 {
-		pluginsDir = fmt.Sprintf("%s/plugins/enterprise/admin", ludusInstallPath)
-	} else {
-		pluginsDir = fmt.Sprintf("%s/plugins/enterprise", ludusInstallPath)
-	}
-	enterpriseLoaded := false
+	pluginsDir := s.enterprisePluginsDir()
 
 	var license *keygen.License
 	var entitlements keygen.Entitlements
@@ -145,17 +161,18 @@ func (s *Server) checkLicense() {
 				log.Println("LICENSE: unable to connect to license server:", err)
 				// If the enterprise plugin is not installed mark the license is not valid
 				// The enterprise plugin can use a fallback on disk license if the network license fails
-				if !FileExists(ludusInstallPath + "/plugins/enterprise/ludus-enterprise.so") {
+				if !FileExists(filepath.Join(pluginsDir, EnterprisePluginFilename)) {
 					s.LicenseValid = false
 					s.LicenseMessage = "Unable to connect to license server"
 					return
 				} else {
 					log.Println("LICENSE: enterprise plugin is present, attempting to load it")
-					err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
+					err = os.Chmod(filepath.Join(pluginsDir, EnterprisePluginFilename), 0755)
+					if err == nil {
+						err = s.LoadPlugin(filepath.Join(pluginsDir, EnterprisePluginFilename))
+					}
 					if err != nil {
 						log.Printf("LICENSE: error loading enterprise plugin as part of network fallback: %v", err)
-					} else {
-						enterpriseLoaded = true
 					}
 				}
 			}
@@ -189,38 +206,232 @@ func (s *Server) checkLicense() {
 	}
 	log.Printf("LICENSE: found entitlements: %s", strings.Join(s.Entitlements, ", "))
 
-	// Always load the enterprise plugin if it exists first
-	if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") && FileExists(pluginsDir+"/ludus-enterprise.so") {
-		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
-		if err != nil {
-			log.Printf("LICENSE: error loading enterprise plugin: %v", err)
-			log.Println("LICENSE: pulling compatible plugin from server (version: " + s.Version + ")")
-			// Pull down the enterprise plugin since we have a valid license, perhaps we had a old version
-			err = DownloadFileUsingLicenseKey(fmt.Sprintf("ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey, LicenseProductLudus)
-			if err != nil {
-				log.Printf("LICENSE: error getting enterprise plugin: %v", err)
-			}
-		} else {
-			enterpriseLoaded = true
-		}
-	} else if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") {
-		log.Println("LICENSE: no enterprise plugin found, pulling compatible plugin from server")
-		err = DownloadFileUsingLicenseKey(fmt.Sprintf("ludus-enterprise_%s.so", s.VersionString), "ludus-enterprise.so", pluginsDir, s.Version, s.LicenseKey, LicenseProductLudus)
-		if err != nil {
-			log.Printf("LICENSE: error getting enterprise plugin: %v", err)
-		}
+	if err := s.refreshLicensedPlugins(ctx); err != nil {
+		log.Printf("LICENSE: error refreshing licensed plugins: %v", err)
 	}
-	if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") && !enterpriseLoaded {
-		err = s.LoadPlugin(pluginsDir + "/ludus-enterprise.so")
-		if err != nil {
-			log.Printf("LICENSE: error loading enterprise plugin: %v", err)
-		}
-	}
-
-	// Additional plugins are loaded by the enterprise plugin.
 
 	// The server will initialize plugins in the main function
 	// s.InitializePlugins()
+}
+
+func (s *Server) refreshLicensedPlugins(ctx context.Context) error {
+	var refreshErrors []error
+	if s.HasEntitlement("ENTERPRISE_PLUGIN") {
+		err := s.ensureLicensedPlugin(ctx, licensedPluginSpec{
+			name:         EnterprisePluginName,
+			artifactBase: "ludus-enterprise",
+			filename:     EnterprisePluginFilename,
+			targetDir:    s.enterprisePluginsDir(),
+			packageUUID:  LicensePackageLudusEnterprisePlugin,
+		})
+		if err != nil {
+			refreshErrors = append(refreshErrors, fmt.Errorf("refresh enterprise plugin: %w", err))
+		}
+	}
+	if os.Geteuid() == 0 && s.HasEntitlement("ANTISANDBOX_PLUGIN") {
+		err := s.ensureLicensedPlugin(ctx, licensedPluginSpec{
+			name:         AntiSandboxPluginName,
+			artifactBase: "ludus-antisandbox",
+			filename:     AntiSandboxPluginFilename,
+			targetDir:    filepath.Join(ludusInstallPath, "plugins", "enterprise", "admin"),
+			packageUUID:  LicensePackageLudusAntisandboxPlugin,
+		})
+		if err != nil {
+			refreshErrors = append(refreshErrors, fmt.Errorf("refresh anti-sandbox plugin: %w", err))
+		}
+	}
+	return errors.Join(refreshErrors...)
+}
+
+func (s *Server) enterprisePluginsDir() string {
+	if os.Geteuid() == 0 {
+		return filepath.Join(ludusInstallPath, "plugins", "enterprise", "admin")
+	}
+	return filepath.Join(ludusInstallPath, "plugins", "enterprise")
+}
+
+func (s *Server) ensureLicensedPlugin(ctx context.Context, spec licensedPluginSpec) error {
+	pluginPath := filepath.Join(spec.targetDir, spec.filename)
+	if metadata, loaded := s.loadedPluginMetadata(spec.name); loaded {
+		if isLocalPlugin(spec.targetDir) {
+			return nil
+		}
+		currentVersion := metadata.Version
+		if diskMetadata, err := readPluginMetadata(pluginPath, s.Logger); err == nil &&
+			diskMetadata.Name == spec.name && diskMetadata.Version != "" {
+			currentVersion = diskMetadata.Version
+		}
+		installed, err := s.installPluginUpdate(ctx, spec, currentVersion)
+		if err != nil {
+			return err
+		}
+		if installed {
+			log.Printf("LICENSE: installed an updated %s plugin; restart Ludus to activate it", spec.name)
+		}
+		return nil
+	}
+
+	if FileExists(pluginPath) {
+		if err := os.Chmod(pluginPath, 0755); err != nil {
+			return fmt.Errorf("make plugin executable: %w", err)
+		}
+		metadata, probeErr := readPluginMetadata(pluginPath, s.Logger)
+		if probeErr == nil && metadata.Name == spec.name {
+			if !isLocalPlugin(spec.targetDir) {
+				if installed, updateErr := s.installPluginUpdate(ctx, spec, metadata.Version); updateErr != nil {
+					log.Printf("LICENSE: unable to check %s for updates; using installed version %s: %v", spec.name, metadata.Version, updateErr)
+				} else if installed {
+					log.Printf("LICENSE: updated %s before loading", spec.name)
+				}
+			}
+			return s.LoadPlugin(pluginPath)
+		}
+		if probeErr == nil {
+			probeErr = fmt.Errorf("plugin reported name %q, want %q", metadata.Name, spec.name)
+		}
+		log.Printf("LICENSE: installed %s plugin failed validation: %v", spec.name, probeErr)
+		if isLocalPlugin(spec.targetDir) {
+			return probeErr
+		}
+	}
+
+	installed, err := s.installPluginUpdate(ctx, spec, "")
+	if err != nil {
+		return err
+	}
+	if !installed {
+		return fmt.Errorf("no published release found for %s", spec.name)
+	}
+	if err := os.Chmod(pluginPath, 0755); err != nil {
+		return fmt.Errorf("make downloaded plugin executable: %w", err)
+	}
+	return s.LoadPlugin(pluginPath)
+}
+
+func (s *Server) installPluginUpdate(ctx context.Context, spec licensedPluginSpec, currentVersion string) (bool, error) {
+	lookup := s.pluginReleaseLookup
+	if lookup == nil {
+		lookup = s.lookupLicensedPluginRelease
+	}
+	release, err := lookup(ctx, currentVersion, spec.packageUUID)
+	if err != nil {
+		return false, fmt.Errorf("check %s release: %w", spec.name, err)
+	}
+	if release == nil {
+		return false, nil
+	}
+	if release.ID == "" || release.Version == "" {
+		return false, fmt.Errorf("Keygen returned an incomplete release for %s", spec.name)
+	}
+
+	download := s.pluginReleaseDownload
+	if download == nil {
+		download = s.downloadPluginRelease
+	}
+	log.Printf("LICENSE: downloading %s plugin release %s", spec.name, release.Version)
+	if err := download(release, spec); err != nil {
+		return false, fmt.Errorf("download %s release %s: %w", spec.name, release.Version, err)
+	}
+	return true, nil
+}
+
+func (s *Server) lookupLicensedPluginRelease(ctx context.Context, currentVersion, packageUUID string) (*keygen.Release, error) {
+	client := newLicenseClient(s.Version, s.LicenseKey)
+	return lookupLicensedPluginRelease(ctx, client, currentVersion, packageUUID)
+}
+
+func lookupLicensedPluginRelease(ctx context.Context, client *keygen.Client, currentVersion, packageUUID string) (*keygen.Release, error) {
+	query := url.Values{
+		"package": {packageUUID},
+		"product": {LicenseProductLudus},
+		"channel": {"stable"},
+	}
+	releaseVersion := strings.TrimPrefix(strings.TrimSpace(currentVersion), "v")
+	var discovered *keygen.Release
+	if !semver.IsValid("v" + releaseVersion) {
+		query.Set("status", "PUBLISHED")
+		query.Set("limit", "1")
+		var releases licensedPluginReleases
+		if _, err := client.Get(ctx, "releases?"+query.Encode(), nil, &releases); err != nil {
+			return nil, err
+		}
+		if len(releases) == 0 {
+			return nil, nil
+		}
+		discovered = &releases[0]
+		if discovered.ID == "" || discovered.Version == "" {
+			return nil, fmt.Errorf("Keygen returned an incomplete release for package %s", packageUUID)
+		}
+		// Listing is creation-date ordered. Upgrade from a real release to find
+		// the semantic latest, or keep that release if no upgrade exists.
+		releaseVersion = discovered.ID
+		query.Del("status")
+		query.Del("limit")
+	}
+	path := fmt.Sprintf("releases/%s/upgrade?%s", url.PathEscape(releaseVersion), query.Encode())
+
+	release := &keygen.Release{}
+	if _, err := client.Get(ctx, path, nil, release); err != nil {
+		var notFound *keygen.NotFoundError
+		if errors.As(err, &notFound) {
+			return discovered, nil
+		}
+		return nil, err
+	}
+	return release, nil
+}
+
+func (s *Server) downloadPluginRelease(release *keygen.Release, spec licensedPluginSpec) error {
+	artifact := fmt.Sprintf("%s_%s.plugin", spec.artifactBase, release.Version)
+	path := fmt.Sprintf("releases/%s/artifacts/%s", url.PathEscape(release.ID), url.PathEscape(artifact))
+	candidateName := "." + spec.filename + ".update"
+	candidatePath := filepath.Join(spec.targetDir, candidateName)
+	defer os.Remove(candidatePath)
+
+	if err := DownloadFileUsingLicenseKey(path, candidateName, spec.targetDir, s.Version, s.LicenseKey, spec.packageUUID); err != nil {
+		return err
+	}
+	if err := os.Chmod(candidatePath, 0755); err != nil {
+		return fmt.Errorf("make plugin update executable: %w", err)
+	}
+	return s.activatePluginUpdate(candidatePath, filepath.Join(spec.targetDir, spec.filename), release.Version, spec.name)
+}
+
+func (s *Server) activatePluginUpdate(candidatePath, targetPath, expectedVersion, expectedName string) error {
+	metadata, err := readPluginMetadata(candidatePath, s.Logger)
+	if err != nil {
+		return fmt.Errorf("validate plugin update protocol: %w", err)
+	}
+	if metadata.Name != expectedName {
+		return fmt.Errorf("plugin update reported name %q, want %q", metadata.Name, expectedName)
+	}
+	if !samePluginVersion(metadata.Version, expectedVersion) {
+		return fmt.Errorf("plugin update reported version %q, want %q", metadata.Version, expectedVersion)
+	}
+	if err := os.Rename(candidatePath, targetPath); err != nil {
+		return fmt.Errorf("activate plugin update: %w", err)
+	}
+	return nil
+}
+
+func samePluginVersion(pluginVersion, releaseVersion string) bool {
+	normalize := func(version string) string {
+		if version != "" && !strings.HasPrefix(version, "v") {
+			return "v" + version
+		}
+		return version
+	}
+	pluginVersion = normalize(pluginVersion)
+	releaseVersion = normalize(releaseVersion)
+	if semver.IsValid(pluginVersion) && semver.IsValid(releaseVersion) {
+		return semver.Compare(pluginVersion, releaseVersion) == 0
+	}
+	return pluginVersion == releaseVersion
+}
+
+func isLocalPlugin(targetDir string) bool {
+	_, err := os.Stat(filepath.Join(targetDir, ".local-testing"))
+	return err == nil
 }
 
 func GetSubscriptionRolesMetadata(e *core.RequestEvent) ([]dto.GetSubscriptionRolesResponseItem, error) {
@@ -285,22 +496,47 @@ func DownloadRoleUsingLicenseKey(e *core.RequestEvent, roleName string, targetDi
 }
 
 func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string, version string, licenseKey string, packageUUID string) error {
-
-	// If the file path doesn't start with artifacts/ or /artifacts/, add it
-	if !strings.HasPrefix(path, "artifacts/") && !strings.HasPrefix(path, "/artifacts/") {
+	if !strings.HasPrefix(path, "artifacts/") &&
+		!strings.HasPrefix(path, "/artifacts/") &&
+		!strings.HasPrefix(path, "releases/") &&
+		!strings.HasPrefix(path, "/releases/") {
 		path = "artifacts/" + path
 	}
-
-	// If the file path starts with /, remove it
 	path = strings.TrimPrefix(path, "/")
 
-	// Check for a .local-testing file in the target directory
-	if _, err := os.Stat(targetDir + "/.local-testing"); err == nil {
+	if isLocalPlugin(targetDir) {
 		log.Printf("LICENSE: In local-testing mode (%s/.local-testing exists), skipping file download\n", targetDir)
 		return nil
 	}
 
-	client := keygen.NewClientWithOptions(&keygen.ClientOptions{
+	client := newLicenseClient(version, licenseKey)
+	if os.Getenv("LUDUS_DEBUG_LICENSE") == "1" {
+		keygen.Logger = keygen.NewLogger(keygen.LogLevelDebug)
+	}
+
+	artifact := &keygen.Artifact{}
+	response, err := client.Get(context.Background(), path, nil, artifact)
+	if err != nil {
+		logger.Error(fmt.Sprintf("LICENSE: unable to download file %s: %v", fileName, err))
+		return err
+	}
+	artifact.URL = response.Headers.Get("Location")
+
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		logger.Error(fmt.Sprintf("LICENSE: unable to create target directory: %v", err))
+		return err
+	}
+	targetPath := filepath.Join(targetDir, fileName)
+	if err := installDownloadedArtifact(http.DefaultClient, artifact, targetPath, BinaryPublicKey, packageUUID); err != nil {
+		logger.Error(fmt.Sprintf("LICENSE: unable to install downloaded file %s: %v", fileName, err))
+		return err
+	}
+	logger.Debug(fmt.Sprintf("LICENSE: successfully verified signature for %s target file", fileName))
+	return nil
+}
+
+func newLicenseClient(version, licenseKey string) *keygen.Client {
+	return keygen.NewClientWithOptions(&keygen.ClientOptions{
 		Account:    LicenseAccount,
 		APIURL:     LicenseURL,
 		PublicKey:  LicensePublicKey,
@@ -309,58 +545,50 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 		UserAgent:  "Ludus-Server/" + version,
 		LicenseKey: licenseKey,
 	})
-	keygen.Package = packageUUID
-	ctx := context.Background()
+}
 
-	if os.Getenv("LUDUS_DEBUG_LICENSE") == "1" {
-		keygen.Logger = keygen.NewLogger(keygen.LogLevelDebug)
+func installDownloadedArtifact(httpClient *http.Client, artifact *keygen.Artifact, targetPath, publicKey, signatureContext string) error {
+	if artifact.URL == "" {
+		return errors.New("artifact download URL is empty")
+	}
+	if httpClient == nil {
+		httpClient = http.DefaultClient
 	}
 
-	artifact := &keygen.Artifact{}
-	response, err := client.Get(ctx, path, nil, artifact)
+	tempFile, err := os.CreateTemp(filepath.Dir(targetPath), "."+filepath.Base(targetPath)+".*")
 	if err != nil {
-		logger.Error(fmt.Sprintf("LICENSE: unable to download file %s: %v", fileName, err))
-		return err
+		return fmt.Errorf("create temporary artifact: %w", err)
 	}
-	artifact.URL = response.Headers.Get("Location")
-	// Write the binary to disk
-	if !FileExists(targetDir) {
-		err := os.MkdirAll(targetDir, 0755)
-		if err != nil {
-			logger.Error(fmt.Sprintf("LICENSE: unable to create target directory: %v", err))
-			return err
-		}
-	}
-	targetPath := filepath.Join(targetDir, fileName)
-	targetFile, err := os.Create(targetPath)
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
+	defer tempFile.Close()
+
+	response, err := httpClient.Get(artifact.URL)
 	if err != nil {
-		logger.Error(fmt.Sprintf("LICENSE: unable to create target file %s: %v", fileName, err))
-		return err
+		return fmt.Errorf("download artifact: %w", err)
 	}
-	defer targetFile.Close()
-
-	// Download the actual binary
-	targetResp, err := http.Get(artifact.URL)
-	if err != nil {
-		logger.Error(fmt.Sprintf("LICENSE: unable to download target file %s: %v", fileName, err))
-		return err
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("download artifact: unexpected HTTP status %s", response.Status)
 	}
-	defer targetResp.Body.Close()
-
-	// Copy the binary to the file
-	_, err = io.Copy(targetFile, targetResp.Body)
-	if err != nil {
-		logger.Error(fmt.Sprintf("LICENSE: unable to write %s target file: %v", fileName, err))
-		return err
+	if _, err := io.Copy(tempFile, response.Body); err != nil {
+		return fmt.Errorf("write temporary artifact: %w", err)
 	}
-
-	// Verify the signature
-	if err := VerifySignature(targetPath, artifact.Signature, BinaryPublicKey, packageUUID); err != nil {
-		logger.Error(fmt.Sprintf("LICENSE: unable to verify signature for %s target file: %v", fileName, err))
-		return err
+	if err := tempFile.Sync(); err != nil {
+		return fmt.Errorf("sync temporary artifact: %w", err)
 	}
-	logger.Debug(fmt.Sprintf("LICENSE: successfully verified signature for %s target file", fileName))
-
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("close temporary artifact: %w", err)
+	}
+	if err := os.Chmod(tempPath, 0644); err != nil {
+		return fmt.Errorf("set artifact permissions: %w", err)
+	}
+	if err := VerifySignature(tempPath, artifact.Signature, publicKey, signatureContext); err != nil {
+		return fmt.Errorf("verify artifact signature: %w", err)
+	}
+	if err := os.Rename(tempPath, targetPath); err != nil {
+		return fmt.Errorf("replace artifact: %w", err)
+	}
 	return nil
 }
 

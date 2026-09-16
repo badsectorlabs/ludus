@@ -82,6 +82,13 @@ The available tags are listed below:
 Any time a version tag is created in Gitlab, two additional CI jobs are added to the pipeline: `upload` and `release`.
 These jobs are manually triggered (you must click the play button in the pipeline) and upload the compiled binaries to the package registry as well as create the actual release. If you use [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/) (perhaps created with [koji](https://github.com/its-danny/koji)), then [git-cliff](https://github.com/orhun/git-cliff) will automatically generate a change log for the release.
 
+For non-beta releases, the pipeline also builds the enterprise and anti-sandbox
+plugins when the corresponding repository tokens are available. These are
+standalone CGO-free RPC executables. They do not have to be compiled on the
+same machine or against the exact same `ludus-api` package build as the server.
+The release jobs publish `ludus-enterprise_<version>.plugin` and
+`ludus-antisandbox_<version>.plugin` to their licensed packages.
+
 ## Manual CI VM Setup
 
 Run these commands on a Debian 13 VM, then power it off and save it as a template
@@ -102,10 +109,11 @@ w
 
 resize2fs /dev/vda1
 
-# Install Go
+# Install the Go version declared in go.work
+GO_VERSION=1.25.12
 apt install curl wget ca-certificates
-wget https://go.dev/dl/go1.25.1.linux-amd64.tar.gz
-rm -rf /usr/local/go && tar -C /usr/local -xzf go1.25.1.linux-amd64.tar.gz
+wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
+rm -rf /usr/local/go && tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
 # This is required since gitlab-runner ignores .bashrc
 echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
 
@@ -134,9 +142,11 @@ su gitlab-runner -
 cd /tmp
 git clone https://gitlab.com/badsectorlabs/ludus
 
-cd ludus/ludus-server
-GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w"
-
+cd ludus/dynamic-inventory
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+  -o ../ludus-server/ansible/range-management/dynamic-inventory .
+cd ../ludus-server
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w"
 cd ../ludus-client
 git clone https://github.com/zimeg/spinner
 cd spinner && git checkout unhide-interrupts && cd .. && go mod edit -replace github.com/briandowns/spinner=./spinner
