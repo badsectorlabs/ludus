@@ -174,6 +174,20 @@ stages:
   # Force install a collection
   - ludus ansible collection add maxhoesel.smallstep --version 0.24.4 --force
   - ludus ansible collection list | grep maxhoesel.smallstep | grep 0.24.4
+  # Serve the checked-in artifact on the API host; this must download, not clone.
+  - |
+    (
+      set -euo pipefail
+      python3 -m http.server 18080 --bind 127.0.0.1 --directory /opt/ludus/ci/fixtures &
+      archive_server=$!
+      trap 'kill "$archive_server" 2>/dev/null || true; wait "$archive_server" 2>/dev/null || true' EXIT
+      archive_url=http://127.0.0.1:18080/ludus_ci-http_archive-1.0.0.tar.gz
+      curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 "$archive_url" --output /dev/null
+      ludus ansible collection add "$archive_url" --force
+      ludus ansible collection add "${archive_url}?token=ci" --force
+      ludus ansible collection list --json | jq -e 'any(.[]; .name == "ludus_ci.http_archive" and .version == "1.0.0" and .global != true)'
+      ludus ansible collection rm ludus_ci.http_archive
+    )
   # Global collection install (regression: a successful global install must NOT be
   # reported as an error by ansible-galaxy's benign path/version-compat warnings)
   - |
@@ -573,6 +587,7 @@ build all:
   timeout: 10m
   script:
     - echo "Compiling the server code..."
+    - (cd ludus-api && go test . -count=1)
     - export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short=8 HEAD)
     - if [[ -n $CI_COMMIT_TAG ]]; then export VERSION=$CI_COMMIT_TAG; else export VERSION=${CI_COMMIT_BRANCH}; fi
     - rm -rf binaries && mkdir binaries
@@ -980,6 +995,7 @@ range deploy-admin:
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
       when: never
     - changes:
+        - ludus-api/ansible.go
         - ludus-client/cmd/range.go
         - ludus-server/ansible/range-management/**/*
         - ludus-server/ansible/user-management/**/*
@@ -995,6 +1011,8 @@ range deploy-admin:
       - job_execution_timeout
   script:
     - *ci-setup-admin
+    # A partial defaults dictionary must inherit the server's domain credentials.
+    - ludus range config set -f /opt/ludus/ci/configs/simple-domain-partial-defaults.yml
     - ludus range config get
     - ludus range deploy
     - *wait-for-range-success
@@ -1004,6 +1022,11 @@ range deploy-admin:
     - export valid_last_octets=(1 11 21 254)
     - ludus range list --json | jq -e --arg allowed_octets_str "${valid_last_octets[*]}" '($allowed_octets_str | split(" ") | map(tonumber)) as $allowed_list | all(.VMs[]; ((.ip | split(".")[-1] | tonumber) as $current_octet | any($allowed_list[]; . == $current_octet)))'
     - '[ "$(ludus range list --json | jq -r ''.rangeState'')" = "SUCCESS" ]'
+    - |
+      DC_VMID=$(ludus range list --json | jq -er '.VMs[] | select(.name | endswith("-ad-dc-win2022-server-x64-1")) | .proxmoxID')
+      qm_guest_exec_retry "$DC_VMID" powershell.exe -NoProfile -NonInteractive -Command \
+        '$ErrorActionPreference = "Stop"; @{ username = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon").DefaultUserName; timezone = (Get-TimeZone).Id } | ConvertTo-Json -Compress' \
+        | jq -e '.exitcode == 0 and (."out-data" | fromjson | .username == "domainadmin" and .timezone == "W. Europe Standard Time")'
 
 #######################
 # POST-DEPLOY - ADMIN #
@@ -1127,8 +1150,10 @@ post-deploy ansible-as-admin:
       when: never
     - changes:
         - ludus-client/cmd/ansible.go
-        - ludus-server/src/ansible.go
-        - ludus-server/src/api_ansible.go
+        - ludus-api/ansible.go
+        - ludus-api/api_ansible*.go
+        - ludus-server/ci/fixtures/ludus_ci-http_archive-*.tar.gz
+        - .gitlab-ci.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_admin
@@ -2154,8 +2179,10 @@ post-deploy ansible-as-user:
       when: never
     - changes:
         - ludus-client/cmd/ansible.go
-        - ludus-server/src/ansible.go
-        - ludus-server/src/api_ansible.go
+        - ludus-api/ansible.go
+        - ludus-api/api_ansible*.go
+        - ludus-server/ci/fixtures/ludus_ci-http_archive-*.tar.gz
+        - .gitlab-ci.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
@@ -2543,6 +2570,7 @@ test-everything:
       qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.[1-9].0.0/16          /\* User Default: External Rule \*/'
       qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | grep "This is a custom iptables command"
     # Check the custom DNS servers
+    - qm_guest_exec_retry "$REDIRECTOR_VMID" awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf | jq -e '.exitcode == 0 and ."out-data" == "1.1.1.1\n8.8.8.8\n"'
 
 ###########
 # CLUSTER #
