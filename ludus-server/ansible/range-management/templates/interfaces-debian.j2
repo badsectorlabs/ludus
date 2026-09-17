@@ -11,4 +11,4 @@ auto {{ interface_name }}
 iface {{ interface_name }} inet static
     address {{ static_ip }}/{{ cidr_netmask }}
     gateway {{ default_gateway }}
-    dns-nameservers {{ default_gateway }}
+    dns-nameservers {{ ([primary_dns_server | default(default_gateway)] + ([secondary_dns_server | default(omit)] | reject('equalto', omit) | list)) | join(' ') }}

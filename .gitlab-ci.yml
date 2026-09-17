@@ -2570,6 +2570,7 @@ test-everything:
       qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | sed 's/\\n/\n/g' | egrep 'ACCEPT     all  --  \*      \*       10.[1-9].0.0/16         !10.[1-9].0.0/16          /\* User Default: External Rule \*/'
       qm_guest_exec_retry "$ROUTER_VMID" /sbin/iptables -nvL | jq -r '."out-data"' | grep "This is a custom iptables command"
     # Check the custom DNS servers
+    - qm_guest_exec_retry "$REDIRECTOR_VMID" awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf | jq -e '.exitcode == 0 and ."out-data" == "1.1.1.1\n8.8.8.8\n"'
 
 ###########
 # CLUSTER #
