@@ -15,6 +15,7 @@ var (
 	debugFlag         bool
 	migrationInfoFlag bool
 	exportStatePath   string
+	exportLivePath    string
 	importStatePath   string
 )
 
@@ -28,6 +29,7 @@ func init() {
 	flag.BoolVar(&debugFlag, "debug", false, "enable debug mode (can also be set with the LUDUS_DEBUG environment variable)")
 	flag.BoolVar(&migrationInfoFlag, "migration-info", false, "print nonsecret legacy migration metadata without bootstrapping")
 	flag.StringVar(&exportStatePath, "export-state", "", "export stopped legacy services' durable state to a new tar.gz archive")
+	flag.StringVar(&exportLivePath, "export-state-live", "", "export a consistent staging snapshot while legacy services remain online")
 	flag.StringVar(&importStatePath, "import-state", "", "import a migration archive into a stopped, unbootstrapped appliance")
 	flag.Usage = printHelp
 }
@@ -45,22 +47,26 @@ func checkArgs() {
 		os.Exit(0)
 	}
 	migrationModes := 0
-	for _, enabled := range []bool{migrationInfoFlag, exportStatePath != "", importStatePath != "", updateFlag} {
+	for _, enabled := range []bool{migrationInfoFlag, exportStatePath != "", exportLivePath != "", importStatePath != "", updateFlag} {
 		if enabled {
 			migrationModes++
 		}
 	}
 	if migrationModes > 1 {
-		fmt.Fprintln(os.Stderr, "choose only one of --migration-info, --export-state, --import-state, or --update")
+		fmt.Fprintln(os.Stderr, "choose only one of --migration-info, --export-state, --export-state-live, --import-state, or --update")
 		os.Exit(1)
 	}
-	if migrationInfoFlag || exportStatePath != "" || importStatePath != "" {
+	if migrationInfoFlag || exportStatePath != "" || exportLivePath != "" || importStatePath != "" {
 		checkRoot()
 		var err error
 		if importStatePath != "" {
 			err = importMigrationState(importStatePath)
 		} else {
-			err = exportMigrationState(exportStatePath, migrationInfoFlag)
+			destination := exportStatePath
+			if exportLivePath != "" {
+				destination = exportLivePath
+			}
+			err = exportMigrationState(destination, migrationInfoFlag, exportLivePath != "")
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "migration failed: %v\n", err)

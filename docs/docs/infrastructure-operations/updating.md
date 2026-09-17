@@ -18,6 +18,12 @@ import TabItem from '@theme/TabItem';
 
 Simply run the install script again. It will detect an existing installation and update the server.
 
+When the installer finds a host-installed Ludus 2.x server on Proxmox, it
+offers the one-time migration to the LXC runtime. The existing client address,
+API keys, TLS identity, and WireGuard profiles are preserved. See
+[Migrate to LXC](./migrate-to-lxc.md) for the migration checks and rollback
+procedure.
+
 ```shell
 # terminal-command-local
 ssh user@ludus

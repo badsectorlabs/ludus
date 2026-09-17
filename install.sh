@@ -83,6 +83,83 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+legacy_host_install_exists() {
+  [[ -f /opt/ludus/config.yml ]] \
+    && [[ ! -f /opt/ludus/install/.bootstrap-complete ]] \
+    && [[ ! -f /etc/ludus-lxc.json ]] \
+    && [[ ! -f /etc/systemd/system/ludus-lxc-forwarding.service ]] \
+    && command_exists pveversion
+}
+
+lxc_host_install_exists() {
+  [[ -f /etc/ludus-lxc.json ]] \
+    || [[ -f /etc/systemd/system/ludus-lxc-forwarding.service ]]
+}
+
+run_ludus_server_install() {
+  if [[ ${EUID} == 0 ]]; then
+    ludus_install_server
+    return
+  fi
+  command_exists sudo || {
+    print_message "[!] Server installation requires root and sudo is unavailable" "error"
+    return 1
+  }
+
+  local installer installer_tmp
+  local -a args
+  case "${0##*/}" in
+    bash|zsh|sh)
+      installer_tmp=$(make_tempdir "ludus-installer") || return 1
+      installer="${installer_tmp}/install.sh"
+      download_file "https://ludus.cloud/install" "${installer_tmp}" install.sh || return 1
+      chmod 0700 "${installer}"
+      ;;
+    *) installer="$0" ;;
+  esac
+
+  args=(--version "${LUDUS_VERSION}")
+  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    args+=(--migrate-host)
+  else
+    args+=(--server-only)
+  fi
+  [[ ${NO_PROMPT:-0} != 1 ]] || args+=(--no-prompt)
+  [[ -z ${TEMPLATE_FILE:-} ]] || args+=(--template-file "${TEMPLATE_FILE}")
+  [[ ${AIRGAPPED_INSTALL:-0} != 1 ]] || args+=(--airgapped)
+  [[ -z ${VM_STORAGE:-} ]] || args+=(--vm-storage "${VM_STORAGE}")
+  [[ -z ${VM_STORAGE_FORMAT:-} ]] || args+=(--vm-storage-format "${VM_STORAGE_FORMAT}")
+  [[ -z ${ISO_STORAGE:-} ]] || args+=(--iso-storage "${ISO_STORAGE}")
+  [[ -z ${ISO_DIRECTORY:-} ]] || args+=(--iso-directory "${ISO_DIRECTORY}")
+  [[ -z ${CA_CERTIFICATE:-} ]] || args+=(--ca-certificate "${CA_CERTIFICATE}")
+  [[ -z ${ENTERPRISE_PLUGIN:-} ]] || args+=(--enterprise-plugin "${ENTERPRISE_PLUGIN}")
+  [[ -z ${LICENSE_FILE:-} ]] || args+=(--license-file "${LICENSE_FILE}")
+  [[ -z ${CHECKSUM_FILE:-} ]] || args+=(--checksum-file "${CHECKSUM_FILE}")
+  [[ -z ${CHECKSUM_SIGNATURE:-} ]] || args+=(--checksum-signature "${CHECKSUM_SIGNATURE}")
+  [[ -z ${CHECKSUM_PUBLIC_KEY:-} ]] || args+=(--checksum-public-key "${CHECKSUM_PUBLIC_KEY}")
+  [[ ${SKIP_VERIFICATION:-0} != 1 ]] || args+=(--skip-verification)
+  [[ -z ${TOKEN_ID:-} ]] || args+=(--token-id "${TOKEN_ID}")
+  [[ -z ${TOKEN_SECRET:-} ]] || args+=(--token-secret "${TOKEN_SECRET}")
+  [[ -z ${VMID:-} ]] || args+=(--vmid "${VMID}")
+  [[ -z ${LXC_HOSTNAME:-} ]] || args+=(--hostname "${LXC_HOSTNAME}")
+  [[ -z ${STORAGE:-} ]] || args+=(--storage "${STORAGE}")
+  [[ -z ${LXC_ROOTFS_SIZE:-} ]] || args+=(--rootfs-size "${LXC_ROOTFS_SIZE}")
+  [[ -z ${LXC_BRIDGE:-} ]] || args+=(--bridge "${LXC_BRIDGE}")
+  [[ -z ${LXC_VLAN_TAG:-} ]] || args+=(--vlan-tag "${LXC_VLAN_TAG}")
+  [[ -z ${ETH0_IP:-} ]] || args+=(--ip "${ETH0_IP}")
+  [[ -z ${ETH0_GW:-} ]] || args+=(--gw "${ETH0_GW}")
+  [[ -z ${LXC_NAMESERVER:-} ]] || args+=(--nameserver "${LXC_NAMESERVER}")
+  [[ -z ${ENDPOINTS:-} ]] || args+=(--endpoints "${ENDPOINTS}")
+  [[ ${VERIFY_PROXMOX_TLS:-0} != 1 ]] || args+=(--verify-proxmox-tls)
+  [[ -z ${IMPORT_DB:-} ]] || args+=(--import-db "${IMPORT_DB}")
+  [[ -z ${WG_EP:-} ]] || args+=(--wg-endpoint "${WG_EP}")
+  [[ -z ${WG_PORT:-} ]] || args+=(--wg-port "${WG_PORT}")
+  [[ -z ${LICENSE:-} ]] || args+=(--license "${LICENSE}")
+
+  print_message "[+] Asking for sudo once to perform the server migration" "warn"
+  sudo "${installer}" "${args[@]}"
+}
+
 
 #---  FUNCTION  ----------------------------------------------------------------
 #          NAME:  print_help
@@ -806,9 +883,9 @@ ludus_install_server() {
     print_message "[!] --airgapped requires a signed local --template-file" "error"
     exit 1
   fi
-  if [[ -f /opt/ludus/config.yml && ${MIGRATE_HOST:-0} != 1 && ! -f /opt/ludus/install/.bootstrap-complete ]]; then
-    print_message "[!] Existing host install detected. Use --migrate-host to preserve it; --update is not a migration." "error"
-    exit 1
+  if legacy_host_install_exists && [[ ${MIGRATE_HOST:-0} != 1 ]]; then
+    MIGRATE_HOST=1
+    print_message "[+] Existing host-installed Ludus detected; upgrading it to the LXC runtime" "info"
   fi
   VMID=${VMID:-$(pvesh get /cluster/nextid --output-format json | python3 -c 'import json,sys; print(json.load(sys.stdin))')}
   [[ $VMID =~ ^[1-9][0-9]*$ ]] || { print_message "[!] Invalid LXC VMID" "error"; exit 1; }
@@ -871,6 +948,19 @@ ludus_install_server() {
   fi
 
   if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    if ! command_exists conntrack; then
+      [[ ${AIRGAPPED_INSTALL:-0} != 1 ]] || {
+        print_message "[!] Air-gapped host migration requires the conntrack package to be installed first" "error"
+        exit 1
+      }
+      command_exists apt-get || {
+        print_message "[!] Automatic conntrack installation requires apt-get" "error"
+        exit 1
+      }
+      print_message "[+] Installing the host conntrack package required for endpoint handoff ..." "info"
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y conntrack
+    fi
     install -d -m 0700 /var/lib/ludus-migration
     MIGRATION_DIR=$(mktemp -d /var/lib/ludus-migration/upgrade.XXXXXXXX)
     tar --zstd -tf "$TMPL_CACHE" >"$MIGRATION_DIR/template-files"
@@ -1055,11 +1145,6 @@ ludus_install_server() {
     print_message "[!] VMID ${VMID} is occupied; refusing to modify its state" "error"
     exit 1
   fi
-  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
-    migration_cutover
-  fi
-
-
   # ---- 3. SDN bootstrap --------------------------------------------------------
   local NODE_COUNT ZONE_TYPE PEERS
   NODE_COUNT=$(echo "${CLUSTER_JSON}" | _json 'sum(1 for n in d["data"] if n["type"]=="node")')
@@ -1070,6 +1155,9 @@ ludus_install_server() {
     ZONE_TYPE=vxlan
     PEERS=$(echo "${CLUSTER_JSON}" | _json '",".join(n["ip"] for n in d["data"] if n["type"]=="node")')
     NAT_VNET_TAG=100000
+  fi
+  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    migration_begin_sdn_stage
   fi
   print_message "[+] Creating SDN zone 'ludus' (${ZONE_TYPE}) ..." "info"
   if ! curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/zones/ludus" | grep -q '"zone"'; then
@@ -1099,6 +1187,9 @@ ludus_install_server() {
       --data-urlencode "subnet=192.0.2.0/24" --data-urlencode "type=subnet" \
       --data-urlencode "gateway=${LUDUS_NAT_GATEWAY}" --data-urlencode "snat=1" >/dev/null
   fi
+  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    migration_stage_range_networks
+  fi
   sysctl -w net.ipv4.ip_forward=1 >/dev/null
   install -d -m 0755 /etc/sysctl.d
   printf "net.ipv4.ip_forward=1\n" > /etc/sysctl.d/99-ludus-ip-forward.conf
@@ -1122,11 +1213,8 @@ ludus_install_server() {
   fi
   print_message "[+] SDN zone/vnet applied" "ok"
   if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
-    migration_forwarding start
-    migration_reset_wireguard_sessions
+    migration_finish_sdn_stage
   fi
-
-
   # ---- 5. Create container -----------------------------------------------------
   local ETH0_CFG PROXMOX_INVALID_CERT
   ETH0_CFG="ip=${ETH0_IP}"
@@ -1162,6 +1250,9 @@ EOF
   pct start "${VMID}" \
     || { print_message "[!] Failed to start LXC ${VMID}" "error"; exit 1; }
   sleep 2
+  # The appliance uses ifupdown2. systemd-networkd sees its interfaces as
+  # unmanaged and otherwise delays every boot for its full online timeout.
+  pct exec "${VMID}" -- systemctl mask --now systemd-networkd-wait-online.service
   pct exec "${VMID}" -- systemctl stop ludus-admin ludus \
     || { print_message "[!] Failed to stop Ludus before artifact staging" "error"; exit 1; }
 
@@ -1236,6 +1327,29 @@ EOF
     pct exec "${VMID}" -- update-ca-certificates
   fi
 
+  # Keep the old host services live while the appliance is downloaded, created,
+  # bootstrapped, and configured. The final state export begins only after the
+  # candidate is ready to accept it, keeping the client-visible cutover short.
+  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    pct exec "${VMID}" -- systemctl restart ludus-admin ludus
+    print_message "[+] Staging the LXC runtime while the existing server remains online (up to 5m) ..." "info"
+    for _i in $(seq 1 60); do
+      if pct exec "${VMID}" -- test -f /opt/ludus/install/.bootstrap-complete 2>/dev/null \
+        && pct exec "${VMID}" -- systemctl is-active --quiet ludus ludus-admin \
+        && pct exec "${VMID}" -- curl -fkSs --max-time 5 "https://127.0.0.1:${LUDUS_API_PORT}/api/health" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 5
+    done
+    pct exec "${VMID}" -- test -f /opt/ludus/install/.bootstrap-complete \
+      || { print_message "[!] Bootstrap did not complete; see /opt/ludus/install/install.log inside the container" "error"; exit 1; }
+    pct exec "${VMID}" -- systemctl is-active --quiet ludus ludus-admin \
+      || { print_message "[!] Staged Ludus API services did not become healthy" "error"; exit 1; }
+    print_message "[+] Importing a live state snapshot while the existing server remains online ..." "info"
+    migration_stage_candidate_state
+    migration_cutover
+  fi
+
   if [[ -n "${IMPORT_DB:-}" ]]; then
     print_message "[+] Importing DB/WireGuard state from ${IMPORT_DB} ..." "info"
     pct exec "${VMID}" -- systemctl stop ludus-admin ludus
@@ -1269,10 +1383,19 @@ EOF
   done
   [[ $API_READY == 1 ]] || { print_message "[!] Ludus API services did not become healthy" "error"; exit 1; }
   if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    migration_forwarding start
     curl -fkSs --max-time 10 "https://127.0.0.1:${LUDUS_API_PORT}/api/health" >/dev/null \
       || { print_message "[!] Original API endpoint is not reachable after forwarding" "error"; exit 1; }
+    migration_api_bridge drain
     migration_commit
   fi
+
+  python3 - "${VMID}" "${LUDUS_VERSION}" <<'PY'
+import json,pathlib,sys
+path=pathlib.Path('/etc/ludus-lxc.json')
+path.write_text(json.dumps({'vmid':int(sys.argv[1]),'version':sys.argv[2]},indent=2)+'\n')
+path.chmod(0o600)
+PY
 
   # ---- 7. Output ---------------------------------------------------------------
   if pct exec "${VMID}" -- test -f /opt/ludus/install/.bootstrap-complete; then
@@ -1280,11 +1403,19 @@ EOF
     LXC_IP=$(pct exec "${VMID}" -- hostname -I | awk '{print $1}')
     echo
     print_message "[+] Ludus is running in LXC ${VMID}" "ok"
-    print_message "    API:        https://${LXC_IP}:${LUDUS_API_PORT}" "info"
+    if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+      print_message "    API:        existing endpoint preserved" "info"
+    else
+      print_message "    API:        https://${LXC_IP}:${LUDUS_API_PORT}" "info"
+    fi
     print_message "    Admin API:  https://${LXC_IP}:${LUDUS_ADMIN_PORT} (localhost-only inside LXC by default)" "info"
     print_message "    WireGuard:  ${WG_EP}:${WG_PORT}" "info"
     echo
-    print_message "[+] Next: install ludus-client and run 'ludus user add <name>'" "info"
+    if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+      print_message "[+] Existing clients, API keys, and WireGuard configurations remain valid" "info"
+    else
+      print_message "[+] Next: install ludus-client and run 'ludus user add <name>'" "info"
+    fi
   else
     print_message "[!] Bootstrap did not complete. Last 50 log lines:" "error"
     pct exec "${VMID}" -- tail -50 /opt/ludus/install/install.log 2>/dev/null || true
@@ -1417,9 +1548,18 @@ main() {
       print_message "[!] Unable to determine Ludus version. Pass --version or use a template named ludus-<version>-debian13-amd64.tar.zst" "error"
       exit 1
     fi
+    if lxc_host_install_exists; then
+      print_message "[+] Ludus is already installed in an LXC on this host" "info"
+      rm -rf "${tmpdir}"
+      exit 0
+    fi
+    if legacy_host_install_exists && [[ ${MIGRATE_HOST:-0} != 1 ]]; then
+      MIGRATE_HOST=1
+      print_message "[+] Existing Ludus 2.x host install detected; selecting the transparent LXC upgrade" "info"
+    fi
     rm -rf "${tmpdir}"
     print_message "[+] Installing Ludus server only (LXC mode)" "info"
-    ludus_install_server
+    run_ludus_server_install
     exit 0
   fi
 
@@ -1566,11 +1706,17 @@ main() {
   
   # ---- Server install (LXC mode) ---------------------------------------------
   # Only offered on Proxmox VE hosts (linux/amd64 with pveversion).
-  if [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && command_exists pveversion; then
+  if [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && command_exists pveversion && lxc_host_install_exists; then
+    print_message "[+] Ludus is already installed in an LXC on this host" "info"
+  elif [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && command_exists pveversion; then
+    local server_action="Install"
+    if legacy_host_install_exists; then
+      server_action="Upgrade the existing Ludus server to the LXC runtime"
+    fi
     if [[ "${NO_PROMPT:-0}" == "1" ]]; then
       install_server="y"
     else
-      print_message "[?] Proxmox detected. Install the Ludus server (LXC container) on this host?" "warn"
+      print_message "[?] Proxmox detected. ${server_action}?" "warn"
       if [[ "$SHELL" == "/bin/zsh" ]]; then
         print_message "[?] (y/n): " "warn"
         read -r install_server </dev/tty
@@ -1580,9 +1726,14 @@ main() {
     fi
     case "${install_server}" in
       y|Y )
-        print_message "[+] Installing Ludus server (LXC mode)" "info"
+        if legacy_host_install_exists; then
+          MIGRATE_HOST=1
+          print_message "[+] Upgrading Ludus to the LXC runtime while preserving its endpoints" "info"
+        else
+          print_message "[+] Installing Ludus server (LXC mode)" "info"
+        fi
         LUDUS_VERSION="${LUDUS_VERSION:-${LATEST_TAG}}"
-        ludus_install_server
+        run_ludus_server_install
         ;;
       n|N )
         print_message "[+] Skipping Ludus server installation" "info"

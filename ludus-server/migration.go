@@ -802,7 +802,28 @@ func migrationTLS(values map[string]interface{}, root string) (string, string, e
 	return "", "", errors.New("legacy TLS certificate and private key are required to preserve client trust")
 }
 
-func migrationCollect(stage string) (migrationManifest, error) {
+func migrationSnapshotDatabase(source, destination string) error {
+	if err := os.Remove(destination); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Remove(destination + suffix); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	db, err := sql.Open("sqlite", "file:"+source+"?mode=ro")
+	if err != nil {
+		return err
+	}
+	quoted := strings.ReplaceAll(destination, "'", "''")
+	if _, err := db.Exec("VACUUM INTO '" + quoted + "'"); err != nil {
+		db.Close()
+		return fmt.Errorf("snapshot live PocketBase database: %w", err)
+	}
+	return db.Close()
+}
+
+func migrationCollect(stage string, live bool) (migrationManifest, error) {
 	values, err := migrationReadYAML("/opt/ludus/config.yml")
 	if err != nil {
 		return migrationManifest{}, err
@@ -826,6 +847,11 @@ func migrationCollect(stage string) (migrationManifest, error) {
 	} else {
 		if err := migrationCopyTree(dataDir, filepath.Join(stage, "opt/ludus/db")); err != nil {
 			return migrationManifest{}, fmt.Errorf("copy complete PocketBase data directory: %w", err)
+		}
+		if live {
+			if err := migrationSnapshotDatabase(filepath.Join(dataDir, "data.db"), filepath.Join(stage, "opt/ludus/db/data.db")); err != nil {
+				return migrationManifest{}, err
+			}
 		}
 		for _, name := range migrationTrees {
 			if err := migrationOptionalCopy("/opt/ludus/"+name, filepath.Join(stage, "opt/ludus", name)); err != nil {
@@ -937,28 +963,32 @@ func migrationInventory(stage string) ([]migrationFile, error) {
 	})
 	return files, err
 }
-func exportMigrationState(destination string, infoOnly bool) (err error) {
+func exportMigrationState(destination string, infoOnly, live bool) (err error) {
 	if infoOnly {
-		m, err := migrationCollect("")
+		m, err := migrationCollect("", false)
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(os.Stdout).Encode(m)
 	}
-	if err := migrationStopped(); err != nil {
-		return err
+	if !live {
+		if err := migrationStopped(); err != nil {
+			return err
+		}
 	}
 	stage, err := os.MkdirTemp("", "ludus-export-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	m, err := migrationCollect(stage)
+	m, err := migrationCollect(stage, live)
 	if err != nil {
 		return err
 	}
-	if err := migrationStopped(); err != nil {
-		return err
+	if !live {
+		if err := migrationStopped(); err != nil {
+			return err
+		}
 	}
 	m.Files, err = migrationInventory(stage)
 	if err != nil {

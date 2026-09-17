@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"os"
@@ -11,6 +12,38 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestMigrationSnapshotDatabaseWhileSourceIsOpen(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.db")
+	destination := filepath.Join(dir, "snapshot.db")
+	db, err := sql.Open("sqlite", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("PRAGMA journal_mode=WAL; CREATE TABLE values_table (value TEXT); INSERT INTO values_table VALUES ('before')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationSnapshotDatabase(source, destination); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO values_table VALUES ('after')"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := sql.Open("sqlite", "file:"+destination+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snapshot.Close()
+	var count int
+	if err := snapshot.QueryRow("SELECT count(*) FROM values_table").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("snapshot changed with live database: got %d rows", count)
+	}
+}
 
 func TestMigrationRejectsUnsafeArchiveEntries(t *testing.T) {
 	for _, header := range []tar.Header{
