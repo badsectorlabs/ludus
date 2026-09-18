@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,68 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestMigrationInventorySurvivesLegacyCacheRefresh(t *testing.T) {
+	responses := map[string]string{
+		"/pools/LAB":                  `{"members":[{"vmid":201,"name":"LAB-client","node":"node","type":"qemu"},{"vmid":200,"name":"custom-router","node":"node","type":"qemu"}]}`,
+		"/nodes/node/qemu/200/config": `{"net0":"virtio=00:11:22:33:44:55,bridge=vmbr1000,tag=1","net1":"virtio=00:11:22:33:44:56,bridge=vmbr1002,trunks=10;99"}`,
+		"/nodes/node/qemu/201/config": `{"net0":"virtio=00:11:22:33:44:57,bridge=vmbr1002,tag=10"}`,
+	}
+	get := func(path string, result interface{}) error {
+		data, ok := responses[path]
+		if !ok {
+			return fmt.Errorf("unexpected Proxmox path %s", path)
+		}
+		return json.Unmarshal([]byte(data), result)
+	}
+	ranges := []migrationRange{{ID: "LAB", Number: 2}}
+	inventory, err := migrationProxmoxInventory(ranges, get)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory) != 2 || inventory[0].VMID != 200 || !inventory[0].IsRouter || inventory[1].IsRouter {
+		t.Fatalf("incorrect authoritative inventory: %+v", inventory)
+	}
+	// Simulate the legacy DELETE followed by a partial repopulation. Neither
+	// state may drop the live router from the imported configuration.
+	for _, cache := range [][]migrationVM{nil, {{VMID: 201, Name: "LAB-client", RangeNumber: 2}}} {
+		stage := t.TempDir()
+		config := filepath.Join(stage, "opt/ludus/ranges/LAB/range-config.yml")
+		if err := os.MkdirAll(filepath.Dir(config), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(config, []byte("ludus: []\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		m := migrationManifest{Ranges: ranges, VMs: cache, Inventory: inventory, RouterTemplate: "debian-12-x64-server-template"}
+		if err := migrationAnnotateRouters(stage, m); err != nil {
+			t.Fatal(err)
+		}
+		values, err := migrationReadYAML(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if values["router"].(map[interface{}]interface{})["vm_name"] != "custom-router" {
+			t.Fatal("partial legacy VM cache lost the actual router identity")
+		}
+	}
+	// Pool response ordering is immaterial, but a real NIC change must cause
+	// the cutover inventory comparison to fail.
+	responses["/pools/LAB"] = `{"members":[{"vmid":200,"name":"custom-router","node":"node","type":"qemu"},{"vmid":201,"name":"LAB-client","node":"node","type":"qemu"}]}`
+	after, err := migrationProxmoxInventory(ranges, get)
+	if err != nil || !reflect.DeepEqual(inventory, after) {
+		t.Fatal("pool ordering changed inventory")
+	}
+	responses["/nodes/node/qemu/201/config"] = `{"net0":"virtio=00:11:22:33:44:57,bridge=vmbr1002,tag=99"}`
+	after, err = migrationProxmoxInventory(ranges, get)
+	if err != nil || reflect.DeepEqual(inventory, after) {
+		t.Fatal("real network change went undetected")
+	}
+	delete(responses, "/nodes/node/qemu/200/config")
+	if _, err := migrationProxmoxInventory(ranges, get); err == nil {
+		t.Fatal("missing VM configuration was accepted")
+	}
+}
 
 func TestMigrationSnapshotDatabaseWhileSourceIsOpen(t *testing.T) {
 	dir := t.TempDir()

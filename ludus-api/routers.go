@@ -95,6 +95,11 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	}
 
 	InitDb()
+	preserveConcurrentUserCredentials(app)
+	if os.Geteuid() != 0 {
+		app.Cron().MustAdd("recover-password-rotations", "* * * * *", func() { recoverPendingPasswords(app) })
+		go recoverPendingPasswords(app)
+	}
 	LudusVersion = ludusVersion
 	if os.Geteuid() != 0 {
 		if err := startupSyncTemplatesCollection(app); err != nil {

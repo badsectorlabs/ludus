@@ -41,6 +41,15 @@ type migrationVM struct {
 	IsRouter    bool   `json:"is_router"`
 	Name        string `json:"name"`
 }
+
+// The legacy vms table is a cache which range-status requests rebuild without
+// a transaction. Use Proxmox identities and NICs for cutover checks and router
+// preservation, while retaining VMs to validate the archived database itself.
+type migrationProxmoxVM struct {
+	migrationVM
+	Node string            `json:"node"`
+	NICs map[string]string `json:"nics"`
+}
 type migrationFile struct {
 	Path      string `json:"path"`
 	Size      int64  `json:"size"`
@@ -49,22 +58,23 @@ type migrationFile struct {
 	Directory bool   `json:"directory,omitempty"`
 }
 type migrationManifest struct {
-	Version                int              `json:"version"`
-	Ranges                 []migrationRange `json:"ranges"`
-	VMs                    []migrationVM    `json:"vms"`
-	Port                   int              `json:"port"`
-	AdminPort              int              `json:"admin_port"`
-	ExposeAdminPort        bool             `json:"expose_admin_port"`
-	WireguardPort          int              `json:"wireguard_port"`
-	WireguardEndpoint      string           `json:"wireguard_endpoint"`
-	ProxmoxUserRealm       string           `json:"proxmox_user_realm"`
-	ProxmoxVMStoragePool   string           `json:"proxmox_vm_storage_pool"`
-	ProxmoxVMStorageFormat string           `json:"proxmox_vm_storage_format"`
-	ProxmoxISOStoragePool  string           `json:"proxmox_iso_storage_pool"`
-	RequiresPlugin         bool             `json:"requires_plugin"`
-	RouterTemplate         string           `json:"router_template"`
-	CustomTLS              bool             `json:"custom_tls"`
-	Files                  []migrationFile  `json:"files,omitempty"`
+	Version                int                  `json:"version"`
+	Ranges                 []migrationRange     `json:"ranges"`
+	VMs                    []migrationVM        `json:"vms"`
+	Inventory              []migrationProxmoxVM `json:"inventory"`
+	Port                   int                  `json:"port"`
+	AdminPort              int                  `json:"admin_port"`
+	ExposeAdminPort        bool                 `json:"expose_admin_port"`
+	WireguardPort          int                  `json:"wireguard_port"`
+	WireguardEndpoint      string               `json:"wireguard_endpoint"`
+	ProxmoxUserRealm       string               `json:"proxmox_user_realm"`
+	ProxmoxVMStoragePool   string               `json:"proxmox_vm_storage_pool"`
+	ProxmoxVMStorageFormat string               `json:"proxmox_vm_storage_format"`
+	ProxmoxISOStoragePool  string               `json:"proxmox_iso_storage_pool"`
+	RequiresPlugin         bool                 `json:"requires_plugin"`
+	RouterTemplate         string               `json:"router_template"`
+	CustomTLS              bool                 `json:"custom_tls"`
+	Files                  []migrationFile      `json:"files,omitempty"`
 }
 
 var migrationTrees = []string{"ranges", "users", "templates", "resources", "blueprints", "sources", "tls"}
@@ -73,6 +83,58 @@ var migrationCredentials = []string{".ssh", ".gitconfig", ".git-credentials"}
 var migrationServices = []string{"ludus", "ludus-admin"}
 var migrationID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*(/[A-Za-z0-9_-]+){0,2}$`)
 var migrationEnvName = regexp.MustCompile(`^(LUDUS_DB_ENCRYPTION_PASSWORD|LUDUS_SECRET_[A-Za-z0-9_]+)$`)
+var migrationNICName = regexp.MustCompile(`^net[0-9]+$`)
+
+func migrationProxmoxInventory(ranges []migrationRange, get func(string, interface{}) error) ([]migrationProxmoxVM, error) {
+	result := []migrationProxmoxVM{}
+	seen := map[int]bool{}
+	for _, r := range ranges {
+		var pool struct {
+			Members []struct {
+				VMID int    `json:"vmid"`
+				Name string `json:"name"`
+				Node string `json:"node"`
+				Type string `json:"type"`
+			} `json:"members"`
+		}
+		if err := get("/pools/"+url.PathEscape(r.ID), &pool); err != nil {
+			return nil, fmt.Errorf("read Proxmox pool for range %s: %w", r.ID, err)
+		}
+		for _, member := range pool.Members {
+			if member.Type != "qemu" {
+				continue
+			}
+			if member.VMID < 100 || member.Name == "" || member.Node == "" || strings.ContainsAny(member.Node, "/\\") || seen[member.VMID] {
+				return nil, errors.New("Proxmox contains invalid or duplicate range VM identities")
+			}
+			seen[member.VMID] = true
+			var config map[string]interface{}
+			if err := get(fmt.Sprintf("/nodes/%s/qemu/%d/config", member.Node, member.VMID), &config); err != nil {
+				return nil, fmt.Errorf("read Proxmox VM %d configuration: %w", member.VMID, err)
+			}
+			vm := migrationProxmoxVM{migrationVM: migrationVM{VMID: member.VMID, Name: member.Name, RangeNumber: r.Number}, Node: member.Node, NICs: map[string]string{}}
+			nat, internal := false, false
+			for key, value := range config {
+				if !migrationNICName.MatchString(key) {
+					continue
+				}
+				nic, ok := value.(string)
+				if !ok {
+					return nil, errors.New("Proxmox VM NIC configuration is not a string")
+				}
+				vm.NICs[key] = nic
+				for _, field := range strings.Split(nic, ",") {
+					nat = nat || field == "bridge=vmbr1000" || field == "bridge=ludusnat"
+					internal = internal || field == fmt.Sprintf("bridge=vmbr%d", 1000+r.Number) || field == fmt.Sprintf("bridge=r%d", r.Number)
+				}
+			}
+			vm.IsRouter = nat && internal
+			result = append(result, vm)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].VMID < result[j].VMID })
+	return result, nil
+}
 
 func migrationReadYAML(filename string) (map[string]interface{}, error) {
 	b, err := os.ReadFile(filename)
@@ -877,6 +939,16 @@ func migrationCollect(stage string, live bool) (migrationManifest, error) {
 	if err != nil {
 		return m, err
 	}
+	m.Inventory, err = migrationProxmoxInventory(m.Ranges, func(path string, result interface{}) error {
+		b, err := exec.Command("pvesh", "get", path, "--output-format", "json").Output()
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(b, result)
+	})
+	if err != nil {
+		return m, err
+	}
 	m.RouterTemplate, err = migrationRouterTemplate("/opt/ludus/ansible/server-config.yml", "/opt/ludus/ansible/range-management/ludus.yml")
 	if err != nil {
 		return m, err
@@ -1226,9 +1298,16 @@ func migrationMergeConfig(old, generated map[string]interface{}) (map[string]int
 	return merged, nil
 }
 func migrationAnnotateRouters(stage string, m migrationManifest) error {
+	vms := m.VMs
+	if m.Inventory != nil {
+		vms = make([]migrationVM, 0, len(m.Inventory))
+		for _, vm := range m.Inventory {
+			vms = append(vms, vm.migrationVM)
+		}
+	}
 	for _, r := range m.Ranges {
 		var router string
-		for _, v := range m.VMs {
+		for _, v := range vms {
 			if v.RangeNumber == r.Number && v.IsRouter {
 				if router != "" {
 					return errors.New("range has multiple router VMs; resolve before migration")

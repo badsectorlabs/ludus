@@ -122,12 +122,12 @@ func TestPluginRangeLogHistoryArchivesEachRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	succeeded := start()
-	writeLog("VM two: anti-sandbox applied\n")
+	writeLog("VM two: plugin configuration applied\n")
 	if err := client.finishRangeLogHistory(ctx, succeeded, "success"); err != nil {
 		t.Fatal(err)
 	}
 	assertLog(failed, "failure", "VM one: WinRM timeout\n")
-	assertLog(succeeded, "success", "VM two: anti-sandbox applied\n")
+	assertLog(succeeded, "success", "VM two: plugin configuration applied\n")
 	var history []dto.LogHistoryEntry
 	if err := client.requestJSON(ctx, http.MethodGet, APIBasePath+"/range/logs/history", nil, nil, &history); err != nil {
 		t.Fatal(err)

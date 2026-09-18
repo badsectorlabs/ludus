@@ -9,12 +9,12 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
-func TestProcessRESTResultRejectsUnhandledHTTPError(t *testing.T) {
+func TestProcessRESTResultRejectsPendingPasswordRotation(t *testing.T) {
 	logger.InitLogger(false)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotImplemented)
-		_, _ = w.Write([]byte(`{"error":"not implemented"}`))
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"Password rotation is pending verification on Proxmox"}`))
 	}))
 	defer server.Close()
 
@@ -24,9 +24,9 @@ func TestProcessRESTResultRejectsUnhandledHTTPError(t *testing.T) {
 	}
 	result, success := processRESTResult(response, nil)
 	if success {
-		t.Fatal("HTTP 501 was reported as success")
+		t.Fatal("HTTP 503 was reported as success")
 	}
 	if result != nil {
-		t.Fatalf("HTTP 501 returned a result: %q", result)
+		t.Fatalf("HTTP 503 returned a result: %q", result)
 	}
 }

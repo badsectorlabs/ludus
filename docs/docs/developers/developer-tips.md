@@ -33,10 +33,9 @@ Examples:
   # Build and install client remotely; Build and install Ludus server with debug mode, skip plugins
   ./dev.sh -t ludus-dev-hostname -C -d -s
 ```
-The script copies the current checkout to `~/ludus-dev` on the target machine, then runs the relevant component `dev.sh` scripts. If the enterprise or anti-sandbox source directory is present and `-s` is not set, it builds that plugin before building the server.
+The script copies the current checkout to `~/ludus-dev` on the target machine, then runs the relevant component `dev.sh` scripts. If a supported plugin source directory is present and `-s` is not set, it builds that plugin before building the server.
 
-The enterprise plugins are standalone RPC executables named
-`ludus-enterprise.plugin` and `ludus-antisandbox.plugin`. Their development
+Plugins are standalone RPC executables with a `.plugin` suffix. Their development
 scripts use normal CGO-free `go build` commands and copy the results into the
 appropriate `/opt/ludus/plugins/enterprise` directory. The plugin build no
 longer has to match the server's exact `ludus-api` build. See

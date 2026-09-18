@@ -1,4 +1,4 @@
-# Shared by the enterprise and anti-sandbox plugin projects.
+# Shared by RPC plugin projects.
 # Include this file from badsectorlabs/ludus, then extend the hidden jobs below.
 
 .ludus-plugin-runner:
@@ -25,7 +25,6 @@
   script:
     - test -n "$LUDUS_PLUGIN_MODULE" || (echo "LUDUS_PLUGIN_MODULE is required" >&2; exit 1)
     - test -n "$LUDUS_PLUGIN_BINARY" || (echo "LUDUS_PLUGIN_BINARY is required" >&2; exit 1)
-    - test -n "$LUDUS_PLUGIN_TEST_ENV" || (echo "LUDUS_PLUGIN_TEST_ENV is required" >&2; exit 1)
     - export LUDUS_PLUGIN_WORKSPACE="/tmp/ludus-plugin-${CI_PIPELINE_ID}-${CI_JOB_ID}"
     - rm -rf "$LUDUS_PLUGIN_WORKSPACE" binaries
     - mkdir -p "$LUDUS_PLUGIN_WORKSPACE" binaries
@@ -33,14 +32,13 @@
     - rm -rf "$LUDUS_PLUGIN_WORKSPACE/ludus/$LUDUS_PLUGIN_MODULE"
     - cp -a "$CI_PROJECT_DIR" "$LUDUS_PLUGIN_WORKSPACE/ludus/$LUDUS_PLUGIN_MODULE"
     - cd "$LUDUS_PLUGIN_WORKSPACE/ludus"
-    - go work edit -dropuse ./ludus-enterprise-plugin -dropuse ./ludus-antisandbox-plugin
     - go work use "./$LUDUS_PLUGIN_MODULE"
     - cd "$LUDUS_PLUGIN_MODULE"
     - go test -count=1 ./...
     - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.VersionString=${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}" -o "$LUDUS_PLUGIN_BINARY" .
     - export LUDUS_PLUGIN_PATH="$PWD/$LUDUS_PLUGIN_BINARY"
     - cd ../ludus-api
-    - env "$LUDUS_PLUGIN_TEST_ENV=$LUDUS_PLUGIN_PATH" go test -count=1 -run '^TestRPCPluginInteroperability$' -v
+    - go test -count=1 -run '^TestRPCPluginInteroperability$' -v
     - cd ../dynamic-inventory
     - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o ../ludus-server/ansible/range-management/dynamic-inventory .
     - cd ../ludus-server

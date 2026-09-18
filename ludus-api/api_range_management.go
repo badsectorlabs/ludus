@@ -975,8 +975,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 
 		err := RunAccessControlPlaybook(e, targetRange)
 		if err != nil {
-			sourceUserObject.Set("ranges-", targetRange.Id)
-			e.App.Save(sourceUserObject)
+			if rollbackErr := restoreUserRangeMembership(e.App, sourceUserRecord.Id, targetRange.Id, false); rollbackErr != nil {
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("%v; unable to restore range access: %v", err, rollbackErr))
+			}
 			if errors.Is(err, ErrRangeRouterPoweredOff) {
 				return JSONError(e, http.StatusConflict, err.Error())
 			}
@@ -986,8 +987,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 		// Give the user access to the proxmox pool for the range
 		err = giveUserAccessToRange(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId(), rangeNumber)
 		if err != nil {
-			sourceUserObject.Set("ranges-", targetRange.Id)
-			e.App.Save(sourceUserObject)
+			if rollbackErr := restoreUserRangeMembership(e.App, sourceUserRecord.Id, targetRange.Id, false); rollbackErr != nil {
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("%v; unable to restore range access: %v", err, rollbackErr))
+			}
 			return JSONError(e, http.StatusInternalServerError, "Unable to give user access to pool: "+err.Error())
 		}
 
@@ -1003,8 +1005,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 
 		err := RunAccessControlPlaybook(e, targetRange)
 		if err != nil {
-			sourceUserObject.Set("ranges+", targetRange.Id)
-			e.App.Save(sourceUserObject)
+			if rollbackErr := restoreUserRangeMembership(e.App, sourceUserRecord.Id, targetRange.Id, true); rollbackErr != nil {
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("%v; unable to restore range access: %v", err, rollbackErr))
+			}
 			if errors.Is(err, ErrRangeRouterPoweredOff) {
 				return JSONError(e, http.StatusConflict, err.Error())
 			}
@@ -1013,8 +1016,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 
 		err = removeUserAccessFromRange(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId(), rangeNumber)
 		if err != nil {
-			sourceUserObject.Set("ranges+", targetRange.Id)
-			e.App.Save(sourceUserObject)
+			if rollbackErr := restoreUserRangeMembership(e.App, sourceUserRecord.Id, targetRange.Id, true); rollbackErr != nil {
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("%v; unable to restore range access: %v", err, rollbackErr))
+			}
 			return JSONError(e, http.StatusInternalServerError, "Unable to remove user access from pool: "+err.Error())
 		}
 

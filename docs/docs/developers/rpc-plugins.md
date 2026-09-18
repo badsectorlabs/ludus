@@ -44,10 +44,9 @@ PocketBase before it expires. Closing the plugin removes its idle HTTP
 connections.
 
 Plugin jobs also run through the host. For example, the enterprise license job
-returns updated license and entitlement state to the server. If the license
-contains the anti-sandbox entitlement, the server downloads and starts the
-anti-sandbox executable. The enterprise subprocess does not start other
-plugins itself.
+returns updated license and entitlement state to the server. Base Ludus
+refreshes the enterprise executable; management of enterprise add-ons belongs
+to the enterprise plugin.
 
 ## Protocol compatibility
 
@@ -118,7 +117,6 @@ Ludus uses these executable names:
 | --- | --- | --- | --- |
 | Enterprise | `ludus-enterprise.plugin` | `ludus` | `/opt/ludus/plugins/enterprise/` |
 | Enterprise admin | `ludus-enterprise.plugin` | `root` | `/opt/ludus/plugins/enterprise/admin/` |
-| Anti-sandbox | `ludus-antisandbox.plugin` | `root` | `/opt/ludus/plugins/enterprise/admin/` |
 
 Community plugins use the `.plugin` suffix and belong in
 `/opt/ludus/plugins/community/` or
@@ -130,7 +128,6 @@ Plugin files must be executable:
 ```shell
 chmod 0755 /opt/ludus/plugins/enterprise/ludus-enterprise.plugin
 chmod 0755 /opt/ludus/plugins/enterprise/admin/ludus-enterprise.plugin
-chmod 0755 /opt/ludus/plugins/enterprise/admin/ludus-antisandbox.plugin
 ```
 
 Release artifacts include the plugin version in the download name, such as
@@ -139,7 +136,7 @@ the server. The server installs the artifact under the unversioned filename
 shown above.
 
 At startup and on each scheduled license check, the host asks Keygen for the
-latest stable release in each entitled plugin package. A downloaded
+latest stable release of the entitled enterprise plugin. A downloaded
 artifact must pass its Keygen signature check, complete the RPC handshake, and
 report the expected plugin name and version before it replaces the installed
 file. A plugin that is already running keeps serving requests until Ludus is
@@ -153,19 +150,14 @@ artifacts cannot be loaded by the RPC host.
 
 ## Building the enterprise plugins
 
-The enterprise and anti-sandbox source directories are available only in an
-authorized development checkout. From the workspace root, run:
+The enterprise plugin source directory is available only in an authorized
+development checkout. From the workspace root, run:
 
 ```shell
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
   -trimpath -ldflags "-s -w" \
   -o ludus-enterprise-plugin/ludus-enterprise.plugin \
   ./ludus-enterprise-plugin
-
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -trimpath -ldflags "-s -w" \
-  -o ludus-antisandbox-plugin/ludus-antisandbox.plugin \
-  ./ludus-antisandbox-plugin
 ```
 
 The builds do not require CGO or a Linux C cross-compiler. The `dev.sh` script
@@ -196,31 +188,30 @@ broadcasts, caches, and file lifecycle remain active.
 
 ## Testing real plugin processes
 
-Build both plugin executables, then provide their absolute paths to the
-integration test:
+Build a plugin executable, then provide its absolute path to the integration
+test:
 
 ```shell
 cd ludus-api
-LUDUS_ENTERPRISE_PLUGIN=/absolute/path/ludus-enterprise.plugin \
-LUDUS_ANTISANDBOX_PLUGIN=/absolute/path/ludus-antisandbox.plugin \
+LUDUS_PLUGIN_PATH=/absolute/path/example.plugin \
 go test -run '^TestRPCPluginInteroperability$' -v
 ```
 
-The test starts both executables, initializes their PocketBase API clients,
-registers every declared route, runs the enterprise inactivity job with an
-undeployed range, and then calls enterprise and anti-sandbox status endpoints.
-It also exercises an enterprise record update through a fake parent PocketBase
-API and checks that both subprocesses shut down cleanly.
+The test starts the executable, initializes its PocketBase API client,
+registers every declared route, and checks that the subprocess shuts down
+cleanly. When testing the enterprise plugin, it also runs the inactivity job
+with an undeployed range, calls the KMS status endpoint, and exercises a record
+update through a fake parent PocketBase API.
 
-To verify independent-build compatibility, build the plugins first, make a
+To verify independent-build compatibility, build the plugin first, make a
 harmless change to host-side `ludus-api`, and run the integration test without
-rebuilding the plugins. Remove the temporary change afterward and rerun the
+rebuilding the plugin. Remove the temporary change afterward and rerun the
 test with current-source release binaries.
 
 ## Plugin repository CI
 
-The enterprise and anti-sandbox repositories include
-`ludus-server/ci/plugin.gitlab-ci.yml` from the Ludus repository. The shared
+Plugin repositories can include `ludus-server/ci/plugin.gitlab-ci.yml` from
+the Ludus repository. The shared
 build job runs on a disposable `range_built_user` VM, checks out the current
 Ludus `main` branch, replaces the matching plugin directory with the pipeline
 checkout, and then:
@@ -231,24 +222,24 @@ checkout, and then:
 
 The functional job reuses the same disposable VM and tests the plugin through
 the HTTPS API. Enterprise CI covers licensing, quotas, inactivity settings,
-KMS, and inbound and outbound WireGuard. Anti-sandbox CI covers standard and
-custom package transitions and VM anti-sandbox configuration. A successful
+KMS, and inbound and outbound WireGuard. Add-on functional tests belong in
+their respective plugin repositories. A successful
 pipeline releases the VM claim. A failed pipeline leaves the VM running so the
 state and collected journal artifacts can be inspected.
 
-Both licensed plugin projects must define `LUDUS_LICENSE_KEY` as a masked CI
+Licensed plugin projects must define `LUDUS_LICENSE_KEY` as a masked CI
 variable. The functional jobs install their artifacts in the production
 enterprise plugin directories and start the server with that license.
 
-Tagged enterprise and anti-sandbox pipelines require `KEYGEN_HOST`,
+Tagged licensed plugin pipelines require `KEYGEN_HOST`,
 `KEYGEN_ACCOUNT_ID`, `KEYGEN_TOKEN`, the matching `LUDUS_*_PACKAGE_ID`, and
 the matching `LUDUS_*_ENTITLEMENT_ID` as protected variables. The upload job
 adds the entitlement constraint, publishes the versioned executable to the
 licensed Keygen package, and moves that package's `latest` tag before the
 GitLab release can be created.
 
-Each plugin pipeline must set `LUDUS_PLUGIN_MODULE`, `LUDUS_PLUGIN_BINARY`, and
-`LUDUS_PLUGIN_TEST_ENV`. It must also use one `LUDUS_CI_SERIES` value for its
+Each plugin pipeline must set `LUDUS_PLUGIN_MODULE` and `LUDUS_PLUGIN_BINARY`.
+It must also use one `LUDUS_CI_SERIES` value for its
 build, functional, and VM-release jobs. Keep tests on the disposable VM; do not
 run package installation, VM mutation, or plugin functional tests on the
 Proxmox host.

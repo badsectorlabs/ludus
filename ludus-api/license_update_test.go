@@ -193,7 +193,7 @@ func newPluginReleaseTestClient(t *testing.T, handler http.HandlerFunc) *keygen.
 	return client
 }
 
-func TestActivatePluginUpdateValidatesBothPlugins(t *testing.T) {
+func TestActivatePluginUpdateValidatesMetadata(t *testing.T) {
 	tests := []struct {
 		name            string
 		pathEnvironment string
@@ -205,9 +205,8 @@ func TestActivatePluginUpdateValidatesBothPlugins(t *testing.T) {
 			pluginName:      EnterprisePluginName,
 		},
 		{
-			name:            "anti-sandbox",
-			pathEnvironment: "LUDUS_ANTISANDBOX_PLUGIN",
-			pluginName:      AntiSandboxPluginName,
+			name:            "external plugin",
+			pathEnvironment: "LUDUS_PLUGIN_PATH",
 		},
 	}
 
@@ -223,6 +222,9 @@ func TestActivatePluginUpdateValidatesBothPlugins(t *testing.T) {
 			}
 			if sourceMetadata.Version == "" {
 				t.Fatal("source plugin has no version")
+			}
+			if test.pluginName == "" {
+				test.pluginName = sourceMetadata.Name
 			}
 
 			targetDir := t.TempDir()

@@ -96,21 +96,17 @@ CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags=embeddocs -trimpath \
 
 ## Enterprise plugins
 
-The enterprise and anti-sandbox plugins are standalone RPC executables. They
+Enterprise plugins are standalone RPC executables. They
 are built with normal `go build` commands rather than `-buildmode=plugin`, and
 they do not need CGO or the server's exact `ludus-api` source revision.
 
 The plugin source directories are available only in an authorized development
-checkout. Build both executables from the workspace root:
+checkout. For example, build the enterprise executable from the workspace root:
 
 ```shell
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" \
   -o ludus-enterprise-plugin/ludus-enterprise.plugin \
   ./ludus-enterprise-plugin
-
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" \
-  -o ludus-antisandbox-plugin/ludus-antisandbox.plugin \
-  ./ludus-antisandbox-plugin
 ```
 
 See [RPC plugins](./rpc-plugins.md) for installation paths, protocol

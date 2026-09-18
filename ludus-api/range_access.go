@@ -17,6 +17,23 @@ import (
 // because the VM exists in the cluster but is not reachable (typically powered off).
 var ErrRangeRouterPoweredOff = errors.New("The range router you are sharing access to must be accessible. Make sure the router is powered on and accessible.")
 
+// Credential preservation saves only changed user fields. Reload the record
+// before undoing a grant or revoke so the rollback is recognized as a change.
+func restoreUserRangeMembership(app core.App, userID, rangeID string, grant bool) error {
+	return app.RunInTransaction(func(tx core.App) error {
+		user, err := tx.FindRecordById("users", userID)
+		if err != nil {
+			return err
+		}
+		if grant {
+			user.Set("ranges+", rangeID)
+		} else {
+			user.Set("ranges-", rangeID)
+		}
+		return tx.Save(user)
+	})
+}
+
 func playbookReportsRouterUnreachable(output, routerVMName string) bool {
 	if routerVMName == "" {
 		return false

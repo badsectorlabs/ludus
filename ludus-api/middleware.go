@@ -201,6 +201,9 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 	startVMHookEndpoint := e.Request.URL.Path == APIBasePath+"/range/poweron" && e.Request.Method == http.MethodPut
 	stopVMHookEndpoint := e.Request.URL.Path == APIBasePath+"/range/poweroff" && e.Request.Method == http.MethodPut
 	deleteVMHookEndpoint := strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/vm/") && e.Request.Method == http.MethodDelete
+	rangeDeleteEndpoint := e.Request.Method == http.MethodDelete &&
+		(e.Request.URL.Path == APIBasePath+"/range" ||
+			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range/") && strings.HasSuffix(e.Request.URL.Path, "/vms")))
 	if os.Geteuid() == 0 &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") &&
@@ -208,7 +211,7 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 		!(startVMHookEndpoint && server.hasStartVMHooks()) &&
 		!(stopVMHookEndpoint && server.hasStopVMHooks()) &&
 		!(deleteVMHookEndpoint && server.hasBeforeDeleteVMHooks()) &&
-		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) &&
+		!rangeDeleteEndpoint &&
 		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/migrate/") {
@@ -217,7 +220,7 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 		(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") ||
-			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) ||
+			rangeDeleteEndpoint ||
 			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/migrate/")) {

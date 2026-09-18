@@ -82,12 +82,12 @@ The available tags are listed below:
 Any time a version tag is created in Gitlab, two additional CI jobs are added to the pipeline: `upload` and `release`.
 These jobs are manually triggered (you must click the play button in the pipeline) and upload the compiled binaries to the package registry as well as create the actual release. If you use [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/) (perhaps created with [koji](https://github.com/its-danny/koji)), then [git-cliff](https://github.com/orhun/git-cliff) will automatically generate a change log for the release.
 
-For non-beta releases, the pipeline also builds the enterprise and anti-sandbox
-plugins when the corresponding repository tokens are available. These are
+For non-beta releases, the pipeline also builds licensed plugins using their
+repository tokens. These are
 standalone CGO-free RPC executables. They do not have to be compiled on the
 same machine or against the exact same `ludus-api` package build as the server.
-The release jobs publish `ludus-enterprise_<version>.plugin` and
-`ludus-antisandbox_<version>.plugin` to their licensed packages.
+The release jobs publish versioned `.plugin` executables to their licensed
+packages.
 
 ## Manual CI VM Setup
 

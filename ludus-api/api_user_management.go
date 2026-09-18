@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -16,6 +17,7 @@ import (
 
 	"ludusapi/dto"
 	"ludusapi/models"
+	"ludusapi/pveclient"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -397,6 +399,13 @@ func DeleteUser(e *core.RequestEvent) error {
 	if userRecord == nil {
 		return JSONError(e, http.StatusNotFound, fmt.Sprintf("User record for %s is nil", userID))
 	}
+	lockCtx, cancel := context.WithTimeout(e.Request.Context(), 90*time.Second)
+	defer cancel()
+	unlock, err := lockUserCredentials(lockCtx, app, userRecord.Id)
+	if err != nil {
+		return JSONError(e, http.StatusServiceUnavailable, err.Error())
+	}
+	defer unlock()
 	user.SetProxyRecord(userRecord)
 
 	extraVars := map[string]interface{}{
@@ -517,6 +526,14 @@ func GetAPIKey(e *core.RequestEvent) error {
 // GetCredentials - get the proxmox creds for the user
 func GetCredentials(e *core.RequestEvent) error {
 	user := e.Get("user").(*models.User)
+	ctx, cancel := context.WithTimeout(e.Request.Context(), 90*time.Second)
+	defer cancel()
+	record, err := (passwordRotator{app: app, client: GetRootPVEClient}).credentials(ctx, user.Id)
+	if err != nil {
+		return JSONError(e, http.StatusServiceUnavailable, err.Error())
+	}
+	user = &models.User{}
+	user.SetProxyRecord(record)
 
 	proxmoxPassword := user.ProxmoxPassword()
 	if proxmoxPassword == "" {
@@ -663,7 +680,9 @@ func ListUser(e *core.RequestEvent) error {
 func PostCredentials(e *core.RequestEvent) error {
 
 	var credsToUpdate dto.PostCredentialsRequest
-	e.BindBody(&credsToUpdate)
+	if err := e.BindBody(&credsToUpdate); err != nil {
+		return JSONError(e, http.StatusBadRequest, "Invalid credentials request")
+	}
 	if credsToUpdate.ProxmoxPassword == "" {
 		return JSONError(e, http.StatusBadRequest, "Missing proxmoxPassword value")
 	}
@@ -690,10 +709,20 @@ func PostCredentials(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, "You are not an admin and cannot update the password for another user")
 	}
 
-	// The Proxmox /access/password endpoint is not available to API tokens, and ludus-api
-	// no longer runs co-located with pveum. Password rotation must be done on a cluster node.
-	// TODO(Phase D): restore DB-side credential update once @pve realm + ticket-auth path lands.
-	return JSONError(e, http.StatusNotImplemented,
-		fmt.Sprintf("Cannot change Proxmox password via API token. Run on any cluster node: pveum passwd %s@%s",
-			user.ProxmoxUsername(), user.ProxmoxRealm()))
+	if err := validateRotationPassword(credsToUpdate.ProxmoxPassword); err != nil {
+		return JSONError(e, http.StatusBadRequest, err.Error())
+	}
+	ctx, cancel := context.WithTimeout(e.Request.Context(), 90*time.Second)
+	defer cancel()
+	err = (passwordRotator{app: app, client: GetRootPVEClient}).rotate(ctx, user.Id, credsToUpdate.ProxmoxPassword)
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, pveclient.ErrPasswordAuthentication) || errors.Is(err, pveclient.ErrPasswordMFA) {
+			status = http.StatusConflict
+		} else if errors.Is(err, pveclient.ErrPasswordRejected) || errors.Is(err, pveclient.ErrPasswordUnsupported) {
+			status = http.StatusBadRequest
+		}
+		return JSONError(e, status, err.Error())
+	}
+	return e.JSON(http.StatusOK, dto.PostCredentialsResponse{Result: "Ludus and Proxmox passwords updated"})
 }

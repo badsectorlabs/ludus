@@ -36,9 +36,7 @@ const (
 	LicensePublicKey                        = "70cb26141f38840b8f3f499d4875a829a9d251bd3337278995832b9ea4e39d12"
 	BinaryPublicKey                         = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
 	EnterprisePluginFilename                = "ludus-enterprise.plugin"
-	AntiSandboxPluginFilename               = "ludus-antisandbox.plugin"
 	EnterprisePluginName                    = "Ludus Enterprise"
-	AntiSandboxPluginName                   = "Ludus Enterprise Anti-Sandbox Plugin"
 )
 
 type licensedPluginSpec struct {
@@ -226,18 +224,6 @@ func (s *Server) refreshLicensedPlugins(ctx context.Context) error {
 		})
 		if err != nil {
 			refreshErrors = append(refreshErrors, fmt.Errorf("refresh enterprise plugin: %w", err))
-		}
-	}
-	if os.Geteuid() == 0 && s.HasEntitlement("ANTISANDBOX_PLUGIN") {
-		err := s.ensureLicensedPlugin(ctx, licensedPluginSpec{
-			name:         AntiSandboxPluginName,
-			artifactBase: "ludus-antisandbox",
-			filename:     AntiSandboxPluginFilename,
-			targetDir:    filepath.Join(ludusInstallPath, "plugins", "enterprise", "admin"),
-			packageUUID:  LicensePackageLudusAntisandboxPlugin,
-		})
-		if err != nil {
-			refreshErrors = append(refreshErrors, fmt.Errorf("refresh anti-sandbox plugin: %w", err))
 		}
 	}
 	return errors.Join(refreshErrors...)

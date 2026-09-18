@@ -432,7 +432,7 @@ func GetRangeLogHistoryByID(e *core.RequestEvent) error {
 				logContent, err = os.ReadFile(logPath)
 			}
 		} else {
-			// Anti-sandbox runs in the admin host, whose in-memory log map
+			// Plugins may run in the admin host, whose in-memory log map
 			// is not shared with the regular API serving range history.
 			logContent, err = os.ReadFile(filepath.Join(ludusInstallPath, "ranges", targetRange.RangeId(), "ansible.log"))
 		}

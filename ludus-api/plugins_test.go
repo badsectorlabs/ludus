@@ -8,7 +8,7 @@ import (
 
 func TestApplyPluginStatePreservesEntitlementsOnEmptyValidState(t *testing.T) {
 	server := &Server{
-		Entitlements: []string{"ENTERPRISE_PLUGIN", "ANTISANDBOX_PLUGIN"},
+		Entitlements: []string{"ENTERPRISE_PLUGIN", "EXAMPLE_ADDON"},
 		LicenseValid: true,
 		LicenseKey:   "host-key",
 	}
@@ -21,7 +21,7 @@ func TestApplyPluginStatePreservesEntitlementsOnEmptyValidState(t *testing.T) {
 		LicenseName:    "fallback",
 	})
 
-	if !server.HasEntitlement("ENTERPRISE_PLUGIN") || !server.HasEntitlement("ANTISANDBOX_PLUGIN") {
+	if !server.HasEntitlement("ENTERPRISE_PLUGIN") || !server.HasEntitlement("EXAMPLE_ADDON") {
 		t.Fatalf("expected host entitlements to be preserved, got %v", server.Entitlements)
 	}
 	if !server.LicenseValid {
@@ -39,11 +39,11 @@ func TestApplyPluginStateReplacesEntitlementsWhenProvided(t *testing.T) {
 	}
 
 	server.applyPluginState(pluginrpc.ServerState{
-		Entitlements: []string{"ENTERPRISE_PLUGIN", "ANTISANDBOX_PLUGIN"},
+		Entitlements: []string{"ENTERPRISE_PLUGIN", "EXAMPLE_ADDON"},
 		LicenseValid: true,
 	})
 
-	if !server.HasEntitlement("ANTISANDBOX_PLUGIN") {
+	if !server.HasEntitlement("EXAMPLE_ADDON") {
 		t.Fatalf("expected replaced entitlements, got %v", server.Entitlements)
 	}
 }

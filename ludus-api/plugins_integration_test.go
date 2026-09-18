@@ -28,30 +28,25 @@ func TestRPCPluginInteroperability(t *testing.T) {
 		request string
 	}
 
-	var plugins []pluginCase
-	if path := os.Getenv("LUDUS_ENTERPRISE_PLUGIN"); path != "" {
-		plugins = append(plugins, pluginCase{
-			path:    path,
-			name:    EnterprisePluginName,
-			test:    "enterprise KMS status",
-			method:  http.MethodGet,
-			route:   "/kms/status",
-			request: "/api/v2/kms/status",
-		})
+	path := os.Getenv("LUDUS_PLUGIN_PATH")
+	if path == "" {
+		path = os.Getenv("LUDUS_ENTERPRISE_PLUGIN")
 	}
-	if path := os.Getenv("LUDUS_ANTISANDBOX_PLUGIN"); path != "" {
-		plugins = append(plugins, pluginCase{
-			path:    path,
-			name:    AntiSandboxPluginName,
-			test:    "anti-sandbox package status",
-			method:  http.MethodGet,
-			route:   "/antisandbox/status",
-			request: "/api/v2/antisandbox/status",
-		})
+	if path == "" {
+		t.Skip("set LUDUS_PLUGIN_PATH or LUDUS_ENTERPRISE_PLUGIN to test an external plugin executable")
 	}
-	if len(plugins) == 0 {
-		t.Skip("set LUDUS_ENTERPRISE_PLUGIN and/or LUDUS_ANTISANDBOX_PLUGIN to test external plugin executables")
+	metadata, err := readPluginMetadata(path, nil)
+	if err != nil {
+		t.Fatalf("read plugin metadata: %v", err)
 	}
+	plugin := pluginCase{path: path, name: metadata.Name}
+	if metadata.Name == EnterprisePluginName {
+		plugin.test = "enterprise KMS status"
+		plugin.method = http.MethodGet
+		plugin.route = "/kms/status"
+		plugin.request = "/api/v2/kms/status"
+	}
+	plugins := []pluginCase{plugin}
 
 	ConfigMu.Lock()
 	previousConfiguration := ServerConfiguration
@@ -170,6 +165,11 @@ func TestRPCPluginInteroperability(t *testing.T) {
 	if names := server.LoadedPluginNames(); !slices.Equal(names, wantNames) {
 		t.Fatalf("loaded plugin names = %v, want %v", names, wantNames)
 	}
+	for _, route := range metadata.Routes {
+		if _, ok := LudusPluginHandlerManager.GetHandler(route.Method, route.Pattern); !ok {
+			t.Fatalf("declared route %s %s was not registered", route.Method, route.Pattern)
+		}
+	}
 
 	// An installed server has range records even before any VMs are deployed.
 	// Its first inactivity job must not kill the executable serving routes below.
@@ -182,6 +182,9 @@ func TestRPCPluginInteroperability(t *testing.T) {
 	}
 
 	for _, plugin := range plugins {
+		if plugin.route == "" {
+			continue
+		}
 		t.Run(plugin.test, func(t *testing.T) {
 			handler, ok := LudusPluginHandlerManager.GetHandler(plugin.method, plugin.route)
 			if !ok {
@@ -207,9 +210,6 @@ func TestRPCPluginInteroperability(t *testing.T) {
 				t.Fatalf("decode plugin status: %v", err)
 			}
 			validStatuses := []string{"running", "not_running"}
-			if plugin.name == AntiSandboxPluginName {
-				validStatuses = []string{"standard", "custom", "not_installed"}
-			}
 			if !slices.Contains(validStatuses, status.Result.Status) {
 				t.Fatalf("unexpected plugin status %q", status.Result.Status)
 			}

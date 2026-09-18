@@ -210,12 +210,13 @@ c=json.load(open(sys.argv[1]))
 existing={v['vnet']:v for v in json.loads(subprocess.check_output(['pvesh','get','/cluster/sdn/vnets','--output-format','json']))}
 for r in c['ranges']:
     name=f"r{r['number']}"
+    # Existing router/workload NICs retain their VLAN tags during hotplug.
     if name in existing:
         if existing[name]['zone']!='ludus':
             raise SystemExit(f'SDN target {name} belongs to another zone')
-        subprocess.run(['pvesh','set',f'/cluster/sdn/vnets/{name}','--vlanaware','0'],check=True,stdout=subprocess.DEVNULL)
+        subprocess.run(['pvesh','set',f'/cluster/sdn/vnets/{name}','--vlanaware','1'],check=True,stdout=subprocess.DEVNULL)
     else:
-        subprocess.run(['pvesh','create','/cluster/sdn/vnets','--vnet',name,'--zone','ludus'],check=True,stdout=subprocess.DEVNULL)
+        subprocess.run(['pvesh','create','/cluster/sdn/vnets','--vnet',name,'--zone','ludus','--vlanaware','1'],check=True,stdout=subprocess.DEVNULL)
 PY
 }
 
@@ -341,7 +342,9 @@ import json,pathlib,sys
 root=pathlib.Path(sys.argv[1])
 before=json.loads((root/'info.json').read_text())
 after=json.loads((root/'cutover-info.json').read_text())
-for key in ('ranges','vms','port','admin_port','expose_admin_port','wireguard_port','wireguard_endpoint'):
+# The legacy vms table is a transient cache; even a read-only range poll can
+# delete/repopulate it. Proxmox inventory includes stable identities and NICs.
+for key in ('ranges','inventory','port','admin_port','expose_admin_port','wireguard_port','wireguard_endpoint'):
     if before[key]!=after[key]:
         raise SystemExit('Installation changed during preflight; retry migration in a maintenance window')
 PY
@@ -615,6 +618,19 @@ if (root/'cutover').exists():
         args=['pvesh','set',f"/nodes/{vm['node']}/qemu/{vm['vmid']}/config"]
         for key,value in vm['old'].items(): args+=['--'+key,value]
         run(args)
+        # A failed Proxmox NIC hotplug can detach the tap before rejecting the
+        # new bridge. The saved config may look restored while the guest is
+        # disconnected. Report incomplete rollback instead of claiming success;
+        # replacing the guest NIC can lose its live IP configuration.
+        try:
+            status=json.loads(subprocess.check_output(['pvesh','get',f"/nodes/{vm['node']}/qemu/{vm['vmid']}/status/current",'--output-format','json']))
+            if status.get('status')=='running':
+                for key,value in vm['old'].items():
+                    tap=pathlib.Path('/sys/class/net',f"tap{vm['vmid']}i{key[3:]}")
+                    if not (tap/'master').exists():
+                        errors.append(f"VM {vm['vmid']} {key} bridge attachment was not restored")
+        except (subprocess.CalledProcessError,ValueError) as e:
+            errors.append(f"cannot verify VM {vm['vmid']} NIC rollback: {e}")
 if (root/'sdn-changed').exists():
     # Restore only the section files this migration can change. Reapplying the
     # saved sections regenerates running state, including a reused Ludus zone.

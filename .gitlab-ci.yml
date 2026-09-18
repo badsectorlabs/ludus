@@ -21,10 +21,9 @@ stages:
     for attempt in 1 2 3; do
       if sudo qm guest exec "$vmid" -- "$@"; then
         return 0
-      else
-        exit_code=$?
       fi
 
+      exit_code=$?
       if [[ "$attempt" -eq 3 ]]; then
         return "$exit_code"
       fi
@@ -222,7 +221,7 @@ stages:
   # Validate that WIN10 cannot reach the internet
   - qm_guest_exec_retry "$WIN11VMID" ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
   # Sometimes the DNS lookup is cached from the test above, so test for a DNS failure or a connect failure
-  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://google.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|[Tt]imeout'
+  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://google.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|Timeout was reached'
   - ludus testing allow -i 8.8.8.8
   - ludus testing status
   # Validate that 8.8.8.8 is in the allowedIPs list
@@ -235,17 +234,15 @@ stages:
   - ludus testing status
   # Validate that google.com is in the allowedDomains list
   - 'ludus testing status --json | jq -e ''.allowedDomains | any(startswith("google.com"))'''
-  # Use the IP pinned by the allow command so an upstream DNS cache cannot
-  # return a different Google address during the assertion.
-  - export ALLOWED_GOOGLE_IP="$(ludus testing status --json | jq -r '.allowedDomains[] | select(startswith("google.com ("))' | cut -d '(' -f2 | tr -d ')')"
-  - qm_guest_exec_retry "$WIN11VMID" curl --resolve "google.com:443:${ALLOWED_GOOGLE_IP}" https://google.com/ | grep 'HTML'
-  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://example.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|[Tt]imeout'
+  # This sometimes takes a few seconds - try 3 times 5 seconds apart
+  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
+  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://example.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|Timeout was reached'
   # Deny google.com and 8.8.8.8 and check that they are not reachable
   - ludus testing deny -d google.com
   - ludus testing deny -i 8.8.8.8
   # Validate that google.com and 8.8.8.8 are no longer in the allowed lists
   - 'ludus testing status --json | jq -e ''(.allowedDomains | any(startswith("google.com")) | not) and (.allowedIPs | index("8.8.8.8") | not)'''
-  - qm_guest_exec_retry "$WIN11VMID" curl --resolve "google.com:443:${ALLOWED_GOOGLE_IP}" --connect-timeout 5 --max-time 10 https://google.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|[Tt]imeout'
+  - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://google.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|Timeout was reached'
   - qm_guest_exec_retry "$WIN11VMID" ping -n 1 8.8.8.8 | egrep 'Request timed out.|Destination port unreachable.'
   - ludus testing stop
   - ludus testing status
@@ -293,8 +290,8 @@ stages:
 
 .template-tests: &template-tests # `templates add` CLI tests. The bundled template library moved to the ludus-source-bsl source; a throwaway fixture exercises add/force/ownership, and an embedded (server-included) template covers the build smoke-test.
   - ludus templates list --json | jq -r '.[] | select(.name == "ci-add-test-template") | .name' | grep -q 'ci-add-test-template' && ludus templates rm -n "ci-add-test-template" || echo "No ci-add-test template on the server"
-  # Remove the Ubuntu template if it exists (retry)
-  - ludus templates list --json | jq -r '.[] | select(.name == "ubuntu-22.04-x64-server-template") | .name' | grep -q 'ubuntu-22.04-x64-server-template' && ludus templates rm -n "ubuntu-22.04-x64-server-template" || echo "No Ubuntu 22.04 template on the server"
+  # Remove the debian10 template if it exists (retry)
+  - ludus templates list --json | jq -r '.[] | select(.name == "debian-10-x64-server-template") | .name' | grep -q 'debian-10-x64-server-template' && ludus templates rm -n "debian-10-x64-server-template" || echo "No debian10 on the server"
   - ludus templates list
   - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test
   - ludus templates list
@@ -309,10 +306,10 @@ stages:
   - set -o pipefail
   - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test --force
   - ludus templates rm -n "ci-add-test-template"
-  - ludus source add https://github.com/badsectorlabs/ludus-source-bsl --templates ubuntu-22.04-x64-server-template
-  - ludus templates build -n ubuntu-22.04-x64-server-template
+  - ludus source add https://github.com/badsectorlabs/ludus-source-bsl --templates debian-10-x64-server-template
+  - ludus templates build -n debian-10-x64-server-template
   - ludus templates status
-  - ludus templates status | grep ubuntu-22.04-x64-server-template
+  - ludus templates status | grep debian-10-x64-server-template
   - ludus templates status | grep continuous-integration-
   # Wait for the template to build
   - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
@@ -1217,7 +1214,11 @@ post-deploy user-cmds-as-admin:
       when: never
     - changes:
         - ludus-client/cmd/user.go
-        - ludus-server/src/api_user_management.go
+        - ludus-api/api_user_management.go
+        - ludus-api/password_rotation*.go
+        - ludus-api/pveclient/password*.go
+        - ludus-api/migrations/*password_rotations.go
+        - ludus-server/ci/check-password-rotation.py
         - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
@@ -1238,9 +1239,9 @@ post-deploy user-cmds-as-admin:
     - ludus user add -n "Test Admin 2" -i TA -e "ta2@ludus.internal" -p "ta2password" 2>&1 | grep "User with that ID already exists"
     - set -o pipefail
     # Get and set creds
-    - ludus user creds get --user TA
+    - export ROTATION_API_KEY=$(ludus --user TA users apikey --no-prompt --value)
     - ludus user creds set -i TA -p test-password-123
-    - ludus user creds get --user TA | grep test-password-123
+    - printf '%s' 'tapassword' | python3 /opt/ludus/ci/check-password-rotation.py --user TA --api-key-env ROTATION_API_KEY
     # Get wireguard
     - ludus user wireguard --user TA | grep Endpoint
     # Remove admin user
@@ -1250,9 +1251,10 @@ post-deploy user-cmds-as-admin:
     - ludus user add -n "Test User" -i TU -e "tu@ludus.internal" -p "tupassword"
     - ludus users list all | grep "Test User"
     # Get and set creds
-    - ludus user creds get --user TU
+    - export ROTATION_API_KEY=$(ludus --user TU users apikey --no-prompt --value)
     - ludus user creds set -i TU -p test-password-123
-    - ludus user creds get --user TU | grep test-password-123
+    - printf '%s' 'tupassword' | python3 /opt/ludus/ci/check-password-rotation.py --user TU --api-key-env ROTATION_API_KEY
+    - unset ROTATION_API_KEY
     # Get wireguard
     - ludus user wireguard --user TU | grep Endpoint
     # Remove normal user
@@ -2239,7 +2241,11 @@ post-deploy user-cmds-as-user:
       when: never
     - changes:
         - ludus-client/cmd/user.go
-        - ludus-server/src/api_user_management.go
+        - ludus-api/api_user_management.go
+        - ludus-api/password_rotation*.go
+        - ludus-api/pveclient/password*.go
+        - ludus-api/migrations/*password_rotations.go
+        - ludus-server/ci/check-password-rotation.py
         - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
@@ -2255,11 +2261,12 @@ post-deploy user-cmds-as-user:
     - ludus user list
     - ludus users list all 2>&1 | grep "You are not an admin and cannot list all users"
     # Get and set our own creds
-    - ludus user creds get
     - OG_PW=$(ludus user creds get --json | jq -r '.result.proxmoxPassword')
     - ludus user creds set -p test-password-123
-    - ludus user creds get | grep test-password-123
-    - ludus user creds set -p $OG_PW
+    - printf '%s' "$OG_PW" | python3 /opt/ludus/ci/check-password-rotation.py
+    - ludus user creds set -p "$OG_PW"
+    - printf '%s' 'test-password-123' | python3 /opt/ludus/ci/check-password-rotation.py
+    - unset OG_PW
     # Try to get and set other user's creds
     - ludus user creds get --user CIA 2>&1 | grep "You are not an admin and cannot impersonate other users"
     - ludus user creds set -i CIA -p test-password-123 2>&1 | grep "You are not an admin and cannot update the password for another user"
@@ -2921,7 +2928,7 @@ test-install-sh:
     - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
     - sudo -E ./install.sh --no-prompt --template-file "ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst" --vmid 9999 --storage local-lvm --ip dhcp --wg-endpoint 127.0.0.1 --token-id "${CI_PROXMOX_TOKEN_ID}" --token-secret "${CI_PROXMOX_TOKEN_SECRET}"
     - LXC_IP=$(sudo pct exec 9999 -- hostname -I | awk '{print $1}')
-    - curl -sk "https://${LXC_IP}:8080/api/v1/version" | grep -q version
+    - curl -fsk "https://${LXC_IP}:8080/api/health" | jq -e '.code == 200'
   after_script:
     - sudo pct stop 9999 || true
     - sudo pct destroy 9999 || true
@@ -3330,8 +3337,6 @@ keygen-upload:
       }'
     - keygen upload ludus-antisandbox.plugin --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-antisandbox_${CI_COMMIT_TAG}.plugin --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
     - keygen publish --release ${CI_COMMIT_TAG} --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
-    - keygen untag --release latest --package ${LUDUS_ANTISANDBOX_PACKAGE_ID} || true
-    - keygen tag latest --release ${CI_COMMIT_TAG} --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
 
 release:
   stage: release-binaries

@@ -65,3 +65,34 @@ func TestAdminRoutingPreservesPocketBaseAuthorization(t *testing.T) {
 		})
 	}
 }
+
+func TestRangeRevocationStaysOnRegularService(t *testing.T) {
+	previousLogger := logger
+	logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	t.Cleanup(func() { logger = previousLogger })
+	for _, path := range []string{"/ranges/revoke/USER/RANGE", "/range", "/range/RANGE/vms"} {
+		t.Run(path, func(t *testing.T) {
+			if os.Geteuid() != 0 && path != "/ranges/revoke/USER/RANGE" {
+				return // The actual admin proxy requires a running peer service.
+			}
+			response := httptest.NewRecorder()
+			event := &core.RequestEvent{Event: router.Event{
+				Request: httptest.NewRequest(http.MethodDelete, APIBasePath+path, nil), Response: response,
+			}}
+			chain := hook.Hook[*core.RequestEvent]{}
+			chain.BindFunc(limitRootEndpoints)
+			if err := chain.Trigger(event, func(e *core.RequestEvent) error {
+				return e.JSON(http.StatusOK, map[string]bool{"handled": true})
+			}); err != nil {
+				t.Fatal(err)
+			}
+			want := http.StatusOK
+			if os.Geteuid() == 0 && path == "/ranges/revoke/USER/RANGE" {
+				want = http.StatusInternalServerError
+			}
+			if response.Code != want {
+				t.Fatalf("status=%d want=%d body=%s", response.Code, want, response.Body.String())
+			}
+		})
+	}
+}
