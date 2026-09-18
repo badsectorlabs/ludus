@@ -14,9 +14,9 @@
 .ludus-rpc-plugin-build:
   extends: .ludus-plugin-runner
   stage: build
+  resource_group: ludus-build-vm
   variables:
-    LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: range_built_user
+    LUDUS_BUILD_TYPE: any-built
     LUDUS_REPOSITORY_REF: main
   artifacts:
     paths:

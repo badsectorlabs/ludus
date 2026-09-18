@@ -6,8 +6,10 @@ set -euo pipefail
 VMID=${1:?vmid}
 TMPL=${2:?template path}
 NODE=$(hostname)
-TOKEN_ID=${TOKEN_ID:?}
-TOKEN_SECRET=${TOKEN_SECRET:?}
+TOKEN_ID=${TOKEN_ID:-}
+TOKEN_SECRET=${TOKEN_SECRET:-}
+GENERATED_TOKEN=0
+TOKEN_NAME="ludus-airgap-${VMID}"
 RUN_USER_TEST=${RUN_USER_TEST:-0}
 RUN_RANGE_TEST=${RUN_RANGE_TEST:-0}
 TEST_USER_ID=${TEST_USER_ID:-UT}
@@ -20,11 +22,23 @@ TEST_RANGE_NAME=${TEST_RANGE_NAME:-User Test Range}
 TEST_RANGE_NUMBER=${TEST_RANGE_NUMBER:-42}
 LXC_ROOTFS_STORAGE=${LXC_ROOTFS_STORAGE:-local-lvm}
 LUDUS_NAT_BRIDGE=${LUDUS_NAT_BRIDGE:-ludusnat}
+LUDUS_NAT_GATEWAY=${LUDUS_NAT_GATEWAY:-192.0.2.254}
+CREATED_NAT_BRIDGE=0
 TMP_PREFIX="/tmp/ludus-lxc-test-${VMID}-"
 
 if [[ "$RUN_RANGE_TEST" == "1" ]]; then
   RUN_USER_TEST=1
 fi
+
+[[ "$VMID" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid test VMID" >&2; exit 1; }
+[[ -s "$TMPL" ]] || { echo "LXC template is missing or empty" >&2; exit 1; }
+if [[ -z "$TOKEN_ID" && -n "$TOKEN_SECRET" || -n "$TOKEN_ID" && -z "$TOKEN_SECRET" ]]; then
+  echo "TOKEN_ID and TOKEN_SECRET must be supplied together" >&2
+  exit 1
+fi
+RESOURCE_JSON=$(pvesh get /cluster/resources --type vm --output-format json)
+python3 -c 'import json,sys; guests=json.load(sys.stdin); assert isinstance(guests,list); sys.exit("Test VMID is already in use" if any(int(v["vmid"])==int(sys.argv[1]) for v in guests) else 0)' "$VMID" <<<"$RESOURCE_JSON"
+unset RESOURCE_JSON
 
 cleanup() {
   local rc=$?
@@ -33,12 +47,26 @@ cleanup() {
   pct destroy "$VMID" --force 1 2>/dev/null
   nft delete table inet ludus-airgap-test 2>/dev/null
   ip link del ludus-airgap 2>/dev/null
+  if [[ "$CREATED_NAT_BRIDGE" == "1" ]]; then
+    ip link del "$LUDUS_NAT_BRIDGE" 2>/dev/null || true
+  fi
   rm -f /tmp/cfg.yml
   rm -f "${TMP_PREFIX}"*.json 2>/dev/null || true
   rm -f "/var/lib/vz/template/cache/${TMPL_NAME:-}" 2>/dev/null || true
+  if [[ "$GENERATED_TOKEN" == "1" ]]; then
+    pveum user token remove root@pam "$TOKEN_NAME" >/dev/null 2>&1 || true
+  fi
   exit "$rc"
 }
 trap cleanup EXIT INT TERM
+
+if [[ -z "$TOKEN_ID" ]]; then
+  token_json=$(pveum user token add root@pam "$TOKEN_NAME" --privsep 0 --output-format json)
+  GENERATED_TOKEN=1
+  TOKEN_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["full-tokenid"])' <<<"$token_json")
+  TOKEN_SECRET=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])' <<<"$token_json")
+  unset token_json
+fi
 
 api_post_in_lxc() {
   local api_key=$1
@@ -144,6 +172,13 @@ if ! ip link show ludus-airgap &>/dev/null; then
   ip addr add 172.31.255.1/24 dev ludus-airgap
   ip link set ludus-airgap up
 fi
+# The clean-install seed can still have the legacy vmbr1000 bridge. The LXC
+# needs its NIC bridge before bootstrap creates and applies the SDN VNet.
+if ! ip link show "$LUDUS_NAT_BRIDGE" &>/dev/null; then
+  ip link add "$LUDUS_NAT_BRIDGE" type bridge
+  CREATED_NAT_BRIDGE=1
+  ip link set "$LUDUS_NAT_BRIDGE" up
+fi
 # Egress drop counter on the bridge
 nft add table inet ludus-airgap-test 2>/dev/null || true
 nft flush table inet ludus-airgap-test
@@ -175,6 +210,7 @@ proxmox_invalid_cert: true
 airgapped_install: true
 sdn_zone: ludus
 ludus_nat_interface: ${LUDUS_NAT_BRIDGE}
+ludus_nat_gateway: ${LUDUS_NAT_GATEWAY}
 ludus_dns_server: ${PVE_API_IP}
 license_key: community
 database_encryption_key: $(head -c 24 /dev/urandom | base64 | head -c 32)
