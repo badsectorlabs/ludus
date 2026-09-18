@@ -543,6 +543,9 @@ documentation:
 
 go-unit-tests:
   stage: build
+  resource_group: ludus-build-vm
+  variables:
+    LUDUS_BUILD_TYPE: any-built
   tags:
     - ludus-proxmox-runner-parallel
   rules:
@@ -679,6 +682,9 @@ build all:
 
 build-lxc-template:
   stage: build
+  resource_group: ludus-build-vm
+  variables:
+    LUDUS_BUILD_TYPE: any-built
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2899,12 +2905,16 @@ cluster-test-range-default:
 #############
 test-lxc-airgap:
   stage: test
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: clean_install
+    LUDUS_CI_SERIES: lxc-airgap
   tags:
     - ludus-proxmox-runner-parallel
   needs:
     - job: build-lxc-template
       artifacts: true
-  rules:
+  rules: &lxc-test-rules
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_MESSAGE =~ /\[build-lxc\]/
   timeout: 30m
@@ -2916,14 +2926,16 @@ test-lxc-airgap:
 
 test-install-sh:
   stage: test
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: clean_install
+    LUDUS_CI_SERIES: lxc-install
   tags:
     - ludus-proxmox-runner-parallel
   needs:
     - job: build-lxc-template
       artifacts: true
-  rules:
-    - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_MESSAGE =~ /\[build-lxc\]/
+  rules: *lxc-test-rules
   timeout: 30m
   script:
     - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
@@ -2939,6 +2951,38 @@ test-install-sh:
 #################
 # These dynamic VM release jobs run only when their upstream series succeeds.
 # Failed series intentionally keep their clone running for troubleshooting.
+release lxc-airgap-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - test-lxc-airgap
+  dependencies: []
+  rules: *lxc-test-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: lxc-airgap
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release lxc-install-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - test-install-sh
+  dependencies: []
+  rules: *lxc-test-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: lxc-install
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
 release install-vm:
   stage: release-claim
   tags:
