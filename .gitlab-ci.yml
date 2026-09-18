@@ -2910,7 +2910,8 @@ test-lxc-airgap:
   timeout: 30m
   script:
     - export TOKEN_ID="${CI_PROXMOX_TOKEN_ID}" TOKEN_SECRET="${CI_PROXMOX_TOKEN_SECRET}"
-    - VMID=$(curl -sk -H "Authorization: PVEAPIToken=${TOKEN_ID}=${TOKEN_SECRET}" https://localhost:8006/api2/json/cluster/nextid | python3 -c "import sys,json;print(json.load(sys.stdin)['data'])")
+    - |
+      VMID=$(curl -sk -H "Authorization: PVEAPIToken=${TOKEN_ID}=${TOKEN_SECRET}" https://localhost:8006/api2/json/cluster/nextid | python3 -c "import sys,json;print(json.load(sys.stdin)['data'])")
     - sudo -E ludus-server/ci/test-lxc-airgap.sh "$VMID" "ludus-${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}-debian13-amd64.tar.zst"
 
 test-install-sh:
