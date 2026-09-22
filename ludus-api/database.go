@@ -268,7 +268,6 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 		}
 	}
 	logger.Info("Successfully created initial admin user")
-	Run("ludus-install-status", "/tmp", "/tmp/ludus-install-status.log")
 	return nil
 }
 

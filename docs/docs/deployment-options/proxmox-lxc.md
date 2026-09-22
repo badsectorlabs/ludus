@@ -168,6 +168,15 @@ pct exec 900 -- tail -100 /opt/ludus/install/install.log
 
 The API listens on TCP 8080. The admin API listens on TCP 8081 inside the
 container and is bound to localhost unless `expose_admin_port` is enabled.
+Use the public API for normal CLI operations; supported admin operations are
+proxied internally. The Proxmox host's localhost is not the container's localhost.
+
+Run `ludus-install-status` as root on Proxmox to check the LXC selected by
+`/etc/ludus-lxc.json`. It can also be run directly inside the container. It checks
+both services and API health using the configured ports. `--credentials` displays
+initial-admin credentials only when the initial-admin marker exists, and never
+rotates an API key. A migrated installation without that marker retains its
+existing users; the status command does not create an administrator.
 WireGuard listens on UDP 51820.
 
 The server configuration is `/opt/ludus/config.yml` inside the LXC. Restart both

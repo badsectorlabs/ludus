@@ -199,11 +199,14 @@ Admins can also trigger the SQLite-to-PocketBase migration through the CLI or AP
 ludus migrate sqlite
 
 # terminal-command-ludus-root
-curl -sk -X POST https://127.0.0.1:8081/api/v2/migrate/sqlite \
-  -H "X-API-Key: $(cat /opt/ludus/install/root-api-key)"
+curl -sk -X POST "${LUDUS_URL}/api/v2/migrate/sqlite" \
+  -H "X-API-Key: ${LUDUS_API_KEY}"
 ```
 
-This calls the same migration function and is useful if you want to retry without restarting the service.
+Set `LUDUS_URL` to the public Ludus API and `LUDUS_API_KEY` to an administrator key.
+The public API proxies this operation to the admin service inside the LXC; the
+Proxmox host's loopback address is not the admin endpoint. This calls the same
+migration function and is useful if you want to retry without restarting the service.
 
 ## API Changes (v1 → v2)
 

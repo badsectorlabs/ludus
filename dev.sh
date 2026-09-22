@@ -217,11 +217,22 @@ set -euo pipefail
 
 key_file="$HOME/.ludus-api-key"
 if [ ! -s "$key_file" ]; then
+  if [ -f /etc/ludus-lxc.json ]; then
+    vmid=$(python3 -c 'import json; v=json.load(open("/etc/ludus-lxc.json"))["vmid"]; assert type(v) is int and v > 0; print(v)')
+    response=$(pct exec "$vmid" -- bash -euo pipefail -c '
+      port=$(/opt/ludus/venv/bin/python3 -c '\''import yaml; print(yaml.safe_load(open("/opt/ludus/config.yml")).get("port",8080))'\'')
+      printf "X-API-KEY: %s\n" "$(cat /opt/ludus/install/root-api-key)" |
+        curl -fkSs --max-time 120 --header @- -H "Content-Type: application/json" \
+          --data '\''{"userID":"DEV","isAdmin":true,"email":"dev@localhost.local","name":"Dev","password":"password"}'\'' \
+          "https://127.0.0.1:${port}/api/v2/user"
+    ')
+  else
   response=$(
     LUDUS_URL=https://127.0.0.1:8080 \
     LUDUS_API_KEY="$(cat /opt/ludus/install/root-api-key)" \
       ludus user add -a -e dev@localhost.local -n Dev -p password -i DEV --json
   )
+  fi
   api_key=$(printf '%s\n' "$response" | jq -er '.apiKey | select(type == "string" and length > 0)')
   temp_file=$(mktemp "${key_file}.tmp.XXXXXX")
   chmod 600 "$temp_file"

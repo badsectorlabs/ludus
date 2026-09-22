@@ -27,6 +27,7 @@ install:
 	# binary + embedded trees
 	install -m 0755 ../../binaries/ludus-server $(BASEDIR)/opt/ludus/ludus-server
 	install -m 0700 migrate-host.sh $(BASEDIR)/opt/ludus/install/migrate-host.sh
+	install -m 0755 files/ludus-install-status $(BASEDIR)/usr/local/bin/ludus-install-status
 	cp -r ../ansible $(BASEDIR)/opt/ludus/ansible
 	cp -r ../packer $(BASEDIR)/opt/ludus/packer
 	# python venv (air-gap)

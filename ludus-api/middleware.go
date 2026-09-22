@@ -24,10 +24,10 @@ import (
 func adminEndpointError(command string) string {
 	port := ServerConfiguration.AdminPort
 	return fmt.Sprintf(
-		"You must use the ludus-admin server on 127.0.0.1:%d to use this endpoint.\n"+
-			"Use SSH to tunnel to this port with the command: ssh -L %d:127.0.0.1:%d root@<ludus IP>\n"+
-			"In a different terminal re-run the %s command with --url https://127.0.0.1:%d",
-		port, port, port, command, port,
+		"This endpoint requires ludus-admin (127.0.0.1:%d inside the Ludus LXC, not the Proxmox host).\n"+
+			"Run %s against the configured public Ludus API, which proxies supported admin endpoints.\n"+
+			"For diagnostics, enter the container with pct enter <VMID> on the Proxmox host. Do not expose the admin port.",
+		port, command,
 	)
 }
 

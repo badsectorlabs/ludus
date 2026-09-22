@@ -1,0 +1,103 @@
+#!/usr/bin/python3
+"""Read-only installation status, dispatched into the configured LXC on PVE."""
+import argparse
+import json
+import os
+from pathlib import Path
+import ssl
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+
+INSTALL = Path('/opt/ludus/install')
+METADATA = Path('/etc/ludus-lxc.json')
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def container_id(metadata):
+    vmid = json.loads(metadata.read_text())['vmid']
+    if type(vmid) is not int or vmid <= 0:
+        raise ValueError('invalid LXC VMID in /etc/ludus-lxc.json')
+    return str(vmid)
+
+
+def configured_ports():
+    # Use the appliance's YAML parser; never print the configuration or secrets.
+    raw = subprocess.check_output([
+        '/opt/ludus/venv/bin/python3', '-c',
+        'import yaml,json; c=yaml.safe_load(open("/opt/ludus/config.yml")) or {}; '
+        'print(json.dumps([c.get("port",8080),c.get("admin_port",8081)]))',
+    ], text=True)
+    ports = json.loads(raw)
+    if any(type(p) is not int or not 1 <= p <= 65535 for p in ports):
+        raise ValueError('invalid API port configuration')
+    return ports
+
+
+def request(port, path, key=None):
+    headers = {'X-API-KEY': key} if key else {}
+    req = urllib.request.Request(f'https://127.0.0.1:{port}{path}', headers=headers)
+    # Local appliance TLS is self-signed; never send root credentials off loopback.
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), NoRedirect(),
+        urllib.request.HTTPSHandler(context=ssl._create_unverified_context()))
+    with opener.open(req, timeout=5) as response:
+        return response.read().decode()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--credentials', action='store_true',
+                        help='display initial admin credentials (does not rotate API keys)')
+    args = parser.parse_args(argv)
+    if os.geteuid() != 0:
+        raise ValueError('Run this command as root.')
+    if METADATA.exists():
+        command = ['pct', 'exec', container_id(METADATA), '--',
+                   '/usr/local/bin/ludus-install-status']
+        if args.credentials:
+            command.append('--credentials')
+        return subprocess.call(command)
+    if not (INSTALL / '.bootstrap-complete').exists():
+        print('Bootstrap is not complete. Check /opt/ludus/install/install.log inside the Ludus LXC.')
+        return 1
+    # systemctl with multiple units succeeds when ANY unit is active.
+    if any(subprocess.call(['systemctl', 'is-active', '--quiet', service]) != 0
+           for service in ('ludus', 'ludus-admin')):
+        print('Ludus services are not active. Check journalctl -u ludus -u ludus-admin inside the LXC.')
+        return 1
+    public_port, admin_port = configured_ports()
+    request(public_port, '/api/health')
+    request(admin_port, '/api/health')
+    print('Ludus installation is healthy (services and APIs inside the LXC).')
+    marker = INSTALL / 'initial-admin-userid'
+    if not marker.exists():
+        print('No initial-admin marker exists. Migrated installations retain their existing users. '
+              'This command does not create users. Use an existing administrator and ludus user add '
+              'against the public API; for a new installation configure /opt/ludus/install/initial-admin.yml '
+              'inside the LXC and restart ludus-admin.')
+        return 0
+    user_id = marker.read_text().strip()
+    if not user_id:
+        raise ValueError('Initial admin marker is empty.')
+    print(f'Initial admin: {user_id}')
+    if args.credentials:
+        key = (INSTALL / 'root-api-key').read_text().strip()
+        print(request(admin_port, '/api/v2/user/credentials?' + urllib.parse.urlencode({'userID': user_id}), key))
+    else:
+        print('Use --credentials to display initial admin credentials. Existing API keys are unchanged.')
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except Exception:
+        # HTTP errors and configuration failures must not leak credentials/configuration.
+        print('Unable to read Ludus installation status. Check the LXC, configuration, and service logs.', file=sys.stderr)
+        sys.exit(1)

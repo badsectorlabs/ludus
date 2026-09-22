@@ -1397,6 +1397,16 @@ path.write_text(json.dumps({'vmid':int(sys.argv[1]),'version':sys.argv[2]},inden
 path.chmod(0o600)
 PY
 
+  # Install only after migration commits: rollback keeps the legacy helper intact.
+  local STATUS_HELPER
+  STATUS_HELPER=$(mktemp)
+  pct pull "${VMID}" /usr/local/bin/ludus-install-status "${STATUS_HELPER}"
+  if [[ -f /usr/local/bin/ludus-install-status && ! -e /usr/local/bin/ludus-install-status.pre-lxc ]]; then
+    cp -p /usr/local/bin/ludus-install-status /usr/local/bin/ludus-install-status.pre-lxc
+  fi
+  install -m 0755 "${STATUS_HELPER}" /usr/local/bin/ludus-install-status
+  rm -f "${STATUS_HELPER}"
+
   # ---- 7. Output ---------------------------------------------------------------
   if pct exec "${VMID}" -- test -f /opt/ludus/install/.bootstrap-complete; then
     local LXC_IP
@@ -1408,7 +1418,8 @@ PY
     else
       print_message "    API:        https://${LXC_IP}:${LUDUS_API_PORT}" "info"
     fi
-    print_message "    Admin API:  https://${LXC_IP}:${LUDUS_ADMIN_PORT} (localhost-only inside LXC by default)" "info"
+    print_message "    Admin API:  https://127.0.0.1:${LUDUS_ADMIN_PORT} inside LXC ${VMID} only; use the public API for CLI commands" "info"
+    print_message "    Status:     ludus-install-status (automatically enters LXC ${VMID})" "info"
     print_message "    WireGuard:  ${WG_EP}:${WG_PORT}" "info"
     echo
     if [[ ${MIGRATE_HOST:-0} == 1 ]]; then

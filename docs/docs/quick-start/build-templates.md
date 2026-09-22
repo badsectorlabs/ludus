@@ -11,7 +11,11 @@ Unlike other solutions, Ludus templates are built from scratch (ISO), and by des
 This allows users to modify base templates into arbitrary VMs during a deploy without having to maintain a library of stale, customized VMs.
 This focus on infrastructure as code allows Ludus users to create fresh, up to date VMs every deployment.
 
-The first step is to start the template build process. First, we can view the available templates.
+The first step is to start the template build process. Configure `LUDUS_URL` with
+your public Ludus API address and use the API key returned when your user was
+created. On the Proxmox host, `ludus-install-status` checks the installed LXC;
+`ludus-install-status --credentials` can display initial-admin credentials when
+that user was created by the installer. Neither command creates or rotates API keys.
 
 :::tip
 
@@ -22,22 +26,7 @@ shell's history file in most common shells.
 
 ```shell-session
 #terminal-command-ludus
-su -
-#terminal-command-ludus-root
-ludus-install-status
-Initial admin credentials:
-  userID: JD
-  Proxmox username: john-doe
-  Proxmox password: password
-  Ludus Web username: john.doe@example.com
-  Ludus Web password: password
-
-  API key for user JD: JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
-  [Note: This API key will be recreated if this command is run again and the old key will no longer work]
-#terminal-command-ludus-root
-exit
-#terminal-command-ludus
- export LUDUS_API_KEY=JD._7Gx2T5kTUSD%uTWZ*lFi=Os6MpFR^OrG+yT94Xt
+ export LUDUS_API_KEY='<your-user-api-key>'
 #terminal-command-ludus
 ludus templates list
 +------------------------------------+--------------+

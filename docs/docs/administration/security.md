@@ -56,7 +56,7 @@ iptables-save /etc/iptables/rules.v4
 
 ## Malicious Users
 
-Giving users the ability to add arbitrary Ansible roles is effectively allowing for remote code execution, as a role could simply be a reverse shell executed on host `localhost` (the Ludus host).
+Giving users the ability to add arbitrary Ansible roles is effectively allowing for remote code execution, as a role could simply be a reverse shell executed on host `localhost` (the Ansible controller inside the Ludus LXC, not the Proxmox host).
 The flexibility offered by arbitrary Ansible roles is worth the security trade off for nearly all use cases.
 
 To prevent non-admin users from adding Ansible roles or collections, set the following option in the Ludus config file.

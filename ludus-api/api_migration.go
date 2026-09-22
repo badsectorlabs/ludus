@@ -88,7 +88,7 @@ func GetSDNMigrationStatus(e *core.RequestEvent) error {
 // All operations use the Proxmox API for portability.
 func MigrateToSDN(e *core.RequestEvent) error {
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, fmt.Sprintf("Migration must be run via ludus-admin on 127.0.0.1:%d", ServerConfiguration.AdminPort))
+		return JSONError(e, http.StatusForbidden, adminEndpointError("ludus migrate sdn run"))
 	}
 
 	client, err := GetRootGoProxmoxClient()
@@ -247,7 +247,7 @@ func migrateRangeVMsToVNet(client *goproxmox.Client, ctx context.Context, rangeI
 // migrating existing ranges. Used during fresh installations.
 func SetupSDNInfrastructure(e *core.RequestEvent) error {
 	if os.Geteuid() != 0 {
-		return JSONError(e, http.StatusForbidden, fmt.Sprintf("SDN setup must be run via ludus-admin on 127.0.0.1:%d", ServerConfiguration.AdminPort))
+		return JSONError(e, http.StatusForbidden, adminEndpointError("SDN setup"))
 	}
 
 	err := setupSDNZone()
