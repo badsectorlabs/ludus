@@ -703,12 +703,15 @@ build-lxc-template:
         - ludus-server/ci/test-lxc*.sh
         - ludus-server/ci/test-install*.sh
         - ludus-server/lxc/**/*
+        - ludus-server/ci/build-lxc-isolated.sh
+        - ludus-server/ci/test_build_lxc_isolated.py
         - ludus-server/ansible/requirements.yml
   before_script:
     - sudo apt-get update && sudo apt-get install -y dab make unzip zstd python3-pip ansible-core
   script:
     - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
-    - sudo -E ludus-server/lxc/build.sh
+    - sudo python3 -B ludus-server/ci/test_build_lxc_isolated.py
+    - sudo -E bash ludus-server/ci/build-lxc-isolated.sh
   artifacts:
     paths:
       - "ludus-*-debian13-amd64.tar.zst"
