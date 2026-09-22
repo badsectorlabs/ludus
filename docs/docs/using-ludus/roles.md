@@ -101,6 +101,8 @@ HTTP(S) URLs whose path ends in `.tar.gz` are downloaded as collection artifacts
 
 Roles bundled in a collection can be used in a range config — reference them in the `roles:` key by their fully-qualified name (e.g. `badsectorlabs.ludus_windows_utils.ludus_ad_password_policy`).
 
+Both range deployments and template builds can use user-local and globally installed roles and collections. When the same role or collection is installed in both scopes, the initiating user's copy takes precedence.
+
 ## Ludus Specific Roles
 
 While most existing ansible roles will work with Ludus, this page contains a table of roles specifically designed for Ludus.
