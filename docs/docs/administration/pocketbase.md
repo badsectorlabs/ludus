@@ -3,6 +3,8 @@ sidebar_position: 4
 title: "🗃️ PocketBase"
 ---
 
+## Enable PocketBase Web UI
+
 Ludus uses [PocketBase](https://pocketbase.io/) as part of the backend to manage data. By default, the PocketBase web UI is disabled to prevent users from modifying the database directly which can cause unintended consequences.
 
 However, there are use cases that require an administrator to access the database and manipulate it directly or view logs.
@@ -21,6 +23,17 @@ You can then browse to the PocketBase admin page at `https://<Ludus IP>:8080/adm
 Log in with the username `root@ludus.internal` and the password the full ROOT API key from `/opt/ludus/install/root-api-key`.
 
 ![The PocketBase login screen](/img/pocketbase/pocketbase-login.png)
+
+## Disable PocketBase Web UI
+
+You can disable the pocketbase web interface by running the following commands
+
+```shell-session
+#terminal-command-ludus-root
+systemctl unset-environment LUDUS_ENABLE_SUPERADMIN
+#terminal-command-ludus-root
+systemctl restart ludus
+```
 
 ## Logs in PocketBase
 

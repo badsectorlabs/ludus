@@ -498,7 +498,16 @@ func generateUserIDFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEvent) 
 	}
 }
 
+const ssoExistingUserRequiredMessage = "SSO requires an existing Ludus account with a matching email address. Ask an administrator to create your account or set sso_require_existing_user: false in /opt/ludus/config.yml to allow automatic account creation."
+
 func populateUserFieldsFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEvent) error {
+	ConfigMu.RLock()
+	requireExistingUser := ServerConfiguration.SSORequireExistingUser
+	ConfigMu.RUnlock()
+	if requireExistingUser && (e.Record == nil || e.OAuth2User == nil || e.OAuth2User.Email == "" || e.Record.Email() != e.OAuth2User.Email) {
+		return e.ForbiddenError(ssoExistingUserRequiredMessage, nil)
+	}
+
 	if e.Record != nil {
 		return e.Next()
 	}

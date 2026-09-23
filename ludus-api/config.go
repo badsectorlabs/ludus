@@ -35,6 +35,7 @@ type Configuration struct {
 	ProxmoxISOStoragePool     string        `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
 	LudusNATInterface         string        `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
 	PreventUserAnsibleAdd     bool          `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
+	SSORequireExistingUser    bool          `mapstructure:"sso_require_existing_user" yaml:"sso_require_existing_user"`
 	LicenseKey                string        `mapstructure:"license_key" yaml:"license_key"`
 	ExposeAdminPort           bool          `mapstructure:"expose_admin_port" yaml:"expose_admin_port"`
 	RegisterDefaultSource     bool          `mapstructure:"register_default_source" yaml:"register_default_source"`
@@ -59,7 +60,7 @@ type Configuration struct {
 	DefaultQuotaRanges int `mapstructure:"default_quota_ranges" yaml:"default_quota_ranges"`
 }
 
-var ServerConfiguration Configuration
+var ServerConfiguration = Configuration{SSORequireExistingUser: true}
 var ConfigMu sync.RWMutex
 
 func (s *Server) ParseConfig() {
@@ -83,6 +84,7 @@ func (s *Server) ParseConfig() {
 	viper.SetDefault("proxmox_iso_storage_pool", "local")
 	viper.SetDefault("ludus_nat_interface", "vmbr1000")
 	viper.SetDefault("prevent_user_ansible_add", false)
+	viper.SetDefault("sso_require_existing_user", true)
 	viper.SetDefault("register_default_source", true)
 	viper.SetDefault("sync_sources_on_startup", true)
 	viper.SetDefault("data_directory", "/opt/ludus/db")

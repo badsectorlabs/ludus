@@ -282,6 +282,13 @@ func ProvisionOAuth2User(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusForbidden, fmt.Sprintf("Token validation failed: %v", err))
 	}
 
+	ConfigMu.RLock()
+	requireExistingUser := ServerConfiguration.SSORequireExistingUser
+	ConfigMu.RUnlock()
+	if requireExistingUser {
+		return e.ForbiddenError(ssoExistingUserRequiredMessage, nil)
+	}
+
 	matchingUsers, err := app.CountRecords("users", dbx.HashExp{"userID": req.UserID})
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Error checking if user already exists: %v", err))

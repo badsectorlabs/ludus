@@ -33,19 +33,37 @@ Once you have your provider configured, click `Set provider config` and double c
 
 Now users will be presented with a `Login with...` button on the login page for Ludus.
 
+## Account requirements
+
+By default, SSO only works for users who already have a Ludus account. An administrator must create the account before the user's first SSO login. The email returned by the provider must exactly match the email stored in Ludus, including for accounts already linked to an SSO provider. Existing users retain their roles and access.
+
+This restriction is controlled by `/opt/ludus/config.yml`:
+
+```yaml
+sso_require_existing_user: true
+```
+
+The default is `true`, including when the key is absent from an existing configuration file. If no matching account exists or the provider email does not match, login is rejected with a message asking the user to contact an administrator to create the account or change this setting.
+
+To allow automatic account creation on first SSO login, explicitly set:
+
+```yaml
+sso_require_existing_user: false
+```
+
 :::warning
 
-Any user that can authenticate to your OAuth2 provider can authenticate to Ludus. On first login to Ludus a default range, PAM user, and proxmox token will be generated for the user.
+With `sso_require_existing_user: false`, any user who can authenticate to a configured OAuth2 provider can create a Ludus account. On first login, Ludus provisions a default range, PAM user, and Proxmox token.
 
 :::
 
-Users that log in via SSO are standard users with no access beyond their default range. Admins should add them to groups, share ranges and blueprints with them, or otherwise grant them access to the resources they need.
+Automatically created SSO users are standard users with access only to their default range. Admins can add them to groups, share ranges and blueprints with them, or grant access to other resources as needed.
 
 You can disable the pocketbase web interface by running the following commands
 
 ```shell-session
 #terminal-command-ludus-root
-unset-environment LUDUS_ENABLE_SUPERADMIN
+systemctl unset-environment LUDUS_ENABLE_SUPERADMIN
 #terminal-command-ludus-root
 systemctl restart ludus
 ```

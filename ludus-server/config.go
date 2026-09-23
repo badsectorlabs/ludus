@@ -78,6 +78,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					config.LudusNATInterface = "vmbr1000"
 				}
 				config.PreventUserAnsibleAdd = false
+				config.SSORequireExistingUser = true
 				config.ProxmoxInvalidCert = true
 				config.ProxmoxURL = "https://127.0.0.1:8006"
 				config.LicenseKey = "community"
@@ -118,6 +119,7 @@ func automatedConfigGenerator(writeToFile bool) {
 					f.WriteString("proxmox_iso_storage_pool: local\n")
 					f.WriteString("ludus_nat_interface: vmbr1000\n")
 					f.WriteString("prevent_user_ansible_add: false\n")
+					f.WriteString("sso_require_existing_user: true\n")
 					f.WriteString("license_key: community\n")
 					f.WriteString("expose_admin_port: false\n")
 					f.WriteString("# register_default_source: true   # Set false to skip auto-registering the Bad Sector Labs source on startup\n")
@@ -151,6 +153,7 @@ func loadConfig() {
 	if err != nil {
 		log.Fatalf("Error opening config: %v", err)
 	}
+	config.SSORequireExistingUser = true
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
 		log.Fatalf("Error unmarshalling config: %v", err)
