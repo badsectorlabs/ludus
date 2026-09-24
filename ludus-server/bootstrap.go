@@ -163,7 +163,6 @@ func bootstrapProxmoxObjects(ctx context.Context, pc PVEClient, cfg ludusapi.Con
 		{"/pool/ADMIN", "LudusAdmin", []string{"ludus_admins"}},
 		{"/sdn/zones/" + cfg.SDNZone, "LudusUser", []string{"ludus_users", "ludus_admins"}},
 		{"/nodes", "LudusPacker", []string{"ludus_users", "ludus_admins"}},
-		{"/vms", "LudusPacker", []string{"ludus_users", "ludus_admins"}},
 	}
 	seenStorageACLs := map[string]bool{}
 	for _, storage := range []string{cfg.ProxmoxVMStoragePool, cfg.ProxmoxISOStoragePool} {
