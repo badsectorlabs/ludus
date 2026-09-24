@@ -26,10 +26,22 @@ type Route struct {
 }
 
 type Metadata struct {
-	Name    string
-	Version string
-	Routes  []Route
-	VMHooks VMHookCapabilities
+	// Optional resource metadata; older RPC-v2 plugins remain compatible.
+	ID          string
+	Description string
+	Author      string
+	UI          *UIContribution
+	Name        string
+	Version     string
+	Routes      []Route
+	VMHooks     VMHookCapabilities
+}
+
+// UIContribution supplies a self-contained frontend for the sandboxed GUI
+// viewer. It calls the host through the versioned window.ludus bridge.
+type UIContribution struct {
+	HTML        string
+	RangeScoped bool
 }
 
 // VMHookCapabilities advertises optional VM lifecycle operations. All fields

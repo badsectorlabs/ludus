@@ -119,6 +119,14 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	e.App.ExpandRecord(userRecord, []string{"ranges", "groups"}, nil)
 	e.Set("user", user)
 
+	// Plugin inventory/management is independent of a range, including users
+	// who have not deployed one yet. RPC requests retain normal range checks.
+	if strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/plugins") &&
+		(e.Request.URL.Path == APIBasePath+"/plugins" || strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/plugins/")) &&
+		!strings.Contains(e.Request.URL.Path, "/rpc/") {
+		return e.Next()
+	}
+
 	// Check if the user is requesting a specific range
 	rangeID := e.Request.URL.Query().Get("rangeID")
 	if rangeID != "" {

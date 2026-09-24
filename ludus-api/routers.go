@@ -95,6 +95,9 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	}
 
 	InitDb()
+	if os.Geteuid() != 0 {
+		server.PluginResources = newPluginResources(app, server)
+	}
 	preserveConcurrentUserCredentials(app)
 	if os.Geteuid() != 0 {
 		app.Cron().MustAdd("recover-password-rotations", "* * * * *", func() { recoverPendingPasswords(app) })
@@ -286,8 +289,19 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		RegisterRoutesWithPocketBase(se, routes)
 		RegisterPluginPlaceholderRoutes(se)
+		if server.PluginResources != nil {
+			registerPluginResourceRoutes(se, server.PluginResources)
+		}
 		registerPluginLogHistoryRoutes(se, ludusInstallPath)
-		return se.Next()
+		if err := se.Next(); err != nil {
+			return err
+		}
+		// Resource initialization and jobs may use the parent's API. Wait until
+		// PocketBase has bound its listener before starting these subprocesses.
+		if server.PluginResources != nil {
+			server.PluginResources.startup()
+		}
+		return nil
 	})
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {

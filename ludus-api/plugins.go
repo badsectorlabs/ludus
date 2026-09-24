@@ -16,6 +16,7 @@ import (
 	"time"
 
 	hcplugin "github.com/hashicorp/go-plugin"
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -30,6 +31,7 @@ type managedPlugin struct {
 }
 
 type Server struct {
+	PluginResources            *PluginResources
 	pluginMu                   sync.Mutex
 	plugins                    []*managedPlugin
 	pluginsInitialized         bool
@@ -336,6 +338,13 @@ func (s *Server) registerPluginRoutes(plugin *managedPlugin) {
 		route := declaredRoute
 		logger.Info(fmt.Sprintf("Registering route for plugin %s: %s %s", plugin.metadata.Name, route.Method, route.Pattern))
 		LudusPluginHandlerManager.RegisterHandler(route.Method, route.Pattern, func(event *core.RequestEvent) error {
+			// A legacy URL must not bypass a resource plugin's per-user access.
+			if plugin.metadata.ID != "" && s.PluginResources != nil {
+				record, err := s.PluginResources.app.FindFirstRecordByFilter("plugin_resources", "pluginID = {:id} && system = true", dbx.Params{"id": plugin.metadata.ID})
+				if err != nil || !record.GetBool("system") || !pluginVisible(record, event.Auth) || record.GetString("state") != "approved" {
+					return JSONError(event, http.StatusNotFound, "plugin not found")
+				}
+			}
 			request, err := PluginRequestFromEvent(event)
 			if err != nil {
 				return JSONError(event, http.StatusInternalServerError, err.Error())
@@ -352,6 +361,9 @@ func (s *Server) registerPluginRoutes(plugin *managedPlugin) {
 }
 
 func (s *Server) ShutdownPlugins() {
+	if s.PluginResources != nil {
+		s.PluginResources.Close()
+	}
 	s.pluginMu.Lock()
 	plugins := append([]*managedPlugin(nil), s.plugins...)
 	s.plugins = nil
