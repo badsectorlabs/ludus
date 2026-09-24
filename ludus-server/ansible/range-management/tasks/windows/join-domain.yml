@@ -81,10 +81,16 @@
   ansible.builtin.set_fact:
     backslash: '\'
 
+# WMI can return no domain group without failing, including on routed members.
+# Translate the SID directly to retain localized names without WMI enumeration.
 - name: Gather Domain Users group name by SID (multilingual)
   ansible.windows.win_shell: |
-    (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-513'").Name
+    ([System.Security.Principal.SecurityIdentifier]'{{ domain_sid }}-513').Translate([System.Security.Principal.NTAccount]).Value.Split([char]92)[-1]
   register: domain_users_group_name_command_autologon
+  # Treat empty output as a lookup failure, not an invalid DOMAIN\ membership.
+  failed_when: >-
+    domain_users_group_name_command_autologon is failed or
+    (domain_users_group_name_command_autologon.stdout | default('') | trim | length == 0)
   # We must run as the domain/autologon to get the domain group info. Assumes the autologon user is a domain user.
   vars:
     ansible_become: true
@@ -94,10 +100,13 @@
     ansible_become_flags: "logon_type=interactive logon_flags=with_profile"
   ignore_errors: true
 
-- name: Gather Domain Users group name as domain admin if the autologon user login failed (possibly not created in the domain yet)
+- name: Gather Domain Users group name as domain admin if the autologon lookup failed (possibly not created in the domain yet)
   ansible.windows.win_shell: |
-    (Get-WmiObject win32_group -Filter "Domain='{{ netbios_name }}' and SID='{{ domain_sid }}-513'").Name
+    ([System.Security.Principal.SecurityIdentifier]'{{ domain_sid }}-513').Translate([System.Security.Principal.NTAccount]).Value.Split([char]92)[-1]
   register: domain_users_group_name_command_domain_admin
+  failed_when: >-
+    domain_users_group_name_command_domain_admin is failed or
+    (domain_users_group_name_command_domain_admin.stdout | default('') | trim | length == 0)
   when: domain_users_group_name_command_autologon is failed
   vars:
     ansible_become: true
