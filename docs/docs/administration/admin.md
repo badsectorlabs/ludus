@@ -36,6 +36,18 @@ systemctl restart ludus
 1. Enable the Pocketbase web UI as detailed above and log in. You can select a user in the `users` table and toggle the `isAdmin` toggle. Remember to click `Save changes`.
 2. Add the user to the `ludus_admins` group in the Proxmox Web UI or run `pveum user modify <username>@pam --groups ludus_admins --append`
 
+## Default ranges for new users
+
+By default, Ludus creates a default range for each new user, including automatically provisioned SSO users and the initial admin account. To create users without a default range, set:
+
+```yaml title="/opt/ludus/config.yml"
+create_default_range: false
+```
+
+The default is `true` when this setting is omitted. Setting it to `false` skips the range record, range files, network and Proxmox pool setup, and range-specific permissions. User account provisioning continues normally.
+
+This setting only affects new users; it does not remove or change existing ranges. Create or share ranges separately as needed. To also allow account creation on first SSO login, set `sso_require_existing_user: false`; see [SSO account requirements](./sso.md#account-requirements).
+
 ## Forcing a range out of testing mode
 
 Enable the Pocketbase web UI as detailed above and log in. Select the `ranges` table and click on the range. Toggle the `testingEnabled` toggle. Remember to click `Save changes`.

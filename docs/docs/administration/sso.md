@@ -51,13 +51,22 @@ To allow automatic account creation on first SSO login, explicitly set:
 sso_require_existing_user: false
 ```
 
+To create SSO accounts without automatically creating a default range, set both options:
+
+```yaml
+sso_require_existing_user: false
+create_default_range: false
+```
+
+`create_default_range` defaults to `true` when omitted and applies to all new users, not just SSO users. It does not change existing ranges. See [Default ranges for new users](./admin.md#default-ranges-for-new-users).
+
 :::warning
 
-With `sso_require_existing_user: false`, any user who can authenticate to a configured OAuth2 provider can create a Ludus account. On first login, Ludus provisions a default range, PAM user, and Proxmox token.
+With `sso_require_existing_user: false`, any user who can authenticate to a configured OAuth2 provider can create a Ludus account. On first login, Ludus provisions a PAM user and Proxmox token. A default range is also created unless `create_default_range` is `false`.
 
 :::
 
-Automatically created SSO users are standard users with access only to their default range. Admins can add them to groups, share ranges and blueprints with them, or grant access to other resources as needed.
+Automatically created SSO users are standard users. When default range creation is enabled, they initially have access only to their own range. With `create_default_range: false`, they start without a default range. Admins can add them to groups, share ranges and blueprints with them, or grant access to other resources as needed.
 
 You can disable the pocketbase web interface by running the following commands
 

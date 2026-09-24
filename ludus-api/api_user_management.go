@@ -24,7 +24,7 @@ import (
 var UserIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,20}$`)
 
 // provisionNewUser handles the common provisioning steps for a new Ludus user:
-// assigns a user number, creates a default range, runs the add-user ansible playbook,
+// assigns a user number, optionally creates a default range, runs the add-user ansible playbook,
 // generates an API key, creates a Proxmox API token, grants Proxmox access,
 // and saves the user record. The caller must set Name, UserId, Email, Password,
 // ProxmoxUsername, ProxmoxRealm, and ProxmoxPassword on the user before calling.
@@ -40,12 +40,13 @@ func provisionNewUser(txApp core.App, user *models.User, plaintextPassword strin
 	}
 
 	extraVars := map[string]interface{}{
-		"username":          user.ProxmoxUsername(),
-		"user_id":           user.UserId(),
-		"user_number":       user.UserNumber(),
-		"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
-		"user_is_admin":     user.IsAdmin(),
-		"proxmox_password":  plaintextPassword,
+		"username":               user.ProxmoxUsername(),
+		"user_id":                user.UserId(),
+		"user_number":            user.UserNumber(),
+		"proxmox_public_ip":      ServerConfiguration.ProxmoxPublicIP,
+		"user_is_admin":          user.IsAdmin(),
+		"proxmox_password":       plaintextPassword,
+		"user_has_default_range": user.DefaultRangeId() != "",
 	}
 	output, err := RunAddUserPlaybookStandalone(extraVars)
 	if err != nil {
@@ -70,8 +71,10 @@ func provisionNewUser(txApp core.App, user *models.User, plaintextPassword strin
 	user.SetProxmoxTokenId(tokenID)
 	user.SetProxmoxTokenSecret(encryptedTokenSecret)
 
-	if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
-		return "", fmt.Errorf("granting Proxmox access to default range: %w", err)
+	if user.DefaultRangeId() != "" {
+		if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
+			return "", fmt.Errorf("granting Proxmox access to default range: %w", err)
+		}
 	}
 
 	if err := txApp.Save(user); err != nil {
