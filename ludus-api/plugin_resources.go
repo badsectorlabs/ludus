@@ -54,9 +54,6 @@ func pluginVisible(record, auth *core.Record) bool {
 	if pluginAdmin(auth) {
 		return true
 	}
-	if record.GetString("state") == "removed" {
-		return record.GetString("owner") == auth.Id && !record.GetBool("allUsers")
-	}
 	if slices.Contains(record.GetStringSlice("excludedUsers"), auth.Id) {
 		return false
 	}
@@ -64,7 +61,7 @@ func pluginVisible(record, auth *core.Record) bool {
 }
 
 func pluginAvailable(record, auth *core.Record) bool {
-	if auth == nil || record.GetString("state") == "removed" {
+	if auth == nil {
 		return false
 	}
 	return pluginAdmin(auth) || record.GetBool("allUsers") || record.GetString("owner") == auth.Id || slices.Contains(record.GetStringSlice("allowedUsers"), auth.Id)
