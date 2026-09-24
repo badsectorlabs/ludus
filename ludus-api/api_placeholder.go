@@ -54,63 +54,9 @@ func PlaceholderHandler(e *core.RequestEvent) error {
 
 func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 
-	// We hard-code the PlaceholderHandler for plugin routes, and the plugin will register its own handler for the route
+	// Only legacy server-installed plugins need fixed, direct API routes here.
+	// GUI-uploaded resource plugins use /plugins/{pluginID}/rpc/{pluginPath...}.
 	var pluginRoutes = PocketBaseRoutes{
-		// Traffic Observer plugin routes
-		{
-			Name:        "TrafficObserverInventory",
-			Method:      http.MethodGet,
-			Pattern:     "/traffic-observer/inventory",
-			HandlerFunc: PlaceholderHandler,
-		},
-		{
-			Name:        "TrafficObserverCAStatus",
-			Method:      http.MethodGet,
-			Pattern:     "/traffic-observer/ca-status",
-			HandlerFunc: PlaceholderHandler,
-		},
-		{
-			Name:        "TrafficObserverInstall",
-			Method:      http.MethodPost,
-			Pattern:     "/traffic-observer/install",
-			HandlerFunc: PlaceholderHandler,
-		},
-		{
-			Name:        "TrafficObserverStart",
-			Method:      http.MethodPost,
-			Pattern:     "/traffic-observer/start",
-			HandlerFunc: PlaceholderHandler,
-		},
-		{
-			Name:        "TrafficObserverStop",
-			Method:      http.MethodPost,
-			Pattern:     "/traffic-observer/stop",
-			HandlerFunc: PlaceholderHandler,
-		},
-		{
-			Name:        "TrafficObserverPurge",
-			Method:      http.MethodPost,
-			Pattern:     "/traffic-observer/purge",
-			HandlerFunc: PlaceholderHandler,
-		},
-		{
-			Name:        "TrafficObserverStatus",
-			Method:      http.MethodGet,
-			Pattern:     "/traffic-observer/status",
-			HandlerFunc: PlaceholderHandler,
-		},
-		{
-			Name:        "TrafficObserverFlows",
-			Method:      http.MethodGet,
-			Pattern:     "/traffic-observer/flows",
-			HandlerFunc: PlaceholderHandler,
-		},
-		{
-			Name:        "TrafficObserverExport",
-			Method:      http.MethodGet,
-			Pattern:     "/traffic-observer/export",
-			HandlerFunc: PlaceholderHandler,
-		},
 		PocketBaseRoute{
 			Name:        "EnableAntiSandboxForVM",
 			Method:      http.MethodPost,
