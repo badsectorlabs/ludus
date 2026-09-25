@@ -27,7 +27,7 @@ import (
 var UserIDRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,20}$`)
 
 // provisionNewUser handles the common provisioning steps for a new Ludus user:
-// assigns a user number, creates a default range, creates the Proxmox-side user
+// assigns a user number, optionally creates a default range, creates the Proxmox-side user
 // via the API, runs the add-user ansible playbook, generates an API key, creates
 // a Proxmox API token, grants Proxmox access, and saves the user record. The
 // caller must set Name, UserId, Email, Password, ProxmoxUsername, ProxmoxRealm,
@@ -62,9 +62,10 @@ func provisionNewUser(txApp core.App, user *models.User, plaintextPassword strin
 	}
 
 	extraVars := map[string]interface{}{
-		"username":    user.ProxmoxUsername(),
-		"user_id":     user.UserId(),
-		"user_number": user.UserNumber(),
+		"username":               user.ProxmoxUsername(),
+		"user_id":                user.UserId(),
+		"user_number":            user.UserNumber(),
+		"user_has_default_range": user.DefaultRangeId() != "",
 	}
 	output, err := RunAddUserPlaybookStandalone(extraVars)
 	if err != nil {
@@ -89,8 +90,10 @@ func provisionNewUser(txApp core.App, user *models.User, plaintextPassword strin
 	user.SetProxmoxTokenId(tokenID)
 	user.SetProxmoxTokenSecret(encryptedTokenSecret)
 
-	if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
-		return "", "", fmt.Errorf("granting Proxmox access to default range: %w", err)
+	if user.DefaultRangeId() != "" {
+		if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
+			return "", "", fmt.Errorf("granting Proxmox access to default range: %w", err)
+		}
 	}
 
 	if err := txApp.Save(user); err != nil {
@@ -294,6 +297,13 @@ func ProvisionOAuth2User(e *core.RequestEvent) error {
 	}
 	if err := validateInternalToken(token, req.UserID, req.IsAdmin); err != nil {
 		return JSONError(e, http.StatusForbidden, fmt.Sprintf("Token validation failed: %v", err))
+	}
+
+	ConfigMu.RLock()
+	requireExistingUser := ServerConfiguration.SSORequireExistingUser
+	ConfigMu.RUnlock()
+	if requireExistingUser {
+		return e.ForbiddenError(ssoExistingUserRequiredMessage, nil)
 	}
 
 	matchingUsers, err := app.CountRecords("users", dbx.HashExp{"userID": req.UserID})

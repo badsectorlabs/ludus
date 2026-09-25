@@ -292,7 +292,7 @@ tasksel tasksel/first multiselect SSH server
 # We need at least these to continue the preseeding later on.
 # Provide also haveged so we (hopefully) have more entropy when our VM starts
 # for the first time.
-d-i pkgsel/include string haveged openssh-server sudo qemu-guest-agent python3 python3-apt acpid acpi-support dbus ca-certificates
+d-i pkgsel/include string haveged openssh-server sudo qemu-guest-agent python3 python3-apt acpid acpi-support dbus ca-certificates resolvconf
 
 # Whether to upgrade packages after debootstrap.
 # Allowed values: none, safe-upgrade, full-upgrade

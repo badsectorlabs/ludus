@@ -8,7 +8,6 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-
 // Load the config file from disk into the config struct
 func loadConfig() {
 	// Read the config file
@@ -16,6 +15,8 @@ func loadConfig() {
 	if err != nil {
 		log.Fatalf("Error opening config: %v", err)
 	}
+	config.SSORequireExistingUser = true
+	config.CreateDefaultRange = true
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
 		log.Fatalf("Error unmarshalling config: %v", err)

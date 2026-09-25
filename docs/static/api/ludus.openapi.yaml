@@ -577,10 +577,12 @@ paths:
                 collection:
                   type: string
                   description: >-
-                    Collection FQCN (namespace.name) for a galaxy install, or a
-                    git source URL (https/ssh, optionally git+ prefixed) to
-                    install from git. The server infers git from the string's
-                    shape. For removal, the FQCN of the collection to delete.
+                    Collection FQCN (namespace.name) for a galaxy install, an
+                    HTTP(S) URL with a .tar.gz path for an archive download, or a
+                    git source URL (https/ssh, optionally git+ prefixed).
+                    Archive URLs are passed through with query strings intact.
+                    An explicit git+ prefix always selects git, even for a
+                    .tar.gz path. For removal, the FQCN of the collection to delete.
                   example: maxhoesel.smallstep
                 action:
                   type: string
@@ -591,6 +593,7 @@ paths:
                   description: >-
                     Version pin for a galaxy collection, or any commit-ish
                     (branch / tag / commit) for a git source.
+                    Ignored for archive URLs, whose version comes from the artifact.
                   example: 0.23.1
                 force:
                   type: boolean

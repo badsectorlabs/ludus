@@ -4,6 +4,8 @@ If you want to use ansible you must include the ansible_home var and set it, sin
 kali.pkr.hcl has an example.
 You also need to set `skip_version_check = true` since the env variables are not set before the version check.
 
+Ludus template builds export `ANSIBLE_ROLES_PATH` and `ANSIBLE_COLLECTIONS_PATH` for Packer's Ansible provisioners. Each path searches the initiating user's installed roles or collections first, then the instance-wide global directory, matching range deployments. Templates do not need to add these variables to `ansible_env_vars`; setting them explicitly overrides the inherited paths.
+
 ```
 variable "ansible_home" {
   type =  string

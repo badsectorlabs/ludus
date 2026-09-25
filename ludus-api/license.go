@@ -137,6 +137,8 @@ func (s *Server) checkLicense() {
 			// Activate the current fingerprint
 			_, err := license.Activate(ctx, fingerprint)
 			switch {
+			case errors.Is(err, keygen.ErrMachineAlreadyActivated):
+				log.Println("LICENSE: machine is already activated; continuing license check")
 			case err == keygen.ErrMachineLimitExceeded:
 				log.Println("LICENSE: machine limit has been exceeded!")
 				s.LicenseValid = false
@@ -173,6 +175,9 @@ func (s *Server) checkLicense() {
 						log.Printf("LICENSE: error loading enterprise plugin as part of network fallback: %v", err)
 					}
 				}
+			} else {
+				s.LicenseValid = false
+				s.LicenseMessage = err.Error()
 			}
 			log.Printf("LICENSE: %v\n", err)
 			return

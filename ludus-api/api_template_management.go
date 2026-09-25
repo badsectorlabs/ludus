@@ -331,6 +331,8 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		`PROXMOX_TOKEN={{ .ProxmoxToken }} ` +
 		`PACKER_CONFIG_DIR={{.UsersPackerDir}} ` +
 		`PACKER_CACHE_DIR={{.UsersPackerDir}}/packer_cache ` +
+		`ANSIBLE_ROLES_PATH='{{.AnsibleRolesPath}}' ` +
+		`ANSIBLE_COLLECTIONS_PATH='{{.AnsibleCollectionsPath}}' ` +
 		`PKR_VAR_proxmox_password="" ` +
 		`PKR_VAR_proxmox_username='{{ .ProxmoxTokenID }}' ` +
 		`PKR_VAR_airgapped_install={{ .AirgappedInstall }} ` +
@@ -367,6 +369,8 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		ProxmoxISOStoragePool  string
 		AirgappedInstall       string
 		UsersAnsibleDir        string
+		AnsibleRolesPath       string
+		AnsibleCollectionsPath string
 		PackerFile             string
 		LudusNATInterface      string
 		PackerHTTPBindAddress  string
@@ -385,6 +389,8 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		ServerConfiguration.ProxmoxISOStoragePool,
 		strconv.FormatBool(ServerConfiguration.AirgappedInstall),
 		usersAnsibleDir,
+		ansibleRolesSearchPath(user.ProxmoxUsername()),
+		ansibleCollectionsSearchPath(user.ProxmoxUsername()),
 		packerFile,
 		ServerConfiguration.LudusNATInterface,
 		ServerConfiguration.LudusNATIP,
