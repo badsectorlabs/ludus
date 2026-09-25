@@ -17,8 +17,8 @@ github.com/apparentlymart/go-textseg/v15 v15.0.0/go.mod h1:K8XmNZdhEBkdlyDdvbmms
 github.com/asaskevich/govalidator v0.0.0-20200108200545-475eaeb16496/go.mod h1:oGkLhpf+kjZl6xBf758TQhh5XrAeiJv/7FRz/2spLIg=
 github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 h1:DklsrG3dyBCFEj5IhUbnKptjxatkF07cF2ak3yi77so=
 github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2/go.mod h1:WaHUgvxTVq04UNunO+XhnAqY/wQc+bxr74GqbsZ/Jqw=
-github.com/badsectorlabs/go-proxmox v0.0.0-20260902004611-e83d6356cfea h1:HW/Ba9TG+3DntTwaReolY+fNSuxEmHF0a/UgqonUWdk=
-github.com/badsectorlabs/go-proxmox v0.0.0-20260902004611-e83d6356cfea/go.mod h1:Q6ByFv9Zak9NvJwZJ36HMN5qwIZVj0isxf8u4YIk6lE=
+github.com/badsectorlabs/go-proxmox v0.0.0-20260925164902-37c99f03b4d7 h1:JRCbjLm75FYBxf+mNq9eZKNyyzjA3rkU+b+dCebqJmQ=
+github.com/badsectorlabs/go-proxmox v0.0.0-20260925164902-37c99f03b4d7/go.mod h1:Q6ByFv9Zak9NvJwZJ36HMN5qwIZVj0isxf8u4YIk6lE=
 github.com/buger/goterm v1.0.4 h1:Z9YvGmOih81P0FbVtEYTFF6YsSgxSUKEhf/f9bTMXbY=
 github.com/buger/goterm v1.0.4/go.mod h1:HiFWV3xnkolgrBV3mY8m0X0Pumt4zg4QhbdOzQtB8tE=
 github.com/containrrr/shoutrrr v0.8.0 h1:mfG2ATzIS7NR2Ec6XL+xyoHzN97H8WPjir8aYzJUSec=

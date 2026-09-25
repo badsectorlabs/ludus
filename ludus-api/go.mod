@@ -100,4 +100,4 @@ require (
 	modernc.org/sqlite v1.45.0 // indirect
 )
 
-replace github.com/luthermonson/go-proxmox => github.com/badsectorlabs/go-proxmox v0.0.0-20260902004611-e83d6356cfea
+replace github.com/luthermonson/go-proxmox => github.com/badsectorlabs/go-proxmox v0.0.0-20260925164902-37c99f03b4d7
