@@ -123,6 +123,8 @@ func (s *Server) checkLicense() {
 			// Activate the current fingerprint
 			_, err := license.Activate(ctx, fingerprint)
 			switch {
+			case errors.Is(err, keygen.ErrMachineAlreadyActivated):
+				log.Println("LICENSE: machine is already activated; continuing license check")
 			case err == keygen.ErrMachineLimitExceeded:
 				log.Println("LICENSE: machine limit has been exceeded!")
 				s.LicenseValid = false
@@ -158,6 +160,9 @@ func (s *Server) checkLicense() {
 						enterpriseLoaded = true
 					}
 				}
+			} else {
+				s.LicenseValid = false
+				s.LicenseMessage = err.Error()
 			}
 			log.Printf("LICENSE: %v\n", err)
 			return

@@ -931,7 +931,6 @@
           - gnupg
           - wget
           - ca-certificates
-          - software-properties-common
         update_cache: true
     - name: Install openjdk repo
       ansible.builtin.shell: |

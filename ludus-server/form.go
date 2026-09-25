@@ -29,7 +29,7 @@ var (
 	gold   = lipgloss.AdaptiveColor{Light: "#D8AE2D", Dark: "#BF9000"}
 	green  = lipgloss.AdaptiveColor{Light: "#02BA84", Dark: "#02BF87"}
 	red    = lipgloss.AdaptiveColor{Light: "#A70000", Dark: "#A70000"}
-	config ludusapi.Configuration
+	config = ludusapi.Configuration{SSORequireExistingUser: true, CreateDefaultRange: true}
 
 	finalConfirm              = false
 	shouldShowAdminPortExpose = false

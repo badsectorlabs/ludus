@@ -55,6 +55,8 @@ func checkConfig() {
 	d := yaml.NewDecoder(file)
 
 	// Start YAML decoding from file
+	config.SSORequireExistingUser = true
+	config.CreateDefaultRange = true
 	if err := d.Decode(&config); err != nil {
 		log.Fatalf("Error decoding config: %v", err)
 	}

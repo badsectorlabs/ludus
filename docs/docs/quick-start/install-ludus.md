@@ -104,6 +104,8 @@ proxmox_iso_storage_pool: local   # The storage pool used to store ISOs as they 
 # boot_disk: /dev/sda             # Optional: override the auto-detected boot disk used for grub-pc recovery (e.g. /dev/nvme0n1 on EC2/NVMe hosts)
 ludus_nat_interface: ludus        # The name of the interface Ludus will create on the proxmox host that Ludus will use as the "WAN" for range routers
 prevent_user_ansible_add: false   # Set this to true to prevent non-admin users from adding Ansible roles or collections to the server
+sso_require_existing_user: true  # Require SSO email to match an existing Ludus account; false allows automatic account creation
+create_default_range: true       # Create a default range for each new user, including SSO users
 license_key: community            # Set this to your license key if you have one, or leave as community for community edition
 expose_admin_port: false          # Set this to true to expose the admin API globally
 port: 8080                        # The TCP port the web UI and user-facing API listen on

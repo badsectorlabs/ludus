@@ -254,12 +254,13 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 		}
 
 		extraVars := map[string]interface{}{
-			"username":          user.ProxmoxUsername(),
-			"user_id":           user.UserId(),
-			"user_number":       user.UserNumber(),
-			"proxmox_public_ip": ServerConfiguration.ProxmoxPublicIP,
-			"user_is_admin":     true,
-			"proxmox_password":  cfg.Password,
+			"username":               user.ProxmoxUsername(),
+			"user_id":                user.UserId(),
+			"user_number":            user.UserNumber(),
+			"proxmox_public_ip":      ServerConfiguration.ProxmoxPublicIP,
+			"user_is_admin":          true,
+			"proxmox_password":       cfg.Password,
+			"user_has_default_range": user.DefaultRangeId() != "",
 		}
 		output, err := RunAddUserPlaybookStandalone(extraVars)
 		if err != nil {
@@ -290,9 +291,11 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 
 		// Grant user and ludus_admins Proxmox pool/SDN access to the user's default range
 		// (required for range deployment, especially SDN.Use in cluster mode)
-		if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
-			wasError = true
-			return fmt.Errorf("granting Proxmox access to default range: %w", err)
+		if user.DefaultRangeId() != "" {
+			if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
+				wasError = true
+				return fmt.Errorf("granting Proxmox access to default range: %w", err)
+			}
 		}
 
 		if err := txApp.Save(user); err != nil {
@@ -498,7 +501,16 @@ func generateUserIDFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEvent) 
 	}
 }
 
+const ssoExistingUserRequiredMessage = "SSO requires an existing Ludus account with a matching email address. Ask an administrator to create your account or set sso_require_existing_user: false in /opt/ludus/config.yml to allow automatic account creation."
+
 func populateUserFieldsFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEvent) error {
+	ConfigMu.RLock()
+	requireExistingUser := ServerConfiguration.SSORequireExistingUser
+	ConfigMu.RUnlock()
+	if requireExistingUser && (e.Record == nil || e.OAuth2User == nil || e.OAuth2User.Email == "" || e.Record.Email() != e.OAuth2User.Email) {
+		return e.ForbiddenError(ssoExistingUserRequiredMessage, nil)
+	}
+
 	if e.Record != nil {
 		return e.Next()
 	}
