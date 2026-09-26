@@ -3,6 +3,8 @@ import base64
 import importlib.util
 import json
 import pathlib
+import socket
+import struct
 import subprocess
 import tarfile
 import tempfile
@@ -83,6 +85,33 @@ class MigrationBoundaries(unittest.TestCase):
                 (root/'tap901i0/master').unlink()
                 with self.assertRaisesRegex(RuntimeError, 'tap is detached'):
                     migration.verify_tap(901, 'net0', 'virtio=00:11:22:33:44:55,bridge=r7,firewall=1')
+
+    def test_gateway_reservation_uses_active_arp_not_stale_neighbors(self):
+        mac = bytes.fromhex('001122334455')
+        def reply(address):
+            return (b'\xff'*6 + mac + b'\x08\x06'
+                    + struct.pack('!HHBBH', 1, 0x0800, 6, 4, 2)
+                    + mac + socket.inet_aton(address) + b'\x00'*10)
+        def command(*args):
+            if args[:4] == ('ip', '-j', '-4', 'address'):
+                return '[]'  # A cluster peer need not own any NAT IPv4 address.
+            return json.dumps([{'dst': '192.0.2.49', 'lladdr': '00:11:22:33:44:55', 'state': ['STALE']}])
+        for occupied in (False, True):
+            with self.subTest(occupied=occupied):
+                frames = [b'truncated', reply('192.0.2.48')]
+                frames += [reply('192.0.2.49')] if occupied else [socket.timeout()]*3
+                with (mock.patch.object(migration, 'run', side_effect=command),
+                      mock.patch.object(migration.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1)),
+                      mock.patch.object(migration.pathlib.Path, 'exists', return_value=True),
+                      mock.patch.object(migration.pathlib.Path, 'read_text', return_value='00:11:22:33:44:66'),
+                      mock.patch.object(socket, 'AF_PACKET', 17, create=True),
+                      mock.patch.object(socket, 'socket') as raw_socket):
+                    raw_socket.return_value.__enter__.return_value.recv.side_effect = frames
+                    if occupied:
+                        with self.assertRaisesRegex(RuntimeError, 'Reserved NAT gateway is already in use'):
+                            migration.node_action('probe', {'bridge': 'ludusnat', 'gateway': '192.0.2.49'})
+                    else:
+                        self.assertTrue(migration.node_action('probe', {'bridge': 'ludusnat', 'gateway': '192.0.2.49'}))
 
     def test_node_restore_reports_service_failure_after_restoring_files(self):
         with tempfile.TemporaryDirectory() as directory:

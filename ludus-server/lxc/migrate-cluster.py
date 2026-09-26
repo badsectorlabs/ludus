@@ -42,7 +42,7 @@ def call(node, owner, action, payload=None):
 
 
 def snapshot(allow_migration=False):
-    for command in ('ip', 'ifreload', 'iptables-save', 'iptables-restore', 'systemctl', 'pvesh', 'ping'):
+    for command in ('ip', 'ifreload', 'iptables-save', 'iptables-restore', 'systemctl', 'pvesh'):
         if not shutil.which(command):
             raise RuntimeError('Missing per-node prerequisite: '+command)
     if subprocess.run(['pgrep', '-f', '(^|/)(ansible-playbook|packer)( |$)'], stdout=subprocess.DEVNULL).returncode == 0:
@@ -117,6 +117,33 @@ def remove_legacy_hooks(text, nat_bridge, ranges):
     return ''.join(out)
 
 
+def probe_address(interface, address):
+    """Probe the wire, not stale neighbor entries left by a rolled-back owner."""
+    import socket
+    import struct
+    mac = bytes.fromhex(pathlib.Path('/sys/class/net', interface, 'address').read_text().strip().replace(':', ''))
+    target = socket.inet_aton(address)
+    header = struct.pack('!HHBB', 1, 0x0800, 6, 4)
+    packet = b'\xff'*6 + mac + b'\x08\x06' + header + b'\x00\x01'
+    # An ARP probe works even on cluster peers without an IPv4 NAT address.
+    packet += mac + b'\x00'*4 + b'\x00'*6 + target
+    with socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806)) as probe:
+        probe.bind((interface, 0))
+        for _ in range(3):
+            probe.send(packet)
+            deadline = time.monotonic()+1
+            while time.monotonic() < deadline:
+                probe.settimeout(max(0.001, deadline-time.monotonic()))
+                try:
+                    reply = probe.recv(2048)
+                except socket.timeout:
+                    break
+                if (len(reply) >= 42 and reply[12:20] == b'\x08\x06'+header
+                        and reply[20:22] in (b'\x00\x01', b'\x00\x02')
+                        and reply[28:32] == target):
+                    raise RuntimeError('Reserved NAT gateway is already in use')
+
+
 def node_action(action, p):
     if action == 'snapshot':
         return snapshot(p.get('allow_migration', False))
@@ -126,12 +153,7 @@ def node_action(action, p):
             raise RuntimeError('Reserved NAT gateway is assigned on this node')
         bridge = p['bridge']
         if pathlib.Path('/sys/class/net', bridge).exists():
-            result = subprocess.run(['ping', '-n', '-I', bridge, '-c', '1', '-W', '2', '-w', '3', p['gateway']], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-            if result.returncode not in (0, 1):
-                raise RuntimeError('Cannot probe reserved NAT gateway')
-            neighbours = json.loads(run('ip', '-j', '-4', 'neighbour', 'show', 'to', p['gateway'], 'dev', bridge))
-            if result.returncode == 0 or any(n.get('lladdr') and not {'FAILED', 'INCOMPLETE'}.intersection(n.get('state', [])) for n in neighbours):
-                raise RuntimeError('Reserved NAT gateway is already in use')
+            probe_address(bridge, p['gateway'])
         return True
     if action == 'verify-nics':
         for vm in p['vms']:
