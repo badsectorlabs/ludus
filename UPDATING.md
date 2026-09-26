@@ -2,8 +2,10 @@
 
 Use the target LXC release's `install.sh --migrate-host`, not
 `ludus-server --update` on the Proxmox host. The automated path supports a
-single-node installation and preserves existing users, ranges, VM identities,
-and client endpoints. It requires a maintenance window and host backups.
+single-node installation or a healthy cluster with a compatible existing VXLAN
+zone. It preserves users, ranges, VM identities, client endpoints, the configured
+source database, and global Ansible defaults. It requires a maintenance window,
+host backups, and trusted root SSH access to every cluster node.
 
 See [the migration procedure](docs/docs/infrastructure-operations/migrate-to-lxc.md)
 for prerequisites, supported topology, verification, and rollback. For local

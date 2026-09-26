@@ -113,6 +113,10 @@ func TestMigrationRejectsUnsafeArchiveEntries(t *testing.T) {
 		{Name: "../outside", Typeflag: tar.TypeReg, Mode: 0600},
 		{Name: "opt/ludus/db/link", Typeflag: tar.TypeSymlink, Linkname: "/etc/shadow", Mode: 0600},
 		{Name: "opt/ludus/ludus-server", Typeflag: tar.TypeReg, Mode: 0711},
+		{Name: "opt/ludus/ansible/range-management/ludus.yml", Typeflag: tar.TypeReg, Mode: 0644},
+		{Name: "opt/ludus/ansible/server-config.yml/extra", Typeflag: tar.TypeReg, Mode: 0644},
+		{Name: "opt/ludus/ansible/server-config.yml", Typeflag: tar.TypeSymlink, Linkname: "/etc/shadow", Mode: 0644},
+		{Name: "opt/ludus/ansible/server-config.yml", Typeflag: tar.TypeDir, Mode: 0755},
 		{Name: "etc/systemd/system/ludus.service", Typeflag: tar.TypeReg, Mode: 0644},
 		{Name: "home/ludus/.profile", Typeflag: tar.TypeReg, Mode: 0600},
 		{Name: "home/root/.ssh/id_ed25519", Typeflag: tar.TypeReg, Mode: 0600},
@@ -150,7 +154,8 @@ func TestMigrationConfigPreservesSecretsAndUnknownSettings(t *testing.T) {
 		"database_encryption_key": "old-key", "license_key": "old-license", "port": 9080,
 		"proxmox_public_ip": "old.example", "custom_plugin_setting": map[interface{}]interface{}{"enabled": false},
 		"data_directory": "/srv/pocketbase", "proxmox_token_secret": "old-token",
-		"expose_admin_port": true,
+		"expose_admin_port":    true,
+		"host_managed_network": false,
 	}
 	generated := map[string]interface{}{
 		"proxmox_endpoints": []interface{}{"https://pve.example:8006"}, "proxmox_node": "node",
@@ -158,7 +163,8 @@ func TestMigrationConfigPreservesSecretsAndUnknownSettings(t *testing.T) {
 		"tls_cert_file": "/opt/ludus/tls/server.crt", "tls_key_file": "/opt/ludus/tls/server.key",
 		"database_encryption_key": "new-key", "license_key": "community", "port": 8080,
 		"wireguard_endpoint": "new.example", "ludus_nat_ip": "192.0.2.254",
-		"expose_admin_port": false,
+		"expose_admin_port":    false,
+		"host_managed_network": true,
 	}
 	merged, err := migrationMergeConfig(old, generated)
 	if err != nil {
@@ -166,6 +172,9 @@ func TestMigrationConfigPreservesSecretsAndUnknownSettings(t *testing.T) {
 	}
 	if merged["expose_admin_port"] != true {
 		t.Fatal("legacy admin exposure setting was replaced")
+	}
+	if merged["host_managed_network"] != true {
+		t.Fatal("migration lost ownership of the preserved host network")
 	}
 	for key, want := range map[string]interface{}{"database_encryption_key": "old-key", "license_key": "old-license", "port": 9080, "wireguard_endpoint": "old.example", "proxmox_token_secret": "new-token", "ludus_nat_ip": "192.0.2.254", "data_directory": "/opt/ludus/db"} {
 		if !reflect.DeepEqual(merged[key], want) {

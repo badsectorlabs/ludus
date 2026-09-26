@@ -359,7 +359,11 @@ func manageRangeVNet(rangeID string, rangeNumber int, present bool) error {
 		}
 		tag, vlanaware := RangeVNetOptionsForZone(zoneType, ServerConfiguration.VXLANTagBase, rangeNumber)
 
-		if err := pc.EnsureVNet(ctx, zoneName, vnetName, tag, vlanaware); err != nil {
+		ensureVNet := pc.EnsureVNet
+		if ServerConfiguration.HostManagedNetwork {
+			ensureVNet = pc.EnsureVNetPreservingTag
+		}
+		if err := ensureVNet(ctx, zoneName, vnetName, tag, vlanaware); err != nil {
 			return fmt.Errorf("failed to create VNet %s: %w", vnetName, err)
 		}
 
@@ -430,20 +434,26 @@ func setupNATVNet() error {
 		zoneName = "ludus"
 	}
 
-	zoneType, err := pc.SDNZoneType(ctx, zoneName)
-	if err != nil {
-		return fmt.Errorf("failed to get SDN zone type: %w", err)
-	}
-	tag, vlanaware := NATVNetOptionsForZone(zoneType)
-	if err := pc.EnsureVNet(ctx, zoneName, NATVNetName, tag, vlanaware); err != nil {
-		return fmt.Errorf("failed to create NAT VNet: %w", err)
-	}
-	cluster, err := pc.Raw().Cluster(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get cluster client: %w", err)
-	}
-	if err := applySDNChangesAndWait(ctx, cluster); err != nil {
-		return err
+	if ServerConfiguration.HostManagedNetwork {
+		if err := pc.RequireVNet(ctx, zoneName, NATVNetName, false); err != nil {
+			return fmt.Errorf("host-managed NAT VNet: %w", err)
+		}
+	} else {
+		zoneType, err := pc.SDNZoneType(ctx, zoneName)
+		if err != nil {
+			return fmt.Errorf("failed to get SDN zone type: %w", err)
+		}
+		tag, vlanaware := NATVNetOptionsForZone(zoneType)
+		if err := pc.EnsureVNet(ctx, zoneName, NATVNetName, tag, vlanaware); err != nil {
+			return fmt.Errorf("failed to create NAT VNet: %w", err)
+		}
+		cluster, err := pc.Raw().Cluster(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get cluster client: %w", err)
+		}
+		if err := applySDNChangesAndWait(ctx, cluster); err != nil {
+			return err
+		}
 	}
 
 	// Make sure all ludus users have SDN.Use on the ludusnat vnet

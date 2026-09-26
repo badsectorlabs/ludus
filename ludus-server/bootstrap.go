@@ -32,6 +32,7 @@ type PVEClient interface {
 	EnsureACL(ctx context.Context, path, role string, groups, users []string) error
 	EnsureSDNZone(ctx context.Context, name, kind string, peers []string) error
 	EnsureVNet(ctx context.Context, zone, name string, tag int, vlanaware bool) error
+	RequireVNet(ctx context.Context, zone, name string, vlanaware bool) error
 	EnsureSubnet(ctx context.Context, vnet, cidr, gw string, snat bool) error
 	ApplySDN(context.Context) error
 }
@@ -141,18 +142,24 @@ func bootstrapProxmoxObjects(ctx context.Context, pc PVEClient, cfg ludusapi.Con
 		}
 	}
 	// SDN — must exist before ACLs reference /sdn/zones/<zone>
-	if err := pc.EnsureSDNZone(ctx, cfg.SDNZone, zoneType, peers); err != nil {
-		return fmt.Errorf("sdn zone: %w", err)
-	}
-	natTag, natVlanaware := ludusapi.NATVNetOptionsForZone(zoneType)
-	if err := pc.EnsureVNet(ctx, cfg.SDNZone, cfg.LudusNATInterface, natTag, natVlanaware); err != nil {
-		return fmt.Errorf("vnet %s: %w", cfg.LudusNATInterface, err)
-	}
-	if err := pc.EnsureSubnet(ctx, cfg.LudusNATInterface, "192.0.2.0/24", cfg.LudusNATGateway, true); err != nil {
-		return fmt.Errorf("subnet: %w", err)
-	}
-	if err := pc.ApplySDN(ctx); err != nil {
-		return fmt.Errorf("apply sdn: %w", err)
+	if cfg.HostManagedNetwork {
+		if err := pc.RequireVNet(ctx, cfg.SDNZone, cfg.LudusNATInterface, false); err != nil {
+			return fmt.Errorf("host-managed network: %w", err)
+		}
+	} else {
+		if err := pc.EnsureSDNZone(ctx, cfg.SDNZone, zoneType, peers); err != nil {
+			return fmt.Errorf("sdn zone: %w", err)
+		}
+		natTag, natVlanaware := ludusapi.NATVNetOptionsForZone(zoneType)
+		if err := pc.EnsureVNet(ctx, cfg.SDNZone, cfg.LudusNATInterface, natTag, natVlanaware); err != nil {
+			return fmt.Errorf("vnet %s: %w", cfg.LudusNATInterface, err)
+		}
+		if err := pc.EnsureSubnet(ctx, cfg.LudusNATInterface, "192.0.2.0/24", cfg.LudusNATGateway, true); err != nil {
+			return fmt.Errorf("subnet: %w", err)
+		}
+		if err := pc.ApplySDN(ctx); err != nil {
+			return fmt.Errorf("apply sdn: %w", err)
+		}
 	}
 	// ACLs
 	acls := []struct {

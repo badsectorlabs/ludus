@@ -57,6 +57,12 @@ func (m *mockPVE) EnsureVNet(_ context.Context, _, n string, tag int, vlanaware 
 	m.calls = append(m.calls, fmt.Sprintf("EnsureVNet:%s:%d:%t", n, tag, vlanaware))
 	return nil
 }
+func (m *mockPVE) RequireVNet(_ context.Context, _, _ string, _ bool) error {
+	return nil
+}
+func (m *mockPVE) EnsureVNetPreservingTag(ctx context.Context, zone, name string, tag int, vlanaware bool) error {
+	return m.EnsureVNet(ctx, zone, name, tag, vlanaware)
+}
 func (m *mockPVE) EnsureSubnet(_ context.Context, v, c, _ string, _ bool) error {
 	m.calls = append(m.calls, "EnsureSubnet:"+v+":"+c)
 	return nil

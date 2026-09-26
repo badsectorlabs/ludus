@@ -965,7 +965,7 @@ ludus_install_server() {
     MIGRATION_DIR=$(mktemp -d /var/lib/ludus-migration/upgrade.XXXXXXXX)
     tar --zstd -tf "$TMPL_CACHE" >"$MIGRATION_DIR/template-files"
     local MEMBER TARGET
-    for TARGET in opt/ludus/ludus-server opt/ludus/install/migrate-host.sh; do
+    for TARGET in opt/ludus/ludus-server opt/ludus/install/migrate-host.sh opt/ludus/install/migrate-cluster.py; do
       MEMBER=$(python3 -c 'import sys; names=[n.strip() for n in open(sys.argv[1]) if n.strip().removeprefix("./")==sys.argv[2]]; assert len(names)==1, "Appliance lacks host migration support"; print(names[0])' "$MIGRATION_DIR/template-files" "$TARGET")
       tar --zstd -xOf "$TMPL_CACHE" "$MEMBER" >"$MIGRATION_DIR/${TARGET##*/}"
       chmod 0700 "$MIGRATION_DIR/${TARGET##*/}"
@@ -1146,80 +1146,78 @@ ludus_install_server() {
     exit 1
   fi
   # ---- 3. SDN bootstrap --------------------------------------------------------
-  local NODE_COUNT ZONE_TYPE PEERS
-  NODE_COUNT=$(echo "${CLUSTER_JSON}" | _json 'sum(1 for n in d["data"] if n["type"]=="node")')
-  ZONE_TYPE=simple
-  PEERS=""
-  NAT_VNET_TAG=""
-  if [[ "${NODE_COUNT}" -gt 1 ]]; then
-    ZONE_TYPE=vxlan
-    PEERS=$(echo "${CLUSTER_JSON}" | _json '",".join(n["ip"] for n in d["data"] if n["type"]=="node")')
-    NAT_VNET_TAG=100000
-  fi
   if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
-    migration_begin_sdn_stage
-  fi
-  print_message "[+] Creating SDN zone 'ludus' (${ZONE_TYPE}) ..." "info"
-  if ! curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/zones/ludus" | grep -q '"zone"'; then
-    # shellcheck disable=SC2086
-    curl -sk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/zones" \
-      --data-urlencode "zone=ludus" --data-urlencode "type=${ZONE_TYPE}" \
-      --data-urlencode "ipam=pve" ${PEERS:+--data-urlencode "peers=${PEERS}"} >/dev/null
-  fi
-  if ! curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat" | grep -q '"vnet"'; then
-    local VNET_CREATE_ARGS=(--data-urlencode "vnet=ludusnat" --data-urlencode "zone=ludus")
-    [[ -n "${NAT_VNET_TAG}" ]] && VNET_CREATE_ARGS+=(--data-urlencode "tag=${NAT_VNET_TAG}")
-    curl -sk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/vnets" \
-      "${VNET_CREATE_ARGS[@]}" >/dev/null
+    migration_stage_networks
   else
-    local VNET_UPDATE_ARGS=(--data-urlencode "vlanaware=0")
-    [[ -n "${NAT_VNET_TAG}" ]] && VNET_UPDATE_ARGS+=(--data-urlencode "tag=${NAT_VNET_TAG}")
-    curl -sk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat" \
-      "${VNET_UPDATE_ARGS[@]}" >/dev/null 2>&1 || true
-  fi
-  local SUBNET_ID
-  SUBNET_ID=$(curl -fsk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets" | _json 'next((s["subnet"] for s in d["data"] if s["subnet"].endswith("-192.0.2.0-24")), "")')
-  if [[ -n $SUBNET_ID ]]; then
-    curl -fsk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets/${SUBNET_ID}" \
-      --data-urlencode "gateway=${LUDUS_NAT_GATEWAY}" --data-urlencode "snat=1" >/dev/null
-  else
-    curl -fsk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets" \
-      --data-urlencode "subnet=192.0.2.0/24" --data-urlencode "type=subnet" \
-      --data-urlencode "gateway=${LUDUS_NAT_GATEWAY}" --data-urlencode "snat=1" >/dev/null
-  fi
-  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
-    migration_stage_range_networks
-  fi
-  sysctl -w net.ipv4.ip_forward=1 >/dev/null
-  install -d -m 0755 /etc/sysctl.d
-  printf "net.ipv4.ip_forward=1\n" > /etc/sysctl.d/99-ludus-ip-forward.conf
-  if [[ -f /etc/network/interfaces ]] \
-    && ! grep -Eq '^[[:space:]]*(source[[:space:]]+/etc/network/interfaces\.d/(\*|sdn)|source-directory[[:space:]]+/etc/network/interfaces\.d/?)([[:space:]]|$)' /etc/network/interfaces; then
-    printf "\nsource /etc/network/interfaces.d/sdn\n" >> /etc/network/interfaces
-  fi
-  curl -fsk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn" >/dev/null
-  local _i SDN_OK=0 SDN_ADDRESSES
-  for _i in $(seq 1 60); do
-    if SDN_ADDRESSES=$(ip -j -4 address show dev ludusnat 2>/dev/null) \
-      && printf '%s\n' "$SDN_ADDRESSES" | python3 -c 'import json,sys; sys.exit(0 if any(a.get("local")==sys.argv[1] for n in json.load(sys.stdin) for a in n.get("addr_info",[])) else 1)' "$LUDUS_NAT_GATEWAY"; then
-      SDN_OK=1
-      break
+    local NODE_COUNT ZONE_TYPE PEERS
+    NODE_COUNT=$(echo "${CLUSTER_JSON}" | _json 'sum(1 for n in d["data"] if n["type"]=="node")')
+    ZONE_TYPE=simple
+    PEERS=""
+    NAT_VNET_TAG=""
+    if [[ "${NODE_COUNT}" -gt 1 ]]; then
+      ZONE_TYPE=vxlan
+      PEERS=$(echo "${CLUSTER_JSON}" | _json '",".join(n["ip"] for n in d["data"] if n["type"]=="node")')
+      NAT_VNET_TAG=100000
     fi
-    sleep 1
-  done
-  if [[ "${SDN_OK}" != "1" ]]; then
-    print_message "[!] SDN apply did not activate ludusnat within 60s. Check: pvesh get /cluster/sdn" "error"
-    exit 1
-  fi
-  print_message "[+] SDN zone/vnet applied" "ok"
-  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
-    migration_finish_sdn_stage
+    print_message "[+] Creating SDN zone 'ludus' (${ZONE_TYPE}) ..." "info"
+    if ! curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/zones/ludus" | grep -q '"zone"'; then
+      # shellcheck disable=SC2086
+      curl -sk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/zones" \
+        --data-urlencode "zone=ludus" --data-urlencode "type=${ZONE_TYPE}" \
+        --data-urlencode "ipam=pve" ${PEERS:+--data-urlencode "peers=${PEERS}"} >/dev/null
+    fi
+    if ! curl -sk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat" | grep -q '"vnet"'; then
+      local VNET_CREATE_ARGS=(--data-urlencode "vnet=ludusnat" --data-urlencode "zone=ludus")
+      [[ -n "${NAT_VNET_TAG}" ]] && VNET_CREATE_ARGS+=(--data-urlencode "tag=${NAT_VNET_TAG}")
+      curl -sk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/vnets" \
+        "${VNET_CREATE_ARGS[@]}" >/dev/null
+    else
+      local VNET_UPDATE_ARGS=(--data-urlencode "vlanaware=0")
+      [[ -n "${NAT_VNET_TAG}" ]] && VNET_UPDATE_ARGS+=(--data-urlencode "tag=${NAT_VNET_TAG}")
+      curl -sk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat" \
+        "${VNET_UPDATE_ARGS[@]}" >/dev/null 2>&1 || true
+    fi
+    local SUBNET_ID
+    SUBNET_ID=$(curl -fsk -H "${AUTH}" "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets" | _json 'next((s["subnet"] for s in d["data"] if s["subnet"].endswith("-192.0.2.0-24")), "")')
+    if [[ -n $SUBNET_ID ]]; then
+      curl -fsk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets/${SUBNET_ID}" \
+        --data-urlencode "gateway=${LUDUS_NAT_GATEWAY}" --data-urlencode "snat=1" >/dev/null
+    else
+      curl -fsk -H "${AUTH}" -X POST "${EP_LOCAL}/api2/json/cluster/sdn/vnets/ludusnat/subnets" \
+        --data-urlencode "subnet=192.0.2.0/24" --data-urlencode "type=subnet" \
+        --data-urlencode "gateway=${LUDUS_NAT_GATEWAY}" --data-urlencode "snat=1" >/dev/null
+    fi
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null
+    install -d -m 0755 /etc/sysctl.d
+    printf "net.ipv4.ip_forward=1\n" > /etc/sysctl.d/99-ludus-ip-forward.conf
+    if [[ -f /etc/network/interfaces ]] \
+      && ! grep -Eq '^[[:space:]]*(source[[:space:]]+/etc/network/interfaces\.d/(\*|sdn)|source-directory[[:space:]]+/etc/network/interfaces\.d/?)([[:space:]]|$)' /etc/network/interfaces; then
+      printf "\nsource /etc/network/interfaces.d/sdn\n" >> /etc/network/interfaces
+    fi
+    curl -fsk -H "${AUTH}" -X PUT "${EP_LOCAL}/api2/json/cluster/sdn" >/dev/null
+    local _i SDN_OK=0 SDN_ADDRESSES
+    for _i in $(seq 1 60); do
+      if SDN_ADDRESSES=$(ip -j -4 address show dev ludusnat 2>/dev/null) \
+        && printf '%s\n' "$SDN_ADDRESSES" | python3 -c 'import json,sys; sys.exit(0 if any(a.get("local")==sys.argv[1] for n in json.load(sys.stdin) for a in n.get("addr_info",[])) else 1)' "$LUDUS_NAT_GATEWAY"; then
+        SDN_OK=1
+        break
+      fi
+      sleep 1
+    done
+    if [[ "${SDN_OK}" != "1" ]]; then
+      print_message "[!] SDN apply did not activate ludusnat within 60s. Check: pvesh get /cluster/sdn" "error"
+      exit 1
+    fi
+    print_message "[+] SDN zone/vnet applied" "ok"
   fi
   # ---- 5. Create container -----------------------------------------------------
-  local ETH0_CFG PROXMOX_INVALID_CERT
+  local ETH0_CFG ETH1_CFG PROXMOX_INVALID_CERT
   ETH0_CFG="ip=${ETH0_IP}"
   [[ -n "${ETH0_GW:-}" ]] && ETH0_CFG="${ETH0_CFG},gw=${ETH0_GW}"
   [[ -n "${LXC_VLAN_TAG:-}" ]] && ETH0_CFG="${ETH0_CFG},tag=${LXC_VLAN_TAG}"
+  ETH1_CFG="name=eth1,bridge=ludusnat,ip=${LUDUS_NAT_IP}/24"
+  # The legacy owner keeps this address until cutover. Do not advertise it twice.
+  [[ ${MIGRATE_HOST:-0} != 1 ]] || ETH1_CFG="${ETH1_CFG},link_down=1"
   local -a PCT_CREATE_ARGS=(
     --hostname "${LXC_HOSTNAME}"
     --unprivileged 1
@@ -1229,7 +1227,7 @@ ludus_install_server() {
     --swap 512
     --rootfs "${STORAGE}:${LXC_ROOTFS_SIZE}"
     --net0 "name=eth0,bridge=${LXC_BRIDGE},${ETH0_CFG},firewall=0"
-    --net1 "name=eth1,bridge=ludusnat,ip=${LUDUS_NAT_IP}/24"
+    --net1 "${ETH1_CFG}"
     --onboot 1
     --startup order=99
   )
@@ -1238,7 +1236,10 @@ ludus_install_server() {
   # lxc-usernsexec must traverse the rootfs directories created by pct.
   (umask 022; pct create "${VMID}" "local:vztmpl/${TMPL_NAME}" "${PCT_CREATE_ARGS[@]}") \
     || { print_message "[!] pct create failed; check the selected storage and /etc/vzdump.conf tmpdir" "error"; exit 1; }
-  [[ ${MIGRATE_HOST:-0} != 1 ]] || touch "$MIGRATION_DIR/container-created"
+  if [[ ${MIGRATE_HOST:-0} == 1 ]]; then
+    printf '%s\n' "$VMID" >"$MIGRATION_DIR/vmid"
+    touch "$MIGRATION_DIR/container-created"
+  fi
   cat >> "/etc/pve/lxc/${VMID}.conf" <<EOF
 lxc.cgroup2.devices.allow: c 10:200 rwm
 lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
@@ -1258,12 +1259,13 @@ EOF
 
 
   # ---- 6. Configure ------------------------------------------------------------
-  local CFG AIRGAPPED_CONFIG
+  local CFG AIRGAPPED_CONFIG HOST_MANAGED_NETWORK=false
   CFG=$(mktemp /tmp/ludus-config.XXXXXXXX.yml)
   AIRGAPPED_CONFIG=false
   [[ "${AIRGAPPED_INSTALL}" == "1" ]] && AIRGAPPED_CONFIG=true
   PROXMOX_INVALID_CERT=true
   [[ "${VERIFY_PROXMOX_TLS:-0}" == "1" ]] && PROXMOX_INVALID_CERT=false
+  [[ "${MIGRATE_HOST:-0}" != "1" ]] || HOST_MANAGED_NETWORK=true
   cat > "${CFG}" <<EOF
 proxmox_endpoints:
 $(for e in ${ENDPOINTS}; do echo "  - ${e}"; done)
@@ -1281,7 +1283,8 @@ ludus_nat_ip: ${LUDUS_NAT_IP}
 ludus_nat_gateway: ${LUDUS_NAT_GATEWAY}
 wireguard_endpoint: ${WG_EP}
 wireguard_port: ${WG_PORT}
-sdn_zone: ludus
+sdn_zone: ${MIGRATION_SDN_ZONE:-ludus}
+host_managed_network: ${HOST_MANAGED_NETWORK}
 license_key: ${LICENSE}
 expose_admin_port: false
 port: ${LUDUS_API_PORT}
@@ -1294,10 +1297,10 @@ EOF
   chmod 0600 "${CFG}"
   pct push "${VMID}" "${CFG}" /opt/ludus/config.yml --perms 0600 --user 1001 --group 1001
   if [[ -n "${ENTERPRISE_PLUGIN:-}" ]]; then
-    pct push "${VMID}" "${ENTERPRISE_PLUGIN}" /opt/ludus/plugins/enterprise/ludus-enterprise.so \
-      --perms 0644 --user 1001 --group 1001
-    pct push "${VMID}" "${ENTERPRISE_PLUGIN}" /opt/ludus/plugins/enterprise/admin/ludus-enterprise.so \
-      --perms 0644 --user 0 --group 0
+    pct push "${VMID}" "${ENTERPRISE_PLUGIN}" /opt/ludus/plugins/enterprise/ludus-enterprise.plugin \
+      --perms 0755 --user 1001 --group 1001
+    pct push "${VMID}" "${ENTERPRISE_PLUGIN}" /opt/ludus/plugins/enterprise/admin/ludus-enterprise.plugin \
+      --perms 0755 --user 0 --group 0
   fi
   if [[ -n "${LICENSE_FILE:-}" ]]; then
     pct push "${VMID}" "${LICENSE_FILE}" /opt/ludus/license.lic --perms 0640 --user 1001 --group 1001

@@ -17,6 +17,7 @@ type importedUser struct{ ProxmoxUsername string }
 type ReconcilePVE interface {
 	SDNZoneType(ctx context.Context, name string) (string, error)
 	EnsureVNet(ctx context.Context, zone, name string, tag int, vlanaware bool) error
+	EnsureVNetPreservingTag(ctx context.Context, zone, name string, tag int, vlanaware bool) error
 	ApplySDN(context.Context) error
 	UserExists(context.Context, string) (bool, error)
 }
@@ -36,7 +37,11 @@ func reconcileImportedState(ctx context.Context, pc ReconcilePVE, cfg ludusapi.C
 		for _, r := range ranges {
 			name := fmt.Sprintf("r%d", r.Number)
 			tag, vlanaware := ludusapi.RangeVNetOptionsForZone(zoneType, cfg.VXLANTagBase, r.Number)
-			if err := pc.EnsureVNet(ctx, cfg.SDNZone, name, tag, vlanaware); err != nil {
+			ensureVNet := pc.EnsureVNet
+			if cfg.HostManagedNetwork {
+				ensureVNet = pc.EnsureVNetPreservingTag
+			}
+			if err := ensureVNet(ctx, cfg.SDNZone, name, tag, vlanaware); err != nil {
 				return warns, fmt.Errorf("vnet %s: %w", name, err)
 			}
 			rangeNums = append(rangeNums, r.Number)

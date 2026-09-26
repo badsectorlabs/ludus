@@ -155,7 +155,9 @@ func startManagedPlugin(path string, serverLogger *slog.Logger) (*managedPlugin,
 	}, nil
 }
 
-func readPluginMetadata(path string, serverLogger *slog.Logger) (pluginrpc.Metadata, error) {
+// ReadPluginMetadata probes the runtime protocol and metadata without initializing
+// the plugin or registering its routes, then shuts down the subprocess.
+func ReadPluginMetadata(path string, serverLogger *slog.Logger) (pluginrpc.Metadata, error) {
 	plugin, err := startManagedPlugin(path, serverLogger)
 	if err != nil {
 		return pluginrpc.Metadata{}, err

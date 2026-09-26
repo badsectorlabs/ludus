@@ -125,7 +125,7 @@ func ensurePocketBaseStoragePermissions() {
 
 // recursively extract an embed.FS directory to the ludus install path
 // all files will be have 0644 permissions and all directories will have 0755 permissions
-func extractDirectory(embeddedFS embed.FS, embeddedBaseDir string) {
+func extractDirectory(embeddedFS embed.FS, embeddedBaseDir, installPath string) {
 	embeddedDirEntries, err := embeddedFS.ReadDir(embeddedBaseDir)
 	if err != nil {
 		log.Fatal(err.Error())
@@ -134,18 +134,18 @@ func extractDirectory(embeddedFS embed.FS, embeddedBaseDir string) {
 	for _, embeddedDirEntry := range embeddedDirEntries {
 		// log.Printf("Processing: %s Dir: %t\n", ansibleDirEntry.Name(), ansibleDirEntry.IsDir())
 		if embeddedDirEntry.IsDir() { // Dir
-			os.MkdirAll(fmt.Sprintf("%s/%s/%s", ludusInstallPath, embeddedBaseDir, embeddedDirEntry.Name()), 0755)
+			os.MkdirAll(fmt.Sprintf("%s/%s/%s", installPath, embeddedBaseDir, embeddedDirEntry.Name()), 0755)
 			// It's recursion time! Extract this directory, and any directories inside of it
-			extractDirectory(embeddedFS, fmt.Sprintf("%s/%s", embeddedBaseDir, embeddedDirEntry.Name()))
+			extractDirectory(embeddedFS, fmt.Sprintf("%s/%s", embeddedBaseDir, embeddedDirEntry.Name()), installPath)
 		} else { // File
 			fileContent, err := embeddedFS.ReadFile(fmt.Sprintf("%s/%s", embeddedBaseDir, embeddedDirEntry.Name()))
 			if err != nil {
 				log.Fatal(err.Error())
 			}
 
-			filename := fmt.Sprintf("%s/%s/%s", ludusInstallPath, embeddedBaseDir, embeddedDirEntry.Name())
+			filename := fmt.Sprintf("%s/%s/%s", installPath, embeddedBaseDir, embeddedDirEntry.Name())
 			// Make sure the dir we are writing the file into exists
-			fileDir := fmt.Sprintf("%s/%s", ludusInstallPath, embeddedBaseDir)
+			fileDir := fmt.Sprintf("%s/%s", installPath, embeddedBaseDir)
 			if _, err := os.Stat(fileDir); os.IsNotExist(err) {
 				os.MkdirAll(fileDir, 0755)
 			}
@@ -157,6 +157,37 @@ func extractDirectory(embeddedFS embed.FS, embeddedBaseDir string) {
 	}
 }
 
+// Replace versioned playbooks, but retain the supported administrator defaults.
+// Read before backup/extraction so an unreadable or non-regular config cannot
+// silently turn into factory settings.
+func replaceAnsibleFiles(installPath, timestamp string) error {
+	filename := filepath.Join(installPath, "ansible/server-config.yml")
+	var defaults []byte
+	var mode os.FileMode
+	st, err := os.Lstat(filename)
+	if err == nil {
+		if !st.Mode().IsRegular() {
+			return fmt.Errorf("global Ansible defaults must be a regular file: %s", filename)
+		}
+		defaults, err = os.ReadFile(filename)
+		if err != nil {
+			return err
+		}
+		mode = st.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	backupDir("ansible", timestamp, installPath)
+	extractDirectory(embeddedAnsbileDir, "ansible", installPath)
+	if st != nil {
+		if err := os.WriteFile(filename, defaults, mode); err != nil {
+			return err
+		}
+		return os.Chmod(filename, mode)
+	}
+	return nil
+}
+
 // Check to make sure the ludus install directory exists
 // then back it up and replace ansible, packer, and ci dirs
 // with the embedded files
@@ -166,15 +197,14 @@ func checkDirAndReplaceFiles() {
 		return
 	}
 
-	// Backup ansible if it exists
+	// Use one backup generation for every versioned payload.
 	timestamp := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
-	backupDir("ansible", timestamp)
 
 	// Backup packer if it exists
-	backupDir("packer", timestamp)
+	backupDir("packer", timestamp, ludusInstallPath)
 
 	// Backup ci if it exists
-	backupDir("ci", timestamp)
+	backupDir("ci", timestamp, ludusInstallPath)
 
 	// Copy the ludus-server binary to the timestamp dir
 	if fileExists(fmt.Sprintf("%s/ludus-server", ludusInstallPath)) {
@@ -182,7 +212,9 @@ func checkDirAndReplaceFiles() {
 	}
 
 	log.Printf("Extracting ludus to %s...\n", ludusInstallPath)
-	extractDirectory(embeddedAnsbileDir, "ansible")
+	if err := replaceAnsibleFiles(ludusInstallPath, timestamp); err != nil {
+		log.Fatalf("Preserve global Ansible defaults: %v", err)
+	}
 
 	// dynamic-inventory has to be executable or it will not work!
 	if err := os.Chmod(ludusInstallPath+"/ansible/range-management/dynamic-inventory", 0770); err != nil {
@@ -193,7 +225,7 @@ func checkDirAndReplaceFiles() {
 		Run(fmt.Sprintf("chown -R ludus:ludus %s/ansible", ludusInstallPath), false, true)
 	}
 
-	extractDirectory(embeddedPackerDir, "packer")
+	extractDirectory(embeddedPackerDir, "packer", ludusInstallPath)
 	if err := preserveInjectedCA(); err != nil {
 		log.Fatalf("Restore injected CA to packer HTTP seeds: %v", err)
 	}
@@ -204,7 +236,7 @@ func checkDirAndReplaceFiles() {
 	// Extract the CI directory. All files will be owned by root
 	// The ci setup play will handle permission changes after creating the user
 	// and if the gitlab-runner users exists, we will chown the ci directory below
-	extractDirectory(embeddedCIDir, "ci")
+	extractDirectory(embeddedCIDir, "ci", ludusInstallPath)
 	// Make all the CI scripts executable
 	Run(fmt.Sprintf("chmod +x %s/ci/*.sh", ludusInstallPath), false, true)
 
@@ -268,10 +300,10 @@ func copyThisBinaryToInstallPath() {
 	}
 }
 
-func backupDir(srcDir string, timestamp string) {
+func backupDir(srcDir, timestamp, installPath string) {
 
 	// Make the previous-versions dir if it doesn't exist
-	previousVersionDir := fmt.Sprintf("%s/previous-versions", ludusInstallPath)
+	previousVersionDir := fmt.Sprintf("%s/previous-versions", installPath)
 	if !exists(previousVersionDir) {
 		os.MkdirAll(previousVersionDir, 0755)
 	}
@@ -282,7 +314,7 @@ func backupDir(srcDir string, timestamp string) {
 		os.MkdirAll(timestampDir, 0755)
 	}
 
-	srcDirPath := fmt.Sprintf("%s/%s", ludusInstallPath, srcDir)
+	srcDirPath := fmt.Sprintf("%s/%s", installPath, srcDir)
 
 	if exists(srcDirPath) {
 		// Why is it 130 lines of go to copy a directory recursively? This will only ever run on Debian, so shell it out

@@ -26,15 +26,20 @@ before stopping services. After migration, ordinary updates run inside the LXC.
 - Apply or discard pending Proxmox SDN changes before starting. Migration must
   not apply unrelated network edits.
 
-The automated same-host path supports a **single-node Proxmox installation**
-with the standard legacy IPv4 NAT network (`192.0.2.254/24` on `vmbr1000` or
-`ludusnat`) and range bridges. Clustered hosts, incompatible SDN zones, custom
-NAT VLANs, WireGuard hooks, and unsupported credential references are rejected
-during preflight; resolve these explicitly rather than bypassing the checks.
+The automated same-host path supports a **single-node Proxmox installation** or a
+**healthy, quorate Proxmox cluster** with an existing VXLAN Ludus SDN zone. The
+legacy IPv4 NAT address must be `192.0.2.254/24` on `vmbr1000` or `ludusnat`, owned
+by the host running Ludus. All cluster nodes must be online and reachable through
+Proxmox's trusted root SSH configuration. Migration preserves the zone, peers,
+MTU, and existing VNI tags; it does not move workload disks or VM ownership.
+Incompatible SDN zones, custom NAT VLANs, WireGuard hooks, and unsupported
+credential references are rejected during preflight rather than bypassed.
 
-If Enterprise is installed, supply the matching target-release plugin with
-`--enterprise-plugin`. The legacy host's shared library is not copied into the
-new runtime.
+If Enterprise is installed, supply the matching target-release executable RPC
+plugin with `--enterprise-plugin`. It is installed as `ludus-enterprise.plugin`
+with executable permissions in both public and admin plugin directories. State
+import verifies both artifacts through the RPC metadata protocol. The legacy
+host's shared library is not copied into the new runtime.
 
 ## Migrate on the existing Proxmox host
 
@@ -60,26 +65,33 @@ clients do not need a new server address.
 
 The installer:
 
-1. Validates the existing installation and saves reversible host/network state
-   under `/var/lib/ludus-migration/upgrade.*`.
+1. Validates the existing installation and saves reversible per-node network,
+   firewall, service, and VM NIC state under `/var/lib/ludus-migration/upgrade.*`.
 2. Downloads, creates, and configures the candidate LXC while the 2.x API and
-   WireGuard service remain available.
+   WireGuard service remain available. Private management-network forwarding is
+   enabled before bootstrap so the candidate can reach every Proxmox node, without
+   redirecting the existing public endpoints.
 3. Creates a consistent online database snapshot and imports a versioned,
    integrity-checked state archive into the staged LXC while 2.x remains live.
    It preserves the database, user/range files, encryption settings, supported
-   service secrets, private-source credentials, TLS material, and WireGuard
-   keys and peers. Legacy executables and playbooks are not imported. Static
-   files are fingerprinted so a concurrent configuration change aborts instead
-   of being lost.
+   service secrets, private-source credentials, TLS material, WireGuard keys and
+   peers, and administrator-owned `ansible/server-config.yml` defaults. Legacy
+   executables and playbooks are not imported. Static files are fingerprinted so
+   a concurrent configuration change aborts instead of being lost.
 4. Redirects new API connections to a byte relay, stops the old API, and copies
    only the final database, WireGuard state, and DHCP leases. Requests accepted
    during this short transfer wait for the new service and retain end-to-end TLS
    with the original certificate.
+   Both snapshots use the source's configured `data_directory`, including a
+   custom path; only the destination is normalized to `/opt/ludus/db`.
 5. Moves existing VM NICs to the appropriate SDN VNets without cloning or
    renumbering VMs. It preserves MAC addresses and range VLANs, and converts
    the legacy NAT NIC's native VLAN 1 to the untagged NAT VNet.
 6. Preserves `192.0.2.254` inside the container for existing routers' gateway
    and DNS settings. The Proxmox-side NAT gateway moves to `192.0.2.49`.
+   In a cluster, `.49` exists only on the original Ludus host, not every VXLAN
+   peer. The candidate's NAT interface remains disconnected until cutover removes
+   the host's `.254`, preventing duplicate gateway ownership.
    Existing ranges retain their original router template and VM name rather
    than adopting the new-install Debian 13 default.
 7. Starts the unchanged WireGuard identity in the LXC and switches forwarding
@@ -94,6 +106,10 @@ The admin API remains localhost-only **inside the LXC** unless it was explicitly
 exposed before migration. Run local administrative operations through
 `pct exec VMID -- ...`; the old host's localhost admin endpoint is not retained
 by default. An explicitly exposed admin endpoint is forwarded.
+
+Migrated configuration includes `host_managed_network: true`. Keep this setting:
+bootstrap and later deployments must reuse the preserved NAT/VXLAN topology
+instead of retagging live networks or recreating a cluster-wide subnet gateway.
 
 ## Verify and recover
 
@@ -115,9 +131,13 @@ bash /var/lib/ludus-migration/upgrade.XXXXXXXX/migrate-host.sh \
 ```
 
 Replace `upgrade.XXXXXXXX` with the directory reported by your migration.
-Rollback restores host services and network state and stops the candidate LXC;
-it does not destroy its disk. Do not roll back a committed migration after users
-have changed data in the LXC without first reconciling those changes.
+Rollback stops the migration-owned candidate and disables its autostart before
+restoring host services and per-node network state, including failures during
+initial bootstrap or state import. It retains the candidate disk for diagnosis.
+If stopping or disabling the candidate fails, rollback reports the failure instead
+of restoring competing services. Retry with an unused VMID; existing containers
+and API tokens are not overwritten. Do not roll back a committed migration after
+users have changed data in the LXC without first reconciling those changes.
 
 ## Importing onto another host
 

@@ -248,7 +248,7 @@ func (s *Server) ensureLicensedPlugin(ctx context.Context, spec licensedPluginSp
 			return nil
 		}
 		currentVersion := metadata.Version
-		if diskMetadata, err := readPluginMetadata(pluginPath, s.Logger); err == nil &&
+		if diskMetadata, err := ReadPluginMetadata(pluginPath, s.Logger); err == nil &&
 			diskMetadata.Name == spec.name && diskMetadata.Version != "" {
 			currentVersion = diskMetadata.Version
 		}
@@ -266,7 +266,7 @@ func (s *Server) ensureLicensedPlugin(ctx context.Context, spec licensedPluginSp
 		if err := os.Chmod(pluginPath, 0755); err != nil {
 			return fmt.Errorf("make plugin executable: %w", err)
 		}
-		metadata, probeErr := readPluginMetadata(pluginPath, s.Logger)
+		metadata, probeErr := ReadPluginMetadata(pluginPath, s.Logger)
 		if probeErr == nil && metadata.Name == spec.name {
 			if !isLocalPlugin(spec.targetDir) {
 				if installed, updateErr := s.installPluginUpdate(ctx, spec, metadata.Version); updateErr != nil {
@@ -389,7 +389,7 @@ func (s *Server) downloadPluginRelease(release *keygen.Release, spec licensedPlu
 }
 
 func (s *Server) activatePluginUpdate(candidatePath, targetPath, expectedVersion, expectedName string) error {
-	metadata, err := readPluginMetadata(candidatePath, s.Logger)
+	metadata, err := ReadPluginMetadata(candidatePath, s.Logger)
 	if err != nil {
 		return fmt.Errorf("validate plugin update protocol: %w", err)
 	}

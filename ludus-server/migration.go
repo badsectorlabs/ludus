@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"ludusapi"
 	"net/url"
 	"os"
 	"os/exec"
@@ -59,6 +60,7 @@ type migrationFile struct {
 }
 type migrationManifest struct {
 	Version                int                  `json:"version"`
+	DataDirectory          string               `json:"data_directory"`
 	Ranges                 []migrationRange     `json:"ranges"`
 	VMs                    []migrationVM        `json:"vms"`
 	Inventory              []migrationProxmoxVM `json:"inventory"`
@@ -78,7 +80,7 @@ type migrationManifest struct {
 }
 
 var migrationTrees = []string{"ranges", "users", "templates", "resources", "blueprints", "sources", "tls"}
-var migrationLooseFiles = []string{"license.lic", "cert.pem", "key.pem"}
+var migrationLooseFiles = []string{"license.lic", "cert.pem", "key.pem", "ansible/server-config.yml"}
 var migrationCredentials = []string{".ssh", ".gitconfig", ".git-credentials"}
 var migrationServices = []string{"ludus", "ludus-admin"}
 var migrationID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*(/[A-Za-z0-9_-]+){0,2}$`)
@@ -312,6 +314,9 @@ func migrationOptionalCopy(src, dst string) error {
 func migrationDatabase(root string, values map[string]interface{}) (migrationManifest, error) {
 	m := migrationManifest{Version: 1, Ranges: []migrationRange{}, VMs: []migrationVM{}}
 	var err error
+	if m.DataDirectory, err = migrationDataDir(values); err != nil {
+		return m, err
+	}
 	if m.Port, err = migrationPort(values, "port", 8080); err != nil {
 		return m, err
 	}
@@ -362,11 +367,7 @@ func migrationDatabase(root string, values map[string]interface{}) (migrationMan
 	}
 	databasePath := filepath.Join(root, "opt/ludus/db/data.db")
 	if root == "/" {
-		dataDir, err := migrationDataDir(values)
-		if err != nil {
-			return m, err
-		}
-		databasePath = filepath.Join(dataDir, "data.db")
+		databasePath = filepath.Join(m.DataDirectory, "data.db")
 	}
 	if err := migrationRequireFile(databasePath); err != nil {
 		return m, err
@@ -1154,7 +1155,7 @@ func migrationAllowed(name string, directory bool) bool {
 		}
 	}
 	if directory {
-		for _, p := range []string{"opt", "opt/ludus", "opt/ludus/install", "etc", "usr", "usr/local", "usr/local/share", "var", "var/lib", "var/lib/misc", "migration-tls", "home", "home/ludus"} {
+		for _, p := range []string{"opt", "opt/ludus", "opt/ludus/install", "opt/ludus/ansible", "etc", "usr", "usr/local", "usr/local/share", "var", "var/lib", "var/lib/misc", "migration-tls", "home", "home/ludus"} {
 			if name == p {
 				return true
 			}
@@ -1259,7 +1260,7 @@ func migrationMergeConfig(old, generated map[string]interface{}) (map[string]int
 	for key, value := range old {
 		merged[key] = value
 	}
-	for _, key := range []string{"proxmox_node", "proxmox_hostname", "proxmox_endpoints", "proxmox_token_id", "proxmox_token_secret", "proxmox_invalid_cert", "proxmox_user_realm", "proxmox_vm_storage_pool", "proxmox_vm_storage_format", "proxmox_iso_storage_pool", "ludus_nat_interface", "ludus_nat_ip", "ludus_nat_gateway", "ludus_dns_server", "sdn_zone", "vxlan_tag_base", "tls_cert_file", "tls_key_file"} {
+	for _, key := range []string{"proxmox_node", "proxmox_hostname", "proxmox_endpoints", "proxmox_token_id", "proxmox_token_secret", "proxmox_invalid_cert", "proxmox_user_realm", "proxmox_vm_storage_pool", "proxmox_vm_storage_format", "proxmox_iso_storage_pool", "ludus_nat_interface", "ludus_nat_ip", "ludus_nat_gateway", "ludus_dns_server", "sdn_zone", "vxlan_tag_base", "host_managed_network", "tls_cert_file", "tls_key_file"} {
 		if value, ok := generated[key]; ok {
 			merged[key] = value
 		}
@@ -1352,7 +1353,7 @@ func migrationValidateStage(stage string) (migrationManifest, map[string]interfa
 	if err != nil {
 		return m, nil, err
 	}
-	if json.Unmarshal(b, &m) != nil || m.Version != 1 || len(m.Files) == 0 || m.RouterTemplate == "" || !m.CustomTLS {
+	if json.Unmarshal(b, &m) != nil || m.Version != 1 || m.DataDirectory == "" || len(m.Files) == 0 || m.RouterTemplate == "" || !m.CustomTLS {
 		return m, nil, errors.New("unsupported or incomplete migration manifest (original TLS identity is required)")
 	}
 	inventory, err := migrationInventory(stage)
@@ -1397,8 +1398,16 @@ func migrationValidateStage(stage string) (migrationManifest, map[string]interfa
 	if err != nil {
 		return m, nil, err
 	}
-	if !reflect.DeepEqual(actual.Ranges, m.Ranges) || !reflect.DeepEqual(actual.VMs, m.VMs) || actual.Port != m.Port || actual.AdminPort != m.AdminPort || actual.ExposeAdminPort != m.ExposeAdminPort || actual.WireguardPort != m.WireguardPort || actual.WireguardEndpoint != m.WireguardEndpoint || actual.ProxmoxUserRealm != m.ProxmoxUserRealm || actual.ProxmoxVMStoragePool != m.ProxmoxVMStoragePool || actual.ProxmoxVMStorageFormat != m.ProxmoxVMStorageFormat || actual.ProxmoxISOStoragePool != m.ProxmoxISOStoragePool || (actual.RequiresPlugin && !m.RequiresPlugin) {
+	if actual.DataDirectory != m.DataDirectory || !reflect.DeepEqual(actual.Ranges, m.Ranges) || !reflect.DeepEqual(actual.VMs, m.VMs) || actual.Port != m.Port || actual.AdminPort != m.AdminPort || actual.ExposeAdminPort != m.ExposeAdminPort || actual.WireguardPort != m.WireguardPort || actual.WireguardEndpoint != m.WireguardEndpoint || actual.ProxmoxUserRealm != m.ProxmoxUserRealm || actual.ProxmoxVMStoragePool != m.ProxmoxVMStoragePool || actual.ProxmoxVMStorageFormat != m.ProxmoxVMStorageFormat || actual.ProxmoxISOStoragePool != m.ProxmoxISOStoragePool || (actual.RequiresPlugin && !m.RequiresPlugin) {
 		return m, nil, errors.New("migration metadata does not match the archived database/configuration")
+	}
+	defaults, err := migrationReadYAML(filepath.Join(stage, "opt/ludus/ansible/server-config.yml"))
+	if err != nil {
+		return m, nil, fmt.Errorf("read archived global Ansible defaults: %w", err)
+	}
+	template, err := migrationString(defaults, "default_router_template_name", "")
+	if err != nil || (template != "" && template != m.RouterTemplate) {
+		return m, nil, errors.New("migration router template does not match archived global defaults")
 	}
 	if m.CustomTLS {
 		if _, err := tls.LoadX509KeyPair(filepath.Join(stage, "migration-tls/server.crt"), filepath.Join(stage, "migration-tls/server.key")); err != nil {
@@ -1599,6 +1608,54 @@ func migrationMergeResources(stage string) error {
 	})
 }
 
+// Probe the installed runtime, never legacy executable payloads from the archive.
+// Both services must use the same enterprise build before any state is replaced.
+func migrationValidatePlugins(directory string) error {
+	var version string
+	for _, serviceDir := range []string{directory, filepath.Join(directory, "admin")} {
+		filename := filepath.Join(serviceDir, ludusapi.EnterprisePluginFilename)
+		st, err := os.Lstat(filename)
+		if err != nil {
+			return err
+		}
+		if !st.Mode().IsRegular() || st.Mode().Perm()&0111 != 0111 {
+			return fmt.Errorf("enterprise plugin must be a regular executable readable by both services: %s", filename)
+		}
+		metadata, err := ludusapi.ReadPluginMetadata(filename, nil)
+		if err != nil {
+			return fmt.Errorf("validate enterprise plugin %s: %w", filename, err)
+		}
+		if metadata.Name != ludusapi.EnterprisePluginName || metadata.Version == "" {
+			return fmt.Errorf("unexpected enterprise plugin identity in %s", filename)
+		}
+		if version != "" && metadata.Version != version {
+			return errors.New("public and admin enterprise plugin versions differ")
+		}
+		version = metadata.Version
+	}
+	return nil
+}
+
+func migrationPreserveRouterDefault(stage, template string) error {
+	filename := filepath.Join(stage, "opt/ludus/ansible/server-config.yml")
+	defaults, err := migrationReadYAML(filename)
+	if err != nil {
+		return err
+	}
+	existing, err := migrationString(defaults, "default_router_template_name", "")
+	if err != nil || existing != "" {
+		return err
+	}
+	// Older releases kept this default in their playbook. Carry it forward
+	// without copying the playbook or replacing other administrator settings.
+	defaults["default_router_template_name"] = template
+	content, err := yaml.Marshal(defaults)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filename, content, 0600)
+}
+
 func importMigrationState(archive string) error {
 	if err := migrationStopped(); err != nil {
 		return err
@@ -1632,9 +1689,8 @@ func importMigrationState(archive string) error {
 		return errors.New("migration requires the LXC Ludus service account home to be /home/ludus")
 	}
 	if m.RequiresPlugin {
-		plugins, _ := filepath.Glob("/opt/ludus/plugins/enterprise/*.so")
-		if len(plugins) == 0 {
-			return errors.New("legacy license/plugins require a compatible enterprise plugin; supply it to install.sh before migration")
+		if err := migrationValidatePlugins("/opt/ludus/plugins/enterprise"); err != nil {
+			return fmt.Errorf("legacy license/plugins require a compatible enterprise plugin for both services; supply it to install.sh before migration: %w", err)
 		}
 	}
 	merged, err := migrationMergeConfig(old, generated)
@@ -1649,6 +1705,9 @@ func importMigrationState(archive string) error {
 		return err
 	}
 	if err := migrationAnnotateRouters(stage, m); err != nil {
+		return err
+	}
+	if err := migrationPreserveRouterDefault(stage, m.RouterTemplate); err != nil {
 		return err
 	}
 	if err := migrationMergeResources(stage); err != nil {

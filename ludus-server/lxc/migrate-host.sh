@@ -67,105 +67,8 @@ migration_prepare() {
   LUDUS_NAT_GATEWAY=192.0.2.49
   # Preserve the address used for DNS, DHCP, router management and default routes
   # by existing guests. Only the Proxmox-side SDN gateway moves.
-  python3 - "$MIGRATION_DIR" "${LXC_BRIDGE:-}" "${ETH0_IP:-}" "${ETH0_GW:-}" "$LUDUS_NAT_GATEWAY" <<'PY'
-import ipaddress,json,pathlib,re,shutil,subprocess,sys
-root=pathlib.Path(sys.argv[1])
-def run(*args):
-    return subprocess.check_output(args,text=True)
-def api(path,*args):
-    return json.loads(run('pvesh','get',path,*args,'--output-format','json'))
-info=json.loads((root/'info.json').read_text())
-nodes=[n for n in api('/cluster/status') if n['type']=='node']
-if len(nodes)!=1:
-    raise SystemExit('Host network cutover requires a single-node install; do not change a clustered legacy network without a per-node migration plan')
-node=nodes[0]['name']
-for zone in api('/cluster/sdn/zones'):
-    if zone['zone']=='ludus' and zone['type']!='simple':
-        raise SystemExit('The existing ludus SDN zone is not simple; a per-node migration plan is required')
-    if zone['zone']=='ludus' and (zone.get('ipam') not in (None,'pve') or zone.get('dns') or zone.get('reversedns')):
-        raise SystemExit('The existing ludus SDN zone uses external IPAM/DNS; migration cannot safely roll back those services')
-targets={'ludusnat', *(f"r{r['number']}" for r in info['ranges'])}
-for vnet in api('/cluster/sdn/vnets'):
-    if vnet['vnet'] in targets and vnet['zone']!='ludus':
-        raise SystemExit(f"SDN target {vnet['vnet']} belongs to another zone; resolve the collision before migrating")
-addresses=json.loads(run('ip','-j','-4','address'))
-nat=[a['ifname'] for a in addresses for ip in a['addr_info'] if ip.get('local')=='192.0.2.254' and ip.get('prefixlen')==24]
-if len(nat)!=1 or nat[0] not in ('vmbr1000','ludusnat'):
-    raise SystemExit('Expected the existing Ludus NAT address 192.0.2.254/24 on vmbr1000 or ludusnat')
-nat_gateway=sys.argv[5]
-if any(a.get('local')==nat_gateway for interface in addresses for a in interface['addr_info']):
-    raise SystemExit(f'NAT gateway {nat_gateway} is already assigned on the host')
-def gateway_neighbour_exists():
-    neighbours=json.loads(run('ip','-j','-4','neighbour','show','to',nat_gateway,'dev',nat[0]))
-    return any(n.get('lladdr') and not {'FAILED','INCOMPLETE'}.intersection(n.get('state',[])) for n in neighbours)
-if gateway_neighbour_exists():
-    raise SystemExit(f'NAT gateway {nat_gateway} already has a neighbour on {nat[0]}')
-probe=subprocess.run(['ping','-n','-I',nat[0],'-c','1','-W','2','-w','3',nat_gateway],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=5)
-if probe.returncode not in (0,1):
-    raise SystemExit('Could not check the reserved NAT gateway address')
-if probe.returncode==0 or gateway_neighbour_exists():
-    raise SystemExit(f'NAT gateway {nat_gateway} is in use on {nat[0]}')
-bridge,ip,gateway=sys.argv[2:5]
-auto_management=not bridge and not ip and not gateway
-if not auto_management and (not bridge or not ip or not gateway or ip=='dhcp'):
-    raise SystemExit('Migration needs --bridge, static --ip and --gw together, or none for an automatic private management bridge')
-routes=json.loads(run('ip','-j','-4','route','show','table','all'))
-if auto_management:
-    bridge='ludusmg'
-    if any(a['ifname']==bridge for a in addresses) or pathlib.Path('/sys/class/net/'+bridge).exists():
-        raise SystemExit('ludusmg already exists; supply an unused management bridge/address explicitly')
-    occupied=[ipaddress.ip_network(r['dst'],strict=False) for r in routes if r.get('dst') not in (None,'default')]
-    subnet=next((ipaddress.ip_network(f'172.31.{n}.0/30') for n in range(255,239,-1) if not any(ipaddress.ip_network(f'172.31.{n}.0/30').overlaps(x) for x in occupied)),None)
-    if subnet is None:
-        raise SystemExit('No unused private management subnet; supply --bridge, --ip and --gw')
-    gateway=str(subnet[1]); ip=str(subnet[2])+'/30'
-else:
-    subnet=ipaddress.ip_interface(ip).network
-    if subnet.overlaps(ipaddress.ip_network('192.0.2.0/24')) or subnet.overlaps(ipaddress.ip_network('198.51.100.0/24')):
-        raise SystemExit('Management network must not overlap Ludus NAT or WireGuard networks')
-    if any(a['ifname']==bridge and bridge==nat[0] for a in addresses):
-        raise SystemExit('Management must not use the old Ludus NAT bridge')
-uplink=next((r['dev'] for r in routes if r.get('dst')=='default' and 'dev' in r),None)
-if not uplink:
-    raise SystemExit('The host needs an IPv4 default route')
-for path in ('/etc/systemd/system/ludus-lxc-forwarding.service','/usr/local/lib/ludus/migrate-host.sh'):
-    if pathlib.Path(path).exists():
-        raise SystemExit('A previous LXC migration forwarding installation exists; resolve it before migrating')
-for name in ('interfaces','interfaces.d'):
-    src=pathlib.Path('/etc/network')/name
-    if src.is_dir(): shutil.copytree(src,root/name)
-    elif src.exists(): shutil.copy2(src,root/name)
-shutil.copytree('/etc/pve/sdn',root/'sdn',dirs_exist_ok=True)
-sysctl_path=pathlib.Path('/etc/sysctl.d/99-ludus-ip-forward.conf')
-if sysctl_path.exists(): shutil.copy2(sysctl_path,root/sysctl_path.name)
-(root/'iptables.rules').write_text(run('iptables-save'))
-services={}
-for service in ('ludus','ludus-admin','wg-quick@wg0','dnsmasq'):
-    services[service]={'active':subprocess.run(['systemctl','is-active','--quiet',service]).returncode==0,'enabled':subprocess.run(['systemctl','is-enabled','--quiet',service]).returncode==0}
-bridges={nat[0]:'ludusnat', **{f"vmbr{1000+r['number']}":f"r{r['number']}" for r in info['ranges']}}
-vms=[]
-for vm in api('/cluster/resources','--type','vm'):
-    if vm['type']!='qemu': continue
-    config=api(f"/nodes/{vm['node']}/qemu/{vm['vmid']}/config")
-    old={}; new={}
-    for key,value in config.items():
-        if not re.fullmatch(r'net\d+',key): continue
-        fields=value.split(',')
-        replaced=[('bridge='+bridges[f[7:]]) if f.startswith('bridge=') and f[7:] in bridges else f for f in fields]
-        if 'bridge='+nat[0] in fields:
-            # The legacy NAT bridge used native VLAN 1. The NAT VNet is untagged.
-            if any(f.startswith('trunks=') or (f.startswith('tag=') and f!='tag=1') for f in fields):
-                raise SystemExit(f"VM {vm['vmid']} {key} uses non-native NAT VLANs; resolve them before migrating")
-            replaced=[f for f in replaced if f!='tag=1']
-        if replaced!=fields:
-            old[key]=value; new[key]=','.join(replaced)
-    if new: vms.append({'node':vm['node'],'vmid':vm['vmid'],'old':old,'new':new})
-config={'node':node,'nat_bridge':nat[0],'bridge':bridge,'ip':ip,'gateway':gateway,'auto_management':auto_management,'subnet':str(subnet),'uplink':uplink,'services':services,'vms':vms,'ranges':info['ranges'],'port':info['port'],'admin_port':info['admin_port'],'expose_admin_port':info['expose_admin_port'],'wireguard_port':info['wireguard_port'],'ip_forward':pathlib.Path('/proc/sys/net/ipv4/ip_forward').read_text().strip()}
-config['host_addresses']=[a['local'] for interface in addresses for a in interface.get('addr_info',[])]
-if not auto_management:
-    config['route_localnet']=pathlib.Path('/proc/sys/net/ipv4/conf',bridge,'route_localnet').read_text().strip()
-(root/'network.json').write_text(json.dumps(config,indent=2))
-PY
+  python3 "$MIGRATION_DIR/migrate-cluster.py" prepare "$MIGRATION_DIR" "${LXC_BRIDGE:-}" "${ETH0_IP:-}" "${ETH0_GW:-}" "$LUDUS_NAT_GATEWAY"
+  MIGRATION_SDN_ZONE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["zone"])' "$MIGRATION_DIR/network.json")
   LXC_BRIDGE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["bridge"])' "$MIGRATION_DIR/network.json")
   ETH0_IP=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ip"])' "$MIGRATION_DIR/network.json")
   ETH0_GW=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["gateway"])' "$MIGRATION_DIR/network.json")
@@ -203,21 +106,13 @@ migration_finish_sdn_stage() {
   touch "$MIGRATION_DIR/sdn-staged"
 }
 
-migration_stage_range_networks() {
-  python3 - "$MIGRATION_DIR/network.json" <<'PY'
-import json,subprocess,sys
-c=json.load(open(sys.argv[1]))
-existing={v['vnet']:v for v in json.loads(subprocess.check_output(['pvesh','get','/cluster/sdn/vnets','--output-format','json']))}
-for r in c['ranges']:
-    name=f"r{r['number']}"
-    # Existing router/workload NICs retain their VLAN tags during hotplug.
-    if name in existing:
-        if existing[name]['zone']!='ludus':
-            raise SystemExit(f'SDN target {name} belongs to another zone')
-        subprocess.run(['pvesh','set',f'/cluster/sdn/vnets/{name}','--vlanaware','1'],check=True,stdout=subprocess.DEVNULL)
-    else:
-        subprocess.run(['pvesh','create','/cluster/sdn/vnets','--vnet',name,'--zone','ludus','--vlanaware','1'],check=True,stdout=subprocess.DEVNULL)
-PY
+migration_stage_networks() {
+  migration_begin_sdn_stage
+  python3 "$MIGRATION_DIR/migrate-cluster.py" stage "$MIGRATION_DIR"
+  migration_finish_sdn_stage
+  # The private management subnet must reach every Proxmox node during
+  # bootstrap, before any original API or WireGuard endpoint is redirected.
+  migration_forwarding stage
 }
 
 migration_write_candidate_routes() {
@@ -243,7 +138,7 @@ migration_static_fingerprint() {
   python3 - <<'PY'
 import hashlib,pathlib
 roots=[pathlib.Path('/opt/ludus')/name for name in ('ranges','users','templates','resources','blueprints','sources','tls')]
-roots += [pathlib.Path('/opt/ludus')/name for name in ('license.lic','cert.pem','key.pem','config.yml','install/root-api-key')]
+roots += [pathlib.Path('/opt/ludus')/name for name in ('license.lic','cert.pem','key.pem','config.yml','install/root-api-key','ansible/server-config.yml')]
 roots += [pathlib.Path('/home/ludus')/name for name in ('.ssh','.gitconfig','.git-credentials')]
 h=hashlib.sha256()
 for root in roots:
@@ -281,14 +176,12 @@ migration_stage_candidate_state() {
 
 migration_sync_final_state() {
   local current
-  local -a final_paths=(opt/ludus/db etc/wireguard)
   current=$(migration_static_fingerprint)
   [[ -f "$MIGRATION_DIR/static-fingerprint" ]] && [[ $current == "$(cat "$MIGRATION_DIR/static-fingerprint")" ]] || {
     echo "Ludus files changed after the LXC state was staged; retry migration" >&2
     return 1
   }
-  [[ ! -f /var/lib/misc/dnsmasq.leases ]] || final_paths+=(var/lib/misc/dnsmasq.leases)
-  tar -C / -czf "$MIGRATION_DIR/final-state.tar.gz" "${final_paths[@]}"
+  python3 "$MIGRATION_DIR/migrate-cluster.py" final-state "$MIGRATION_DIR"
   pct push "$VMID" "$MIGRATION_DIR/final-state.tar.gz" /tmp/ludus-final-state.tar.gz
   pct exec "$VMID" -- systemctl stop wg-quick@wg0
   pct exec "$VMID" -- bash -euo pipefail -c '
@@ -316,7 +209,6 @@ migration_sync_final_state() {
 }
 
 migration_cutover() {
-  printf '%s\n' "$VMID" >"$MIGRATION_DIR/vmid"
   if pgrep -f '(^|/)(ansible-playbook|packer)( |$)' >/dev/null; then
     echo "A deployment or build started during preflight; retry after it finishes" >&2
     return 1
@@ -344,7 +236,7 @@ before=json.loads((root/'info.json').read_text())
 after=json.loads((root/'cutover-info.json').read_text())
 # The legacy vms table is a transient cache; even a read-only range poll can
 # delete/repopulate it. Proxmox inventory includes stable identities and NICs.
-for key in ('ranges','inventory','port','admin_port','expose_admin_port','wireguard_port','wireguard_endpoint'):
+for key in ('ranges','inventory','port','admin_port','expose_admin_port','wireguard_port','wireguard_endpoint','data_directory'):
     if before[key]!=after[key]:
         raise SystemExit('Installation changed during preflight; retry migration in a maintenance window')
 PY
@@ -353,29 +245,8 @@ PY
   migration_reset_wireguard_sessions
   systemctl stop wg-quick@wg0 dnsmasq
   touch "$MIGRATION_DIR/cutover"
-  python3 - "$MIGRATION_DIR/network.json" <<'PY'
-import json,pathlib,re,subprocess,sys
-c=json.load(open(sys.argv[1]))
-# Keep bridge definitions until all NICs have moved. Remove only the old NAT
-# address and Ludus range route hooks; never touch the management uplink.
-paths=[pathlib.Path('/etc/network/interfaces'),*pathlib.Path('/etc/network/interfaces.d').glob('*')]
-for path in paths:
-    if not path.is_file() or path.name=='sdn': continue
-    lines=path.read_text().splitlines(keepends=True); out=[]; interface=None
-    for line in lines:
-        m=re.match(r'\s*iface\s+(\S+)\s+inet\s+',line)
-        if m: interface=m[1]
-        if interface==c['nat_bridge']:
-            if re.match(r'\s*address\s+192\.0\.2\.254(?:/24)?\s*$',line): continue
-            if re.match(r'\s*netmask\s+255\.255\.255\.0\s*$',line): continue
-            if m: line=re.sub(r'\binet static\b','inet manual',line)
-        if any(re.search(r'\bip route (?:add|del|replace) 10\.'+str(r['number'])+r'\.0\.0/16\b',line) for r in c['ranges']): continue
-        out.append(line)
-    path.write_text(''.join(out))
-subprocess.run(['ip','address','del','192.0.2.254/24','dev',c['nat_bridge']],check=True)
-for r in c['ranges']:
-    subprocess.run(['ip','route','del',f"10.{r['number']}.0.0/16"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-PY
+  python3 "$MIGRATION_DIR/migrate-cluster.py" cutover "$MIGRATION_DIR"
+  python3 "$MIGRATION_DIR/migrate-cluster.py" activate "$MIGRATION_DIR" "$VMID"
 }
 
 # Hold ordinary client TCP connections open while durable state moves into the
@@ -519,18 +390,7 @@ PY
 }
 
 migration_move_nics() {
-  python3 - "$MIGRATION_DIR/network.json" <<'PY'
-import json,subprocess,sys
-c=json.load(open(sys.argv[1]))
-for vm in c['vms']:
-    args=['pvesh','set',f"/nodes/{vm['node']}/qemu/{vm['vmid']}/config"]
-    for key,value in vm['new'].items(): args += ['--'+key,value]
-    subprocess.run(args,check=True,stdout=subprocess.DEVNULL)
-    actual=json.loads(subprocess.check_output(['pvesh','get',f"/nodes/{vm['node']}/qemu/{vm['vmid']}/config",'--current','1','--output-format','json']))
-    for key,value in vm['new'].items():
-        if sorted(actual[key].split(','))!=sorted(value.split(',')):
-            raise SystemExit(f"VM {vm['vmid']} {key} did not apply its new bridge; refusing to commit migration")
-PY
+  python3 "$MIGRATION_DIR/migrate-cluster.py" move-nics "$MIGRATION_DIR" "$VMID"
 }
 
 migration_forwarding() {
@@ -538,12 +398,14 @@ migration_forwarding() {
 import json,subprocess,sys
 c=json.load(open(sys.argv[1])); mode=sys.argv[2]; start=mode!='stop'; ip=c['ip'].split('/')[0]
 rules=[['-t','raw','PREROUTING','-i',c['bridge'],'-s','127.0.0.0/8','-j','DROP'],['-t','nat','POSTROUTING','-s',ip+'/32','-o',c['uplink'],'-j','MASQUERADE'],['filter','FORWARD','-s',ip,'-j','ACCEPT'],['filter','FORWARD','-d',ip,'-m','conntrack','--ctstate','RELATED,ESTABLISHED','-j','ACCEPT'],['filter','INPUT','-s',ip,'-p','tcp','--dport','8006','-j','ACCEPT']]
-endpoints=[('udp',c['wireguard_port'])]
-if mode!='wireguard':
-    endpoints.insert(0,('tcp',c['port']))
-    if c['expose_admin_port']: endpoints.append(('tcp',c['admin_port']))
-for proto,port in endpoints:
-    rules += [['-t','nat','PREROUTING','-m','addrtype','--dst-type','LOCAL','-p',proto,'--dport',str(port),'-j','DNAT','--to-destination',f'{ip}:{port}'],['-t','nat','OUTPUT','-m','addrtype','--dst-type','LOCAL','-p',proto,'--dport',str(port),'-j','DNAT','--to-destination',f'{ip}:{port}'],['-t','nat','POSTROUTING','-d',ip,'-p',proto,'--dport',str(port),'-j','MASQUERADE'],['filter','FORWARD','-d',ip,'-p',proto,'--dport',str(port),'-j','ACCEPT']]
+if mode!='stage':
+    rules += [['-t','nat','POSTROUTING','-s','192.0.2.0/24','-o',c['uplink'],'-j','MASQUERADE'],['filter','FORWARD','-i','ludusnat','-o',c['uplink'],'-j','ACCEPT'],['filter','FORWARD','-i',c['uplink'],'-o','ludusnat','-m','conntrack','--ctstate','RELATED,ESTABLISHED','-j','ACCEPT']]
+    endpoints=[('udp',c['wireguard_port'])]
+    if mode!='wireguard':
+        endpoints.insert(0,('tcp',c['port']))
+        if c['expose_admin_port']: endpoints.append(('tcp',c['admin_port']))
+    for proto,port in endpoints:
+        rules += [['-t','nat','PREROUTING','-m','addrtype','--dst-type','LOCAL','-p',proto,'--dport',str(port),'-j','DNAT','--to-destination',f'{ip}:{port}'],['-t','nat','OUTPUT','-m','addrtype','--dst-type','LOCAL','-p',proto,'--dport',str(port),'-j','DNAT','--to-destination',f'{ip}:{port}'],['-t','nat','POSTROUTING','-d',ip,'-p',proto,'--dport',str(port),'-j','MASQUERADE'],['filter','FORWARD','-d',ip,'-p',proto,'--dport',str(port),'-j','ACCEPT']]
 for rule in rules:
     table,chain,args=(rule[1],rule[2],rule[3:]) if rule[0]=='-t' else (rule[0],rule[1],rule[2:])
     base=['iptables','-w','-t',table]
@@ -551,7 +413,9 @@ for rule in rules:
     if start and not exists: subprocess.run(base+['-I',chain,'1']+args,check=True)
     if not start and exists: subprocess.run(base+['-D',chain]+args,check=True)
 if start:
-    subprocess.run(['sysctl','-w','net.ipv4.ip_forward=1',f"net.ipv4.conf.{c['bridge']}.route_localnet=1"],check=True,stdout=subprocess.DEVNULL)
+    subprocess.run(['sysctl','-w','net.ipv4.ip_forward=1'],check=True,stdout=subprocess.DEVNULL)
+    if mode!='stage':
+        subprocess.run(['sysctl','-w',f"net.ipv4.conf.{c['bridge']}.route_localnet=1"],check=True,stdout=subprocess.DEVNULL)
 PY
 }
 
@@ -596,94 +460,28 @@ EOF
 migration_rollback() {
   [[ -f "$MIGRATION_DIR/network.json" ]] || return 0
   echo "Restoring the host installation from $MIGRATION_DIR" >&2
-  migration_api_bridge stop
-  if [[ -f "$MIGRATION_DIR/vmid" ]]; then
-    local id
-    read -r id <"$MIGRATION_DIR/vmid"
-    if [[ -f "$MIGRATION_DIR/container-created" ]]; then
-      pct stop "$id" || true
-      pct set "$id" --onboot 0 || true
-    fi
-  fi
-  systemctl disable --now ludus-lxc-forwarding.service 2>/dev/null || true
   local restore_result=0
-  python3 - "$MIGRATION_DIR" <<'PY' || restore_result=$?
-import json,pathlib,shutil,subprocess,sys
-root=pathlib.Path(sys.argv[1]); c=json.loads((root/'network.json').read_text()); errors=[]
-def run(args):
-    result=subprocess.run(args,stdout=subprocess.DEVNULL)
-    if result.returncode: errors.append(' '.join(args[:5]))
-if (root/'cutover').exists():
-    for vm in c['vms']:
-        args=['pvesh','set',f"/nodes/{vm['node']}/qemu/{vm['vmid']}/config"]
-        for key,value in vm['old'].items(): args+=['--'+key,value]
-        run(args)
-        # A failed Proxmox NIC hotplug can detach the tap before rejecting the
-        # new bridge. The saved config may look restored while the guest is
-        # disconnected. Report incomplete rollback instead of claiming success;
-        # replacing the guest NIC can lose its live IP configuration.
-        try:
-            status=json.loads(subprocess.check_output(['pvesh','get',f"/nodes/{vm['node']}/qemu/{vm['vmid']}/status/current",'--output-format','json']))
-            if status.get('status')=='running':
-                for key,value in vm['old'].items():
-                    tap=pathlib.Path('/sys/class/net',f"tap{vm['vmid']}i{key[3:]}")
-                    if not (tap/'master').exists():
-                        errors.append(f"VM {vm['vmid']} {key} bridge attachment was not restored")
-        except (subprocess.CalledProcessError,ValueError) as e:
-            errors.append(f"cannot verify VM {vm['vmid']} NIC rollback: {e}")
-if (root/'sdn-changed').exists():
-    # Restore only the section files this migration can change. Reapplying the
-    # saved sections regenerates running state, including a reused Ludus zone.
-    for name in ('zones.cfg','vnets.cfg','subnets.cfg'):
-        path=pathlib.Path('/etc/pve/sdn')/name
-        saved=root/'sdn'/name
-        if saved.exists(): shutil.copy2(saved,path)
-        elif path.exists(): path.unlink()
-    # Subnet gateway updates also mutate PVE IPAM outside the section files.
-    # Restore only this NAT subnet; leave allocations in other zones untouched.
-    ipam_path=pathlib.Path('/etc/pve/sdn/pve-ipam-state.json')
-    if ipam_path.exists():
-        ipam=json.loads(ipam_path.read_text() or '{}')
-        saved_path=root/'sdn'/ipam_path.name
-        saved=json.loads(saved_path.read_text() or '{}') if saved_path.exists() else {}
-        saved_zone=saved.get('zones',{}).get('ludus',{})
-        old_subnet=saved_zone.get('subnets',{}).get('192.0.2.0/24')
-        zone=ipam.get('zones',{}).get('ludus')
-        if old_subnet is not None:
-            ipam.setdefault('zones',{}).setdefault('ludus',{}).setdefault('subnets',{})['192.0.2.0/24']=old_subnet
-        elif zone is not None:
-            zone.get('subnets',{}).pop('192.0.2.0/24',None)
-            if not zone.get('subnets') and not saved_zone: ipam['zones'].pop('ludus')
-        ipam_path.write_text(json.dumps(ipam))
-    run(['pvesh','set','/cluster/sdn'])
-if c['auto_management'] and pathlib.Path('/sys/class/net',c['bridge']).exists():
-    run(['ifdown',c['bridge']])
-shutil.copy2(root/'interfaces','/etc/network/interfaces')
-for name in ('ludus-migration','sdn'):
-    path=pathlib.Path('/etc/network/interfaces.d')/name
-    if path.exists() and not (root/'interfaces.d'/name).exists(): path.unlink()
-if (root/'interfaces.d').exists(): shutil.copytree(root/'interfaces.d','/etc/network/interfaces.d',dirs_exist_ok=True)
-run(['ifreload','-a'])
-if c['auto_management']:
-    if pathlib.Path('/sys/class/net',c['bridge']).exists(): run(['ip','link','delete',c['bridge']])
-else:
-    run(['sysctl','-w',f"net.ipv4.conf.{c['bridge']}.route_localnet={c['route_localnet']}"])
-sysctl_path=pathlib.Path('/etc/sysctl.d/99-ludus-ip-forward.conf')
-if (root/sysctl_path.name).exists(): shutil.copy2(root/sysctl_path.name,sysctl_path)
-elif sysctl_path.exists(): sysctl_path.unlink()
-run(['sysctl','-w',f"net.ipv4.ip_forward={c['ip_forward']}"])
-for path in ('/etc/systemd/system/ludus-lxc-forwarding.service','/usr/local/lib/ludus/migrate-host.sh'):
-    artifact=pathlib.Path(path)
-    if artifact.exists(): artifact.unlink()
-run(['systemctl','daemon-reload'])
-if (root/'iptables.rules').exists():
-    result=subprocess.run(['iptables-restore'],input=(root/'iptables.rules').read_bytes())
-    if result.returncode: errors.append('iptables-restore')
-for name,state in c['services'].items():
-    run(['systemctl','enable' if state['enabled'] else 'disable',name])
-    run(['systemctl','start' if state['active'] else 'stop',name])
-if errors: raise SystemExit('Rollback needs attention: '+', '.join(errors))
-PY
+  migration_api_bridge stop || restore_result=1
+  if [[ -f "$MIGRATION_DIR/container-created" ]]; then
+    local id status
+    if [[ ! -f "$MIGRATION_DIR/vmid" ]]; then
+      echo "Rollback cannot identify the migration-owned container" >&2
+      return 1
+    fi
+    read -r id <"$MIGRATION_DIR/vmid"
+    [[ $id =~ ^[0-9]+$ ]] || { echo "Invalid migration-owned VMID" >&2; return 1; }
+    # An already stopped candidate is safe; every other stop error is fatal.
+    status=$(pct status "$id") || return 1
+    if [[ $status != "status: stopped" ]]; then
+      pct stop "$id" || { echo "Cannot stop candidate $id; refusing to reactivate duplicate host services" >&2; return 1; }
+    fi
+    pct set "$id" --onboot 0 || { echo "Cannot disable candidate $id autostart; rollback incomplete" >&2; return 1; }
+    [[ $(pct status "$id") == "status: stopped" ]] || { echo "Candidate $id remains active; rollback incomplete" >&2; return 1; }
+  fi
+  if [[ -f /etc/systemd/system/ludus-lxc-forwarding.service ]]; then
+    systemctl disable --now ludus-lxc-forwarding.service || restore_result=1
+  fi
+  python3 "$MIGRATION_DIR/migrate-cluster.py" rollback "$MIGRATION_DIR" || restore_result=$?
   migration_reset_wireguard_sessions || restore_result=1
   return "$restore_result"
 }

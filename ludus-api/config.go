@@ -62,8 +62,9 @@ type Configuration struct {
 	MaxLogHistory             int           `mapstructure:"max_log_history" yaml:"max_log_history"` // Max number of log history entries to keep per range/user (default: 100)
 	InactivityShutdownTimeout time.Duration `mapstructure:"inactivity_shutdown_timeout" yaml:"inactivity_shutdown_timeout"`
 	// SDN settings
-	SDNZone      string `mapstructure:"sdn_zone" yaml:"sdn_zone"`             // The SDN zone name for Ludus networking (default: "ludus")
-	VXLANTagBase int    `mapstructure:"vxlan_tag_base" yaml:"vxlan_tag_base"` // Base VXLAN tag (VNI) added to range number (default: 0)
+	SDNZone            string `mapstructure:"sdn_zone" yaml:"sdn_zone"`                         // The SDN zone name for Ludus networking (default: "ludus")
+	VXLANTagBase       int    `mapstructure:"vxlan_tag_base" yaml:"vxlan_tag_base"`             // Base VXLAN tag (VNI) added to range number (default: 0)
+	HostManagedNetwork bool   `mapstructure:"host_managed_network" yaml:"host_managed_network"` // Migration installer owns NAT/VXLAN topology.
 	// Quota defaults - applied to users who don't have explicit quotas or group defaults
 	// 0 means unlimited
 	DefaultQuotaRAM    int `mapstructure:"default_quota_ram" yaml:"default_quota_ram"`

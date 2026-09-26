@@ -35,7 +35,7 @@ func TestRPCPluginInteroperability(t *testing.T) {
 	if path == "" {
 		t.Skip("set LUDUS_PLUGIN_PATH or LUDUS_ENTERPRISE_PLUGIN to test an external plugin executable")
 	}
-	metadata, err := readPluginMetadata(path, nil)
+	metadata, err := ReadPluginMetadata(path, nil)
 	if err != nil {
 		t.Fatalf("read plugin metadata: %v", err)
 	}

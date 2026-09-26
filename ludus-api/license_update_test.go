@@ -216,7 +216,7 @@ func TestActivatePluginUpdateValidatesMetadata(t *testing.T) {
 			if sourcePath == "" {
 				t.Skipf("%s is not set", test.pathEnvironment)
 			}
-			sourceMetadata, err := readPluginMetadata(sourcePath, nil)
+			sourceMetadata, err := ReadPluginMetadata(sourcePath, nil)
 			if err != nil {
 				t.Fatalf("read source plugin metadata: %v", err)
 			}
@@ -241,7 +241,7 @@ func TestActivatePluginUpdateValidatesMetadata(t *testing.T) {
 			if err := server.activatePluginUpdate(candidatePath, targetPath, sourceMetadata.Version, test.pluginName); err != nil {
 				t.Fatalf("activatePluginUpdate() error = %v", err)
 			}
-			installedMetadata, err := readPluginMetadata(targetPath, nil)
+			installedMetadata, err := ReadPluginMetadata(targetPath, nil)
 			if err != nil {
 				t.Fatalf("read activated plugin metadata: %v", err)
 			}
