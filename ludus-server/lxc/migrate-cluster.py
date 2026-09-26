@@ -16,6 +16,7 @@ import time
 SERVICES = ('ludus', 'ludus-admin', 'wg-quick@wg0', 'dnsmasq')
 NETWORK = pathlib.Path('/etc/network')
 FRAGMENT = 'interfaces.d/ludus-lxc-gateway'
+ROUTE_HOOKS = ('if-up.d/sdn-routes', 'if-up.d/ludus-routes')
 
 
 def run(*args, **kwargs):
@@ -47,7 +48,7 @@ def snapshot(allow_migration=False):
             raise RuntimeError('Missing per-node prerequisite: '+command)
     if subprocess.run(['pgrep', '-f', '(^|/)(ansible-playbook|packer)( |$)'], stdout=subprocess.DEVNULL).returncode == 0:
         raise RuntimeError('A deployment or template build is running')
-    paths = [NETWORK/'interfaces', *sorted((NETWORK/'interfaces.d').glob('*'))]
+    paths = [NETWORK/'interfaces', *sorted((NETWORK/'interfaces.d').glob('*')), *(NETWORK/name for name in ROUTE_HOOKS)]
     files = {}
     for path in paths:
         if path.is_symlink():
@@ -117,6 +118,13 @@ def remove_legacy_hooks(text, nat_bridge, ranges):
     return ''.join(out)
 
 
+def remove_legacy_route_blocks(text, ranges):
+    for r in ranges:
+        marker = '# LUDUS MANAGED BLOCK FOR RANGE '+str(r['number'])
+        text = re.sub(r'^'+re.escape(marker)+r' BEGIN\r?\n.*?^'+re.escape(marker)+r' END(?:\r?\n|$)', '', text, flags=re.M | re.S)
+    return text
+
+
 def probe_address(interface, address):
     """Probe the wire, not stale neighbor entries left by a rolled-back owner."""
     import socket
@@ -164,6 +172,10 @@ def node_action(action, p):
         for path in [NETWORK/'interfaces', *sorted((NETWORK/'interfaces.d').glob('*'))]:
             if path.is_file() and path.name not in ('sdn', 'ludus-lxc-gateway'):
                 path.write_text(remove_legacy_hooks(path.read_text(), p['nat_bridge'], p['ranges']))
+        for name in ROUTE_HOOKS:
+            path = NETWORK/name
+            if path.is_file():
+                path.write_text(remove_legacy_route_blocks(path.read_text(), p['ranges']))
         addresses = json.loads(run('ip', '-j', '-4', 'address'))
         for link in addresses:
             for address in link['addr_info']:

@@ -92,6 +92,9 @@ The installer:
 5. Moves existing VM NICs to the appropriate SDN VNets without cloning or
    renumbering VMs. It preserves MAC addresses and range VLANs, and converts
    the legacy NAT NIC's native VLAN 1 to the untagged NAT VNet.
+   Legacy host route-hook blocks for migrated ranges are retired on every node
+   so a later network reload cannot override the LXC routing plan. Unrelated
+   hook content is retained, and rollback restores the original files and modes.
 6. Preserves `192.0.2.254` inside the container for existing routers' gateway
    and DNS settings. The Proxmox-side NAT gateway moves to `192.0.2.49`.
    In a cluster, `.49` exists only on the original Ludus host, not every VXLAN

@@ -64,6 +64,17 @@ class MigrationBoundaries(unittest.TestCase):
         self.assertIn('address 203.0.113.5/24', result)
         self.assertIn('ip route add 10.70.0.0/16 via 192.0.2.170', result)
 
+    def test_retiring_route_hooks_preserves_manual_and_other_ranges(self):
+        manual = '#!/bin/sh\nip route replace 10.7.9.0/24 via 203.0.113.9\n'
+        def block(number):
+            return (f'# LUDUS MANAGED BLOCK FOR RANGE {number} BEGIN\n'
+                    f'if [ "$IFACE" = "r{number}" ]; then\n'
+                    f'\tip route replace 10.{number}.0.0/16 via 192.0.2.{100+number} dev ludusnat\n'
+                    f'fi\n# LUDUS MANAGED BLOCK FOR RANGE {number} END\n')
+        original = manual+block(7)+'# administrator notes\n'+block(70)
+        self.assertEqual(migration.remove_legacy_route_blocks(original, [{'number': 7}]),
+                         manual+'# administrator notes\n'+block(70))
+
     def test_tap_verification_rejects_wrong_firewall_uplink(self):
         real_path = type(pathlib.Path())
         with tempfile.TemporaryDirectory() as directory:
@@ -119,9 +130,11 @@ class MigrationBoundaries(unittest.TestCase):
             (network/'interfaces.d').mkdir()
             (network/migration.FRAGMENT).write_text('migration gateway')
             original = b'auto vmbr0\niface vmbr0 inet static\n\taddress 203.0.113.9/24\n'
+            route_hook = b'#!/bin/sh\n# LUDUS MANAGED BLOCK FOR RANGE 7 BEGIN\nip route replace 10.7.0.0/16 via 192.0.2.107 dev ludusnat\n# LUDUS MANAGED BLOCK FOR RANGE 7 END\n'
             saved = {'files': {'interfaces': {'data': base64.b64encode(original).decode(), 'mode': 0o640}},
                      'addresses': [], 'routes': [], 'ip_forward': '1', 'iptables': '*filter\nCOMMIT\n',
                      'services': {'ludus': {'active': True, 'enablement': 'enabled'}}}
+            saved['files']['if-up.d/sdn-routes'] = {'data': base64.b64encode(route_hook).decode(), 'mode': 0o755}
             def command(args, **kwargs):
                 return subprocess.CompletedProcess(args, 1 if tuple(args) == ('systemctl', 'start', 'ludus') else 0)
             with mock.patch.object(migration, 'NETWORK', network), mock.patch.object(migration, 'run', return_value='[]'), mock.patch.object(migration.subprocess, 'run', side_effect=command):
@@ -129,6 +142,8 @@ class MigrationBoundaries(unittest.TestCase):
                     migration.node_action('restore', {'saved': saved, 'ranges': [], 'gateway': '192.0.2.49'})
             self.assertEqual((network/'interfaces').read_bytes(), original)
             self.assertEqual((network/'interfaces').stat().st_mode & 0o777, 0o640)
+            self.assertEqual((network/'if-up.d/sdn-routes').read_bytes(), route_hook)
+            self.assertEqual((network/'if-up.d/sdn-routes').stat().st_mode & 0o777, 0o755)
             self.assertFalse((network/migration.FRAGMENT).exists())
 
     def test_owned_candidate_must_stop_and_disable_before_host_restores(self):
