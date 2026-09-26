@@ -1,8 +1,9 @@
 # Host-to-LXC and plugin upgrade test matrix
 
-Review target: `plugin-updates` after merging `origin/main` (2.3.4), September 25, 2026.
-This is a release qualification plan, **not a report of successful migrations**.
-Source review and local checks are complete; the VM scenarios below remain unexecuted.
+Original planning target: `plugin-updates` after merging `origin/main` (2.3.4), September 25, 2026.
+This remains the broader qualification plan, **not a claim that every scenario has passed**.
+The subsequent `2-4-0` merges, fixes, and actual VM 2001–2004 results are recorded in
+[the integration and qualification report](ludus-2.4.0-integration-review.md).
 
 ## Release recommendation
 
@@ -10,31 +11,28 @@ Do not qualify upgrades using `/api/health` alone. Require the same users to aut
 with their existing credentials at the same endpoint and operate the same deployed VMs
 through their existing WireGuard profiles. Test ordinary users, not only ROOT.
 
-Three source-confirmed gaps need fixes and regression coverage before qualification:
+The three original source-review blockers below are now fixed in `2-4-0`.
+Their IDs remain attached to the matrix scenarios so that additional fixture
+families can be qualified without losing the original failure boundaries.
 
-1. **B1 — P0: supplied Enterprise plugin is not installed in the runtime format.**
-   `install.sh` pushes `--enterprise-plugin` to `ludus-enterprise.so` in both plugin
-   directories with mode `0644`. `importMigrationState` checks for `*.so`, while
-   `ludus-api/license.go` looks for `ludus-enterprise.plugin` and `startManagedPlugin`
-   requires an executable RPC process. Supplying a valid RPC binary does not put it
-   at the path the loader uses. Online download could mask this; an offline licensed
-   migration must exercise the supplied artifact. Cover with PLUGIN-01 and PLUGIN-02.
-2. **B2 — P0: final transfer ignores custom `data_directory`.**
-   `migrationCollect` snapshots the configured directory, and import normalizes its
-   destination to `/opt/ludus/db`. However, `migration_sync_final_state` archives
-   `opt/ludus/db` on the old host unconditionally. A missing default directory fails;
-   a stale one can replace the correctly staged database with the wrong data. Cover
-   both variants, with an acknowledged write after staging, in DATA-02 and FAIL-03.
-3. **B3 — P1: customized global Ansible defaults are omitted.**
-   `migrationTrees` excludes `ansible`, and the export does not separately capture
-   `ansible/server-config.yml`. Router template/name annotation preserves router
-   identity, but not the other global defaults used by future deployments. Preserve
-   supported configuration explicitly, or reject it with an actionable preflight
-   message; do not copy legacy executables/playbooks wholesale. Cover with DATA-05.
+1. **B1 — Supplied Enterprise RPC artifact:** install the executable
+   `ludus-enterprise.plugin` in both service directories and validate its RPC
+   metadata, identity, and matching versions before required state import.
+   Protocol subprocess regressions pass; real licensed/offline deployment
+   qualification still requires the actual commercial artifact and license.
+2. **B2 — Custom `data_directory`:** preserve the configured source path through
+   final synchronization and normalize only the destination. Both full upgrade
+   variants—missing default directory and deliberately stale default directory—
+   have been exercised with a committed source write after initial staging.
+3. **B3 — Global Ansible defaults:** export/import and fingerprint
+   `ansible/server-config.yml` separately from obsolete playbooks, and preserve it
+   during payload refresh. Actual custom-directory upgrades preserved its exact
+   bytes and existing router defaults.
 
-These findings follow directly from the code; they have **not** been reproduced by
-running an installer on a test VM. No fixes to these migration gaps are included in
-the main merge.
+The later review additionally identified cluster-upgrade and early-rollback
+blockers. Their implementation changes, fault recovery, and observed runtime
+limits are documented in the qualification report rather than inferred from
+API health alone.
 
 Two intentional behavior changes also need explicit acceptance:
 
@@ -46,7 +44,7 @@ Two intentional behavior changes also need explicit acceptance:
   host-local administration using `127.0.0.1:8081` must move to `pct exec` or a supported
   public API command. This is documented, but is not a transparent change for scripts.
 
-## Evidence and current coverage
+## Historical branch-review checks and existing coverage
 
 The merge passed all Go tests, then all Go tests with `-race`, across `ludus-api`,
 `ludus-server`, `ludus-client`, and `dynamic-inventory` on macOS arm64. The Linux
@@ -93,7 +91,8 @@ Use its scoped test-pool API for checkout/release and SSH only as the jump host.
 Do not run repository CI helpers on the outer host; several create tokens, change
 storage, or configure bridges on whichever machine executes them.
 
-Read-only observations during this review:
+Historical read-only observations from the earlier review pool (not the later
+VM 2001–2004 qualification):
 
 - VM **1014** was available and runs Ludus **2.3.2**, Proxmox **9.2.18**, with both
   legacy API services active and no LXC guests. Its CIA range has four running VMs:
@@ -134,7 +133,7 @@ Read-only observations during this review:
 - **F5 — Existing LXC:** a successful F2/F3 migration with post-cutover writes, plus a
   fresh LXC install. Needed for ordinary updates, plugin replacement, reboot, and retry.
 - **FX — Unsupported/broken:** clones or restored baselines varied one fault at a time:
-  pre-PocketBase DB, multiple Proxmox nodes, incompatible SDN, address collision,
+  pre-PocketBase DB, lost cluster quorum or untrusted/unreachable peers, incompatible SDN, address collision,
   unsupported credential reference, corrupt artifact, or missing state. These must
   fail safely, not silently downgrade functionality.
 
@@ -407,7 +406,7 @@ share a single migrated fixture. All cases inherit the common assertions above.
   unavailable token/insufficient ACLs, corrupt/truncated template, checksum/signature
   mismatch, incompatible archive schema/path/symlink, and wrong decryption key. Expect
   nonzero status, actionable cause, and original API/WG/range operation intact.
-- **FAIL-02 · P0 · FX:** Multi-node legacy host; incompatible SDN zone/external IPAM;
+- **FAIL-02 · P0 · FX:** Lost cluster quorum or untrusted/unreachable peers; incompatible SDN zone/external IPAM;
   pending SDN changes/lock; unsupported NAT VLANs; WireGuard hooks; missing user/range
   files. Test each actual preflight rejection and preservation of unrelated state.
 - **FAIL-03 · P0 · F2/F4:** Create a user or mutate static config after staging; separately
@@ -509,5 +508,5 @@ jobs should remain smoke tests, not be renamed as upgrade qualification.
 Release requires all P0 executions to pass, B1–B3 fixed or the affected configurations
 explicitly rejected/documented before mutation, and all supported P1 variants covered.
 Every pass needs the saved before/after evidence. Unknown SSO provisioning policy,
-private admin-endpoint relocation, unsupported legacy clusters/custom networking, and
+private admin-endpoint relocation, incompatible cluster/custom-network topologies, and
 post-commit rollback limitations must be visible in release/upgrade guidance.
