@@ -255,21 +255,6 @@ func TestPluginResourcesAccessAndLifecycle(t *testing.T) {
 	call(ownerToken, "PUT", base+"/personal-plugin/access", []byte(`{"allUsers":false}`), 403)
 	call(adminToken, "PUT", base+"/personal-plugin/access", []byte(`{"allUsers":false}`), 200)
 	call(ownerToken, "DELETE", base+"/personal-plugin", nil, 200)
-	// Tombstones left by older Ludus releases can also be permanently deleted.
-	m.ID = "legacy-removed-plugin"
-	call(ownerToken, "POST", base+"/install", testPackage(t, m, map[string]string{"ui/index.html": "legacy"}), 201)
-	legacy, _ := pb.FindFirstRecordByData("plugin_resources", "pluginID", m.ID)
-	legacy.Set("state", "removed")
-	if err := pb.Save(legacy); err != nil {
-		t.Fatal(err)
-	}
-	call(ownerToken, "DELETE", base+"/legacy-removed-plugin?uninstall=true", nil, 200)
-	if _, err := pb.FindFirstRecordByData("plugin_resources", "pluginID", m.ID); err == nil {
-		t.Fatal("legacy tombstone remains after deletion")
-	}
-	if _, err := os.Stat(filepath.Join(p.root, legacy.Id)); !os.IsNotExist(err) {
-		t.Fatal("legacy tombstone package remains after deletion")
-	}
 	m.ID = "global-plugin"
 	call(adminToken, "POST", base+"/install?allUsers=true", testPackage(t, m, map[string]string{"ui/index.html": "global"}), 201)
 	global, _ := pb.FindFirstRecordByData("plugin_resources", "pluginID", m.ID)

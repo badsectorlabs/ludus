@@ -28,7 +28,9 @@ func init() {
 			&core.AutodateField{Name: "created", OnCreate: true},
 			&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 		)
-		c.AddIndex("idx_plugin_resources_id", true, "pluginID", "")
+		c.AddIndex("idx_plugin_resources_personal", true, "pluginID, owner", "allUsers = FALSE AND system = FALSE")
+		c.AddIndex("idx_plugin_resources_global", true, "pluginID", "allUsers = TRUE AND system = FALSE")
+		c.AddIndex("idx_plugin_resources_system", true, "pluginID", "system = TRUE")
 		return app.Save(c)
 	}, func(app core.App) error {
 		c, err := app.FindCollectionByNameOrId("plugin_resources")
