@@ -90,12 +90,16 @@ func TestBootstrap_EnsureSequence_SingleNode(t *testing.T) {
 		"EnsureSubnet:ludusnat:192.0.2.0/24",
 		"ApplySDN",
 		"EnsureACL:/nodes:LudusPacker",
-		"EnsureACL:/vms:LudusPacker",
+		"EnsureACL:/pool/SHARED:LudusUser",
+		"EnsureACL:/pool/ADMIN:LudusAdmin",
 		"EnsureACL:/storage/vmstore:LudusPacker",
 		"EnsureACL:/storage/isostore:LudusPacker",
 	}
 	got := map[string]bool{}
 	for _, c := range m.calls {
+		if strings.HasPrefix(c, "EnsureACL:/vms:") {
+			t.Fatalf("unsafe global VM ACL: %s", c)
+		}
 		got[c] = true
 	}
 	for _, w := range wantContains {
