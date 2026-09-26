@@ -1,7 +1,6 @@
 package ludusapi
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -55,7 +54,8 @@ func PlaceholderHandler(e *core.RequestEvent) error {
 
 func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 
-	// We hard-code the PlaceholderHandler for plugin routes, and the plugin will register its own handler for the route
+	// Only legacy server-installed plugins need fixed, direct API routes here.
+	// GUI-uploaded resource plugins use /plugins/{pluginID}/rpc/{pluginPath...}.
 	var pluginRoutes = PocketBaseRoutes{
 		PocketBaseRoute{
 			Name:        "EnableAntiSandboxForVM",
@@ -164,11 +164,4 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 	}
 
 	RegisterRoutesWithPocketBase(se, pluginRoutes)
-}
-
-func RegisterPluginActualRoutes(routes PocketBaseRoutes) {
-	for _, route := range routes {
-		logger.Debug(fmt.Sprintf("Registering actual route for plugin: %s %s", route.Method, route.Pattern))
-		LudusPluginHandlerManager.RegisterHandler(route.Method, route.Pattern, route.HandlerFunc)
-	}
 }

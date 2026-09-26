@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -eo pipefail
+
 # This script is used to build and run Ludus in a development environment
 # It assumes you are on a macOS or Linux host and have root SSH access to the target machine
 
@@ -7,13 +9,15 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 TESTING_STATE_FILE=${LUDUS_TESTING_STATE_FILE:-"$SCRIPT_DIR/.ludus-testing-vm.json"}
 DEV_ENV_FILE=${LUDUS_DEV_ENV_FILE:-"$SCRIPT_DIR/.ludus-dev-env"}
 TARGET_EXPLICIT=false
+BUILD_ONLY=false
 
 # Parse command line arguments
-while getopts "hlap:t:n:cdwsSDCPLv:" opt; do
+while getopts "hBlap:t:n:cdwsSDCPLv:" opt; do
   case $opt in
     h)
-      echo "Usage: $0 [-h] [-l] [-a] [-t target] [-n lines] [-c] [-d] [-p] [-w] [-s] [-D] [-C] [-v version]"
+      echo "Usage: $0 [-h] [-B] [-l] [-a] [-t target] [-n lines] [-c] [-d] [-p port] [-w] [-s] [-D] [-C] [-v version]"
       echo "  -h  Show this help message"
+      echo "  -B  Sync/build server artifacts only; skip plugin installation, service changes, and API/env setup"
       echo "  -l  Show Ludus service logs (default 100 lines)"
       echo "  -a  Show Ludus admin service logs (requires -l)"
       echo "  -n  Number of log lines to show (default 100)"
@@ -33,6 +37,9 @@ while getopts "hlap:t:n:cdwsSDCPLv:" opt; do
       echo "Examples:"
       echo "  $0 -t ludus-dev-hostname -C -d -s # Build and install client remotely, Build and install Ludus server with debug mode, skip plugins"
       exit 0
+      ;;
+    B)
+      BUILD_ONLY=true
       ;;
     l)
       SHOW_LOGS=true
@@ -86,6 +93,16 @@ while getopts "hlap:t:n:cdwsSDCPLv:" opt; do
       ;;
   esac
 done
+
+if [ "$BUILD_ONLY" = true ]; then
+  if [ "${SKIP_SERVER:-}" = true ] || [ "${BUILD_CLIENT:-}" = true ] || \
+      [ "${BUILD_CLIENT_REMOTELY:-}" = true ] || [ "${SHOW_LOGS:-}" = true ]; then
+    echo "-B cannot be combined with -S, -c, -C, or -l" >&2
+    exit 1
+  fi
+  # Plugin dev scripts install into /opt/ludus; do not invoke them on a build host.
+  SKIP_PLUGINS=true
+fi
 
 # Use a checked-out test VM unless the caller explicitly supplied a target.
 if [ -z "${PORT:-}" ]; then
@@ -200,11 +217,22 @@ set -euo pipefail
 
 key_file="$HOME/.ludus-api-key"
 if [ ! -s "$key_file" ]; then
+  if [ -f /etc/ludus-lxc.json ]; then
+    vmid=$(python3 -c 'import json; v=json.load(open("/etc/ludus-lxc.json"))["vmid"]; assert type(v) is int and v > 0; print(v)')
+    response=$(pct exec "$vmid" -- bash -euo pipefail -c '
+      port=$(/opt/ludus/venv/bin/python3 -c '\''import yaml; print(yaml.safe_load(open("/opt/ludus/config.yml")).get("port",8080))'\'')
+      printf "X-API-KEY: %s\n" "$(cat /opt/ludus/install/root-api-key)" |
+        curl -fkSs --max-time 120 --header @- -H "Content-Type: application/json" \
+          --data '\''{"userID":"DEV","isAdmin":true,"email":"dev@localhost.local","name":"Dev","password":"password"}'\'' \
+          "https://127.0.0.1:${port}/api/v2/user"
+    ')
+  else
   response=$(
     LUDUS_URL=https://127.0.0.1:8080 \
     LUDUS_API_KEY="$(cat /opt/ludus/install/root-api-key)" \
       ludus user add -a -e dev@localhost.local -n Dev -p password -i DEV --json
   )
+  fi
   api_key=$(printf '%s\n' "$response" | jq -er '.apiKey | select(type == "string" and length > 0)')
   temp_file=$(mktemp "${key_file}.tmp.XXXXXX")
   chmod 600 "$temp_file"
@@ -249,12 +277,12 @@ elif ! DEVELOPMENT_VERSION=$(git -C "$SCRIPT_DIR" symbolic-ref --quiet --short H
   DEVELOPMENT_VERSION=$LOCAL_GIT_COMMIT
 fi
 
-# Add the plugins to the go workspace if they exist
-if [ -d "./ludus-enterprise-plugin" ]; then
+# Skipped plugins must not change the local workspace or affect the candidate.
+if [ -d "./ludus-enterprise-plugin" ] && [ "${SKIP_PLUGINS:-false}" != true ]; then
     go work use ./ludus-enterprise-plugin
 fi
 
-if [ -d "./ludus-antisandbox-plugin" ]; then
+if [ -d "./ludus-antisandbox-plugin" ] && [ "${SKIP_PLUGINS:-false}" != true ]; then
     go work use ./ludus-antisandbox-plugin
 fi
 
@@ -271,6 +299,17 @@ rsync -av --progress \
     --exclude='webUI/' \
     --exclude='ludus-gui/node_modules/' \
     --exclude='ludus-gui/.next/' \
+    --exclude='/ludus-server/ludus-server' \
+    --exclude='/ludus-server/ansible/range-management/dynamic-inventory' \
+    --exclude='/ludus-server/lxc/rootfs/' \
+    --exclude='/ludus-server/lxc/deps/' \
+    --exclude='/ludus-server/lxc/cache/' \
+    --exclude='/ludus-server/lxc/info/' \
+    --exclude='/ludus-server/lxc/.veid' \
+    --exclude='/ludus-server/lxc/config' \
+    --exclude='/ludus-server/lxc/logfile' \
+    --exclude='/ludus-server/lxc/*.tar.zst' \
+    --exclude='/ludus-*-debian13-amd64.tar.zst*' \
     --include='ludus-antisandbox-plugin/' \
     --include='ludus-enterprise-plugin/' \
     --filter=':- ./*/.gitignore' \
@@ -302,12 +341,15 @@ fi
 # If the web UI exists, build it before the Ludus server
 if [ -d "./ludus-gui" ] && [ "$BUILD_WEB_UI" = true ]; then
     echo "[+] Building web UI"
-    run_remote_in_dir ludus-gui ./dev.sh
+    run_remote_in_dir ludus-gui bash -e ./dev.sh
 fi
 
 # Build the Ludus server in a login shell so the target's configured Go path
 # matches an interactive root login.
 SERVER_ARGS=()
+if [ "$BUILD_ONLY" = true ]; then
+    SERVER_ARGS+=(-B)
+fi
 if [ "$DEBUG_MODE" = true ]; then
     SERVER_ARGS+=(-d)
 fi
@@ -332,6 +374,12 @@ if [ "$SKIP_SERVER" != true ]; then
         ./dev.sh "${SERVER_ARGS[@]}"
 else
     echo "[-] Skipping server build"
+fi
+
+if [ "$BUILD_ONLY" = true ]; then
+    echo "[=] Build-only complete: $DEVELOPMENT_HOSTNAME:~/ludus-dev/ludus-server/ludus-server"
+    echo "    Installed Ludus, service environments, development API user, and local env file were not changed."
+    exit 0
 fi
 
 if ! DEV_API_KEY=$(get_remote_dev_api_key); then

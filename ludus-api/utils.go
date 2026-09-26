@@ -10,14 +10,12 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/user"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/alessio/shellescape"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/security"
@@ -144,6 +142,38 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 		return err
 	}
 
+	poweredOnByVMID := make(map[int]bool, len(allVMs))
+	for _, vmResource := range allVMs {
+		poweredOnByVMID[int(vmResource.VMID)] = vmResource.Status == goproxmox.StatusVirtualMachineRunning
+	}
+	if server.hasVMStatusHooks() {
+		// Resolve provider-owned runtime status before replacing any persisted
+		// VM rows. A failed provider leaves the previous range view intact.
+		requests := make([]VMHookRequest, 0, len(allVMs))
+		for _, vmResource := range allVMs {
+			requests = append(requests, VMHookRequest{
+				Source: StartVMSourceAPI, RangeID: targetRange.RangeId(), VMID: int(vmResource.VMID),
+				VMName: vmResource.Name, Node: vmResource.Node, Pool: vmResource.Pool, Status: vmResource.Status,
+			})
+		}
+		// Provider work gets its own budget without consuming the ordinary
+		// Proxmox guest-agent discovery timeout below.
+		deadline, _ := ctx.Deadline()
+		remainingProxmoxTime := time.Until(deadline)
+		cancel()
+		hookContext, cancelHooks := context.WithTimeout(context.Background(), 60*time.Second)
+		statuses, statusErr := server.resolveVMStatuses(hookContext, requests)
+		cancelHooks()
+		if statusErr != nil {
+			return fmt.Errorf("resolve lifecycle status: %w", statusErr)
+		}
+		for vmID, status := range statuses {
+			poweredOnByVMID[vmID] = status == VMStatusRunning || status == VMStatusStarting
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), remainingProxmoxTime)
+		defer cancel()
+	}
+
 	// Clear the DB of any previous VMs for this range
 	logger.Debug(fmt.Sprintf("Clearing VMs for range %s with range number %d", targetRange.RangeId(), targetRange.RangeNumber()))
 	_, err = app.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").
@@ -172,14 +202,20 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 	}
 
 	for _, vmResource := range allVMs {
-		rawVM := core.NewRecord(vmCollection)
-		thisVM := &models.VMs{}
-		thisVM.SetProxyRecord(rawVM)
+		vmName := vmResource.Name
+		if vmName == "" && vmResource.VMID != 0 {
+			vmName = lookupProxmoxVMName(ctx, vmResource.Node, vmResource.VMID)
+		}
+		if vmName == "" {
+			logger.Error(fmt.Sprintf("Unable to add VMID %d to database: name is blank after Proxmox lookup", vmResource.VMID))
+			continue
+		}
 
-		thisVM.SetProxmoxId(int(vmResource.VMID))
+		rawVM := core.NewRecord(vmCollection)
+		rawVM.Set("proxmoxID", int(vmResource.VMID))
 
 		// Get IP from guest agent if possible
-		thisVM.SetIp("null")
+		vmIP := "null"
 		node, err := proxmoxClient.Node(ctx, vmResource.Node)
 		if err != nil {
 			logger.Warn(fmt.Sprintf("Could not get node object for %s to fetch IP for VM %s: %s", vmResource.Node, vmResource.Name, err.Error()))
@@ -195,7 +231,7 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 						for _, ipInfo := range thisInterface.IPAddresses {
 							ipAddr := net.ParseIP(ipInfo.IPAddress)
 							if ipAddr != nil && network.Contains(ipAddr) {
-								thisVM.SetIp(ipAddr.String())
+								vmIP = ipAddr.String()
 								break interfaceLoop // IP found, no need to check other interfaces/addresses
 							}
 						}
@@ -206,24 +242,25 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 			}
 		}
 
-		if thisVM.Ip() == "null" {
+		if vmIP == "null" {
 			// Fallback: Fetch the IP address from the user's range config if the VM is set to use force_ip
-			thisVM.SetIp(GetIPForVMFromConfig(targetRange, vmResource.Name))
+			vmIP = GetIPForVMFromConfig(targetRange, vmName)
 		}
 
-		thisVM.SetRange(targetRange)
-		thisVM.SetName(vmResource.Name)
-		thisVM.SetPoweredOn(vmResource.Status == goproxmox.StatusVirtualMachineRunning)
-		thisVM.SetIsRouter(vmResource.Name == routerVMName)
-		thisVM.SetCpu(int(vmResource.MaxCPU))
-		thisVM.SetRam(int(vmResource.MaxMem / 1024 / 1024 / 1024)) // Convert bytes to GB
+		rawVM.Set("range", targetRange.Id)
+		rawVM.Set("name", vmName)
+		rawVM.Set("poweredOn", poweredOnByVMID[int(vmResource.VMID)])
+		rawVM.Set("ip", vmIP)
+		rawVM.Set("isRouter", vmName == routerVMName)
+		rawVM.Set("cpu", int(vmResource.MaxCPU))
+		rawVM.Set("ram", int(vmResource.MaxMem/1024/1024/1024)) // Convert bytes to GB
 
-		logger.Debug(fmt.Sprintf("Adding VM %s to range %s with range number %d", thisVM.Name(), targetRange.RangeId(), thisVM.Range().RangeNumber()))
-		err = app.Save(thisVM)
+		logger.Debug(fmt.Sprintf("Adding VM %s to range %s with range number %d", vmName, targetRange.RangeId(), targetRange.RangeNumber()))
+		err = app.Save(rawVM)
 		if err == nil {
 			rangeVMCount++
 		} else {
-			logger.Error(fmt.Sprintf("Unable to add VM %s to database: %s", thisVM.Name(), err.Error()))
+			logger.Error(fmt.Sprintf("Unable to add VM %s to database: %s", vmName, err.Error()))
 		}
 	}
 
@@ -239,6 +276,7 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 		return errors.New("unable to update range VM count: " + err.Error())
 	}
 
+	targetRange.SetNumberOfVms(rangeVMCount)
 	logger.Debug(fmt.Sprintf("Updated range %s with %d VMs", targetRange.RangeId(), rangeVMCount))
 	e.Set("rangeHasBeenUpdatedThisRequest", true)
 
@@ -439,30 +477,6 @@ func getUIDandGIDFromUsername(username string) (int, int, error) {
 	}
 
 	return uid, gid, nil
-}
-
-// userExistsOnHostSystem checks if a user exists on the host system
-func userExistsOnHostSystem(username string) bool {
-	shellEscapedUsername := shellescape.Quote(username)
-	cmd := exec.Command("/usr/bin/id", shellEscapedUsername)
-	return cmd.Run() == nil
-}
-
-// removeUserFromHostSystem removes a user from the host system
-func removeUserFromHostSystem(username string) error {
-	shellEscapedUsername := shellescape.Quote(username)
-	cmd := exec.Command("/usr/sbin/userdel", "-r", shellEscapedUsername)
-	err := cmd.Run()
-	if err != nil {
-		if err.Error() == "exit status 6" {
-			// User does not exist on the host system, this is not an error for our use case
-			return nil
-		} else {
-			fmt.Printf("Failed to remove user %s from host system: %s\n", username, err)
-			return err
-		}
-	}
-	return nil
 }
 
 // HasRangeAccess checks if a user has access to a range through direct assignment or group membership
@@ -678,7 +692,13 @@ func CreateDefaultUserRangeForBootstrap(txApp core.App, user *models.User) error
 
 // GetRangeObjectByNumber gets a range object by range number (for multi-range support)
 func GetRangeObjectByNumber(rangeNumber int) (*models.Range, error) {
-	rawRangeRecord, err := app.FindFirstRecordByData("ranges", "rangeNumber", rangeNumber)
+	var rawRangeRecord *core.Record
+	var err error
+	if client, clientErr := PluginPocketBase(); clientErr == nil {
+		rawRangeRecord, err = client.FindFirstRecordByData(context.Background(), "ranges", "rangeNumber", rangeNumber)
+	} else {
+		rawRangeRecord, err = app.FindFirstRecordByData("ranges", "rangeNumber", rangeNumber)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("error finding range: %w", err)
 	}

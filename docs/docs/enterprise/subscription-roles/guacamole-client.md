@@ -56,7 +56,7 @@ Every mapping key must already exist as a Guacamole account. When `ludus_guacamo
 ## Changes
 
 - v1.2.1 - Create configured connections without requiring their custom destination ports to be open, and normalize numeric credentials as strings.
-- v1.2.0 - Added per-user protocol, credentials, and port 
+- v1.2.0 - Added per-user protocol, credentials, and port
 - v1.1.1 - Change `guac_password` to `guac_admin_password` to match ludus_guacamole_server format
 - v1.1.0 - Added `guac_admin_username` and `guac_connection_users` variables, with automatic READ permission grants for configured users on created connections; extended guacamole server discovery to support router-hosted servers.
 - v1.0.6 - Changed client connectivity checks to test TCP port 22 for Linux clients and TCP port 3389 for Windows clients.

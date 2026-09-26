@@ -6,7 +6,7 @@ sidebar_position: 1
 
 :::warning
 
-Ludus will be installed directly on the host. Docker should not be installed on the host as it interferes with networking.
+On standalone Debian, Ludus is installed directly on the host. On Proxmox, the current installer runs the Ludus server in an LXC; follow the [Proxmox LXC installer guide](../deployment-options/proxmox-lxc.md).
 
 :::
 
@@ -24,7 +24,7 @@ Ludus can **only** be installed on a host that meets the following requirements:
 - Has at least 32 GB of RAM
 - Has at least 200 GB of disk space (fast NVMe recommended)
 - Root access
-- Internet access (not via WiFi). Note: Bonded nics or other advanced networking is not supported. If you use these, you will need to console in and fix the network after install (edit `/etc/network/interfaces`), as Ludus assumes you have a single, standard interface.
+- Internet access during installation, unless you have staged the files and internal services listed in the [offline Proxmox LXC guide](../deployment-options/proxmox-lxc.md#install-on-an-offline-proxmox-cluster). Note: Bonded nics or other advanced networking is not supported. If you use these, you will need to console in and fix the network after install (edit `/etc/network/interfaces`), as Ludus assumes you have a single, standard interface.
 
 Machines with lower specs than listed above may work, but are not tested/supported.
 
@@ -68,7 +68,10 @@ chmod +x install.sh
 ```
 
 The `install.sh` script will install the `ludus` client, and optionally shell completions, and then prompt to install the server.
-Follow the interactive installer. If you are unsure of any option, just accept the default value. The installer will start and reboot the machine.
+Follow the interactive installer. On standalone Debian, the installer starts and reboots the machine. On Proxmox, it creates the LXC without rebooting the host.
+
+On Proxmox, use the [LXC installer guide](../deployment-options/proxmox-lxc.md)
+for the installer prompts, non-interactive options, and cluster requirements.
 
 After the reboot, the install will continue automatically. To monitor its progress, ssh into
 the machine, elevate to root, and run `ludus-install-status`.
@@ -104,6 +107,7 @@ proxmox_iso_storage_pool: local   # The storage pool used to store ISOs as they 
 # boot_disk: /dev/sda             # Optional: override the auto-detected boot disk used for grub-pc recovery (e.g. /dev/nvme0n1 on EC2/NVMe hosts)
 ludus_nat_interface: ludus        # The name of the interface Ludus will create on the proxmox host that Ludus will use as the "WAN" for range routers
 prevent_user_ansible_add: false   # Set this to true to prevent non-admin users from adding Ansible roles or collections to the server
+airgapped_install: false          # Set this to true on offline clusters so tasks skip Internet lookups (for example Office package version discovery)
 sso_require_existing_user: true  # Require SSO email to match an existing Ludus account; false allows automatic account creation
 create_default_range: true       # Create a default range for each new user, including SSO users
 license_key: community            # Set this to your license key if you have one, or leave as community for community edition

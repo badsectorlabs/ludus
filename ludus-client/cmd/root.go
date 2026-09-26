@@ -136,8 +136,8 @@ func initConfig() {
 		!strings.Contains(strings.Join(os.Args, " "), " __completeNoDesc") &&
 		!strings.Contains(strings.Join(os.Args, " "), " update client") {
 
-		logger.Logger.Fatalf(fmt.Sprintf("No Ludus API key found in system keyring for %s.\nSet one using the `apikey` command."+
-			"\nYou can also set the LUDUS_API_KEY env variable if you are on a headless system.", url))
+		logger.Logger.Fatalf("No Ludus API key found in system keyring for %s.\nSet one using the `apikey` command."+
+			"\nYou can also set the LUDUS_API_KEY env variable if you are on a headless system.", url)
 	} else {
 		if len(apiKey) > 4 && strings.Contains(apiKey, ".") {
 			logger.Logger.Debug("Got API key: " + strings.Split(apiKey, ".")[0] + ".***REDACTED***")

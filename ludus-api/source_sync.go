@@ -636,28 +636,77 @@ func relativeToCheckout(checkoutDir, target string) string {
 const startupSyncConcurrency = 4
 
 // defaultSourceBSL is the Bad Sector Labs source that ships Ludus's templates,
-// blueprints, and roles. We auto-register it (owned by ROOT, so the sources
-// list rule `isAdmin || owner` surfaces it to every admin) on startup, so a
-// fresh instance can sync its catalog and install assets without anyone
-// hand-running `source add`. Register-only — the catalog is fetched by the
-// normal startup refresh (and on demand), keeping this offline-tolerant.
+// blueprints, and roles. Online installs track GitHub. Air-gapped LXC installs
+// instead use the source archive embedded in the container image, so catalog
+// refresh never needs network access.
 const (
-	defaultSourceBSLID  = "ludus-source-bsl"
-	defaultSourceBSLURL = "https://github.com/badsectorlabs/ludus-source-bsl.git"
+	defaultSourceBSLID          = "ludus-source-bsl"
+	defaultSourceBSLURL         = "https://github.com/badsectorlabs/ludus-source-bsl.git"
+	defaultSourceBSLArchivePath = "/opt/ludus/resources/sources/ludus-source-bsl.tar.gz"
 )
+
+type defaultSourceBSLSeed struct {
+	sourceType  string
+	sourceURL   string
+	archivePath string
+}
+
+func resolveDefaultSourceBSLSeed(airgapped bool, archivePath string) (defaultSourceBSLSeed, error) {
+	if !airgapped {
+		return defaultSourceBSLSeed{sourceType: "git", sourceURL: defaultSourceBSLURL}, nil
+	}
+
+	info, err := os.Stat(archivePath)
+	if err != nil {
+		return defaultSourceBSLSeed{}, fmt.Errorf("bundled source archive is unavailable: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return defaultSourceBSLSeed{}, fmt.Errorf("bundled source archive %q is not a regular file", archivePath)
+	}
+	return defaultSourceBSLSeed{sourceType: "upload", archivePath: archivePath}, nil
+}
+
+func refreshDefaultSourceBSLFromArchive(app core.App, src *core.Record, archivePath string) error {
+	archive, err := os.ReadFile(archivePath)
+	if err != nil {
+		return fmt.Errorf("read bundled source archive: %w", err)
+	}
+	_, err = runSourceRefresh(app, src, SyncOptions{
+		Archive:         archive,
+		ArchiveFilename: filepath.Base(archivePath),
+	})
+	if err != nil {
+		return fmt.Errorf("load bundled source archive: %w", err)
+	}
+	return nil
+}
+
+func isCanonicalDefaultSourceBSLURL(rawURL string) bool {
+	return strings.TrimSuffix(strings.TrimSpace(rawURL), ".git") ==
+		strings.TrimSuffix(defaultSourceBSLURL, ".git")
+}
 
 // seedDefaultSourceBSL registers the default BSL source if it isn't already
 // present. Idempotent (keyed on owner+sourceID); re-registers if an admin
-// removed it, so the default stays available. Opt out with
-// register_default_source: false in config.yml.
+// removed it, so the default stays available. An existing canonical GitHub
+// registration is converted to the bundled upload source when air-gap mode is
+// enabled. Opt out with register_default_source: false in config.yml.
 func seedDefaultSourceBSL(app core.App) {
 	ConfigMu.RLock()
 	enabled := ServerConfiguration.RegisterDefaultSource
+	airgapped := ServerConfiguration.AirgappedInstall
 	ConfigMu.RUnlock()
 	if !enabled {
 		logger.Debug("blueprint-sources: Skipping default source BSL registration: register_default_source is disabled")
 		return
 	}
+
+	seed, err := resolveDefaultSourceBSLSeed(airgapped, defaultSourceBSLArchivePath)
+	if err != nil {
+		logger.Info(fmt.Sprintf("blueprint-sources: cannot register default source %q: %v", defaultSourceBSLID, err))
+		return
+	}
+
 	// ROOT may not exist yet on the very first boot — skip and let a later
 	// boot register it.
 	root, err := app.FindFirstRecordByData("users", "userID", "ROOT")
@@ -669,8 +718,40 @@ func seedDefaultSourceBSL(app core.App) {
 		"owner = {:o} && sourceID = {:s}", "", 1, 0,
 		map[string]any{"o": root.Id, "s": defaultSourceBSLID})
 	if len(existing) > 0 {
+		src := existing[0]
+		if seed.sourceType != "upload" ||
+			src.GetString("type") != "git" ||
+			!isCanonicalDefaultSourceBSLURL(src.GetString("url")) {
+			return
+		}
+
+		oldURL := src.GetString("url")
+		oldRef := src.GetString("ref")
+		oldStatus := src.GetString("lastSyncStatus")
+		oldSyncError := src.GetString("lastSyncError")
+		src.Set("type", "upload")
+		src.Set("url", "")
+		src.Set("ref", "")
+		if err := app.Save(src); err != nil {
+			logger.Info(fmt.Sprintf("blueprint-sources: convert default source %q to bundled content: %v", defaultSourceBSLID, err))
+			return
+		}
+		if err := refreshDefaultSourceBSLFromArchive(app, src, seed.archivePath); err != nil {
+			src.Set("type", "git")
+			src.Set("url", oldURL)
+			src.Set("ref", oldRef)
+			src.Set("lastSyncStatus", oldStatus)
+			src.Set("lastSyncError", oldSyncError)
+			if rollbackErr := app.Save(src); rollbackErr != nil {
+				err = errors.Join(err, fmt.Errorf("restore git source record: %w", rollbackErr))
+			}
+			logger.Info(fmt.Sprintf("blueprint-sources: convert default source %q to bundled content: %v", defaultSourceBSLID, err))
+			return
+		}
+		logger.Info(fmt.Sprintf("blueprint-sources: converted default source %q to bundled content", defaultSourceBSLID))
 		return
 	}
+
 	collection, err := app.FindCollectionByNameOrId("sources")
 	if err != nil {
 		logger.Debug("blueprint-sources: Skipping default source BSL registration: sources collection not found")
@@ -679,16 +760,26 @@ func seedDefaultSourceBSL(app core.App) {
 	src := core.NewRecord(collection)
 	src.Set("sourceID", defaultSourceBSLID)
 	src.Set("name", defaultSourceBSLID) // refresh overwrites from source.yml
-	src.Set("type", "git")
+	src.Set("type", seed.sourceType)
 	src.Set("owner", root.Id)
-	src.Set("url", defaultSourceBSLURL)
+	src.Set("url", seed.sourceURL)
 	src.Set("lastSyncStatus", "")
 	src.Set("lastSyncError", "")
 	if err := app.Save(src); err != nil {
 		logger.Info(fmt.Sprintf("blueprint-sources: seed default source %q: %v", defaultSourceBSLID, err))
 		return
 	}
-	logger.Info(fmt.Sprintf("blueprint-sources: registered default source %q (%s)", defaultSourceBSLID, defaultSourceBSLURL))
+	if seed.sourceType == "upload" {
+		if err := refreshDefaultSourceBSLFromArchive(app, src, seed.archivePath); err != nil {
+			_ = os.RemoveAll(SourceCheckoutDir(src.Id))
+			_ = app.Delete(src)
+			logger.Info(fmt.Sprintf("blueprint-sources: seed bundled default source %q: %v", defaultSourceBSLID, err))
+			return
+		}
+		logger.Info(fmt.Sprintf("blueprint-sources: registered bundled default source %q", defaultSourceBSLID))
+		return
+	}
+	logger.Info(fmt.Sprintf("blueprint-sources: registered default source %q (%s)", defaultSourceBSLID, seed.sourceURL))
 }
 
 // SyncAllSourcesOnStartup refreshes every registered source's catalog

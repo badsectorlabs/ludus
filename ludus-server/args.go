@@ -8,26 +8,29 @@ import (
 )
 
 var (
-	interactiveInstall bool
-	updateFlag         bool
-	versionFlag        bool
-	helpFlag           bool
-	noPromptFlag       bool
-	nodeName           string
-	autoGenerateConfig bool
-	noAnsibleUpdate    bool
-	debugFlag          bool
+	updateFlag        bool
+	versionFlag       bool
+	helpFlag          bool
+	noAnsibleUpdate   bool
+	debugFlag         bool
+	migrationInfoFlag bool
+	exportStatePath   string
+	exportLivePath    string
+	importStatePath   string
 )
 
 func init() {
 	flag.BoolVar(&updateFlag, "update", false, "update the ludus install with this binary and embedded files and restart the ludus services")
-	flag.BoolVar(&noPromptFlag, "no-prompt", false, "run the installer without prompting for confirmation")
 	flag.BoolVar(&versionFlag, "v", false, "print the version of this ludus server")
 	flag.BoolVar(&versionFlag, "version", false, "print the version of this ludus server")
 	flag.BoolVar(&helpFlag, "h", false, "display help information")
 	flag.BoolVar(&helpFlag, "help", false, "display help information")
 	flag.BoolVar(&noAnsibleUpdate, "no-dep-update", false, "skip the dependency update check")
 	flag.BoolVar(&debugFlag, "debug", false, "enable debug mode (can also be set with the LUDUS_DEBUG environment variable)")
+	flag.BoolVar(&migrationInfoFlag, "migration-info", false, "print nonsecret legacy migration metadata without bootstrapping")
+	flag.StringVar(&exportStatePath, "export-state", "", "export stopped legacy services' durable state to a new tar.gz archive")
+	flag.StringVar(&exportLivePath, "export-state-live", "", "export a consistent staging snapshot while legacy services remain online")
+	flag.StringVar(&importStatePath, "import-state", "", "import a migration archive into a stopped, unbootstrapped appliance")
 	flag.Usage = printHelp
 }
 
@@ -41,6 +44,34 @@ func checkArgs() {
 
 	if versionFlag {
 		fmt.Println(LudusVersion)
+		os.Exit(0)
+	}
+	migrationModes := 0
+	for _, enabled := range []bool{migrationInfoFlag, exportStatePath != "", exportLivePath != "", importStatePath != "", updateFlag} {
+		if enabled {
+			migrationModes++
+		}
+	}
+	if migrationModes > 1 {
+		fmt.Fprintln(os.Stderr, "choose only one of --migration-info, --export-state, --export-state-live, --import-state, or --update")
+		os.Exit(1)
+	}
+	if migrationInfoFlag || exportStatePath != "" || exportLivePath != "" || importStatePath != "" {
+		checkRoot()
+		var err error
+		if importStatePath != "" {
+			err = importMigrationState(importStatePath)
+		} else {
+			destination := exportStatePath
+			if exportLivePath != "" {
+				destination = exportLivePath
+			}
+			err = exportMigrationState(destination, migrationInfoFlag, exportLivePath != "")
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "migration failed: %v\n", err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 
@@ -67,17 +98,6 @@ func checkArgs() {
 	logger = slog.New(handler)
 	slog.SetDefault(logger)
 	slog.Debug("Debug mode enabled via flag or environment variable")
-
-	interactiveInstall = !noPromptFlag
-	autoGenerateConfig = noPromptFlag
-
-	if noPromptFlag {
-		if flag.NArg() > 0 {
-			nodeName = flag.Arg(0)
-		} else {
-			nodeName = ""
-		}
-	}
 }
 
 func printHelp() {
@@ -86,16 +106,12 @@ Ludus is a project to enable teams to quickly and
 safely deploy test environments (ranges) to test tools and
 techniques against representative virtual machines.
 
-When run without arguments, Ludus will check for a Ludus
-install at /opt/ludus and prompt the user to install Ludus
-if an existing install is not found.
-
-When run with --no-prompt an optional node name can be provided as an
-argument to set the proxmox node name in the configuration file.
+When run without arguments, ludus-server reads /opt/ludus/config.yml,
+performs first-boot bootstrap against the configured Proxmox cluster
+if not already complete, then serves the API.
 
 Usage:
     ludus-server
-    ludus-server --no-prompt [nodename]
     ludus-server --update
 
 Flags:

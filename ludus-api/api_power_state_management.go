@@ -1,9 +1,13 @@
 package ludusapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -83,8 +87,33 @@ func PowerAction(e *core.RequestEvent, action string) error {
 		}
 	}
 
+	hasPowerHooks := (action == "on" && server.hasStartVMHooks()) || (action == "off" && server.hasStopVMHooks())
+	if os.Geteuid() != 0 && hasPowerHooks {
+		for _, vm := range allVMs {
+			if !slices.Contains(vmids, vm.ProxmoxId()) {
+				continue
+			}
+			selected, selectErr := server.selectsVMForPower(e.Request.Context(), VMHookRequest{
+				Source: StartVMSourceAPI, RangeID: usersRange.RangeId(), Pool: usersRange.RangeId(),
+				VMID: vm.ProxmoxId(), VMName: vm.Name(),
+			}, action)
+			if selectErr != nil {
+				return JSONError(e, http.StatusInternalServerError, selectErr.Error())
+			}
+			if selected {
+				body, marshalErr := json.Marshal(powerBody)
+				if marshalErr != nil {
+					return marshalErr
+				}
+				e.Request.Body = io.NopCloser(bytes.NewReader(body))
+				e.Request.ContentLength = int64(len(body))
+				return proxyToAdmin(e)
+			}
+		}
+	}
+
 	if action == "off" {
-		errs := PowerOffVMs(context.Background(), proxmoxClient, vmids)
+		errs := server.PowerOffVMs(context.Background(), proxmoxClient, usersRange.RangeId(), vmids)
 		if len(errs) > 0 {
 			var errStrs []string
 			for _, err := range errs {
@@ -93,7 +122,7 @@ func PowerAction(e *core.RequestEvent, action string) error {
 			return JSONError(e, http.StatusInternalServerError, "Unable to power off VMs: "+strings.Join(errStrs, ", "))
 		}
 	} else {
-		errs := PowerOnVMs(context.Background(), proxmoxClient, vmids)
+		errs := server.PowerOnVMs(context.Background(), proxmoxClient, usersRange.RangeId(), vmids)
 		if len(errs) > 0 {
 			var errStrs []string
 			for _, err := range errs {

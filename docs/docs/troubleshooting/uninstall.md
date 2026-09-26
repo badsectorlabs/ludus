@@ -2,7 +2,23 @@
 title: Uninstall Ludus
 ---
 
-Run the following as root on the Ludus host to uninstall Ludus.
+## LXC installations
+
+Using an administrator key and `LUDUS_URL` pointing to the public Ludus API,
+remove each user's ranges (`ludus range rm --user <USER ID>`) and then the user
+(`ludus user rm -i <USER ID>`). Wait for range removal to finish before deleting
+users or stopping the container. The public API forwards admin operations; do
+not point the client at the Proxmox host's localhost admin port.
+
+The installed container ID is recorded in `/etc/ludus-lxc.json` on Proxmox.
+Back up any data you need before removing that container through Proxmox. For
+migrated installations, also review the forwarding service and saved migration
+state documented in [migration to LXC](../infrastructure-operations/migrate-to-lxc.md).
+Do not apply the legacy host cleanup commands below to an LXC installation.
+
+## Legacy host installations only
+
+Run the following as root on a legacy (non-LXC) Ludus host to uninstall Ludus.
 
 ```
 ludus users list all

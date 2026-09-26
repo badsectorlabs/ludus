@@ -1,0 +1,19 @@
+---
+- name: Offer VM start to Ludus lifecycle hooks
+  ansible.builtin.uri:
+    url: http://localhost/v1/start
+    unix_socket: /run/ludus/vm-hooks.sock
+    method: POST
+    body_format: json
+    body:
+      rangeId: "{{ vm_pool | default(range_id) }}"
+      vmId: "{{ vm_id }}"
+      vmName: "{{ vm_name }}"
+      firstBoot: "{{ (clone_vm is changed) | bool }}"
+    return_content: true
+    status_code: 200
+    timeout: 1500
+  delegate_to: localhost
+  register: ludus_vm_start_hook
+  changed_when: ludus_vm_start_hook.json.handled | default(false) | bool
+  when: (ludus_vm_hooks | default({})).get(vm_name | default(inventory_hostname), {}).get('start', false) | bool

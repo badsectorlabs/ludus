@@ -132,10 +132,11 @@
 # I tried to do this with uri and json_query, but JMESPath is a mess.
 - name: Get MAC for vlan interface (Linux)
   ansible.builtin.shell: |
-    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ proxmox_vmid }}/config" | jq -r '.[] | to_entries[] | select(.key|startswith("net")).value | select(contains("tag={{ vlan }}"))' | cut -d '=' -f 2 | cut -d ',' -f 1
+    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ proxmox_vmid }}/config" | jq -r --arg tag "tag={{ vlan }}" --arg bridge "bridge={{ ludus_nat_interface }}" --arg static_ip "{{ static_ip | default('') }}" '.data | [to_entries[] | select(.key|startswith("net")).value] | if ($static_ip | startswith("192.0.2.")) then map(select(contains($bridge)))[0] else map(select(contains($tag)))[0] end' | cut -d '=' -f 2 | cut -d ',' -f 1
   register: vlan_mac_command
   delegate_to: localhost
   become: false
+
 
 - name: Set the vlan_mac variable
   ansible.builtin.set_fact:
@@ -143,7 +144,7 @@
 
 - name: Get interface for MAC of vlan interface (Linux)
   ansible.builtin.shell: |
-    curl -s -k -H "Authorization: PVEAPIToken={{ hostvars['localhost']['proxmox_full_token_id'] }}={{ hostvars['localhost']['proxmox_token_secret'] }}" "https://127.0.0.1:8006/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ proxmox_vmid }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
+    curl -s -k -H "Authorization: PVEAPIToken={{ proxmox_token_id }}={{ proxmox_token_secret }}" "{{ proxmox_url }}/api2/json/nodes/{{ vm_target_nodes[inventory_hostname] | default(range_default_target_node) | default(hostvars['localhost']['node_name']) }}/qemu/{{ proxmox_vmid }}/agent/network-get-interfaces" | jq -r '.[] | .result[] | select(."hardware-address"=="{{ vlan_mac | lower }}").name'
   register: interface_name_command
   delegate_to: localhost
   become: false
@@ -200,21 +201,6 @@
   ignore_errors: true
   when: ansible_os_family == "Debian" and (interfaces_status_debian is changed or interfaces_status_redhat is changed)
 
-# Hostname - Linux
-- name: Setting hostname (Linux)
-  become: true
-  ansible.builtin.hostname:
-    name: "{{ vm_hostname }}"
-    use: debian
-  register: linux_hostname
-  when: ansible_os_family == "Debian"
-
-- name: Setting hostname (Linux-RedHat/CentOS/Alma/Rocky)
-  become: true
-  ansible.builtin.hostname:
-    name: "{{ vm_hostname }}"
-  register: linux_hostname
-  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux', 'CentOS']
 
 - name: Add IP address to /etc/hosts
   ansible.builtin.lineinfile:
@@ -231,6 +217,22 @@
     line: "127.0.1.1    {{ inventory_hostname }}"
     state: present
   become: true
+
+# Hostname - Linux
+- name: Setting hostname (Linux)
+  become: true
+  ansible.builtin.hostname:
+    name: "{{ vm_hostname }}"
+    use: debian
+  register: linux_hostname
+  when: ansible_os_family == "Debian"
+
+- name: Setting hostname (Linux-RedHat/CentOS/Alma/Rocky)
+  become: true
+  ansible.builtin.hostname:
+    name: "{{ vm_hostname }}"
+  register: linux_hostname
+  when: ansible_os_family in ['RedHat', 'Rocky', 'AlmaLinux', 'CentOS']
 
 - name: Remove default entry for 127.0.0.1 from /etc/hosts
   ansible.builtin.lineinfile:
@@ -257,6 +259,10 @@
 - name: Change ansible's ip address for the host
   ansible.builtin.set_fact:
     ansible_host: "{{ static_ip }}"
+  when: reboot is changed
+
+- name: Reset the persistent SSH connection after address change
+  ansible.builtin.meta: reset_connection
   when: reboot is changed
 
 - name: Wait for the host's control interface (SSH) to come up

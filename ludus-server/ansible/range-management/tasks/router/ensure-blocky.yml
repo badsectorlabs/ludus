@@ -1,0 +1,76 @@
+- name: Set staged Blocky binary path
+  ansible.builtin.set_fact:
+    blocky_staged_binary: "{{ ludus_install_path }}/resources/blocky/blocky"
+
+- name: Check for staged Blocky binary
+  ansible.builtin.stat:
+    path: "{{ blocky_staged_binary }}"
+  delegate_to: localhost
+  become: false
+  register: blocky_staged_binary_stat
+  run_once: true
+
+- name: Require staged Blocky binary
+  ansible.builtin.assert:
+    that:
+      - blocky_staged_binary_stat.stat.exists
+      - blocky_staged_binary_stat.stat.isreg | default(false)
+    fail_msg: "The Ludus appliance is missing the staged Blocky binary at {{ blocky_staged_binary }}."
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Stop and disable AdGuardHome if present
+  ansible.builtin.service:
+    name: AdGuardHome
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Install staged Blocky binary on router
+  ansible.builtin.copy:
+    src: "{{ blocky_staged_binary }}"
+    dest: /usr/local/bin/blocky
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create Blocky group
+  ansible.builtin.group:
+    name: blocky
+    system: true
+
+- name: Create Blocky user
+  ansible.builtin.user:
+    name: blocky
+    group: blocky
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/blocky
+    create_home: false
+
+- name: Ensure Blocky directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /etc/blocky, owner: root, group: blocky, mode: '0750' }
+    - { path: /var/lib/blocky, owner: blocky, group: blocky, mode: '0750' }
+    - { path: /var/log/blocky, owner: blocky, group: blocky, mode: '0750' }
+
+- name: Install Blocky systemd service
+  ansible.builtin.template:
+    src: blocky.service.j2
+    dest: /etc/systemd/system/blocky.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: blocky_service_unit
+
+- name: Reload systemd after Blocky service changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: blocky_service_unit.changed

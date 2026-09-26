@@ -3,11 +3,16 @@ package ludusapi
 import (
 	"fmt"
 	"log"
+	"net/netip"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
+
+	"ludusapi/pveclient"
 )
 
 const ludusInstallPath string = "/opt/ludus"
@@ -22,19 +27,26 @@ const (
 // Configurations exported
 type Configuration struct {
 	ProxmoxNode               string        `mapstructure:"proxmox_node" yaml:"proxmox_node"`
-	ProxmoxInterface          string        `mapstructure:"proxmox_interface" yaml:"proxmox_interface"`
 	ProxmoxInvalidCert        bool          `mapstructure:"proxmox_invalid_cert" yaml:"proxmox_invalid_cert"`
-	ProxmoxURL                string        `mapstructure:"proxmox_url" yaml:"proxmox_url"`
+	ProxmoxURL                string        `mapstructure:"proxmox_url" yaml:"proxmox_url"` // Deprecated: use proxmox_endpoints
+	ProxmoxEndpoints          []string      `mapstructure:"proxmox_endpoints" yaml:"proxmox_endpoints"`
+	ProxmoxTokenID            string        `mapstructure:"proxmox_token_id" yaml:"proxmox_token_id"`
+	ProxmoxTokenSecret        string        `mapstructure:"proxmox_token_secret" yaml:"proxmox_token_secret"`
+	ProxmoxUserRealm          string        `mapstructure:"proxmox_user_realm" yaml:"proxmox_user_realm"`
 	ProxmoxHostname           string        `mapstructure:"proxmox_hostname" yaml:"proxmox_hostname"`
-	ProxmoxLocalIP            string        `mapstructure:"proxmox_local_ip" yaml:"proxmox_local_ip"`
-	ProxmoxPublicIP           string        `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"`
-	ProxmoxGateway            string        `mapstructure:"proxmox_gateway" yaml:"proxmox_gateway"`
-	ProxmoxNetmask            string        `mapstructure:"proxmox_netmask" yaml:"proxmox_netmask"`
+	ProxmoxPublicIP           string        `mapstructure:"proxmox_public_ip" yaml:"proxmox_public_ip"` // Deprecated: use wireguard_endpoint
+	WireguardEndpoint         string        `mapstructure:"wireguard_endpoint" yaml:"wireguard_endpoint"`
+	LudusNATIP                string        `mapstructure:"ludus_nat_ip" yaml:"ludus_nat_ip"`
+	LudusNATGateway           string        `mapstructure:"ludus_nat_gateway" yaml:"ludus_nat_gateway"`
+	LudusDNSServer            string        `mapstructure:"ludus_dns_server" yaml:"ludus_dns_server"`
+	TLSCertFile               string        `mapstructure:"tls_cert_file" yaml:"tls_cert_file"`
+	TLSKeyFile                string        `mapstructure:"tls_key_file" yaml:"tls_key_file"`
 	ProxmoxVMStoragePool      string        `mapstructure:"proxmox_vm_storage_pool" yaml:"proxmox_vm_storage_pool"`
 	ProxmoxVMStorageFormat    string        `mapstructure:"proxmox_vm_storage_format" yaml:"proxmox_vm_storage_format"`
 	ProxmoxISOStoragePool     string        `mapstructure:"proxmox_iso_storage_pool" yaml:"proxmox_iso_storage_pool"`
 	LudusNATInterface         string        `mapstructure:"ludus_nat_interface" yaml:"ludus_nat_interface"`
 	PreventUserAnsibleAdd     bool          `mapstructure:"prevent_user_ansible_add" yaml:"prevent_user_ansible_add"`
+	AirgappedInstall          bool          `mapstructure:"airgapped_install" yaml:"airgapped_install"`
 	SSORequireExistingUser    bool          `mapstructure:"sso_require_existing_user" yaml:"sso_require_existing_user"`
 	CreateDefaultRange        bool          `mapstructure:"create_default_range" yaml:"create_default_range"`
 	LicenseKey                string        `mapstructure:"license_key" yaml:"license_key"`
@@ -49,8 +61,7 @@ type Configuration struct {
 	WireguardPort             int           `mapstructure:"wireguard_port" yaml:"wireguard_port"`
 	MaxLogHistory             int           `mapstructure:"max_log_history" yaml:"max_log_history"` // Max number of log history entries to keep per range/user (default: 100)
 	InactivityShutdownTimeout time.Duration `mapstructure:"inactivity_shutdown_timeout" yaml:"inactivity_shutdown_timeout"`
-	// Cluster mode settings
-	ClusterMode  bool   `mapstructure:"cluster_mode" yaml:"cluster_mode"`     // Auto-detected via API during startup, can be overridden
+	// SDN settings
 	SDNZone      string `mapstructure:"sdn_zone" yaml:"sdn_zone"`             // The SDN zone name for Ludus networking (default: "ludus")
 	VXLANTagBase int    `mapstructure:"vxlan_tag_base" yaml:"vxlan_tag_base"` // Base VXLAN tag (VNI) added to range number (default: 0)
 	// Quota defaults - applied to users who don't have explicit quotas or group defaults
@@ -78,13 +89,17 @@ func (s *Server) ParseConfig() {
 
 	// Set defaults
 	viper.SetDefault("proxmox_invalid_cert", true)
-	viper.SetDefault("proxmox_url", "https://127.0.0.1:8006")
-	viper.SetDefault("proxmox_public_ip", "127.0.0.1")
 	viper.SetDefault("proxmox_vm_storage_pool", "local")
 	viper.SetDefault("proxmox_vm_storage_format", "qcow2")
 	viper.SetDefault("proxmox_iso_storage_pool", "local")
-	viper.SetDefault("ludus_nat_interface", "vmbr1000")
+	viper.SetDefault("ludus_nat_interface", "ludusnat")
+	viper.SetDefault("proxmox_user_realm", "pve")
+	viper.SetDefault("ludus_nat_ip", "192.0.2.253")
+	viper.SetDefault("ludus_nat_gateway", "192.0.2.254")
+	viper.SetDefault("tls_cert_file", ludusInstallPath+"/tls/server.crt")
+	viper.SetDefault("tls_key_file", ludusInstallPath+"/tls/server.key")
 	viper.SetDefault("prevent_user_ansible_add", false)
+	viper.SetDefault("airgapped_install", false)
 	viper.SetDefault("sso_require_existing_user", true)
 	viper.SetDefault("create_default_range", true)
 	viper.SetDefault("register_default_source", true)
@@ -94,9 +109,6 @@ func (s *Server) ParseConfig() {
 	viper.SetDefault("wireguard_port", 51820)
 	viper.SetDefault("port", DefaultPort)
 	viper.SetDefault("admin_port", DefaultAdminPort)
-	// Do not set a default for cluster_mode to force viper to leave it unset unless provided,
-	// so we can detect if user has explicitly set it or not and fallback to API if unset.
-	// (See IsClusterMode in sdn.go for logic)
 	viper.SetDefault("sdn_zone", "ludus") // Default SDN zone name
 	viper.SetDefault("vxlan_tag_base", 0) // Base VXLAN tag added to range number
 	viper.SetDefault("default_quota_ram", 0)
@@ -117,6 +129,10 @@ func (s *Server) ParseConfig() {
 	ConfigMu.Unlock()
 	if err != nil {
 		log.Fatalf("Unable to decode into struct, %v", err)
+	}
+	ServerConfiguration.ApplyDefaults()
+	if err := ServerConfiguration.ApplyShimAndValidate(); err != nil {
+		log.Fatalf("config validation: %v", err)
 	}
 	// By default hostname is the node name, but not always
 	if ServerConfiguration.ProxmoxHostname == "" {
@@ -144,13 +160,111 @@ func (s *Server) ParseConfig() {
 	viper.WatchConfig()
 	viper.OnConfigChange(func(e fsnotify.Event) {
 		ConfigMu.Lock()
-		defer ConfigMu.Unlock()
 		if err := viper.Unmarshal(&ServerConfiguration); err != nil {
 			log.Printf("Error reloading config: %v", err)
-		} else {
-			log.Println("Configuration reloaded from file")
+			ConfigMu.Unlock()
+			return
+		}
+		log.Println("Configuration reloaded from file")
+		ConfigMu.Unlock()
+		if err := ServerConfiguration.ApplyShimAndValidate(); err != nil {
+			log.Printf("ERROR: hot-reloaded config is invalid: %v (config left in inconsistent state; fix and save again)", err)
 		}
 	})
+}
+
+// ApplyDefaults backfills zero-value fields with the same defaults Viper would
+// apply in ParseConfig. Used by ludus-server which loads config via plain yaml.
+func (c *Configuration) ApplyDefaults() {
+	if c.ProxmoxUserRealm == "" {
+		c.ProxmoxUserRealm = "pve"
+	}
+	if c.LudusNATInterface == "" {
+		c.LudusNATInterface = "ludusnat"
+	}
+	if c.LudusNATIP == "" {
+		c.LudusNATIP = "192.0.2.253"
+	}
+	if c.LudusNATGateway == "" {
+		c.LudusNATGateway = "192.0.2.254"
+	}
+	if c.TLSCertFile == "" {
+		c.TLSCertFile = ludusInstallPath + "/tls/server.crt"
+	}
+	if c.TLSKeyFile == "" {
+		c.TLSKeyFile = ludusInstallPath + "/tls/server.key"
+	}
+	if c.SDNZone == "" {
+		c.SDNZone = "ludus"
+	}
+	if c.DataDirectory == "" {
+		c.DataDirectory = ludusInstallPath + "/db"
+	}
+	if c.WireguardPort == 0 {
+		c.WireguardPort = 51820
+	}
+	if c.ProxmoxVMStoragePool == "" {
+		c.ProxmoxVMStoragePool = "local"
+	}
+	if c.ProxmoxVMStorageFormat == "" {
+		c.ProxmoxVMStorageFormat = "qcow2"
+	}
+	if c.ProxmoxISOStoragePool == "" {
+		c.ProxmoxISOStoragePool = "local"
+	}
+}
+
+// ApplyShimAndValidate migrates deprecated fields and validates the config.
+// Called after viper.Unmarshal in ParseConfig and by tests.
+func (c *Configuration) ApplyShimAndValidate() error {
+	// Shim: proxmox_url -> proxmox_endpoints
+	if len(c.ProxmoxEndpoints) == 0 && c.ProxmoxURL != "" {
+		log.Printf("WARN: config key 'proxmox_url' is deprecated; use 'proxmox_endpoints: [%q]'", c.ProxmoxURL)
+		c.ProxmoxEndpoints = []string{c.ProxmoxURL}
+	}
+	// Shim: proxmox_public_ip -> wireguard_endpoint
+	if c.WireguardEndpoint == "" && c.ProxmoxPublicIP != "" {
+		log.Printf("WARN: config key 'proxmox_public_ip' is deprecated; use 'wireguard_endpoint'")
+		c.WireguardEndpoint = c.ProxmoxPublicIP
+	}
+	// Default realm (for direct-unmarshal callers like tests)
+	if c.ProxmoxUserRealm == "" {
+		c.ProxmoxUserRealm = "pve"
+	}
+	if c.LudusDNSServer != "" {
+		if _, err := netip.ParseAddr(c.LudusDNSServer); err != nil {
+			return fmt.Errorf("ludus_dns_server must be an IP address: %w", err)
+		}
+	}
+	// Validate endpoints
+	if len(c.ProxmoxEndpoints) == 0 {
+		return fmt.Errorf("proxmox_endpoints must contain at least one URL")
+	}
+	for _, ep := range c.ProxmoxEndpoints {
+		if !strings.Contains(ep, "://") {
+			return fmt.Errorf("proxmox_endpoints: %q must include scheme (e.g. https://%s)", ep, ep)
+		}
+		u, err := url.Parse(ep)
+		if err != nil {
+			return fmt.Errorf("proxmox_endpoints: invalid URL %q: %w", ep, err)
+		}
+		if u.Scheme != "https" && u.Scheme != "http" {
+			return fmt.Errorf("proxmox_endpoints: %q must include scheme (e.g. https://%s)", ep, ep)
+		}
+		host := u.Hostname()
+		if host == "127.0.0.1" || strings.EqualFold(host, "localhost") || host == "::1" {
+			return fmt.Errorf("proxmox_endpoints: %q uses 127.0.0.1/localhost — Ludus now runs in an LXC and must reach Proxmox over the network; use the node's real IP", ep)
+		}
+	}
+	// Reverse-shim: populate deprecated ProxmoxURL from the first endpoint so
+	// legacy call sites (per-user clients, packer, ansible-inventory) keep working.
+	if c.ProxmoxURL == "" {
+		c.ProxmoxURL = c.ProxmoxEndpoints[0]
+	}
+	if c.ProxmoxTokenID == "" || c.ProxmoxTokenSecret == "" {
+		return fmt.Errorf("proxmox_token_id and proxmox_token_secret are required")
+	}
+	return nil
 }
 
 // ApplyPortDefaultsAndValidate backfills DefaultPort / DefaultAdminPort for
@@ -174,4 +288,15 @@ func (c *Configuration) ApplyPortDefaultsAndValidate() error {
 		return fmt.Errorf("port and admin_port must differ (got %d for both)", c.Port)
 	}
 	return nil
+}
+
+// PVEClientConfig returns a pveclient.Config populated from this Configuration.
+// It satisfies pveclient.Builder, enabling pveclient.FromBuilder(cfg) call sites.
+func (c *Configuration) PVEClientConfig() pveclient.Config {
+	return pveclient.Config{
+		Endpoints:   c.ProxmoxEndpoints,
+		TokenID:     c.ProxmoxTokenID,
+		TokenSecret: c.ProxmoxTokenSecret,
+		InsecureTLS: c.ProxmoxInvalidCert,
+	}
 }

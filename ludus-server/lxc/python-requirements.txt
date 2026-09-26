@@ -1,0 +1,7 @@
+ansible-core==2.19.4
+proxmoxer==2.0.1
+requests==2.32.3
+netaddr==1.2.1
+pywinrm==0.4.3
+dnspython==2.6.1
+jmespath==1.0.1

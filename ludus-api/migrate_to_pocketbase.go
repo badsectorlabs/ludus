@@ -232,7 +232,7 @@ func migrateUsersToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 
 		if userRecord.Get("proxmoxTokenID") == "" {
 			logger.Debug(fmt.Sprintf("Creating proxmox API token for existing PocketBase user %s", sqliteUser.ProxmoxUsername))
-			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(sqliteUser.ProxmoxUsername, "pam", password)
+			tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(sqliteUser.ProxmoxUsername, "pam")
 			if err != nil {
 				logger.Error(fmt.Sprintf("Error creating proxmox API token for user %s: %v", sqliteUser.ProxmoxUsername, err))
 				continue
@@ -303,7 +303,10 @@ func migrateRangesToPocketBase(txApp core.App, sqliteDB *gorm.DB) error {
 				logger.Info("User ROOT already has an API key, skipping migration")
 				continue
 			}
-			// Only create an API key for ROOT, otherwise skip migration
+			// Only create an API key for ROOT, otherwise skip migration.
+			// NOTE: The ROOT proxmox token now comes from config (ProxmoxTokenID/ProxmoxTokenSecret),
+			// so persisting it to the DB here is redundant for new installs. Kept to avoid breaking
+			// migration of pre-LXC installs where downstream code may still read it from the user record.
 			tokenID, tokenSecret, err := createRootAPITokenWithShell()
 			if err != nil {
 				// This is a fatal error, as range creation action uses the root proxmox API token

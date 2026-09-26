@@ -12,6 +12,9 @@ import (
 )
 
 func updateLudus() {
+	if err := refuseLegacyHostUpdate(); err != nil {
+		log.Fatal(err)
+	}
 	// Check for running ansible or packer processes
 	// This assumes that ludus is the only thing that would run
 	// packer or ansible on the system - an ok assumption for
@@ -120,7 +123,7 @@ func ensurePocketBaseStoragePermissions() {
 	}
 }
 
-// recursively extract an embed.FS directory to the ludus install path, skipping the file "config.yml.example"
+// recursively extract an embed.FS directory to the ludus install path
 // all files will be have 0644 permissions and all directories will have 0755 permissions
 func extractDirectory(embeddedFS embed.FS, embeddedBaseDir string) {
 	embeddedDirEntries, err := embeddedFS.ReadDir(embeddedBaseDir)
@@ -135,10 +138,6 @@ func extractDirectory(embeddedFS embed.FS, embeddedBaseDir string) {
 			// It's recursion time! Extract this directory, and any directories inside of it
 			extractDirectory(embeddedFS, fmt.Sprintf("%s/%s", embeddedBaseDir, embeddedDirEntry.Name()))
 		} else { // File
-			// Skip the config example file
-			if embeddedDirEntry.Name() == "config.yml.example" {
-				continue
-			}
 			fileContent, err := embeddedFS.ReadFile(fmt.Sprintf("%s/%s", embeddedBaseDir, embeddedDirEntry.Name()))
 			if err != nil {
 				log.Fatal(err.Error())
@@ -195,6 +194,9 @@ func checkDirAndReplaceFiles() {
 	}
 
 	extractDirectory(embeddedPackerDir, "packer")
+	if err := preserveInjectedCA(); err != nil {
+		log.Fatalf("Restore injected CA to packer HTTP seeds: %v", err)
+	}
 	if userExists("ludus") {
 		Run(fmt.Sprintf("chown -R ludus:ludus %s/packer", ludusInstallPath), false, true)
 	}

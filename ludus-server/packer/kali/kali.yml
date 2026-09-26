@@ -79,11 +79,22 @@
           - libyaml-tiny-perl
           - ssl-cert
 
-    - name: Download kasmvnc deb
+    - name: Download pinned KasmVNC package from Packer
+      ansible.builtin.get_url:
+        url: "http://{{ packer_http_addr }}/kasmvncserver_kali-rolling_1.4.0_amd64.deb"
+        dest: /tmp/kasmvncserver_kali-rolling.deb
+        checksum: sha256:ada4c106c3e67dda0474d5d4ef0d2e49404eb1e2499da079e26c586515b6798b
+        mode: '0700'
+      register: kasmvnc_packer_download
+      ignore_errors: true
+
+    - name: Download kasmvnc deb from GitHub
       ansible.builtin.get_url:
         url: https://github.com/kasmtech/KasmVNC/releases/download/v1.4.0/kasmvncserver_kali-rolling_1.4.0_amd64.deb
         dest: /tmp/kasmvncserver_kali-rolling.deb
+        checksum: sha256:ada4c106c3e67dda0474d5d4ef0d2e49404eb1e2499da079e26c586515b6798b
         mode: '0700'
+      when: kasmvnc_packer_download is failed
 
     - name: Install the kasmvnc deb
       become: true

@@ -1,16 +1,23 @@
 #!/bin/bash
 
+set -eo pipefail
+BUILD_ONLY=false
+
 # Parse command line arguments
-while getopts "hDdPLv:" opt; do
+while getopts "hBDdPLv:" opt; do
   case $opt in
     h)
-      echo "Usage: $0 [-h] [-d] [-D] [-P] [-L] [-v version]"
+      echo "Usage: $0 [-h] [-B] [-d] [-D] [-P] [-L] [-v version]"
+      echo "  -B  Build server and embedded inventory only; do not install or change services"
       echo "  -d  Enable debug logging for Ludus"
       echo "  -D  Enable debug logging for the database"
       echo "  -P  Enable debug logging for proxmox"
       echo "  -L  Enable debug logging for license requests"
       echo "  -v  Version string to embed in the server binary"
       exit 0
+      ;;
+    B)
+      BUILD_ONLY=true
       ;;
     d)
       DEBUG_MODE=true
@@ -74,8 +81,7 @@ fi
 # Build the dynamic-inventory binary first so it gets embedded into the
 # ludus-server binary via //go:embed all:ansible.
 echo "[+] Building dynamic-inventory binary"
-(cd ../dynamic-inventory && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o ../ludus-server/ansible/range-management/dynamic-inventory)
-if [[ $? -ne 0 ]]; then
+if ! (cd ../dynamic-inventory && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o ../ludus-server/ansible/range-management/dynamic-inventory); then
     echo
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     echo "[!] ERROR building dynamic-inventory"
@@ -85,14 +91,19 @@ if [[ $? -ne 0 ]]; then
 fi
 
 echo CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${VERSION_STRING}" -tags "${TAGS}" -o ludus-server
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${VERSION_STRING}" -tags "${TAGS}" -o ludus-server
-if [[ $? -ne 0 ]]; then
+if ! CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-build -X main.VersionString=${VERSION_STRING}" -tags "${TAGS}" -o ludus-server; then
     echo
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     echo "[!] ERROR building ludus server"
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     echo
     exit 1
+fi
+
+if [ "$BUILD_ONLY" = true ]; then
+    echo "[=] Ludus server built at $PWD/ludus-server (not installed)"
+    popd >/dev/null
+    exit 0
 fi
 
 
@@ -105,7 +116,8 @@ fi
 
 # If the current hostname is m1 run copy the binary to the K8 dev box and update Ludus
 if [ "$HOSTNAME" == "m1" ]; then
-    scp ludus-server lkdev2: && ssh lkdev2 "./ludus-server --update"
+    scp ludus-server lkdev2:
+    ssh lkdev2 "./ludus-server --update"
 fi
 
 if [ "$DEBUG_MODE" = true ]; then

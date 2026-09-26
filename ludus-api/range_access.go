@@ -1,6 +1,7 @@
 package ludusapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"ludusapi/dto"
@@ -15,6 +16,23 @@ import (
 // ErrRangeRouterPoweredOff is returned when the access-control playbook cannot reach the range router
 // because the VM exists in the cluster but is not reachable (typically powered off).
 var ErrRangeRouterPoweredOff = errors.New("The range router you are sharing access to must be accessible. Make sure the router is powered on and accessible.")
+
+// Credential preservation saves only changed user fields. Reload the record
+// before undoing a grant or revoke so the rollback is recognized as a change.
+func restoreUserRangeMembership(app core.App, userID, rangeID string, grant bool) error {
+	return app.RunInTransaction(func(tx core.App) error {
+		user, err := tx.FindRecordById("users", userID)
+		if err != nil {
+			return err
+		}
+		if grant {
+			user.Set("ranges+", rangeID)
+		} else {
+			user.Set("ranges-", rangeID)
+		}
+		return tx.Save(user)
+	})
+}
 
 func playbookReportsRouterUnreachable(output, routerVMName string) bool {
 	if routerVMName == "" {
@@ -83,16 +101,20 @@ func GetRangeAccessibleUsers(rangeNumber int) []dto.ListRangeUsersResponseItem {
 	}
 
 	// Find all users who have direct access to the range by querying the user table looking for the range.Id in the user's ranges array
-	userRecords, err := app.FindRecordsByFilter(
-		"users",                    // collection name
-		"ranges.id ?= {:range_id}", // filter
-		"-created",                 // sort
-		0,                          // limit
-		0,                          // offset
-		dbx.Params{
-			"range_id": rangeRecord.Id,
-		},
-	)
+	var userRecords []*core.Record
+	client, _ := PluginPocketBase()
+	if client != nil {
+		userRecords, err = client.ListRecords(context.Background(), "users", fmt.Sprintf("ranges.id ?= %q", rangeRecord.Id))
+	} else {
+		userRecords, err = app.FindRecordsByFilter(
+			"users",
+			"ranges.id ?= {:range_id}",
+			"-created",
+			0,
+			0,
+			dbx.Params{"range_id": rangeRecord.Id},
+		)
+	}
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error finding users: %s", err.Error()))
 		return nil
@@ -107,22 +129,27 @@ func GetRangeAccessibleUsers(rangeNumber int) []dto.ListRangeUsersResponseItem {
 	}
 
 	// Find all users who are managers or members of a group with access to the range by querying the group table looking for the range.Id in the group's ranges array
-	groupRecords, err := app.FindRecordsByFilter(
-		"groups",                   // collection name
-		"ranges.id ?= {:range_id}", // filter
-		"-created",                 // sort
-		0,                          // limit
-		0,                          // offset
-		dbx.Params{
-			"range_id": rangeRecord.Id,
-		},
-	)
+	var groupRecords []*core.Record
+	if client != nil {
+		groupRecords, err = client.ListRecords(context.Background(), "groups", fmt.Sprintf("ranges.id ?= %q", rangeRecord.Id), "members", "managers")
+	} else {
+		groupRecords, err = app.FindRecordsByFilter(
+			"groups",
+			"ranges.id ?= {:range_id}",
+			"-created",
+			0,
+			0,
+			dbx.Params{"range_id": rangeRecord.Id},
+		)
+	}
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
 		return nil
 	}
 	for _, groupRecord := range groupRecords {
-		app.ExpandRecord(groupRecord, []string{"members", "managers"}, nil)
+		if client == nil {
+			app.ExpandRecord(groupRecord, []string{"members", "managers"}, nil)
+		}
 		for _, member := range groupRecord.ExpandedAll("members") {
 			result = append(result, dto.ListRangeUsersResponseItem{
 				UserID:     member.GetString("userID"),

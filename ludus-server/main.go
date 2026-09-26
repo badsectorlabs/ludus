@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"embed"
 	"fmt"
@@ -28,7 +29,7 @@ var ludusPath string
 var GitCommitHash string
 var VersionString string
 var LudusVersion string = VersionString + "+" + GitCommitHash
-var existingProxmox bool
+var config ludusapi.Configuration
 var logger *slog.Logger
 
 // Embed the ansible directory into the binary for simple distribution
@@ -48,6 +49,13 @@ var embeddedPackerDir embed.FS
 //go:embed all:ci
 var embeddedCIDir embed.FS
 
+func pluginAPIPort(euid int, configuration ludusapi.Configuration) int {
+	if euid == 0 {
+		return configuration.AdminPort
+	}
+	return configuration.Port
+}
+
 func serve() {
 
 	server := &ludusapi.Server{
@@ -60,6 +68,15 @@ func serve() {
 
 	// Setup PocketBase app
 	app := ludusapi.NewRouter(LudusVersion, server)
+
+	certPath, keyPath := serverCertificatePaths()
+	certificateFingerprint, err := certificateSHA256(certPath)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Failed to fingerprint server certificate: %v", err))
+		return
+	}
+	server.PluginAPIURL = fmt.Sprintf("https://127.0.0.1:%d", pluginAPIPort(os.Geteuid(), config))
+	server.PluginAPICertificateSHA256 = certificateFingerprint
 
 	if len(server.Entitlements) == 0 {
 		logger.Info("LICENSE: Community (no entitlements)")
@@ -81,43 +98,25 @@ func serve() {
 		}
 
 		for _, entry := range entries {
-			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".so" {
+			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".plugin" {
 				path := filepath.Join(pluginsDir, entry.Name())
 				if err := server.LoadPlugin(path); err != nil {
-					log.Fatalf("Error loading plugin %s: %v", path, err)
+					logger.Error(fmt.Sprintf("Error loading plugin %s: %v", path, err))
 				}
 			}
 		}
 	}
 
-	// Initialize plugins
-	server.InitializePlugins()
-
-	// Start all registered scheduler jobs
-	server.Scheduler.Start()
+	// Initialize plugins; failures are soft — keep serving without the broken plugin.
+	if err := server.InitializePlugins(); err != nil {
+		logger.Error(fmt.Sprintf("Error initializing plugins: %v", err))
+	}
+	if err := server.StartVMHookService(); err != nil {
+		log.Fatalf("Error starting VM hook service: %v", err)
+	}
 
 	// Register plugin routes
 	server.RegisterPluginRoutes(app)
-
-	// When a user uploads their own certificate to proxmox, it gets saved as pveproxy-ssl.pem and pveproxy-ssl.key in the /etc/pve/nodes/<node>/ directory.
-	// If these files exist, use them instead of the proxmox CA signed certs (pve-ssl.pem and pve-ssl.key), and only fall back to our own self signed certs if both are missing.
-	certPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pveproxy-ssl.pem"
-	keyPath := "/etc/pve/nodes/" + config.ProxmoxNode + "/pveproxy-ssl.key"
-
-	// Check if the pveproxy-ssl.pem and pveproxy-ssl.key files exist and we can read them. If not, use the proxmox CA signed certs.
-	if !fileExists(certPath) || !fileExists(keyPath) {
-		certPath = "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.pem"
-		keyPath = "/etc/pve/nodes/" + config.ProxmoxNode + "/pve-ssl.key"
-	}
-
-	// Check if the pve-ssl.pem and pve-ssl.key files exist and we can read them. If not, generate our own self signed certs.
-	if !fileExists(certPath) || !fileExists(keyPath) {
-		log.Println("Could not find/read " + certPath + " or " + keyPath)
-		generateSelfSignedCert()
-		certPath = "/opt/ludus/cert.pem"
-		keyPath = "/opt/ludus/key.pem"
-	}
-
 	// Setup the server to use the certificate/key found above
 	serveConfig := apis.ServeConfig{
 		ShowStartBanner: false,
@@ -135,7 +134,13 @@ func serve() {
 		// PocketBase defaults to 5 min Read/WriteTimeout; extend for long-running requests (e.g. antisandbox enable)
 		e.Server.ReadTimeout = 30 * time.Minute
 		e.Server.WriteTimeout = 30 * time.Minute
-		return e.Next()
+		// PocketBase builds the router and binds its listener in e.Next().
+		// Plugin jobs need that listener for their first record queries.
+		if err := e.Next(); err != nil {
+			return err
+		}
+		server.Scheduler.Start()
+		return nil
 	})
 
 	// If we're running as a non-root user, bind to all interfaces, else (running as root) bind to localhost unless the user has opted to expose the admin API globally
@@ -157,6 +162,9 @@ func serve() {
 		}
 	}
 	server.Scheduler.Stop()
+	if err := server.StopVMHookService(); err != nil {
+		logger.Error(fmt.Sprintf("Error stopping VM hook service: %v", err))
+	}
 	server.ShutdownPlugins()
 
 }
@@ -185,40 +193,20 @@ func main() {
 	}
 	ludusPath = filepath.Dir(ex)
 
-	// Sanity checks
 	checkArgs()
-	checkDebian12or13()
-	checkForVirtualizationSupport()
-	generateConfigIfAutomatedInstall()
-	inCluster = isInCluster()
-
-	// If we're done installing, serve the API
-	if fileExists(fmt.Sprintf("%s/install/.stage-3-complete", ludusInstallPath)) && !fileExists("/etc/systemd/system/ludus-install.service") {
-		checkConfig()
-		serve()
-	}
+	checkConfig()
 
 	log.Printf("Ludus server %s", LudusVersion)
 
-	// The install hasn't finished, so make sure we're root, then run through the install
-	checkRoot()
-
-	// If this is a proxmox 8 machine, print some warnings and set the bool
-	existingProxmox = checkForProxmox8or9()
-
-	getInstallStep(existingProxmox)
-	// Use pip to install ansible because Debian's ansible apt package is 4 versions out of date (2.10, current is 2.14)
-	installAnsibleWithPip()
-	// Make sure we have the ansible galaxy package required for Ludus
-	installAnsibleRequirements()
-	// Run the install playbooks with ansible now that it is installed
-	runInstallPlaybook(existingProxmox)
-	// If initial-admin.yml exists, run bootstrap to create ROOT + initial admin.
-	time.Sleep(3 * time.Second)
-	if interactiveInstall {
-		initialAdminPath := fmt.Sprintf("%s/install/initial-admin.yml", ludusInstallPath)
-		if fileExists(initialAdminPath) {
-			runBootstrapOnly()
+	// First boot inside the LXC: provision Proxmox objects + local state via the
+	// Go bootstrap path (replaces the old ansible proxmox-install playbooks).
+	if !fileExists(bootstrapMarker) {
+		checkRoot()
+		ctx := context.Background()
+		if err := bootstrap(ctx, config); err != nil {
+			log.Fatalf("bootstrap failed: %v", err)
 		}
+		runBootstrapOnly() // create ROOT user + admin key
 	}
+	serve()
 }

@@ -5,16 +5,15 @@ title: "📟 DNS"
 
 # 📟 DNS
 
-DNS inside a Ludus range is provided by the user's router, which is running [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome).
+DNS inside a Ludus range is provided by the user's router, which is running [Blocky](https://github.com/0xERR0R/blocky).
 
-AdGuard Home was chosen as it provides the following features important to Ludus:
+Blocky provides the features Ludus needs:
 
 - DNS rewrites ("pinning")
 - DNS blocking/allowing based on requested domain and requesting client
-- A REST API
+- Configuration through a local YAML file
 
-Users can access their AdGuard Home instance at `http://10.{{ range ID }}.{{ any VLAN specified in user's config }}.254:3000`.
-The credentials are `admin:password`.
+Ludus manages Blocky by writing `/etc/blocky/config.yml` on the router and restarting the `blocky` service. Blocky's HTTP API is bound to `127.0.0.1:4000` on the router and is not exposed as a user-facing web UI.
 
 :::info
 
@@ -23,12 +22,20 @@ outside of its domain to the router.
 
 :::
 
-By default, the AdGuard Home instance includes but does not enable the [Windows Spy](https://github.com/crazy-max/WindowsSpyBlocker) list to block some requests to Microsoft Telemetry.
-This blocking is of uncertain value.
+By default, the router forwards DNS through Cloudflare DNS-over-HTTPS. You can change this with `router.upstream_dns` in your range config:
+
+```yaml
+router:
+  upstream_dns:
+    - 1.1.1.1
+    - https://1.1.1.1/dns-query
+```
+
+Entries can be bare IP addresses or `https://` DNS-over-HTTPS URLs.
 
 ## Query Log
 
-The query log shows a log of all DNS queries made to the router VM.
+Blocky writes DNS query logs on the router under `/var/log/blocky`.
 
 :::note
 
@@ -36,24 +43,14 @@ If testing mode is not enabled, VMs may make DNS queries to an external DNS serv
 These queries will not appear in the Query Log.
 :::
 
-![Query Log](/img/dns/query-log.png)
-
 ## DNS rewrites (pins)
 
-`Filter -> DNS rewrites` show a list of active DNS rewrite rules, or "pins". You can manually edit the rewrites, add your own, or remove existing rewrites.
+Ludus renders DNS rewrite rules into Blocky's config. By default, Ludus adds all VM names, and VM names appended with `home.arpa`, to the DNS rewrite list.
 
-By default, Ludus adds all VM names, and VM names appended with `home.arpa` to the DNS rewrite list.
+Range config values in `dns_rewrites` are also written to Blocky. Exact names such as `example.com` resolve only that name. Wildcards such as `*.example.com` resolve both `example.com` and all subdomains because Blocky's config-native wildcard mapping includes the apex domain.
 
-![DNS rewrites](/img/dns/dns-rewrites.png)
+## Testing Mode DNS Rules
 
+Ludus uses Blocky allowlists to enforce testing mode DNS behavior. When testing mode starts, range clients are restricted to explicitly allowed domains, while VMs configured with `testing.block_internet: false` keep unrestricted DNS resolution.
 
-## Custom Filtering Rules
-
-`Filters -> Custom rules` shows the active "custom" rules. Ludus uses these rules to enforce testing mode blocks (the `/.*/` rules), and allow rules (the `@@||` rules).
-
-You can learn more about the syntax for these rules [here](https://adguard.com/kb/general/ad-filtering/create-own-filters/).
-
-![Custom Rules](/img/dns/custom-rules.png)
-
-This image shows a range that is in testing mode, but has allowed `example.com`.
-The first two rules block all queries for the two hosts, and the following rules allow example.com and its CRL domains.
+Allowed domains are added to `/etc/blocky/config.yml` and pinned to the IP address Ludus resolved when the allow rule was created. Removing the allow rule removes that DNS pin.

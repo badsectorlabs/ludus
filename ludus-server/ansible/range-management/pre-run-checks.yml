@@ -3,23 +3,15 @@
   tags: [always]
   gather_facts: false
   tasks:
-    - name: Check for Proxmox token
+    - name: Check for Proxmox API extra-vars
       ansible.builtin.assert:
         that:
-          - hostvars['localhost'].proxmox_full_token_id is defined
-          - hostvars['localhost'].proxmox_token_secret is defined
-        fail_msg: "Proxmox token is not defined"
-        success_msg: "Proxmox token is defined"
-
-    - name: Split the token id
-      ansible.builtin.set_fact:
-        proxmox_token_username: "{{ hostvars['localhost']['proxmox_full_token_id'] | split('!') | first }}"
-        proxmox_token_id: "{{ hostvars['localhost']['proxmox_full_token_id'] | split('!') | last }}"
-
-    - name: Check for valid token id
-      ansible.builtin.assert:
-        that:
-          - proxmox_token_username == hostvars['localhost']['api_user']
+          - proxmox_api_host is defined
+          - proxmox_token_id is defined
+          - "'!' in proxmox_token_id"
+          - proxmox_token_secret is defined
+        fail_msg: "Proxmox API extra-vars not injected (expected proxmox_api_host, proxmox_token_id, proxmox_token_secret from ludus-api)"
+        success_msg: "Proxmox API extra-vars present"
 
     - name: Check for valid dynamic inventory
       ansible.builtin.assert:

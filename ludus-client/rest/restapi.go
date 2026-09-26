@@ -189,7 +189,7 @@ func processRESTResult(resp *resty.Response, err error) ([]byte, bool) {
 		error = true
 	}
 
-	if resp.StatusCode() == 500 || resp.StatusCode() == 502 {
+	if resp.StatusCode() == 500 || resp.StatusCode() == 502 || resp.StatusCode() == 503 {
 		logger.Logger.Error("Error from server!")
 		err := prettyPrintPocketBaseError(resp.Body())
 		if err != nil {

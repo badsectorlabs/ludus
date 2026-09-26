@@ -24,6 +24,12 @@
     source: http://192.0.2.2:8081/repository/raw/install.ps1
   when: not choco_test.failed
 
+- name: Disable Chocolatey package repository optimizations for Nexus compatibility
+  chocolatey.chocolatey.win_chocolatey_feature:
+    name: usePackageRepositoryOptimizations
+    state: disabled
+  when: not choco_test.failed
+
 - name: Install Additional Tools
   chocolatey.chocolatey.win_chocolatey:
     name:

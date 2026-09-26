@@ -1,3 +1,5 @@
+offline-*
+TEST-PLAN.md
 .gograph
 .ansible-home
 .ansible-tmp

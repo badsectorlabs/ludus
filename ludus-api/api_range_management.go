@@ -140,7 +140,7 @@ func deleteRangeResources(targetRange *models.Range, force bool, e *core.Request
 			return fmt.Errorf("failed to get VMs for range: %w", err)
 		}
 		for _, vm := range vms {
-			if err := destroyVM(ctx, proxmoxClient, int(vm.VMID)); err != nil {
+			if err := server.DestroyVM(ctx, proxmoxClient, targetRange.RangeId(), int(vm.VMID)); err != nil {
 				return fmt.Errorf("failed to destroy VM %d: %w", int(vm.VMID), err)
 			}
 			destroyedVMs = true
@@ -244,6 +244,8 @@ func DeleteRangeVMs(e *core.RequestEvent) error {
 	rangeRecord.SetProxyRecord(rangeRecordRaw)
 
 	logger.Debug("DeleteRangeVMs for range ID: " + rangeRecord.RangeId())
+	previousRangeState := rangeRecord.RangeState()
+	destroyedVMs := false
 
 	// Set range state to "DESTROYING"
 	rangeRecord.SetRangeState(LudusRangeStateDestroying)
@@ -269,9 +271,25 @@ func DeleteRangeVMs(e *core.RequestEvent) error {
 	logger.Debug(fmt.Sprintf("Destroying %d VMs for range %s", len(vms), rangeRecord.RangeId()))
 	for _, vm := range vms {
 		logger.Debug(fmt.Sprintf("Destroying VM %d", int(vm.VMID)))
-		err = destroyVM(ctx, proxmoxClient, int(vm.VMID))
+		err = server.DestroyVM(ctx, proxmoxClient, rangeRecord.RangeId(), int(vm.VMID))
 		if err != nil {
 			logger.Error(fmt.Sprintf("Error destroying VM %d: %s", int(vm.VMID), err.Error()))
+			// A lifecycle hook can veto deletion. Do not report success or
+			// change range/testing state when a provider rejected cleanup.
+			// Ordinary Proxmox errors retain the historical best-effort behavior.
+			var hookErr *vmDeleteHookError
+			if errors.As(err, &hookErr) {
+				rangeRecord.SetRangeState(previousRangeState)
+				if destroyedVMs {
+					rangeRecord.SetRangeState(LudusRangeStateError)
+				}
+				if saveErr := e.App.Save(rangeRecord); saveErr != nil {
+					return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to destroy VM %d: %s; unable to save range state: %s", int(vm.VMID), err.Error(), saveErr.Error()))
+				}
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to destroy VM %d: %s", int(vm.VMID), err.Error()))
+			}
+		} else {
+			destroyedVMs = true
 		}
 	}
 
@@ -957,8 +975,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 
 		err := RunAccessControlPlaybook(e, targetRange)
 		if err != nil {
-			sourceUserObject.Set("ranges-", targetRange.Id)
-			e.App.Save(sourceUserObject)
+			if rollbackErr := restoreUserRangeMembership(e.App, sourceUserRecord.Id, targetRange.Id, false); rollbackErr != nil {
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("%v; unable to restore range access: %v", err, rollbackErr))
+			}
 			if errors.Is(err, ErrRangeRouterPoweredOff) {
 				return JSONError(e, http.StatusConflict, err.Error())
 			}
@@ -968,8 +987,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 		// Give the user access to the proxmox pool for the range
 		err = giveUserAccessToRange(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId(), rangeNumber)
 		if err != nil {
-			sourceUserObject.Set("ranges-", targetRange.Id)
-			e.App.Save(sourceUserObject)
+			if rollbackErr := restoreUserRangeMembership(e.App, sourceUserRecord.Id, targetRange.Id, false); rollbackErr != nil {
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("%v; unable to restore range access: %v", err, rollbackErr))
+			}
 			return JSONError(e, http.StatusInternalServerError, "Unable to give user access to pool: "+err.Error())
 		}
 
@@ -985,8 +1005,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 
 		err := RunAccessControlPlaybook(e, targetRange)
 		if err != nil {
-			sourceUserObject.Set("ranges+", targetRange.Id)
-			e.App.Save(sourceUserObject)
+			if rollbackErr := restoreUserRangeMembership(e.App, sourceUserRecord.Id, targetRange.Id, true); rollbackErr != nil {
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("%v; unable to restore range access: %v", err, rollbackErr))
+			}
 			if errors.Is(err, ErrRangeRouterPoweredOff) {
 				return JSONError(e, http.StatusConflict, err.Error())
 			}
@@ -995,8 +1016,9 @@ func AssignOrRevokeRangeAccess(e *core.RequestEvent, actionVerb string, force bo
 
 		err = removeUserAccessFromRange(sourceUserObject.ProxmoxUsername(), sourceUserObject.ProxmoxRealm(), targetRange.RangeId(), rangeNumber)
 		if err != nil {
-			sourceUserObject.Set("ranges+", targetRange.Id)
-			e.App.Save(sourceUserObject)
+			if rollbackErr := restoreUserRangeMembership(e.App, sourceUserRecord.Id, targetRange.Id, true); rollbackErr != nil {
+				return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("%v; unable to restore range access: %v", err, rollbackErr))
+			}
 			return JSONError(e, http.StatusInternalServerError, "Unable to remove user access from pool: "+err.Error())
 		}
 

@@ -248,7 +248,7 @@ func mainList(ctx context.Context, client *proxmox.Client) map[string]interface{
 	hostVars := make(map[string]map[string]interface{})
 
 	env := loadLudusEnv()
-	groupMap, poolGroups, validVMIDs := loadPoolState(ctx, client, env)
+	groupMap, poolGroups, validVMIDs, poolMemberVMIDs := loadPoolState(ctx, client, env)
 
 	// 1 CALL: All cluster resources, filtered server-side to qemu/lxc
 	resources, err := fetchVMResources(ctx, client)
@@ -296,6 +296,8 @@ func mainList(ctx context.Context, client *proxmox.Client) map[string]interface{
 	}
 
 	wg.Wait()
+
+	mergePoolMemberNames(groupMap, poolMemberVMIDs, hostVars)
 
 	// Build Dynamic Groups from resolved hostVars
 	for hName, hVars := range hostVars {
@@ -356,10 +358,11 @@ func mainList(ctx context.Context, client *proxmox.Client) map[string]interface{
 	return results
 }
 
-func loadPoolState(ctx context.Context, client *proxmox.Client, env ludusEnv) (map[string][]string, map[string]bool, map[string]bool) {
+func loadPoolState(ctx context.Context, client *proxmox.Client, env ludusEnv) (map[string][]string, map[string]bool, map[string]bool, map[string][]string) {
 	groupMap := make(map[string][]string)
 	poolGroups := make(map[string]bool)
 	validVMIDs := make(map[string]bool)
+	poolMemberVMIDs := make(map[string][]string)
 
 	// Ensure the requested range always exists as a group even if the pool is
 	// missing or empty. This keeps playbook limits stable without exposing other
@@ -370,17 +373,17 @@ func loadPoolState(ctx context.Context, client *proxmox.Client, env ludusEnv) (m
 	}
 
 	if rangeFilterEnabled(env) {
-		loadPoolMembers(ctx, client, env.RangeID, env, true, groupMap, poolGroups, validVMIDs)
+		loadPoolMembers(ctx, client, env.RangeID, env, true, groupMap, poolGroups, validVMIDs, poolMemberVMIDs)
 		if env.UserIsAdmin {
-			loadPoolMembers(ctx, client, "ADMIN", env, true, groupMap, poolGroups, validVMIDs)
+			loadPoolMembers(ctx, client, "ADMIN", env, true, groupMap, poolGroups, validVMIDs, poolMemberVMIDs)
 		}
-		return groupMap, poolGroups, validVMIDs
+		return groupMap, poolGroups, validVMIDs, poolMemberVMIDs
 	}
 
 	pools, err := client.Pools(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to fetch pools: %v\n", err)
-		return groupMap, poolGroups, validVMIDs
+		return groupMap, poolGroups, validVMIDs, poolMemberVMIDs
 	}
 
 	for _, p := range pools {
@@ -391,17 +394,17 @@ func loadPoolState(ctx context.Context, client *proxmox.Client, env ludusEnv) (m
 
 		groupMap[poolID] = []string{}
 		poolGroups[poolID] = true
-		loadPoolMembers(ctx, client, poolID, env, true, groupMap, poolGroups, validVMIDs)
+		loadPoolMembers(ctx, client, poolID, env, true, groupMap, poolGroups, validVMIDs, poolMemberVMIDs)
 	}
 
-	return groupMap, poolGroups, validVMIDs
+	return groupMap, poolGroups, validVMIDs, poolMemberVMIDs
 }
 
 func rangeFilterEnabled(env ludusEnv) bool {
 	return env.RangeID != "" && !env.ReturnAllRanges
 }
 
-func loadPoolMembers(ctx context.Context, client *proxmox.Client, poolID string, env ludusEnv, emitPoolGroup bool, groupMap map[string][]string, poolGroups map[string]bool, validVMIDs map[string]bool) {
+func loadPoolMembers(ctx context.Context, client *proxmox.Client, poolID string, env ludusEnv, emitPoolGroup bool, groupMap map[string][]string, poolGroups map[string]bool, validVMIDs map[string]bool, poolMemberVMIDs map[string][]string) {
 	if poolID == "" {
 		return
 	}
@@ -415,19 +418,40 @@ func loadPoolMembers(ctx context.Context, client *proxmox.Client, poolID string,
 		}
 		poolGroups[poolID] = true
 	}
-	processMembers(pool.Members, poolID, env, emitPoolGroup, groupMap, validVMIDs)
+	processMembers(pool.Members, poolID, env, emitPoolGroup, groupMap, validVMIDs, poolMemberVMIDs)
 }
 
-func processMembers(members []proxmox.ClusterResource, poolID string, env ludusEnv, emitPoolGroup bool, groupMap map[string][]string, validVMIDs map[string]bool) {
+func processMembers(members []proxmox.ClusterResource, poolID string, env ludusEnv, emitPoolGroup bool, groupMap map[string][]string, validVMIDs map[string]bool, poolMemberVMIDs map[string][]string) {
 	for _, m := range members {
 		if m.Type != "qemu" && m.Type != "lxc" {
 			continue
 		}
-		if emitPoolGroup && m.Template != 1 {
-			groupMap[poolID] = append(groupMap[poolID], m.Name)
+		vmid := fmt.Sprintf("%d", m.VMID)
+		if emitPoolGroup {
+			poolMemberVMIDs[poolID] = append(poolMemberVMIDs[poolID], vmid)
+			if m.Template != 1 && m.Name != "" {
+				groupMap[poolID] = append(groupMap[poolID], m.Name)
+			}
 		}
 		if rangeFilterEnabled(env) && (poolID == env.RangeID || (env.UserIsAdmin && poolID == "ADMIN")) {
-			validVMIDs[fmt.Sprintf("%d", m.VMID)] = true
+			validVMIDs[vmid] = true
+		}
+	}
+}
+
+func mergePoolMemberNames(groupMap map[string][]string, poolMemberVMIDs map[string][]string, hostVars map[string]map[string]interface{}) {
+	namesByVMID := make(map[string]string, len(hostVars))
+	for hostName, variables := range hostVars {
+		if vmid, ok := variables["proxmox_vmid"]; ok {
+			namesByVMID[fmt.Sprintf("%v", vmid)] = hostName
+		}
+	}
+
+	for poolID, vmids := range poolMemberVMIDs {
+		for _, vmid := range vmids {
+			if hostName := namesByVMID[vmid]; hostName != "" {
+				groupMap[poolID] = append(groupMap[poolID], hostName)
+			}
 		}
 	}
 }
@@ -542,7 +566,7 @@ func mainHost(ctx context.Context, client *proxmox.Client, targetHost string) ma
 	env := loadLudusEnv()
 	validVMIDs := map[string]bool{}
 	if rangeFilterEnabled(env) {
-		_, _, validVMIDs = loadPoolState(ctx, client, env)
+		_, _, validVMIDs, _ = loadPoolState(ctx, client, env)
 	}
 
 	resources, err := fetchVMResources(ctx, client)
@@ -627,10 +651,8 @@ func mustCIDR(s string) *net.IPNet {
 
 func checkIPAddresses(env ludusEnv, vmName string, ipAddresses []string) string {
 	var configIP string
-	forceIP := false
 	if vm := env.findLudusVM(vmName); vm != nil && env.RangeNumber != "" {
 		configIP = fmt.Sprintf("10.%s.%d.%d", env.RangeNumber, vm.VLAN, vm.IPLastOctet)
-		forceIP = vm.ForceIP
 	}
 
 	var validIPs []string
@@ -657,7 +679,7 @@ func checkIPAddresses(env ludusEnv, vmName string, ipAddresses []string) string 
 		return validIPs[0]
 	}
 
-	if forceIP && configIP != "" {
+	if configIP != "" {
 		return configIP
 	}
 

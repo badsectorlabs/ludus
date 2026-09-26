@@ -4,54 +4,52 @@ title: Proxmox
 
 # Proxmox
 
+Ludus runs its server components in an unprivileged LXC on an existing
+Proxmox VE 8 or 9 cluster. Range machines remain normal Proxmox VMs.
+
+Follow the [Proxmox LXC installer](./proxmox-lxc.md) guide for interactive,
+automated, and offline installation instructions.
+
 :::warning
 
-Using an existing Proxmox installation may cause issues with existing customizations as it is impossible for Ludus to account for every Proxmox setup. If starting from scratch the [bare metal Debian 12/13 install](./bare-metal) is recommended.
+An existing Proxmox installation may contain storage, SDN, firewall, or network
+configuration that conflicts with Ludus. Back up the cluster configuration and
+review the installer before running it.
 
 :::
 
-Existing Proxmox 8/9 servers can install Ludus without a reboot.
+## What the installer changes
 
-Ludus will make the following changes - **do NOT do any actions below yourself before running the install script**:
+The LXC installer:
 
-- Extract files to `/opt/ludus`
-- Install the following packages to the Proxmox host: ansible, packer, dnsmasq, sshpass, curl, jq, iptables-persistent, gpg-agent, dbus, dbus-user-session, and vim
-- Install the following python packages to the host: proxmoxer, requests, netaddr, pywinrm, dnspython, and jmespath
-- Create the proxmox groups `ludus_users` and `ludus_admins`
-- Create the proxmox pools `SHARED` and `ADMIN`
-- Create a wireguard server wg0 with IP range `198.51.100.0/24`
-- Create an interface `vmbr1000` with IP range 192.0.2.0/24 that NATs traffic
-- Create user ranges with IPs in the 10.0.0.0/16 network starting at 10.2.0.0/8 and incrementing the second octet for each user
-- Create user interfaces starting at `vmbr1002` incrementing for each user
-- Create the pam user `ludus` and pam users for all Ludus users added
-- Create the `ludus-admin` and `ludus` systemd services that listen on 127.0.0.1:8081 and 0.0.0.0:8080 (configurable via `admin_port` and `port` in `config.yml`)
+- creates or validates the Proxmox API token used by Ludus
+- creates the `ludus` SDN zone and the `ludusnat` VNet
+- creates an unprivileged LXC with management and Ludus NAT interfaces
+- stores the cluster endpoints and token in `/opt/ludus/config.yml` inside the
+  container
+- starts the Ludus API, admin API, and WireGuard services in the container
 
-## Install
+It does not install Ansible, Packer, Python packages, or Ludus services directly
+on every Proxmox node. Those dependencies are part of the LXC appliance.
 
-1. Run the install script. Be careful to choose your datastores correctly!
+## Storage
 
-```shell
-# All-in-one command
-curl -s https://ludus.cloud/install | bash
+Choose separate values as needed for:
 
-# If you want to check out the install script
-curl https://ludus.cloud/install > install.sh
-cat install.sh
-chmod +x install.sh
-./install.sh
-```
+- the LXC root filesystem
+- range VM disks and templates
+- ISO files used by Packer
 
-2. Follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user.md).
+The range VM and ISO stores must be available on every node where Ludus builds
+or runs VMs. If you change storage after installation, update
+`/opt/ludus/config.yml` inside the LXC and restart `ludus` and `ludus-admin`.
 
-
-If you made a mistake, you can update the values in `/opt/ludus/config.yml` to reflect the install.
-After updating the config, restart the ludus processes with `systemctl restart ludus-admin` and `systemctl restart ludus`.
-
-If you changed the datastores you are using with Ludus, you will need to give permissions to the `ludus_users` and `ludus_admins` group. As root on your Promox host, run the following:
+Custom storage still needs the appropriate permissions for Ludus users:
 
 ```shell
-pveum acl modify /storage/<your new storage> -group ludus_users -roles DatastoreUser
-pveum acl modify /storage/<your new storage> -group ludus_admins -roles PVEDatastoreAdmin
+pveum acl modify /storage/<storage> -group ludus_users -roles DatastoreUser
+pveum acl modify /storage/<storage> -group ludus_admins -roles PVEDatastoreAdmin
 ```
 
-If you encounter networking issues like VMs not getting IP addresses or having internet access, see [this guide](../troubleshooting/network.md).
+If VMs do not receive addresses or cannot reach their router, see
+[Network troubleshooting](../troubleshooting/network.md).

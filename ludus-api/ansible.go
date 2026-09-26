@@ -10,6 +10,7 @@ import (
 	"io"
 	"ludusapi/models"
 	"maps"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -24,6 +25,68 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	yaml "sigs.k8s.io/yaml"
 )
+
+// activeProxmoxEndpoint returns the URL of the currently-active Proxmox API
+// endpoint from the failover client, falling back to the first configured
+// endpoint if the client is unavailable.
+func activeProxmoxEndpoint() string {
+	ep := ServerConfiguration.ProxmoxEndpoints[0]
+	if pc, err := GetRootPVEClient(); err == nil {
+		ep = pc.ActiveEndpoint()
+	}
+	return ep
+}
+
+// proxmoxAPIVars returns the Proxmox connection extra-vars that every
+// playbook invocation needs, derived from the active failover endpoint.
+func proxmoxAPIVars() map[string]interface{} {
+	ep := activeProxmoxEndpoint()
+	u, _ := url.Parse(ep)
+	hosts := []string{ServerConfiguration.LudusNATIP, ServerConfiguration.LudusNATGateway}
+	for _, e := range ServerConfiguration.ProxmoxEndpoints {
+		if pu, err := url.Parse(e); err == nil {
+			hosts = append(hosts, pu.Hostname())
+		}
+	}
+	return map[string]interface{}{
+		"proxmox_url":          ep,
+		"proxmox_api_host":     u.Hostname(),
+		"proxmox_api_port":     u.Port(),
+		"proxmox_token_id":     ServerConfiguration.ProxmoxTokenID,
+		"proxmox_token_secret": ServerConfiguration.ProxmoxTokenSecret,
+		"ludus_nat_ip":         ServerConfiguration.LudusNATIP,
+		"ludus_nat_gateway":    ServerConfiguration.LudusNATGateway,
+		"ludus_nat_interface":  ServerConfiguration.LudusNATInterface,
+		"ludus_infra_deny_ips": hosts,
+	}
+}
+
+// writeSecretExtraVarsFile pops proxmox_token_secret from vars, writes it to a
+// 0600 temp JSON file for use as `--extra-vars @file`, and returns the path.
+// This keeps the root API token secret off the ansible-playbook argv (visible
+// in ps). Caller must os.Remove the returned path.
+func writeSecretExtraVarsFile(vars map[string]interface{}) (string, error) {
+	secretVars := map[string]interface{}{
+		"proxmox_token_secret": vars["proxmox_token_secret"],
+	}
+	delete(vars, "proxmox_token_secret")
+	f, err := os.CreateTemp("", "ludus-vars-*.json")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(f.Name(), 0600); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := json.NewEncoder(f).Encode(secretVars); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	f.Close()
+	return f.Name(), nil
+}
 
 func getMergedDefaults(serverConfigPath, rangeConfigPath string) map[string]interface{} {
 	mergedDefaults := map[string]interface{}{}
@@ -123,14 +186,43 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		// Pass license entitlements to ansible
 		"ludus_entitlements": server.Entitlements,
 		"wireguard_port":     ServerConfiguration.WireguardPort,
-		// Cluster mode target node settings
+		// Per-VM node placement
 		"range_default_target_node": rangeDefaultTargetNode,
 		"vm_target_nodes":           vmTargetNodes,
-		"ludus_cluster_mode":        UseSDN,
 	}
+	maps.Copy(userVars, proxmoxAPIVars())
 
 	// Merge userVars with any extraVars provided
 	maps.Copy(userVars, extraVars)
+
+	if s.hasStartVMHooks() || s.hasVMAddressHooks() {
+		// Select hooks from plugin configuration before deployment,
+		// independently of whether the privileged service is reachable.
+		vmNames := make([]string, 0, len(vmTargetNodes)+1)
+		for name := range vmTargetNodes {
+			if name != "" {
+				vmNames = append(vmNames, name)
+			}
+		}
+		if routerName, routerErr := GetRouterVMName(usersRange); routerErr == nil {
+			vmNames = append(vmNames, routerName)
+		}
+		hookContext, cancelHookSelection := context.WithTimeout(context.Background(), 10*time.Second)
+		hooks, hookErr := s.deploymentVMHooks(hookContext, usersRange.RangeId(), vmNames)
+		cancelHookSelection()
+		if hookErr != nil {
+			return "", hookErr
+		}
+		userVars["ludus_vm_hooks"] = hooks
+	}
+
+	// proxmox_token_secret must not appear on argv (visible in ps).
+	// Move it to a 0600 temp JSON file passed via --extra-vars @file.
+	secretFilePath, err := writeSecretExtraVarsFile(userVars)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(secretFilePath)
 
 	// root has no range config and cannot use the dynamic inventory
 	var inventory string
@@ -149,6 +241,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	if err != nil {
 		return "", err
 	}
+	serverAndUserConfigs = append(serverAndUserConfigs, "@"+secretFilePath)
 
 	// Check if the user specified a limit, and if so, make sure it has 'localhost' in it
 	if limit != "" {
@@ -214,7 +307,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		// Inject vars for the dynamic inventory
 		execute.WithEnvVar("PROXMOX_NODE", ServerConfiguration.ProxmoxNode),
 		execute.WithEnvVar("PROXMOX_INVALID_CERT", strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert)),
-		execute.WithEnvVar("PROXMOX_URL", ServerConfiguration.ProxmoxURL),
+		execute.WithEnvVar("PROXMOX_URL", activeProxmoxEndpoint()),
 		execute.WithEnvVar("PROXMOX_HOSTNAME", ServerConfiguration.ProxmoxHostname),
 		// Inject creds for the dynamic inventory
 		execute.WithEnvVar("PROXMOX_USERNAME", user.ProxmoxUsername()+"@"+user.ProxmoxRealm()),
@@ -303,7 +396,22 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 // request event or range context.
 func runUserManagementPlaybookStandalone(playbookPath string, extraVars map[string]interface{}) (string, error) {
 	buff := new(bytes.Buffer)
-	serverAndUserConfigs := []string{fmt.Sprintf("@%s/config.yml", ludusInstallPath), fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath)}
+
+	userVars := proxmoxAPIVars()
+	maps.Copy(userVars, extraVars)
+
+	// proxmox_token_secret must not appear on argv (visible in ps).
+	secretFilePath, err := writeSecretExtraVarsFile(userVars)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(secretFilePath)
+
+	serverAndUserConfigs := []string{
+		fmt.Sprintf("@%s/config.yml", ludusInstallPath),
+		fmt.Sprintf("@%s/ansible/server-config.yml", ludusInstallPath),
+		"@" + secretFilePath,
+	}
 
 	ansiblePlaybookConnectionOptions := &options.AnsibleConnectionOptions{
 		Connection: "local",
@@ -312,7 +420,7 @@ func runUserManagementPlaybookStandalone(playbookPath string, extraVars map[stri
 	ansiblePlaybookOptions := &playbook.AnsiblePlaybookOptions{
 		Inventory:     "127.0.0.1",
 		ExtraVarsFile: serverAndUserConfigs,
-		ExtraVars:     extraVars,
+		ExtraVars:     userVars,
 		Tags:          "",
 		Verbose:       false,
 	}
@@ -336,7 +444,7 @@ func runUserManagementPlaybookStandalone(playbookPath string, extraVars map[stri
 		execute.WithEnvVar("ANSIBLE_HOME", fmt.Sprintf("%s/install", ludusInstallPath)),
 		execute.WithEnvVar("PROXMOX_NODE", ServerConfiguration.ProxmoxNode),
 		execute.WithEnvVar("PROXMOX_INVALID_CERT", strconv.FormatBool(ServerConfiguration.ProxmoxInvalidCert)),
-		execute.WithEnvVar("PROXMOX_URL", ServerConfiguration.ProxmoxURL),
+		execute.WithEnvVar("PROXMOX_URL", activeProxmoxEndpoint()),
 		execute.WithEnvVar("PROXMOX_HOSTNAME", ServerConfiguration.ProxmoxHostname),
 	)
 
@@ -360,7 +468,7 @@ func runUserManagementPlaybookStandalone(playbookPath string, extraVars map[stri
 
 // RunAddUserPlaybookStandalone runs the add-user playbook without a request event.
 // Used when creating the initial admin user during InitDb. extraVars must include:
-// username, user_id, user_number, proxmox_public_ip, user_is_admin, proxmox_password.
+// username, user_id, user_number.
 func RunAddUserPlaybookStandalone(extraVars map[string]interface{}) (string, error) {
 	return runUserManagementPlaybookStandalone(
 		ludusInstallPath+"/ansible/user-management/add-user.yml",
@@ -432,10 +540,32 @@ func RunPlaybookWithTag(e *core.RequestEvent, playbook string, tag string, verbo
 	return server.RunAnsiblePlaybookWithVariables(e, playbookPathArray, nil, nil, tag, verbose, "")
 }
 
-// A helper to expose RunAnsiblePlaybookWithVariables to plugins
+// RunAnsiblePlaybookWithVariables archives each plugin playbook run through the host.
 func RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbook string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
+	usersRange, err := GetRange(e)
+	if err != nil {
+		return "", err
+	}
+	client, err := PluginPocketBase()
+	if err != nil {
+		return "", err
+	}
+	user := e.Get("user").(*models.User)
+	logID, err := client.startRangeLogHistory(e.Request.Context(), user.Id, usersRange.Id)
+	if err != nil {
+		return "", err
+	}
+
 	playbookPathArray := []string{fmt.Sprintf("%s/ansible/range-management/%s", ludusInstallPath, playbook)}
-	return server.RunAnsiblePlaybookWithVariables(e, playbookPathArray, extraVarsFiles, extraVars, tags, verbose, limit)
+	output, runErr := server.RunAnsiblePlaybookWithVariables(e, playbookPathArray, extraVarsFiles, extraVars, tags, verbose, limit)
+	status := "success"
+	if runErr != nil {
+		status = "failure"
+	}
+	// The playbook can outlive the caller's HTTP connection. Still archive it
+	// before another VM in this request overwrites the shared range log.
+	archiveErr := client.finishRangeLogHistory(context.WithoutCancel(e.Request.Context()), logID, status)
+	return output, errors.Join(runErr, archiveErr)
 }
 
 // Return true if the role exists for the user, or false if it doesn't
@@ -722,17 +852,6 @@ func computeTargetNodes(e *core.RequestEvent, rangeID string) (string, map[strin
 	}
 	if config.Router != nil {
 		config.Router.VMName = rangeIDTemplateRegex.ReplaceAllString(config.Router.VMName, rangeID)
-	}
-
-	// Not in cluster mode, use the configured node
-	if !UseSDN {
-		for _, vm := range config.Ludus {
-			vmTargetNodes[vm.VMName] = ServerConfiguration.ProxmoxNode
-		}
-		if config.Router != nil {
-			vmTargetNodes[config.Router.VMName] = ServerConfiguration.ProxmoxNode
-		}
-		return ServerConfiguration.ProxmoxNode, vmTargetNodes
 	}
 
 	// Determine the default target node

@@ -47,6 +47,7 @@
     # "The dependency service or group failed to start.\"\r\n", "reboot_required": true}
     - name: Reboot the Additional DC
       ansible.windows.win_reboot:
+        reboot_timeout: 1800
     - name: Wait for WinRM to be available
       ansible.builtin.wait_for:
         host: "{{ ansible_host }}"

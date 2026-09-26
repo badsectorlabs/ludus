@@ -61,13 +61,6 @@ variable "proxmox_url" {
 variable "proxmox_host" {
   type = string
 }
-variable "proxmox_username" {
-  type = string
-}
-variable "proxmox_password" {
-  type      = string
-  sensitive = true
-}
 variable "proxmox_storage_pool" {
   type = string
 }
@@ -83,36 +76,48 @@ variable "proxmox_pool" {
 variable "iso_storage_pool" {
   type = string
 }
+variable "airgapped_install" {
+  type    = bool
+  default = false
+}
 variable "ansible_home" {
   type = string
 }
 variable "ludus_nat_interface" {
   type = string
 }
+variable "packer_http_bind_address" {
+  type = string
+}
 ####
 
 locals {
   template_description = "Debian 13 template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => debian:debian"
+  airgapped_iso_file = "${var.iso_storage_pool}:iso/debian-13.7.0-amd64-netinst.iso"
 }
 
 source "proxmox-iso" "debian13" {
   boot_command = [
-    "<down><tab>", # non-graphical install
-    "preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/debian-13-preseed.cfg ",
-    "language=en locale=en_US.UTF-8 ",
-    "country=US keymap=us ",
-    "hostname=debian13 domain=local ",
+    "<down><tab><wait>", # non-graphical install
+    "preseed/url=http://${var.packer_http_bind_address}:{{ .HTTPPort }}/debian-13-preseed.cfg ",
+    "<wait>ludus_ca_url=http://${var.packer_http_bind_address}:{{ .HTTPPort }}/ludus-injected-ca.crt ",
+    "<wait>language=en locale=en_US.UTF-8 ",
+    "<wait>country=US keymap=us ",
+    "<wait>hostname=debian13 domain=local ",
     "<enter><wait>",
   ]
   boot_key_interval = "100ms"
-  http_directory    = "./http"
+  boot_wait = "15s"
+  http_directory = "./http"
+  http_bind_address = "${var.packer_http_bind_address}"
 
   boot_iso {
     type              = "ide"
-    iso_checksum      = "${var.iso_checksum}"
-    iso_url           = "${var.iso_url}"
-    iso_storage_pool  = "${var.iso_storage_pool}"
-    iso_download_pve  = true
+    iso_checksum      = var.iso_checksum
+    iso_file          = var.airgapped_install ? local.airgapped_iso_file : null
+    iso_url           = var.airgapped_install ? null : var.iso_url
+    iso_storage_pool  = var.iso_storage_pool
+    iso_download_pve  = var.airgapped_install ? null : true
     unmount           = true
     keep_cdrom_device = false
   }
@@ -138,10 +143,8 @@ source "proxmox-iso" "debian13" {
   }
   node                 = "${var.proxmox_host}"
   os                   = "${var.os}"
-  password             = "${var.proxmox_password}"
   proxmox_url          = "${var.proxmox_url}"
   template_description = "${local.template_description}"
-  username             = "${var.proxmox_username}"
   vm_name              = "${var.vm_name}"
   ssh_password         = "${var.ssh_password}"
   ssh_username         = "${var.ssh_username}"
@@ -153,6 +156,15 @@ build {
   sources = ["source.proxmox-iso.debian13"]
 
   provisioner "ansible" {
+    playbook_file = "../ansible/inject-ca-certificate.yml"
+    use_proxy     = false
+    user          = "${var.ssh_username}"
+    extra_arguments = ["--extra-vars", "{ansible_python_interpreter: /usr/bin/python3, ansible_password: ${var.ssh_password}, ansible_sudo_pass: ${var.ssh_password}}"]
+    ansible_env_vars = ["ANSIBLE_HOME=${var.ansible_home}", "ANSIBLE_LOCAL_TEMP=${var.ansible_home}/tmp", "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR=${var.ansible_home}/pc", "ANSIBLE_SSH_CONTROL_PATH_DIR=${var.ansible_home}/cp"]
+    skip_version_check = true
+  }
+
+  provisioner "ansible" {
     playbook_file      = "../ansible/reset-ssh-host-keys.yml"
     use_proxy          = false
     user               = "${var.ssh_username}"
@@ -161,4 +173,3 @@ build {
     skip_version_check = true
   }
 }
-

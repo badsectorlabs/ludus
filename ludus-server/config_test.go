@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v2"
 )
 
 func TestUserProvisioningConfigDefaults(t *testing.T) {
@@ -13,6 +15,7 @@ func TestUserProvisioningConfigDefaults(t *testing.T) {
 	})
 	ludusPath = t.TempDir()
 	configPath := filepath.Join(ludusPath, "config.yml")
+	const platformConfig = "proxmox_endpoints: [https://10.0.0.5:8006]\nproxmox_token_id: root@pam!test\nproxmox_token_secret: test-secret\n"
 
 	for _, scenario := range []struct {
 		name      string
@@ -27,7 +30,7 @@ func TestUserProvisioningConfigDefaults(t *testing.T) {
 		{"removing opt outs restores defaults", "proxmox_node: test\n", true, true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			if err := os.WriteFile(configPath, []byte(scenario.content), 0600); err != nil {
+			if err := os.WriteFile(configPath, []byte(platformConfig+scenario.content), 0600); err != nil {
 				t.Fatal(err)
 			}
 			checkConfig()
@@ -37,8 +40,12 @@ func TestUserProvisioningConfigDefaults(t *testing.T) {
 			}
 
 			// Rewriting older configs must preserve defaults, and explicit opt outs
-			// must survive an installer save and reload.
-			if err := writeConfigToFile(config, configPath); err != nil {
+			// must survive a YAML round trip and reload.
+			data, err := yaml.Marshal(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(configPath, data, 0600); err != nil {
 				t.Fatal(err)
 			}
 			config.SSORequireExistingUser = !scenario.wantSSO

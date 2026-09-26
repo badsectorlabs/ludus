@@ -148,7 +148,7 @@ func TestCheckIPAddresses(t *testing.T) {
 		}
 	})
 
-	t.Run("no forceIP and no valid IPs returns empty", func(t *testing.T) {
+	t.Run("configured IP is the fallback when no reported IP is valid", func(t *testing.T) {
 		env := ludusEnv{
 			RangeID:     "TEST7",
 			RangeNumber: "7",
@@ -157,8 +157,8 @@ func TestCheckIPAddresses(t *testing.T) {
 			},
 		}
 		ips := []string{"127.0.0.1", "172.20.0.5"}
-		if got := checkIPAddresses(env, "TEST7-db", ips); got != "" {
-			t.Errorf("got %q, want empty", got)
+		if got := checkIPAddresses(env, "TEST7-db", ips); got != "10.7.20.9" {
+			t.Errorf("got %q, want configured IP 10.7.20.9", got)
 		}
 	})
 
@@ -218,13 +218,14 @@ func TestProcessMembers(t *testing.T) {
 	t.Run("collects qemu/lxc names but skips templates and storage", func(t *testing.T) {
 		groupMap := map[string][]string{}
 		validVMIDs := map[string]bool{}
+		poolMemberVMIDs := map[string][]string{}
 		members := []proxmox.ClusterResource{
 			{Type: "qemu", Name: "vm-a", VMID: 100, Template: 0},
 			{Type: "qemu", Name: "vm-tmpl", VMID: 101, Template: 1},
 			{Type: "lxc", Name: "ct-a", VMID: 200},
 			{Type: "storage", Name: "local"},
 		}
-		processMembers(members, "POOL1", ludusEnv{}, true, groupMap, validVMIDs)
+		processMembers(members, "POOL1", ludusEnv{}, true, groupMap, validVMIDs, poolMemberVMIDs)
 
 		got := append([]string(nil), groupMap["POOL1"]...)
 		sort.Strings(got)
@@ -237,15 +238,33 @@ func TestProcessMembers(t *testing.T) {
 		}
 	})
 
+	t.Run("resolves unnamed pool members by VMID", func(t *testing.T) {
+		groupMap := map[string][]string{}
+		validVMIDs := map[string]bool{}
+		poolMemberVMIDs := map[string][]string{}
+		members := []proxmox.ClusterResource{
+			{Type: "qemu", VMID: 100},
+		}
+		processMembers(members, "POOL1", ludusEnv{}, true, groupMap, validVMIDs, poolMemberVMIDs)
+		hostVars := map[string]map[string]interface{}{
+			"vm-a": {"proxmox_vmid": float64(100)},
+		}
+		mergePoolMemberNames(groupMap, poolMemberVMIDs, hostVars)
+		if got := groupMap["POOL1"]; !reflect.DeepEqual(got, []string{"vm-a"}) {
+			t.Errorf("groupMap[POOL1] = %v, want [vm-a]", got)
+		}
+	})
+
 	t.Run("populates validVMIDs when poolID matches rangeID", func(t *testing.T) {
 		groupMap := map[string][]string{}
 		validVMIDs := map[string]bool{}
+		poolMemberVMIDs := map[string][]string{}
 		members := []proxmox.ClusterResource{
 			{Type: "qemu", Name: "vm-a", VMID: 100},
 			{Type: "lxc", Name: "ct-a", VMID: 200},
 		}
 		env := ludusEnv{RangeID: "RANGE7"}
-		processMembers(members, "RANGE7", env, true, groupMap, validVMIDs)
+		processMembers(members, "RANGE7", env, true, groupMap, validVMIDs, poolMemberVMIDs)
 		if !validVMIDs["100"] || !validVMIDs["200"] {
 			t.Errorf("expected vmids 100 and 200 marked valid, got %v", validVMIDs)
 		}
@@ -254,11 +273,12 @@ func TestProcessMembers(t *testing.T) {
 	t.Run("admin user collects ADMIN pool members under range filter", func(t *testing.T) {
 		groupMap := map[string][]string{}
 		validVMIDs := map[string]bool{}
+		poolMemberVMIDs := map[string][]string{}
 		members := []proxmox.ClusterResource{
 			{Type: "qemu", Name: "shared-router", VMID: 999},
 		}
 		env := ludusEnv{RangeID: "RANGE7", UserIsAdmin: true}
-		processMembers(members, "ADMIN", env, true, groupMap, validVMIDs)
+		processMembers(members, "ADMIN", env, true, groupMap, validVMIDs, poolMemberVMIDs)
 		if !validVMIDs["999"] {
 			t.Errorf("admin user should see ADMIN-pool members, got %v", validVMIDs)
 		}
@@ -267,11 +287,12 @@ func TestProcessMembers(t *testing.T) {
 	t.Run("non-admin under range filter does not see other pools", func(t *testing.T) {
 		groupMap := map[string][]string{}
 		validVMIDs := map[string]bool{}
+		poolMemberVMIDs := map[string][]string{}
 		members := []proxmox.ClusterResource{
 			{Type: "qemu", Name: "other-vm", VMID: 500},
 		}
 		env := ludusEnv{RangeID: "RANGE7"}
-		processMembers(members, "OTHER", env, false, groupMap, validVMIDs)
+		processMembers(members, "OTHER", env, false, groupMap, validVMIDs, poolMemberVMIDs)
 		if validVMIDs["500"] {
 			t.Errorf("non-admin should not see other pools, got %v", validVMIDs)
 		}
@@ -283,11 +304,12 @@ func TestProcessMembers(t *testing.T) {
 	t.Run("returnAllRanges disables vmid filtering bookkeeping", func(t *testing.T) {
 		groupMap := map[string][]string{}
 		validVMIDs := map[string]bool{}
+		poolMemberVMIDs := map[string][]string{}
 		members := []proxmox.ClusterResource{
 			{Type: "qemu", Name: "vm-a", VMID: 100},
 		}
 		env := ludusEnv{RangeID: "RANGE7", ReturnAllRanges: true}
-		processMembers(members, "RANGE7", env, true, groupMap, validVMIDs)
+		processMembers(members, "RANGE7", env, true, groupMap, validVMIDs, poolMemberVMIDs)
 		if len(validVMIDs) != 0 {
 			t.Errorf("returnAllRanges=true should leave validVMIDs empty, got %v", validVMIDs)
 		}

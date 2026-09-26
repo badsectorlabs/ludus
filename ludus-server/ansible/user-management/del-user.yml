@@ -10,12 +10,8 @@
         path: "{{ ludus_users_dir }}/{{ username }}"
         state: absent
 
-    - name: Remove the user from the remote host
-      ansible.builtin.user:
-        name: "{{ username }}"
-        shell: /bin/bash
-        state: absent
-        remove: true
+    # Proxmox user deletion is handled in Go via removeUserFromProxmox.
+    # No Linux system user is created for @pve realm users, so nothing to remove here.
 
     - name: Check for wg client public key
       ansible.builtin.stat:

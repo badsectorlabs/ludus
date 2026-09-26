@@ -200,9 +200,6 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 	if matchingUsers > 0 {
 		return fmt.Errorf("user with name %s already exists", proxmoxUsername)
 	}
-	if userExistsOnHostSystem(proxmoxUsername) {
-		return fmt.Errorf("username %s already exists on the host system", proxmoxUsername)
-	}
 	if poolExists(cfg.UserID) {
 		return fmt.Errorf("pool %s already exists", cfg.UserID)
 	}
@@ -220,7 +217,7 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 	user.SetPassword(cfg.Password)
 	user.SetIsAdmin(true)
 	user.SetProxmoxUsername(proxmoxUsername)
-	user.SetProxmoxRealm("pam")
+	user.SetProxmoxRealm(ServerConfiguration.ProxmoxUserRealm)
 	encryptedPassword, err := EncryptStringForDatabase(cfg.Password)
 	if err != nil {
 		return fmt.Errorf("encrypting password: %w", err)
@@ -231,8 +228,7 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 	err = app.RunInTransaction(func(txApp core.App) error {
 		defer func() {
 			if wasError {
-				removeUserFromHostSystem(user.ProxmoxUsername())
-				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
+				removeUserFromProxmox(user.ProxmoxUsername(), user.ProxmoxRealm())
 				removePool(user.UserId())
 				defaultRangeRecord, findErr := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
 				if findErr == nil && defaultRangeRecord != nil {
@@ -242,65 +238,9 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 			}
 		}()
 
-		user.SetUserNumber(findNextAvailableUserNumber(txApp))
-		if user.UserNumber() > 150 {
+		if _, _, err := provisionNewUser(txApp, user, cfg.Password); err != nil {
 			wasError = true
-			return fmt.Errorf("cannot create more than 150 users")
-		}
-
-		if err := CreateDefaultUserRangeForBootstrap(txApp, user); err != nil {
-			wasError = true
-			return fmt.Errorf("creating default range: %w", err)
-		}
-
-		extraVars := map[string]interface{}{
-			"username":               user.ProxmoxUsername(),
-			"user_id":                user.UserId(),
-			"user_number":            user.UserNumber(),
-			"proxmox_public_ip":      ServerConfiguration.ProxmoxPublicIP,
-			"user_is_admin":          true,
-			"proxmox_password":       cfg.Password,
-			"user_has_default_range": user.DefaultRangeId() != "",
-		}
-		output, err := RunAddUserPlaybookStandalone(extraVars)
-		if err != nil {
-			wasError = true
-			return fmt.Errorf("running add-user playbook: %w (output: %s)", err, output)
-		}
-
-		apiKey := GenerateAPIKey(user.UserId())
-		hashedAPIKey, err := HashString(apiKey)
-		if err != nil {
-			wasError = true
-			return fmt.Errorf("hashing API key: %w", err)
-		}
-		user.SetHashedApikey(hashedAPIKey)
-
-		tokenID, tokenSecret, err := createProxmoxAPITokenForUserWithoutContext(user.ProxmoxUsername(), user.ProxmoxRealm(), cfg.Password)
-		if err != nil {
-			wasError = true
-			return fmt.Errorf("creating Proxmox API token: %w", err)
-		}
-		encryptedTokenSecret, err := EncryptStringForDatabase(tokenSecret)
-		if err != nil {
-			wasError = true
-			return fmt.Errorf("encrypting Proxmox token: %w", err)
-		}
-		user.SetProxmoxTokenId(tokenID)
-		user.SetProxmoxTokenSecret(encryptedTokenSecret)
-
-		// Grant user and ludus_admins Proxmox pool/SDN access to the user's default range
-		// (required for range deployment, especially SDN.Use in cluster mode)
-		if user.DefaultRangeId() != "" {
-			if err := GrantUserProxmoxAccessToDefaultRange(txApp, user); err != nil {
-				wasError = true
-				return fmt.Errorf("granting Proxmox access to default range: %w", err)
-			}
-		}
-
-		if err := txApp.Save(user); err != nil {
-			wasError = true
-			return fmt.Errorf("saving user: %w", err)
+			return fmt.Errorf("provisioning initial admin: %w", err)
 		}
 
 		os.MkdirAll(fmt.Sprintf("%s/users/%s", ludusInstallPath, user.ProxmoxUsername()), 0700)
@@ -328,7 +268,6 @@ func createInitialAdminFromFile(initialAdminPath string) error {
 		}
 	}
 	logger.Info("Successfully created initial admin user")
-	Run("ludus-install-status", "/tmp", "/tmp/ludus-install-status.log")
 	return nil
 }
 
@@ -538,9 +477,6 @@ func populateUserFieldsFromOAuth2Provider(e *core.RecordAuthWithOAuth2RequestEve
 	}
 	if matchingUsers > 0 {
 		return fmt.Errorf("user with proxmox username %s already exists", proxmoxUsername)
-	}
-	if userExistsOnHostSystem(proxmoxUsername) {
-		return fmt.Errorf("username %s already exists on the host system", proxmoxUsername)
 	}
 	if poolExists(userID) {
 		return fmt.Errorf("pool %s already exists", userID)

@@ -42,7 +42,6 @@ var PB *pocketbase.PocketBase
 var app core.App
 var LudusPluginHandlerManager *HandlerManager
 var DebugProxmox bool
-var UseSDN bool
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
@@ -77,6 +76,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		DefaultDev:           os.Getenv("LUDUS_DEBUG_DATABASE") == "1",
 		DefaultDataDir:       ServerConfiguration.DataDirectory,
 		DefaultEncryptionEnv: "LUDUS_DB_ENCRYPTION_PASSWORD",
+		DBConnect:            connectLudusSQLite,
 	}
 	PB = pocketbase.NewWithConfig(pbConfig)
 	app = PB.App
@@ -87,13 +87,6 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		os.Exit(1)
 	}
 
-	var err error
-	UseSDN, err = IsClusterMode()
-	if err != nil {
-		logger.Debug(fmt.Sprintf("Unable to check for cluster mode: %v", err))
-		UseSDN = false
-	}
-
 	// Run migrations before InitDb(); PocketBase normally runs them on Serve, but we use the app
 	// before starting the HTTP server (e.g. root user creation), so we must run them here.
 	if err := app.RunAllMigrations(); err != nil {
@@ -102,6 +95,14 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	}
 
 	InitDb()
+	if os.Geteuid() != 0 {
+		server.PluginResources = newPluginResources(app, server)
+	}
+	preserveConcurrentUserCredentials(app)
+	if os.Geteuid() != 0 {
+		app.Cron().MustAdd("recover-password-rotations", "* * * * *", func() { recoverPendingPasswords(app) })
+		go recoverPendingPasswords(app)
+	}
 	LudusVersion = ludusVersion
 	if os.Geteuid() != 0 {
 		if err := startupSyncTemplatesCollection(app); err != nil {
@@ -288,7 +289,19 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		RegisterRoutesWithPocketBase(se, routes)
 		RegisterPluginPlaceholderRoutes(se)
-		return se.Next()
+		if server.PluginResources != nil {
+			registerPluginResourceRoutes(se, server.PluginResources)
+		}
+		registerPluginLogHistoryRoutes(se, ludusInstallPath)
+		if err := se.Next(); err != nil {
+			return err
+		}
+		// Resource initialization and jobs may use the parent's API. Wait until
+		// PocketBase has bound its listener before starting these subprocesses.
+		if server.PluginResources != nil {
+			server.PluginResources.startup()
+		}
+		return nil
 	})
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {

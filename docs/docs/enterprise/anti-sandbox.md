@@ -99,7 +99,7 @@ To take full advantage of the Anti-Sandbox feature, you must install the custom 
 
 ```shell-session
 #terminal-command-local
-ludus --url https://127.0.0.1:8081 antisandbox install-custom
+ludus antisandbox install-custom
 [INFO]  Anti-Sandbox QEMU and OVMF installed - will take effect on VM's next power cycle
 ```
 
@@ -124,7 +124,7 @@ When you are ready to enable Anti-Sandbox, note the VMID for the VM and run the 
 #terminal-command-local
 ludus snapshot create -n 179 -d "Clean snapshot before enabling anti-sandbox" pre-antisandbox
 #terminal-command-local
-ludus --url https://127.0.0.1:8081 antisandbox enable -n 179
+ludus antisandbox enable -n 179
 [INFO]  Enabling Anti-Sandbox settings for VM(s), this can take some time. Please wait.
 [INFO]  Successfully enabled anti-sandbox for VM(s): 179
 ```

@@ -1,6 +1,6 @@
 variable "iso_checksum" {
   type    = string
-  default = "sha512:9da6ae5b63a72161d0fd4480d0f090b250c4f6bf421474e4776e82eea5cb3143bf8936bf43244e438e74d581797fe87c7193bbefff19414e33932fe787b1400f"
+  default = "sha512:85f253c53338ac819e9625b1922bac348dfe2836e6a428ad1cb81bd756dfccfbfbd41398b8e9170aedebc238778f698675b0b19fdbe0d47486cdde2fdbec1855"
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
@@ -11,7 +11,7 @@ variable "os" {
 
 variable "iso_url" {
   type    = string
-  default = "https://cdimage.debian.org/cdimage/archive/12.1.0/amd64/iso-cd/debian-12.1.0-amd64-netinst.iso"
+  default = "https://cdimage.debian.org/cdimage/archive/12.14.0/amd64/iso-cd/debian-12.14.0-amd64-netinst.iso"
 }
 
 variable "vm_cpu_cores" {
@@ -66,22 +66,32 @@ variable "proxmox_pool" {
 variable "iso_storage_pool" {
   type = string
 }
+variable "airgapped_install" {
+  type    = bool
+  default = false
+}
 variable "ansible_home" {
   type = string
 }
 variable "ludus_nat_interface" {
   type = string
 }
+variable "packer_http_bind_address" {
+  type = string
+}
 ####
 
 locals {
   template_description = "Debian 12 template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => debian:debian"
+  airgapped_iso_file   = "${var.iso_storage_pool}:iso/debian-12.14.0-amd64-netinst.iso"
+  injected_ca_path = "/opt/ludus/install/injected-ca-certificate.crt"
+  serve_injected_ca = var.airgapped_install && fileexists(local.injected_ca_path)
 }
 
 source "proxmox-iso" "debian12" {
   boot_command = [
     "<down><tab>", # non-graphical install
-    "<wait>preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/debian-12-preseed.cfg ",
+    "<wait>preseed/url=http://${var.packer_http_bind_address}:{{ .HTTPPort }}/preseed.cfg ",
     "<wait>language=en locale=en_US.UTF-8 ",
     "<wait>country=US keymap=us ",
     "<wait>hostname=debian12 domain=local ",
@@ -89,14 +99,31 @@ source "proxmox-iso" "debian12" {
   ]
   boot_key_interval = "100ms"
   boot_wait         = "15s"
-  http_directory    = "./http"
+  http_bind_address = "${var.packer_http_bind_address}"
+  http_port_min = 8090
+  http_port_max = 8090
+  # Render the template directly into memory for the HTTP server
+  http_content = merge(
+    {
+      "/preseed.cfg" = templatefile("${path.root}/preseed.cfg.pkrtpl.hcl", {
+        airgapped_install = var.airgapped_install,
+        serve_injected_ca = local.serve_injected_ca,
+        http_address = "${var.packer_http_bind_address}:8090"
+      })
+    },
+    local.serve_injected_ca ? {
+      "/injected-ca-certificate.crt" = file(local.injected_ca_path)
+    } : {}
+  )
+
 
   boot_iso {
     type              = "ide"
-    iso_checksum      = "${var.iso_checksum}"
-    iso_url           = "${var.iso_url}"
-    iso_storage_pool  = "${var.iso_storage_pool}"
-    iso_download_pve  = true
+    iso_checksum      = var.iso_checksum
+    iso_file          = var.airgapped_install ? local.airgapped_iso_file : null
+    iso_url           = var.airgapped_install ? null : var.iso_url
+    iso_storage_pool  = var.iso_storage_pool
+    iso_download_pve  = var.airgapped_install ? null : true
     unmount           = true
     keep_cdrom_device = false
   }
@@ -135,6 +162,15 @@ build {
   sources = ["source.proxmox-iso.debian12"]
 
   provisioner "ansible" {
+    playbook_file = "../ansible/inject-ca-certificate.yml"
+    use_proxy     = false
+    user          = "${var.ssh_username}"
+    extra_arguments = ["--extra-vars", "{ansible_python_interpreter: /usr/bin/python3, ansible_password: ${var.ssh_password}, ansible_sudo_pass: ${var.ssh_password}}"]
+    ansible_env_vars = ["ANSIBLE_HOME=${var.ansible_home}", "ANSIBLE_LOCAL_TEMP=${var.ansible_home}/tmp", "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR=${var.ansible_home}/pc", "ANSIBLE_SSH_CONTROL_PATH_DIR=${var.ansible_home}/cp"]
+    skip_version_check = true
+  }
+
+  provisioner "ansible" {
     playbook_file = "../ansible/reset-ssh-host-keys.yml"
     use_proxy     = false
     user = "${var.ssh_username}"
@@ -143,4 +179,3 @@ build {
     skip_version_check = true
   }
 }
-

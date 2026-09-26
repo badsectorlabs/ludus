@@ -46,22 +46,6 @@
         mode: '0600'
       when: user_has_default_range | default(create_default_range | default(true)) | bool
 
-    - name: Add the user to the host
-      ansible.builtin.user:
-        name: "{{ username }}"
-        shell: /bin/bash
-        groups:
-          - pveusers
-      register: created_user
-
-    - name: Enable helpful aliases
-      become: true
-      ansible.builtin.blockinfile:
-        path: /home/{{ username }}/.bashrc
-        block: |
-          alias ll='ls $LS_OPTIONS -lart'
-        create: true
-
     - name: Check if wg key files exists for this user
       ansible.builtin.stat:
         path: /etc/wireguard/{{ user_id }}-client-private-key
@@ -112,6 +96,11 @@
 
     # Get the user up to speed with collections and roles without having to download
     # them for every user that gets added. Speeds up user creation and allows for offline usage!
+    - name: Check if ROOT ansible directory exists
+      ansible.builtin.stat:
+        path: "{{ ludus_users_dir }}/root/.ansible"
+      register: root_ansible_dir
+
     - name: Copy the ansible directory from ROOT to the user
       ansible.builtin.copy:
         src: "{{ ludus_users_dir }}/root/.ansible"
@@ -119,13 +108,14 @@
         dest: "{{ ludus_users_dir }}/{{ username }}"
         mode: '0660'
         directory_mode: '0770'
-        owner: "{{ username }}"
+        owner: ludus
         group: ludus
+      when: root_ansible_dir.stat.isdir | default(false)
 
     - name: Chown the user's directory
       ansible.builtin.file:
         path: "{{ ludus_users_dir }}/{{ username }}"
-        owner: "{{ username }}"
+        owner: ludus
         group: ludus
         mode: u=rwX,g=rwX,o-rwx
         recurse: true
@@ -135,13 +125,6 @@
         wg syncconf wg0 <(wg-quick strip wg0)
       args:
         executable: /bin/bash
-
-    # - name: Add the vmbr interface for this user
-    #   ansible.builtin.include_tasks: vmbr-management.yml
-    #   vars:
-    #     state_var: present
-    #   loop:
-    #     - 1
 
     # - name: Add a portforward for this user (Enterprise)
     #   ansible.builtin.include_tasks: portforward-management.yml
@@ -156,66 +139,5 @@
     #     - portforward_enabled is defined
     #     - portforward_enabled
 
-    - name: Add the user to proxmox
-      ansible.builtin.command:
-        argv:
-          - pveum
-          - user
-          - add
-          - "{{ username }}@pam"
-          - "--password"
-          - "{{ proxmox_password }}"
-          - "-group"
-          - ludus_users
-      no_log: true
-
-    - name: Set the acls for the user on their own pool
-      ansible.builtin.command:
-        argv:
-          - pveum
-          - aclmod
-          - "/pool/{{ user_id }}"
-          - "-user"
-          - "{{ username }}@pam"
-          - "-role"
-          - PVEAdmin
-          - "-role"
-          - PVESDNAdmin
-      when: user_has_default_range | default(create_default_range | default(true)) | bool
-
-    - name: Set the acls users pool for admins
-      ansible.builtin.command:
-        argv:
-          - pveum
-          - aclmod
-          - "/pool/{{ user_id }}"
-          - "-group"
-          - ludus_admins
-          - "-role"
-          - PVEAdmin
-          - "-role"
-          - PVESDNAdmin
-      when: user_has_default_range | default(create_default_range | default(true)) | bool
-
-    - name: Set acls for local "/storage/local"
-      ansible.builtin.command:
-        argv:
-          - pveum
-          - aclmod
-          - /storage/local
-          - "-user"
-          - "{{ username }}@pam"
-          - "-role"
-          - PVEDatastoreAdmin
-
-    - name: Add user to ludus_admins
-      ansible.builtin.command:
-        argv:
-          - pveum
-          - user
-          - modify
-          - "{{ username }}@pam"
-          - "--groups"
-          - ludus_admins
-          - "--append"
-      when: user_is_admin is defined and user_is_admin
+    # Proxmox user creation (pveum user add / aclmod) is now handled in Go via
+    # pveclient.CreateUser in the configured realm — see ludus-api/users.go.

@@ -24,10 +24,10 @@ import (
 func adminEndpointError(command string) string {
 	port := ServerConfiguration.AdminPort
 	return fmt.Sprintf(
-		"You must use the ludus-admin server on 127.0.0.1:%d to use this endpoint.\n"+
-			"Use SSH to tunnel to this port with the command: ssh -L %d:127.0.0.1:%d root@<ludus IP>\n"+
-			"In a different terminal re-run the %s command with --url https://127.0.0.1:%d",
-		port, port, port, command, port,
+		"This endpoint requires ludus-admin (127.0.0.1:%d inside the Ludus LXC, not the Proxmox host).\n"+
+			"Run %s against the configured public Ludus API, which proxies supported admin endpoints.\n"+
+			"For diagnostics, enter the container with pct enter <VMID> on the Proxmox host. Do not expose the admin port.",
+		port, command,
 	)
 }
 
@@ -119,6 +119,14 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	e.App.ExpandRecord(userRecord, []string{"ranges", "groups"}, nil)
 	e.Set("user", user)
 
+	// Plugin inventory/management is independent of a range, including users
+	// who have not deployed one yet. RPC requests retain normal range checks.
+	if strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/plugins") &&
+		(e.Request.URL.Path == APIBasePath+"/plugins" || strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/plugins/")) &&
+		!strings.Contains(e.Request.URL.Path, "/rpc/") {
+		return e.Next()
+	}
+
 	// Check if the user is requesting a specific range
 	rangeID := e.Request.URL.Query().Get("rangeID")
 	if rangeID != "" {
@@ -189,14 +197,29 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	return e.Next()
 }
 
-// This function makes sure the request is to a user endpoint if the server is running as root (i.e. the admin port)
+// Route Ludus API requests between the regular and admin services.
 func limitRootEndpoints(e *core.RequestEvent) error {
 	logger.Debug(fmt.Sprintf("Request: %s %s", e.Request.Method, e.Request.URL.Path))
+	// PocketBase routes enforce their own authentication and collection rules.
+	// Admin plugins use these routes to access their parent's records.
+	if e.Request.URL.Path != APIBasePath && !strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/") {
+		return e.Next()
+	}
+
+	startVMHookEndpoint := e.Request.URL.Path == APIBasePath+"/range/poweron" && e.Request.Method == http.MethodPut
+	stopVMHookEndpoint := e.Request.URL.Path == APIBasePath+"/range/poweroff" && e.Request.Method == http.MethodPut
+	deleteVMHookEndpoint := strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/vm/") && e.Request.Method == http.MethodDelete
+	rangeDeleteEndpoint := e.Request.Method == http.MethodDelete &&
+		(e.Request.URL.Path == APIBasePath+"/range" ||
+			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range/") && strings.HasSuffix(e.Request.URL.Path, "/vms")))
 	if os.Geteuid() == 0 &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") &&
-		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) &&
+		!(startVMHookEndpoint && server.hasStartVMHooks()) &&
+		!(stopVMHookEndpoint && server.hasStopVMHooks()) &&
+		!(deleteVMHookEndpoint && server.hasBeforeDeleteVMHooks()) &&
+		!rangeDeleteEndpoint &&
 		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/migrate/") {
@@ -205,7 +228,7 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 		(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") ||
-			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range") && e.Request.Method == http.MethodDelete) ||
+			rangeDeleteEndpoint ||
 			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/migrate/")) {
@@ -215,35 +238,40 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 			return JSONError(e, http.StatusForbidden, "This endpoint is only available on the admin API")
 		}
 
-		// First clear all the headers to prevent sending 2x of each header
-		for k := range e.Response.Header() {
-			e.Response.Header().Del(k)
-		}
-		// Strip PocketBase's RereadableReadCloser before proxying.
-		// PocketBase wraps every request body in a RereadableReadCloser
-		// (see pocketbase/tools/router/router.go:141) that buffers bytes
-		// as they're read and rewinds on EOF. When Go's HTTP transport
-		// writes the proxied request, it reads ContentLength bytes then
-		// checks for leftovers — triggering the rewind and reading the
-		// buffered copy again, producing ContentLength=N with Body length 2N.
-		// See: https://github.com/pocketbase/pocketbase/blob/master/tools/router/rereadable_read_closer.go
-		if e.Request.Body != nil {
-			bodyBytes, err := io.ReadAll(e.Request.Body)
-			if err == nil {
-				e.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-				e.Request.ContentLength = int64(len(bodyBytes))
-			}
-		}
-		// Reverse proxy to the admin API
-		adminProxy.ServeHTTP(e.Response, e.Request)
-
-		// Abort the middleware chain to prevent the user-facing server
-		// from also handling the request and writing a second response.
-		return nil
+		return proxyToAdmin(e)
 	}
 
 	return e.Next()
 
+}
+
+// Reuse the existing authenticated admin proxy after VM-specific selection.
+func proxyToAdmin(e *core.RequestEvent) error {
+	// First clear all the headers to prevent sending 2x of each header
+	for k := range e.Response.Header() {
+		e.Response.Header().Del(k)
+	}
+	// Strip PocketBase's RereadableReadCloser before proxying.
+	// PocketBase wraps every request body in a RereadableReadCloser
+	// (see pocketbase/tools/router/router.go:141) that buffers bytes
+	// as they're read and rewinds on EOF. When Go's HTTP transport
+	// writes the proxied request, it reads ContentLength bytes then
+	// checks for leftovers — triggering the rewind and reading the
+	// buffered copy again, producing ContentLength=N with Body length 2N.
+	// See: https://github.com/pocketbase/pocketbase/blob/master/tools/router/rereadable_read_closer.go
+	if e.Request.Body != nil {
+		bodyBytes, err := io.ReadAll(e.Request.Body)
+		if err == nil {
+			e.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			e.Request.ContentLength = int64(len(bodyBytes))
+		}
+	}
+	// Reverse proxy to the admin API
+	adminProxy.ServeHTTP(e.Response, e.Request)
+
+	// Abort the middleware chain to prevent the user-facing server
+	// from also handling the request and writing a second response.
+	return nil
 }
 
 // auth is only bypassed when all three conditions are met: exact path match, root process, localhost origin. Every other request on the admin API still requires authentication.

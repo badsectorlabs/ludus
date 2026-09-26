@@ -1,20 +1,35 @@
+- name: Ensure Blocky is installed
+  ansible.builtin.include_tasks: tasks/router/ensure-blocky.yml
+
+- name: Load Blocky DNS state
+  ansible.builtin.include_tasks: tasks/router/load-blocky-state.yml
+
 - name: Set vars
   ansible.builtin.set_fact:
     answer: "10.{{ range_second_octet }}.{{ (ludus | selectattr('vm_name', 'match', vm_name) | first).vlan }}.{{ (ludus | selectattr('vm_name', 'match', vm_name) | first).ip_last_octet }}"
     rewrites: "{{ (ludus | selectattr('vm_name', 'match', vm_name) | first).dns_rewrites }}"
+    blocky_user_rewrites: "{{ blocky_state.user_rewrites | default({}) }}"
+    blocky_wildcard_rewrites: "{{ blocky_state.wildcard_rewrites | default({}) }}"
 
-- name: Add custom DNS rewrite rule
-  ansible.builtin.uri:
-    url: http://127.0.0.1:3000/control/rewrite/add
-    method: POST
-    status_code: [200, 202]
-    return_content: true
-    body_format: json
-    headers:
-      Authorization: Basic YWRtaW46cGFzc3dvcmQ=
-    body:
-      domain: "{{ domain_name }}"
-      answer: "{{ answer }}"
+- name: Add exact user-defined DNS rewrite rules
+  ansible.builtin.set_fact:
+    blocky_user_rewrites: "{{ blocky_user_rewrites | combine({(domain_name | lower): answer}) }}"
   loop: "{{ rewrites }}"
   loop_control:
     loop_var: domain_name
+  when: not ((domain_name | lower) is match('^\\*\\.'))
+
+- name: Add wildcard user-defined DNS rewrite rules
+  ansible.builtin.set_fact:
+    blocky_wildcard_rewrites: "{{ blocky_wildcard_rewrites | combine({(domain_name | lower | regex_replace('^\\*\\.', '')): answer}) }}"
+  loop: "{{ rewrites }}"
+  loop_control:
+    loop_var: domain_name
+  when: (domain_name | lower) is match('^\\*\\.')
+
+- name: Update Blocky user-defined DNS rewrite state
+  ansible.builtin.set_fact:
+    blocky_state: "{{ blocky_state | combine({'user_rewrites': blocky_user_rewrites, 'wildcard_rewrites': blocky_wildcard_rewrites}, recursive=True) }}"
+
+- name: Save Blocky DNS state
+  ansible.builtin.include_tasks: tasks/router/save-blocky-state.yml

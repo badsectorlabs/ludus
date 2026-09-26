@@ -356,6 +356,7 @@ stages:
 
 .cluster-rules: &cluster-rules
   rules:
+    - when: never  # Disabled: on-host install replaced by LXC; see test-install-sh / test-lxc-airgap
     - if: $CI_COMMIT_TAG
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
@@ -417,6 +418,7 @@ stages:
     - if: $CI_COMMIT_MESSAGE =~ /\[post-deploy tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[testing-mode tests\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[power tests\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[(ansible tests|blueprint tests|group tests|range mgmt tests|user tests|sources tests)\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[integration test\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at templates\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at range-admin\]/
@@ -425,6 +427,7 @@ stages:
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at post-deploy-user\]/
     - if: $CI_COMMIT_MESSAGE =~ /\[start-at integration\]/
     - changes:
+        - ludus-api/**/*
         - ludus-server/**/*
         - ludus-client/**/*
 
@@ -554,6 +557,27 @@ documentation:
       - built-docs
     expire_in: 1 week
 
+go-unit-tests:
+  stage: build
+  resource_group: ludus-build-vm
+  variables:
+    LUDUS_BUILD_TYPE: any-built
+  tags:
+    - ludus-proxmox-runner-parallel
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+  script:
+    - cd ludus-api && go test ./... -v -race -coverprofile=coverage.out
+    - cd ../dynamic-inventory && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o ../ludus-server/ansible/range-management/dynamic-inventory
+    - cd ../ludus-server && go test ./... -v -race
+  coverage: '/coverage: \d+(?:\.\d+)?% of statements/'
+  artifacts:
+    paths:
+      - ludus-api/coverage.out
+    expire_in: 1 week
+
 #########
 # BUILD #
 #########
@@ -566,8 +590,9 @@ build all:
     - documentation
   rules:
     - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
-    - if: $CI_COMMIT_MESSAGE =~ /\[skip build\]/
+    - if: $CI_COMMIT_MESSAGE =~ /\[(full build|build-lxc)\]/
+    - &skip-build-rule
+      if: $CI_COMMIT_TAG == null && $CI_COMMIT_MESSAGE =~ /\[skip build\]|^Automatic backup from Apidog$/ && $CI_COMMIT_MESSAGE !~ /\[(full build|build-lxc)\]/
       when: never
     - if: $CI_COMMIT_MESSAGE == "Automatic backup from Apidog"
       when: never
@@ -576,6 +601,7 @@ build all:
   artifacts:
     paths:
       - binaries/*
+      - ludus-server/ansible/range-management/dynamic-inventory
     expire_in: 1 week
   variables:
     LUDUS_BUILD_TYPE: any-built # we are just building go code, use any CI VM
@@ -589,7 +615,7 @@ build all:
     - echo "Compiling the server code..."
     - (cd ludus-api && go test . -count=1)
     - export GIT_COMMIT_SHORT_HASH=$(git rev-parse --short=8 HEAD)
-    - if [[ -n $CI_COMMIT_TAG ]]; then export VERSION=$CI_COMMIT_TAG; else export VERSION=${CI_COMMIT_BRANCH}; fi
+    - export VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_REF_NAME}}"
     - rm -rf binaries && mkdir binaries
     - echo "Getting web UI code..."
     - |
@@ -655,25 +681,57 @@ build all:
     - CGO_ENABLED=0 GOOS=windows GOARCH=386 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-386.exe
     - CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X ludus/cmd.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X ludus/cmd.VersionString=$VERSION" -o ../binaries/ludus-client_windows-arm64.exe
     - cd ..
-    # If this is a non-beta release, build the enterprise and anti-sandbox plugins at the same time on the same build machine so the binaries are compatible
+    # Release plugins are standalone RPC executables and may be built independently of the server's ludus-api package revision.
     - |
       if [[ ! -z ${CI_COMMIT_TAG+x} ]] && [[ ! ${CI_COMMIT_TAG} == *"beta"* ]]; then
         git clone https://ludus-enterprise:${LUDUS_ENTERPRISE_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-enterprise-plugin.git
         go work use ./ludus-enterprise-plugin
         cd ludus-enterprise-plugin
         git config --global --add safe.directory $PWD
-        GIT_COMMIT_SHORT_HASH=$(git rev-parse --short=8 HEAD)
-        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags="${TAGS}" -o ../binaries/ludus-enterprise.so
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.VersionString=${CI_COMMIT_TAG}" -o ../binaries/ludus-enterprise.plugin
         cd ..
         # Build the anti-sandbox plugin
         git clone https://ludus-antisandbox:${LUDUS_ANTISANDBOX_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-antisandbox-plugin.git
         go work use ./ludus-antisandbox-plugin
         cd ludus-antisandbox-plugin
         git config --global --add safe.directory $PWD
-        GIT_COMMIT_SHORT_HASH=$(git rev-parse --short=8 HEAD)
-        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH} -X main.VersionString=${CI_COMMIT_TAG}" -tags="${TAGS}" -o ../binaries/ludus-antisandbox.so
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.VersionString=${CI_COMMIT_TAG}" -o ../binaries/ludus-antisandbox.plugin
       fi
     - echo "Compile complete."
+
+build-lxc-template:
+  stage: build
+  resource_group: ludus-build-vm
+  variables:
+    LUDUS_BUILD_TYPE: any-built
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: "build all"
+      artifacts: true
+  rules: &lxc-rules
+    - *skip-build-rule
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_MESSAGE =~ /\[(full build|build-lxc)\]/
+    - changes:
+        - install.sh
+        - ludus-server/ci/test-lxc*.sh
+        - ludus-server/ci/test-install*.sh
+        - ludus-server/lxc/**/*
+        - ludus-server/ci/build-lxc-isolated.sh
+        - ludus-server/ci/test_build_lxc_isolated.py
+        - ludus-server/ansible/requirements.yml
+  before_script:
+    - sudo apt-get update && sudo apt-get install -y dab make unzip zstd python3-pip ansible-core
+  script:
+    - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
+    - sudo python3 -B ludus-server/ci/test_build_lxc_isolated.py
+    - sudo -E bash ludus-server/ci/build-lxc-isolated.sh
+  artifacts:
+    paths:
+      - "ludus-*-debian13-amd64.tar.zst"
+      - "ludus-*-debian13-amd64.tar.zst.sha256"
+    expire_in: 1 week
 
 #########
 # CLAIM #
@@ -705,6 +763,7 @@ install kickoff:
   needs:
     - build all
   rules:
+    - when: never  # Disabled: on-host install replaced by LXC; see test-install-sh / test-lxc-airgap
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -716,7 +775,6 @@ install kickoff:
       when: never
     - changes: # Only run if we need to test installer related changes
         - ludus-server/*.go
-        - ludus-server/ansible/proxmox-install/**/*
   variables:
     LUDUS_BUILD_TYPE: full # We have to test the install process, so do a full build
     LUDUS_INSTALL_STEP: kickoff
@@ -739,6 +797,7 @@ install check:
     - install kickoff
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - when: never  # Disabled: on-host install replaced by LXC; see test-install-sh / test-lxc-airgap
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -750,7 +809,6 @@ install check:
       when: never
     - changes: # Only run if we need to test installer related changes
         - ludus-server/*.go
-        - ludus-server/ansible/proxmox-install/**/*
   variables:
     LUDUS_BUILD_TYPE: full
     LUDUS_INSTALL_STEP: check
@@ -774,6 +832,7 @@ templates build:
   dependencies:
     - build all
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -821,6 +880,7 @@ templates check:
     - templates build
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -916,6 +976,7 @@ client basic-commands:
   dependencies:
     - build all
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -976,6 +1037,7 @@ range deploy-admin:
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -1042,6 +1104,7 @@ post-deploy testing-as-admin:
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -1085,6 +1148,7 @@ post-deploy power-as-admin:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -1130,6 +1194,7 @@ post-deploy ansible-as-admin:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -1178,6 +1243,7 @@ post-deploy user-cmds-as-admin:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -1198,7 +1264,11 @@ post-deploy user-cmds-as-admin:
       when: never
     - changes:
         - ludus-client/cmd/user.go
-        - ludus-server/src/api_user_management.go
+        - ludus-api/api_user_management.go
+        - ludus-api/password_rotation*.go
+        - ludus-api/pveclient/password*.go
+        - ludus-api/migrations/*password_rotations.go
+        - ludus-server/ci/check-password-rotation.py
         - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
@@ -1219,9 +1289,9 @@ post-deploy user-cmds-as-admin:
     - ludus user add -n "Test Admin 2" -i TA -e "ta2@ludus.internal" -p "ta2password" 2>&1 | grep "User with that ID already exists"
     - set -o pipefail
     # Get and set creds
-    - ludus user creds get --user TA
+    - export ROTATION_API_KEY=$(ludus --user TA users apikey --no-prompt --value)
     - ludus user creds set -i TA -p test-password-123
-    - ludus user creds get --user TA | grep test-password-123
+    - printf '%s' 'tapassword' | python3 /opt/ludus/ci/check-password-rotation.py --user TA --api-key-env ROTATION_API_KEY
     # Get wireguard
     - ludus user wireguard --user TA | grep Endpoint
     # Remove admin user
@@ -1231,9 +1301,10 @@ post-deploy user-cmds-as-admin:
     - ludus user add -n "Test User" -i TU -e "tu@ludus.internal" -p "tupassword"
     - ludus users list all | grep "Test User"
     # Get and set creds
-    - ludus user creds get --user TU
+    - export ROTATION_API_KEY=$(ludus --user TU users apikey --no-prompt --value)
     - ludus user creds set -i TU -p test-password-123
-    - ludus user creds get --user TU | grep test-password-123
+    - printf '%s' 'tupassword' | python3 /opt/ludus/ci/check-password-rotation.py --user TU --api-key-env ROTATION_API_KEY
+    - unset ROTATION_API_KEY
     # Get wireguard
     - ludus user wireguard --user TU | grep Endpoint
     # Remove normal user
@@ -1251,6 +1322,7 @@ post-deploy groups-as-admin:
   dependencies:
     - build all
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -1387,6 +1459,7 @@ post-deploy blueprints-as-admin:
   dependencies:
     - build all
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -1500,6 +1573,7 @@ post-deploy sources-as-admin:
   dependencies:
     - build all
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -1786,6 +1860,7 @@ post-deploy ranges-as-admin:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -1975,6 +2050,7 @@ post-deploy templates-as-admin:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -2023,6 +2099,7 @@ range deploy-user:
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -2077,6 +2154,7 @@ post-deploy testing-as-user:
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -2117,6 +2195,7 @@ post-deploy power-as-user:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -2161,6 +2240,7 @@ post-deploy ansible-as-user:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -2204,6 +2284,7 @@ post-deploy user-cmds-as-user:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -2222,7 +2303,11 @@ post-deploy user-cmds-as-user:
       when: never
     - changes:
         - ludus-client/cmd/user.go
-        - ludus-server/src/api_user_management.go
+        - ludus-api/api_user_management.go
+        - ludus-api/password_rotation*.go
+        - ludus-api/pveclient/password*.go
+        - ludus-api/migrations/*password_rotations.go
+        - ludus-server/ci/check-password-rotation.py
         - ludus-server/ansible/user-management/**/*
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
@@ -2238,11 +2323,12 @@ post-deploy user-cmds-as-user:
     - ludus user list
     - ludus users list all 2>&1 | grep "You are not an admin and cannot list all users"
     # Get and set our own creds
-    - ludus user creds get
     - OG_PW=$(ludus user creds get --json | jq -r '.result.proxmoxPassword')
     - ludus user creds set -p test-password-123
-    - ludus user creds get | grep test-password-123
-    - ludus user creds set -p $OG_PW
+    - printf '%s' "$OG_PW" | python3 /opt/ludus/ci/check-password-rotation.py
+    - ludus user creds set -p "$OG_PW"
+    - printf '%s' 'test-password-123' | python3 /opt/ludus/ci/check-password-rotation.py
+    - unset OG_PW
     # Try to get and set other user's creds
     - ludus user creds get --user CIA 2>&1 | grep "You are not an admin and cannot impersonate other users"
     - ludus user creds set -i CIA -p test-password-123 2>&1 | grep "You are not an admin and cannot update the password for another user"
@@ -2271,6 +2357,7 @@ post-deploy blueprints-as-user:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -2400,6 +2487,7 @@ post-deploy templates-as-user:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -2418,7 +2506,7 @@ post-deploy templates-as-user:
       when: never
     - changes:
         - ludus-client/cmd/templates.go
-        - ludus-server/src/api_template_management.go
+        - ludus-api/api_template_management.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
@@ -2440,6 +2528,7 @@ post-deploy snapshots-as-user:
       optional: true
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[full build\]/
@@ -2457,7 +2546,7 @@ post-deploy snapshots-as-user:
       when: never
     - changes:
         - ludus-client/cmd/snapshots.go
-        - ludus-server/src/api_snapshot_management.go
+        - ludus-api/api_snapshot_management.go
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
     LUDUS_SNAPSHOT_NAME: range_built_user
@@ -2482,6 +2571,7 @@ test-everything:
   dependencies: # If this is the first job after build in a [start-at...] pipeline, it will revert to snapshot with the old code and binaries, and no cache since cache is stored on the VM
     - build all
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
       when: never
     - if: $CI_COMMIT_MESSAGE =~ /\[integration test\]/
@@ -2871,11 +2961,89 @@ cluster-test-range-default:
       fi
       echo "Cluster placement verified: $TOTAL VMs across both nodes, 1 on Node1, 2 on Node2"
 
+#############
+# LXC TESTS #
+#############
+test-lxc-airgap:
+  stage: test
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: clean_install
+    LUDUS_CI_SERIES: lxc-airgap
+    LXC_ROOTFS_STORAGE: local
+    LUDUS_NAT_GATEWAY: "192.0.2.49"
+    RUN_USER_TEST: "1"
+    RUN_RANGE_TEST: "1"
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: build-lxc-template
+      artifacts: true
+  rules: *lxc-rules
+  before_script: &lxc-storage-setup
+    - ROOTDIR_CONTENT=$(sudo pvesh get /storage/local --output-format json | jq -r '.content | split(",") | . + ["rootdir"] | unique | join(",")')
+    - sudo pvesm set local --content "$ROOTDIR_CONTENT"
+  timeout: 30m
+  script:
+    - VMID=$(sudo pvesh get /cluster/nextid --output-format json | jq -r '.')
+    - sudo -E ludus-server/ci/test-lxc-airgap.sh "$VMID" "ludus-${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}-debian13-amd64.tar.zst"
+
+test-install-sh:
+  stage: test
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: clean_install
+    LUDUS_CI_SERIES: lxc-install
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: build-lxc-template
+      artifacts: true
+  rules: *lxc-rules
+  before_script: *lxc-storage-setup
+  timeout: 30m
+  script:
+    - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
+    - sudo -E ./install.sh --no-prompt --template-file "ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst" --vmid 9999 --storage local
+    - sudo pct exec 9999 -- curl -fsk https://127.0.0.1:8080/api/health | jq -e '.code == 200'
+
 #################
 # RELEASE CLAIM #
 #################
 # These dynamic VM release jobs run only when their upstream series succeeds.
 # Failed series intentionally keep their clone running for troubleshooting.
+release lxc-airgap-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - test-lxc-airgap
+  dependencies: []
+  rules: *lxc-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: lxc-airgap
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release lxc-install-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - test-install-sh
+  dependencies: []
+  rules: *lxc-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: lxc-install
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
 release install-vm:
   stage: release-claim
   tags:
@@ -3079,6 +3247,7 @@ manual testing:
     - build all
   dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
+    - *skip-build-rule
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/
   variables:
     LUDUS_BUILD_TYPE: any-built # Just move our code to the most recent CI VM for manual testing
@@ -3097,6 +3266,12 @@ beta-release:
     - ludus-proxmox-runner-parallel
   needs:
     - build all
+    - job: go-unit-tests
+      artifacts: false
+    - job: test-lxc-airgap
+      artifacts: false
+    - job: test-install-sh
+      artifacts: false
   variables:
     LUDUS_BUILD_TYPE: any-built
   rules:
@@ -3128,6 +3303,40 @@ beta-release:
         fi
       done
 
+upload-lxc-r2:
+  stage: upload
+  resource_group: ludus-build-vm
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: build-lxc-template
+      artifacts: true
+    - job: go-unit-tests
+      artifacts: false
+    - job: test-lxc-airgap
+      artifacts: false
+    - job: test-install-sh
+      artifacts: false
+  variables:
+    LUDUS_BUILD_TYPE: any-built
+    GIT_STRATEGY: none
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - export RCLONE_CONFIG_R2_TYPE="s3"
+    - export RCLONE_CONFIG_R2_PROVIDER="Cloudflare"
+    - export RCLONE_CONFIG_R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+    - export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+    - export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+    - export VER="${CI_COMMIT_TAG}"
+    - TMPL="ludus-${VER}-debian13-amd64.tar.zst"
+    - sha256sum "${TMPL}" > checksums.txt
+    - echo "Uploading LXC template ${TMPL} to Cloudflare R2..."
+    - rclone copy "${TMPL}" "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
+    - rclone copy "${TMPL}.sha256" "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
+    - rclone copy checksums.txt "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
+    - if [[ "$VER" != *beta* ]]; then echo "${VER}" | rclone rcat "r2:ludus-lxc/latest.txt" --s3-no-check-bucket; fi
+
 gitlab-upload:
   stage: upload
   resource_group: ludus-build-vm
@@ -3135,6 +3344,12 @@ gitlab-upload:
     - ludus-proxmox-runner-parallel
   needs:
     - build all
+    - job: go-unit-tests
+      artifacts: false
+    - job: test-lxc-airgap
+      artifacts: false
+    - job: test-install-sh
+      artifacts: false
   variables:
     LUDUS_BUILD_TYPE: any-built
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
@@ -3223,11 +3438,13 @@ keygen-upload:
           }
         }]
       }'
-    - keygen upload ludus-enterprise.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-enterprise_${CI_COMMIT_TAG}.so --package ${LUDUS_ENTERPRISE_PACKAGE_ID}
+    - keygen upload ludus-enterprise.plugin --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-enterprise_${CI_COMMIT_TAG}.plugin --package ${LUDUS_ENTERPRISE_PACKAGE_ID}
     - keygen publish --release ${CI_COMMIT_TAG} --package ${LUDUS_ENTERPRISE_PACKAGE_ID}
+    - keygen untag --release latest --package ${LUDUS_ENTERPRISE_PACKAGE_ID} || true
+    - keygen tag latest --release ${CI_COMMIT_TAG} --package ${LUDUS_ENTERPRISE_PACKAGE_ID}
     - output=$(keygen new --channel stable --version ${CI_COMMIT_TAG} --package ${LUDUS_ANTISANDBOX_PACKAGE_ID} 2>&1) || { [ "$?" -eq 1 ] && [[ "$output" =~ "VERSION_TAKEN" ]] && true; }
     - |
-      export RELEASE_ID=$(curl -s "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases?package=${LUDUS_ENTERPRISE_PACKAGE_ID}&limit=10" -H "Authorization: Bearer $KEYGEN_TOKEN" -H "Accept: application/vnd.api+json" | jq -r --arg ver "${CI_COMMIT_TAG}" '.data[] | select(.attributes.version == $ver) | .id')
+      export RELEASE_ID=$(curl -s "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases?package=${LUDUS_ANTISANDBOX_PACKAGE_ID}&limit=10" -H "Authorization: Bearer $KEYGEN_TOKEN" -H "Accept: application/vnd.api+json" | jq -r --arg ver "${CI_COMMIT_TAG}" '.data[] | select(.attributes.version == $ver) | .id')
     - echo "Anti-Sandbox Release ID for version ${CI_COMMIT_TAG} = $RELEASE_ID"
     # Add the anti-sandbox plugin entitlement to the release
     - |
@@ -3244,7 +3461,7 @@ keygen-upload:
           }
         }]
       }'
-    - keygen upload ludus-antisandbox.so --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-antisandbox_${CI_COMMIT_TAG}.so --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
+    - keygen upload ludus-antisandbox.plugin --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filename ludus-antisandbox_${CI_COMMIT_TAG}.plugin --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
     - keygen publish --release ${CI_COMMIT_TAG} --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
 
 release:
@@ -3255,6 +3472,7 @@ release:
   needs:
     - build all
     - gitlab-upload
+    - upload-lxc-r2
   variables:
     LUDUS_BUILD_TYPE: any-built
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
@@ -3279,4 +3497,5 @@ release:
       {\"name\":\"ludus-client_macOS-arm64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_macOS-arm64-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\"},
       {\"name\":\"ludus-client_windows-386-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-386-${CI_COMMIT_TAG}.exe\"},
-      {\"name\":\"ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\"}]"'
+      {\"name\":\"ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\"},
+      {\"name\":\"ludus-${CI_COMMIT_TAG}-debian13-amd64.tar.zst\", \"url\":\"https://lxc.ludus.cloud/ludus-lxc/${CI_COMMIT_TAG}/ludus-${CI_COMMIT_TAG}-debian13-amd64.tar.zst\", \"link_type\":\"package\"}]"'
