@@ -6,6 +6,8 @@ Qualification began September 25, 2026. This supersedes the earlier stop-before-
 
 The branch histories are merged and all five reported integration blockers are fixed. The requested final repeat is complete: all four designated VMs were restored to `pre-testing`, then clean installation, normal standalone upgrade, and two-node cluster upgrade passed using the same `2.4.0+ca5bd167` appliance. Earlier full custom-directory upgrades, injected-failure rollback, reboot, and network-persistence checks also passed. Qualification is limited to the fixtures and boundaries stated below, not every scenario in the broader test matrix.
 
+The follow-on deployment exercise also passed: six original ranges and a new ordinary user's range completed full deployments, with one test-role marker per range and WireGuard reachability to all 26 range VMs. It exposed two additional fresh-deployment defects, fixed in `775733b`, and required recovery of pre-existing cluster NFS/NTFS fixture failures. The initial failures, user-approved repair, and final evidence are recorded below.
+
 ## Integrated revisions
 
 - Starting `2-4-0`: `3263236`, Ludus 2.3.5.
@@ -16,6 +18,7 @@ The branch histories are merged and all five reported integration blockers are f
 - `b795bc9c`: active ARP ownership detection instead of treating stale neighbor-cache entries as live gateway conflicts.
 - `b778290c`: include the cluster helper in the isolated CI appliance builder and remove the obsolete ICMP prerequisite.
 - `ca5bd167`: retire legacy managed host route-hook blocks at cutover and restore their exact contents/modes on rollback.
+- `775733b`: create the per-user role-upload directory and package the established Proxmox Packer fork/version.
 
 The `go.sum` merge conflict retained the existing 2.3.5 `go-proxmox` replacement, `v0.0.0-20260925164902-37c99f03b4d7`, and the added RPC dependency checksums. No remote branch was pushed.
 
@@ -208,7 +211,7 @@ go test -tags embedwebui ./ludus-server/... ./ludus-api/... \
 LUDUS_VERSION=2.4.0 bash ludus-server/ci/build-lxc-isolated.sh
 ```
 
-## Evidence and final fixture state
+## Initial qualification evidence and fixture state
 
 Private evidence is grouped under the directory identified below:
 
@@ -218,9 +221,78 @@ Private evidence is grouped under the directory identified below:
 - `final-cluster-2003-installer.json`, `final-cluster-verification.json`, `final-cluster-vlan-verification.json`, `final-cluster-candidate-complete.json`, and `final-cluster-runtime-range.json`: coordinated cutover, actual per-node NIC placement, reboot/reload persistence, and new range.
 - `final-after-cluster-api-2003.json`, `final-after-cluster-vpn-2003.json`, and `final-cluster-cutover-health.json`: original-client acceptance and measured interruption.
 
-At completion, candidate 9999 is running on each of VMs 2001, 2002, and 2003; VM 2004 remains the cluster peer without a Ludus API instance. All twenty-four original workload VMs remain running. Fresh QA/QU users and the cluster's CQ/empty range 4 qualification fixture remain. No final reset was performed after the successful repeat.
+At completion of the initial repeat, candidate 9999 was running on each of VMs 2001, 2002, and 2003; VM 2004 remained the cluster peer without a Ludus API instance. All twenty-four original workload VMs remained running. Fresh QA/QU users and the cluster's CQ/empty range 4 qualification fixture remained. No final reset was performed after the successful repeat.
 
-The temporary qualification SSH key was removed from all four guests and its local private key deleted. Temporary probe harnesses were removed; browser tabs and the UI tunnel were closed. Private evidence/artifacts and the migration recovery directories required by runtime forwarding were retained.
+That phase's temporary qualification SSH key was removed from all four guests and its local private key deleted. Temporary probe harnesses were removed; browser tabs and the UI tunnel were closed. Private evidence/artifacts and the migration recovery directories required by runtime forwarding were retained.
+
+## Additional full-deployment verification — September 26
+
+The follow-on request exercises deployments, not just API health or existing workloads. A benign local role, `ludus_post_upgrade_probe`, writes `/etc/ludus-post-upgrade-qualification` as root with mode `0644`, containing a unique qualification marker and `inventory_hostname`. It was uploaded through each owner's real CLI/API and attached to exactly one non-router Linux VM per range. Existing roles and other configuration were preserved.
+
+Every run used unrestricted `ludus range deploy`: **no `--tags`, `--only-roles`, `--limit`, or manual bypasses of Windows tasks**. Evidence includes terminal job state, actual deployment logs, guest-agent reads of marker contents, and original VM configuration comparisons. WireGuard checks used the original profiles in isolated network namespaces, verified recent handshakes, pinged each gateway/VM, and connected to SSH port 22 or Windows RDP port 3389.
+
+### Existing standalone ranges — VM 2002
+
+- T01, T02, and T03 all completed full deployments with **SUCCESS** on the migrated `2.4.0+ca5bd167` server.
+- Exact role markers appeared only on T01 Kali **VM 116**, T02 Kali **VM 114**, and T03 Kali **VM 115**. Markers were absent on all twelve guests before deployment and on the other nine afterward.
+- All twelve complete Proxmox VM configurations and running states matched the baseline; original names, IDs, IPs, disks, UUIDs, and NICs were retained.
+- All three original users authenticated. Before and after: **15/15 ICMP targets and 12/12 VM TCP targets passed**, using SHA-256-identical WireGuard profiles.
+- Evidence: `post-deploy/standalone/summary.json`, deployment logs/transitions, before/after VM configurations, marker reads, and VPN reports.
+
+### Existing clustered ranges — VMs 2003/2004
+
+- T01 and T02 completed full deployments on their first attempt. T03 initially failed on its existing Windows domain controller's corrupted filesystem; after the explicitly approved repair below, its **full** second deployment completed with **SUCCESS**.
+- Exact role markers appeared only on T01 Kali **VM 114** on peer 2004, T02 Kali **VM 115** on owner 2003, and T03 Kali **VM 116** on peer 2004. The other nine guests remained marker-free.
+- All twelve VM configurations were byte-identical, including disks, UUIDs, and NICs; ownership and running states were preserved. VXLAN tags 1/2/3/4, NAT VNI 16777215, MTU 1450, quorum, owner-only `.49`, LXC-only `.254`, and the unused CQ configuration were retained.
+- Original credentials and unchanged WireGuard profiles passed before and after: **15/15 ICMP targets and 12/12 VM TCP targets**, including peer-owned guests.
+- Evidence: `post-deploy/cluster/qualification-final-summary.json`, `role-execution-proof.json`, `markers-final.json`, `vm-details-final.json`, `final-vpn.json`, and `topology-final.json`.
+
+### Pre-existing cluster fixture failures and approved recovery
+
+Before deployment, two peer guests were unreachable because their QEMU I/O was blocked by a stale NFSv4 session. Packet capture showed `NFS4ERR_SEQ_MISORDERED`; the owner NFS server and local storage were healthy. Restarting `nfs-server` on nested owner 2003 cleared the blocked tasks and restored guest agents/IPs without VM resets or disk replacement. All original-client VPN checks then passed.
+
+T03's first full deployment subsequently failed with DISM `0x80070570` while accessing `C:\Windows\Temp` on **VM 111**. NTFS event 55 predated deployment and identified damaged Temp/Defender indexes; read-only CHKDSK reported corrupted/orphaned file records and a dirty volume. This was not bypassed by narrowing the deployment.
+
+The user explicitly approved a safety snapshot/backup followed by native repair:
+
+- Snapshot-mode `vzdump` backup retained on peer 2004 at `/var/lib/vz/dump/vzdump-qemu-111-2026_09_26-08_47_17.vma.zst`.
+- Backup passed both `zstd` integrity testing and `vma verify`; SHA-256 `e1ba89056fddaec6abc8252a7998a93b24a2ec3e267dd4ad38aaf190647d8ff9`.
+- Scheduled `chkdsk C: /F` and a guest-native `Restart-Computer`; no QEMU reset, replacement, or restore.
+- Windows repaired records/indexes, recovered sixteen files to their original directories and one to `found.000`. Subsequent read-only CHKDSK found no problems; C: was healthy/not dirty and AD feature queries succeeded.
+- The complete T03 deployment and final VPN/identity/marker checks passed afterward. Initial failure and repair evidence remain in `post-deploy/cluster/T03-*`.
+
+### Fresh-install range — VM 2001
+
+New ordinary user **PD** was created on the fresh appliance; the owner-authenticated user API confirmed `isAdmin: false`. After the corrections below, `debian-13-x64-server-template` was built from its ISO in 263 seconds. PD's unrestricted full range deployment completed with `SUCCESS` in 191.8 seconds, creating:
+
+- **VM 101**, `PD-router-debian13-x64`, `10.3.10.254`, running.
+- **VM 102**, `PD-debian13-probe`, `10.3.10.10`, running.
+
+The actual deployment log records the test role changing VM 102. A guest-agent read verified the exact marker `2026-09-26:2001:PD:fresh-full-deployment`, followed by `PD-debian13-probe`, owned by root with mode `0644`. The router had no marker. PD generated a real WireGuard profile through its own CLI/API; a recent handshake, gateway and both VM pings (**3 ICMP targets**), and SSH connections to both VMs (**2 TCP targets**) passed from an isolated network namespace.
+
+Evidence: `post-deploy/fresh-summary.json`, `fresh-template-build-fixed-final.log`, `fresh-PD-full-deploy-final.log`, `fresh-PD-role-execution.log`, `fresh-PD-marker-proof.json`, and `fresh-PD-vpn-proof.json`. Initial failing uploads/builds are retained separately; the final success is not a claim that the original image passed this path unchanged.
+
+### Fresh-deployment corrections
+
+The fresh-install exercise found two additional code/image defects, fixed in **`775733b`**:
+
+1. `ludus-api/api_ansible.go`: local role upload assumed a user's `.ansible/tmp` already existed. The real first upload by new ordinary user PD failed with a missing-directory error. The handler now creates that directory using the existing role-download convention; the same owner upload then succeeded without manually creating it.
+2. `ludus-server/lxc/build.sh`: the image packaged HashiCorp Proxmox Packer plugin 1.2.1, despite the existing updater requiring `badsectorlabs/proxmox` 1.2.4. The older plugin omitted the pool during VM creation and received HTTP 403. Packaging now uses the established fork/version and source-qualified download caches, avoiding cross-fork cache reuse. No global VM permissions were granted. See the [upstream pool-scoping fix](https://github.com/hashicorp/packer-plugin-proxmox/releases/tag/v1.2.2) and [fork release](https://github.com/badsectorlabs/packer-plugin-proxmox/releases/tag/v1.2.4).
+
+All four Linux Go module suites passed with `embedwebui`. The actual isolated CI builder produced the corrected appliance, SHA-256 `f72a8ac5f4283eacf6de8246aa6bc5eb1ced1915f2adbec0ab57837378c91039`. Its packaged fork plugin is executable (`0755`); hashing the actual archived binary yielded `18117dff83c386dadac350b1c0a52225edb639e9da3bc0920e004c2344a790a0`, identical to the plugin that completed the fresh template build.
+
+The six original ranges were redeployed on `2.4.0+ca5bd167`. Fresh end-to-end verification used an in-place binary/dependency update identifying itself as `2.4.0+c470094-rolefix`; those working-tree fixes were subsequently committed as `775733b`. The corrected archive was built and inspected, but was not used to reinstall the completed fresh fixture.
+
+Two harness/configuration corrections were also necessary: the local test role needed Galaxy `meta/main.yml`, and the fresh fixture selected `local-lvm` but omitted the documented `--vm-storage-format raw`. After the plugin fix exposed the unsupported `qcow2` setting, only that storage-format setting was corrected. Direct `pct exec` dependency updates also needed the appliance services' virtualenv PATH and UTF-8 locale; the successful command is recorded in [UPDATING.md](../UPDATING.md).
+
+### Follow-on final state and cleanup
+
+- All **24 original range VMs plus PD's two new VMs** remain running. Original VMIDs, IP addresses, Proxmox configurations, cluster ownership, API keys, and WireGuard profiles were retained.
+- The seven installed test roles, range configuration additions, and seven marker files remain in place as requested. The other 19 range VMs have no marker. The empty CQ range remains untouched.
+- The verified VM 111 safety backup and native repair reports are retained. No snapshot reset, VM replacement, or backup restoration was performed during this follow-on exercise.
+- The temporary qualification SSH key was removed and its absence verified on all four nested hosts. Its local private/public files and disposable deployment/probe scripts were removed. The probe's temporary WireGuard interface and network namespace were confirmed absent. Installed roles, profiles, credentials, deployment logs, build artifacts, and evidence remain private outside the repository.
+
+Consolidated evidence: `post-deploy/post-deploy-summary.json`, `access-cleanup-proof.json`, and `local-cleanup-proof.json`, alongside the per-installation evidence listed above.
 
 ## Verification boundaries
 
