@@ -238,6 +238,9 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 
 	// Save the file to the server
 	ansibleTmpPath := fmt.Sprintf("%s/users/%s/.ansible/tmp", ludusInstallPath, user.ProxmoxUsername())
+	if err := os.MkdirAll(ansibleTmpPath, 0755); err != nil {
+		return JSONError(e, http.StatusInternalServerError, "Unable to create temp directory: "+err.Error())
+	}
 
 	// Make sure the file name is escaped
 	fileHeader.Filename = shellescape.Quote(fileHeader.Filename)

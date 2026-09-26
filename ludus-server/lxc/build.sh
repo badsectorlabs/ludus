@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 
 : "${LUDUS_VERSION:?LUDUS_VERSION must be set}"
 : "${PACKER_VERSION:=1.11.2}"
-: "${PACKER_PROXMOX_VERSION:=1.2.1}"
+: "${PACKER_PROXMOX_VERSION:=1.2.4}"
 : "${PACKER_ANSIBLE_VERSION:=1.1.1}"
 : "${BLOCKY_VERSION:=0.30.0}"
 : "${BLOCKY_LINUX_X86_64_SHA256:=1641ec6821abd39ff61cf47f343f518c33a1973c64ad6c0deb030b0f02d9ef30}"
@@ -38,12 +38,14 @@ if [[ ! -f deps/packer ]]; then
   curl -fsSL "https://releases.hashicorp.com/packer/${PACKER_VERSION}/packer_${PACKER_VERSION}_linux_amd64.zip" -o /tmp/packer.zip
   unzip -o /tmp/packer.zip -d deps/
 fi
-for plugin in proxmox:${PACKER_PROXMOX_VERSION} ansible:${PACKER_ANSIBLE_VERSION}; do
-  name=${plugin%%:*}; ver=${plugin##*:}
+for plugin in badsectorlabs/proxmox:${PACKER_PROXMOX_VERSION} hashicorp/ansible:${PACKER_ANSIBLE_VERSION}; do
+  source=${plugin%%:*}; ver=${plugin##*:}; name=${source##*/}
+  download_dir="deps/plugin-downloads/github.com/${source}"
+  mkdir -p "${download_dir}"
   rm -f "deps/packer-plugin-${name}"
-  if ! compgen -G "deps/packer-plugin-${name}_v${ver}_*" >/dev/null; then
-    curl -fsSL "https://github.com/hashicorp/packer-plugin-${name}/releases/download/v${ver}/packer-plugin-${name}_v${ver}_x5.0_linux_amd64.zip" -o /tmp/pp.zip
-    unzip -o /tmp/pp.zip -d deps/
+  if ! compgen -G "${download_dir}/packer-plugin-${name}_v${ver}_*" >/dev/null; then
+    curl -fsSL "https://github.com/${source%/*}/packer-plugin-${name}/releases/download/v${ver}/packer-plugin-${name}_v${ver}_x5.0_linux_amd64.zip" -o /tmp/pp.zip
+    unzip -o /tmp/pp.zip -d "${download_dir}/"
   fi
 done
 
@@ -52,7 +54,7 @@ stage_packer_plugin() {
   local source=$2
   local version=$3
   local binary
-  binary=$(find deps -maxdepth 1 -type f -name "packer-plugin-${name}_v${version}_*" | sort | head -n1)
+  binary=$(find "deps/plugin-downloads/${source}" -maxdepth 1 -type f -name "packer-plugin-${name}_v${version}_*" | sort | head -n1)
   if [[ -z "${binary}" ]]; then
     echo "ERROR: packer-plugin-${name} v${version} not found in deps" >&2
     exit 1
@@ -65,7 +67,7 @@ stage_packer_plugin() {
 }
 
 rm -rf deps/packer-plugins
-stage_packer_plugin proxmox github.com/hashicorp/proxmox "${PACKER_PROXMOX_VERSION}"
+stage_packer_plugin proxmox github.com/badsectorlabs/proxmox "${PACKER_PROXMOX_VERSION}"
 stage_packer_plugin ansible github.com/hashicorp/ansible "${PACKER_ANSIBLE_VERSION}"
 
 BLOCKY_ARCHIVE="blocky_v${BLOCKY_VERSION}_Linux_x86_64.tar.gz"
