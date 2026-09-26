@@ -41,7 +41,7 @@ migration_prepare() {
     echo "--migrate-host requires an existing host-installed Ludus instance" >&2; return 1;
   }
   [[ -z "${IMPORT_DB:-}" ]] || { echo "Do not combine --migrate-host and --import-db" >&2; return 1; }
-  for cmd in pvesh pvesm qm pct ip ping perl iptables iptables-save iptables-restore conntrack systemctl flock; do
+  for cmd in pvesh pvesm qm pct ip perl iptables iptables-save iptables-restore conntrack systemctl flock; do
     command -v "$cmd" >/dev/null || { echo "Migration requires $cmd" >&2; return 1; }
   done
   exec 9>/run/lock/ludus-lxc-migration.lock

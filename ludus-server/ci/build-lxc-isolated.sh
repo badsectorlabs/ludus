@@ -32,7 +32,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 mkdir -p "$work/ludus-server/lxc" "$work/binaries"
-for input in Makefile dab.conf build.sh migrate-host.sh python-requirements.txt files; do
+for input in Makefile dab.conf build.sh migrate-host.sh migrate-cluster.py python-requirements.txt files; do
   cp -a "$repo/ludus-server/lxc/$input" "$work/ludus-server/lxc/"
 done
 cp -a "$repo/ludus-server/ansible" "$repo/ludus-server/packer" "$work/ludus-server/"

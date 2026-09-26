@@ -24,7 +24,7 @@ class IsolatedBuildTests(unittest.TestCase):
         shutil.copyfile(Path(__file__).with_name('build-lxc-isolated.sh'), self.wrapper)
         for directory in ['files', '../ansible', '../packer', '../../binaries']:
             (self.lxc / directory).mkdir()
-        for name in ['Makefile', 'dab.conf', 'migrate-host.sh', 'python-requirements.txt', '../../binaries/ludus-server']:
+        for name in ['Makefile', 'dab.conf', 'migrate-host.sh', 'migrate-cluster.py', 'python-requirements.txt', '../../binaries/ludus-server']:
             (self.lxc / name).write_text('fixture\n')
         (self.lxc / 'build.sh').write_text('''#!/bin/bash
 set -eu
