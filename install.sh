@@ -45,9 +45,9 @@ AIRGAPPED_ISO_FILENAMES=(
   virtio-win-0.1.229.iso
 )
 
-if [[ -z "${PREFIX}" ]]; then
-  INSTALL_PREFIX="/usr/local/bin"
-fi
+INSTALL_PREFIX="${PREFIX:-/usr/local/bin}"
+LUDUS_RELEASE_CHANNEL="${LUDUS_RELEASE_CHANNEL:-stable}"
+R2_BUCKET_BASE_URL="${R2_BUCKET_BASE_URL:-https://beta-files.ludus.cloud}"
 
 #-------------------------------------------------------------------------------
 # FUNCTIONS
@@ -98,7 +98,15 @@ lxc_host_install_exists() {
 
 run_ludus_server_install() {
   if [[ ${EUID} == 0 ]]; then
-    ludus_install_server
+    if lxc_host_install_exists; then
+      if [[ "${LUDUS_RELEASE_CHANNEL}" == beta ]]; then
+        ludus_update_lxc
+      else
+        print_message "[+] Ludus is already installed in an LXC on this host" "info"
+      fi
+    else
+      ludus_install_server
+    fi
     return
   fi
   command_exists sudo || {
@@ -112,7 +120,11 @@ run_ludus_server_install() {
     bash|zsh|sh)
       installer_tmp=$(make_tempdir "ludus-installer") || return 1
       installer="${installer_tmp}/install.sh"
-      download_file "https://ludus.cloud/install" "${installer_tmp}" install.sh || return 1
+      if [[ "${LUDUS_RELEASE_CHANNEL}" == beta ]]; then
+        download_file "${R2_BUCKET_BASE_URL%/}/${LUDUS_VERSION}/install.sh" "${installer_tmp}" install.sh || return 1
+      else
+        download_file "https://ludus.cloud/install" "${installer_tmp}" install.sh || return 1
+      fi
       chmod 0700 "${installer}"
       ;;
     *) installer="$0" ;;
@@ -156,9 +168,61 @@ run_ludus_server_install() {
   [[ -z ${WG_PORT:-} ]] || args+=(--wg-port "${WG_PORT}")
   [[ -z ${LICENSE:-} ]] || args+=(--license "${LICENSE}")
 
-  print_message "[+] Asking for sudo once to perform the server migration" "warn"
-  sudo "${installer}" "${args[@]}"
+  print_message "[+] Asking for sudo once to perform the server operation" "warn"
+  sudo env LUDUS_RELEASE_CHANNEL="${LUDUS_RELEASE_CHANNEL}" \
+    R2_BUCKET_BASE_URL="${R2_BUCKET_BASE_URL}" \
+    LUDUS_R2_BASE="${LUDUS_R2_BASE:-https://lxc.ludus.cloud}" \
+    bash "${installer}" "${args[@]}"
 }
+
+# Update only the appliance named by host metadata. Never run the server on the
+# Proxmox host or recreate the guest: --update preserves its database/config.
+ludus_update_lxc() (
+  set -Eeuo pipefail
+  umask 077
+  local vmid tmpdir guest_file="" checksum_file
+  [[ "${AIRGAPPED_INSTALL:-0}" != 1 && -z "${TEMPLATE_FILE:-}" ]] || {
+    print_message "[!] An existing beta LXC must be updated online without --template-file/--airgapped" "error"
+    exit 1
+  }
+  command_exists pct || { print_message "[!] pct is required to update the LXC" "error"; exit 1; }
+  vmid=$(python3 - <<'PY'
+import json
+with open('/etc/ludus-lxc.json') as stream:
+    value = json.load(stream)['vmid']
+if type(value) is not int or value <= 0:
+    raise SystemExit('Invalid VMID in /etc/ludus-lxc.json')
+print(value)
+PY
+  )
+  tmpdir=$(make_tempdir ludus-update)
+  trap 'rc=$?; if [[ -n "${guest_file}" ]]; then pct exec "${vmid}" -- rm -f "${guest_file}" || true; fi; rm -rf "${tmpdir}"; exit "${rc}"' EXIT
+  checksum_file="ludus_${LUDUS_VERSION}_checksums.txt"
+  download_file "${R2_BUCKET_BASE_URL%/}/${LUDUS_VERSION}/ludus-server" "${tmpdir}" ludus-server
+  download_file "${R2_BUCKET_BASE_URL%/}/${LUDUS_VERSION}/${checksum_file}" "${tmpdir}" "${checksum_file}"
+  checksum_check "${tmpdir}/${checksum_file}" "${tmpdir}/ludus-server" "${tmpdir}"
+  guest_file=$(pct exec "${vmid}" -- mktemp /tmp/ludus-update.XXXXXX)
+  [[ "${guest_file}" == /tmp/ludus-update.* && "${guest_file}" != *$'\n'* ]] || exit 1
+  pct push "${vmid}" "${tmpdir}/ludus-server" "${guest_file}" --perms 0700
+  print_message "[+] Updating Ludus ${LUDUS_VERSION} inside LXC ${vmid}" "info"
+  # Host home/temp paths may not exist inside the appliance.
+  pct exec "${vmid}" -- env HOME=/root TMPDIR=/tmp \
+    PATH=/opt/ludus/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=C.UTF-8 LC_ALL=C.UTF-8 "${guest_file}" --update
+  python3 - "${LUDUS_VERSION}" <<'PY'
+import json, os, pathlib, sys, tempfile
+path = pathlib.Path('/etc/ludus-lxc.json')
+metadata = json.loads(path.read_text())
+metadata['version'] = sys.argv[1]
+with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, prefix='.ludus-lxc-', delete=False) as stream:
+    temporary = stream.name
+    json.dump(metadata, stream, indent=2)
+    stream.write('\n')
+os.chmod(temporary, path.stat().st_mode & 0o777)
+os.replace(temporary, path)
+PY
+  print_message "[+] Ludus server LXC update complete" "ok"
+)
 
 
 #---  FUNCTION  ----------------------------------------------------------------
@@ -176,6 +240,10 @@ print_help() {
   -p, --prefix INSTALL_PREFIX
       Prefix to install the Ludus client into.  Directory must already exist.
       Default = /usr/local/bin
+
+  Release channel: LUDUS_RELEASE_CHANNEL=stable|beta (default: stable).
+  Beta binaries: R2_BUCKET_BASE_URL (default: https://beta-files.ludus.cloud).
+  Beta installs update an existing LXC in place; stable installs leave it running.
 
   Server (LXC) install flags — only used on a Proxmox host:
   --server-only          Skip client download/install and only install the server LXC
@@ -368,20 +436,44 @@ download_file() {
 }
 
 fetch_latest_tag() {
-  local tag
+  local response tags tag page=1 url
 
-  if command_exists curl; then
-    tag=$(curl -s "https://gitlab.com/api/v4/projects/$PROJECT_ID/repository/tags" | grep -o '"name":"[^"]*' | cut -d'"' -f4 | head -n1)
-  elif command_exists wget; then
-    tag=$(wget -qO- "https://gitlab.com/api/v4/projects/$PROJECT_ID/repository/tags" | grep -o '"name":"[^"]*' | cut -d'"' -f4 | head -n1)
-  else
-    return 20
+  if [[ "${LUDUS_RELEASE_CHANNEL}" == beta ]]; then
+    url="${R2_BUCKET_BASE_URL%/}/latest.txt"
+    if command_exists curl; then
+      response=$(curl -fsSL "${url}") || return 1
+    elif command_exists wget; then
+      response=$(wget -qO- "${url}") || return 1
+    else
+      return 20
+    fi
+    tag=$(printf '%s' "${response}" | tr -d '\r\n ')
+    [[ "${tag}" == *-beta* && "${tag}" != */* ]] || return 1
+    printf '%s\n' "${tag}"
+    return
   fi
 
-  if [[ -z "${tag}" ]]; then
-    return 1
-  fi
-  echo "${tag}"
+  # GitLab returns newest tags first. A page containing only betas is not
+  # the end of the stable release history.
+  while :; do
+    url="https://gitlab.com/api/v4/projects/${PROJECT_ID}/repository/tags?per_page=100&page=${page}"
+    if command_exists curl; then
+      response=$(curl -fsSL "${url}") || return 1
+    elif command_exists wget; then
+      response=$(wget -qO- "${url}") || return 1
+    else
+      return 20
+    fi
+    tags=$(printf '%s' "${response}" | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/^[^:]*:[[:space:]]*"//;s/"$//')
+    [[ -n "${tags}" ]] || return 1
+    while IFS= read -r tag; do
+      if [[ "${tag}" != *-beta* ]]; then
+        printf '%s\n' "${tag}"
+        return 0
+      fi
+    done <<< "${tags}"
+    page=$((page + 1))
+  done
 }
 
 infer_ludus_version_from_template() {
@@ -1475,8 +1567,12 @@ main() {
     LUDUS_VERSION=$(infer_ludus_version_from_template "${TEMPLATE_FILE}" || true)
   fi
 
-  if [[ "${SERVER_ONLY:-0}" != "1" || -z "${LUDUS_VERSION:-}" ]]; then
-    LATEST_TAG=$(fetch_latest_tag)
+  case "${LUDUS_RELEASE_CHANNEL}" in
+    stable|beta) ;;
+    *) print_message "[!] Unknown release channel: ${LUDUS_RELEASE_CHANNEL}" "error"; exit 1;;
+  esac
+  if [[ -z "${LUDUS_VERSION:-}" ]]; then
+    LUDUS_VERSION=$(fetch_latest_tag)
     latest_tag_rcode="${?}"
     if [[ "${latest_tag_rcode}" == "20" ]]; then
       echo "Error: Neither curl nor wget is available. Please install one of them."
@@ -1486,6 +1582,11 @@ main() {
       exit 1
     fi
   fi
+  if [[ "${LUDUS_RELEASE_CHANNEL}" == beta && "${LUDUS_VERSION}" != *-beta* ]]; then
+    print_message "[!] The beta channel requires a version containing -beta" "error"
+    exit 1
+  fi
+  LATEST_TAG="${LUDUS_VERSION}"
 
   ludus_bin_name="ludus-client"
   prefix="${1}"
@@ -1562,7 +1663,7 @@ main() {
       print_message "[!] Unable to determine Ludus version. Pass --version or use a template named ludus-<version>-debian13-amd64.tar.zst" "error"
       exit 1
     fi
-    if lxc_host_install_exists; then
+    if lxc_host_install_exists && [[ "${LUDUS_RELEASE_CHANNEL}" != beta ]]; then
       print_message "[+] Ludus is already installed in an LXC on this host" "info"
       rm -rf "${tmpdir}"
       exit 0
@@ -1574,11 +1675,16 @@ main() {
     rm -rf "${tmpdir}"
     print_message "[+] Installing Ludus server only (LXC mode)" "info"
     run_ludus_server_install
-    exit 0
+    exit $?
   fi
 
-  ludus_base_url="https://gitlab.com/api/v4/projects/$PROJECT_ID/packages/generic/ludus/$LATEST_TAG"
-  ludus_file="${ludus_bin_name}_${ludus_os}-${ludus_arch}-${LATEST_TAG}"
+  if [[ "${LUDUS_RELEASE_CHANNEL}" == beta ]]; then
+    ludus_base_url="${R2_BUCKET_BASE_URL%/}/${LATEST_TAG}"
+    ludus_file="${ludus_bin_name}_${ludus_os}-${ludus_arch}"
+  else
+    ludus_base_url="https://gitlab.com/api/v4/projects/$PROJECT_ID/packages/generic/ludus/$LATEST_TAG"
+    ludus_file="${ludus_bin_name}_${ludus_os}-${ludus_arch}-${LATEST_TAG}"
+  fi
   ludus_checksum_file="ludus_${LATEST_TAG}_checksums.txt"
   ludus_url="${ludus_base_url}/${ludus_file}"
   ludus_checksum_url="${ludus_base_url}/${ludus_checksum_file}"
@@ -1613,7 +1719,9 @@ main() {
 
   # Rename the client to the way the checksum file expects
   ludus_client_non_versioned="${ludus_bin_name}_${ludus_os}-${ludus_arch}"
-  mv "${tmpdir}/${ludus_file}" "${tmpdir}/${ludus_client_non_versioned}"
+  if [[ "${ludus_file}" != "${ludus_client_non_versioned}" ]]; then
+    mv "${tmpdir}/${ludus_file}" "${tmpdir}/${ludus_client_non_versioned}"
+  fi
 
   checksum_check "${tmpdir}/${ludus_checksum_file}" "${tmpdir}/${ludus_client_non_versioned}" "${tmpdir}"
   checksum_check_rcode="${?}"
@@ -1720,12 +1828,14 @@ main() {
   
   # ---- Server install (LXC mode) ---------------------------------------------
   # Only offered on Proxmox VE hosts (linux/amd64 with pveversion).
-  if [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && command_exists pveversion && lxc_host_install_exists; then
+  if [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && command_exists pveversion && lxc_host_install_exists && [[ "${LUDUS_RELEASE_CHANNEL}" != beta ]]; then
     print_message "[+] Ludus is already installed in an LXC on this host" "info"
   elif [[ "${ludus_os}" == "linux" ]] && [[ "${ludus_arch}" == "amd64" ]] && command_exists pveversion; then
     local server_action="Install"
     if legacy_host_install_exists; then
       server_action="Upgrade the existing Ludus server to the LXC runtime"
+    elif lxc_host_install_exists; then
+      server_action="Update the existing Ludus server LXC"
     fi
     if [[ "${NO_PROMPT:-0}" == "1" ]]; then
       install_server="y"
@@ -1748,6 +1858,8 @@ main() {
         fi
         LUDUS_VERSION="${LUDUS_VERSION:-${LATEST_TAG}}"
         run_ludus_server_install
+        local server_rcode=$?
+        [[ "${server_rcode}" == 0 ]] || exit "${server_rcode}"
         ;;
       n|N )
         print_message "[+] Skipping Ludus server installation" "info"

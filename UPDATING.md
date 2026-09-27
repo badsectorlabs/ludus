@@ -1,3 +1,39 @@
+# Installing and updating betas
+
+`install.sh` selects the newest GitLab tag that does not contain `-beta` by
+default. `--version` explicitly pins both the client and the LXC release.
+Use `install-beta.sh` for tags containing `-beta`:
+
+```bash
+curl -fsSL https://beta-files.ludus.cloud/install-beta.sh -o install-beta.sh
+bash ./install-beta.sh --no-prompt --version 2.4.0-beta.1
+```
+
+Omit `--version` to use the beta channel's `latest.txt`. The downloaded entry
+point retrieves the shared installer from that same version, not from a moving
+branch. In a source checkout it uses the adjacent `install.sh`.
+
+- On a client workstation, this installs the checksum-verified beta client.
+- On a fresh Proxmox host, it uses the standard 2.4 LXC installation path.
+- On a legacy host installation, it selects the host-to-LXC migration below.
+  `--migrate-host` can also select that path explicitly.
+- On a host with `/etc/ludus-lxc.json`, it verifies the beta server download and
+  runs `--update` inside the recorded container. It does not recreate the LXC,
+  database, or range VMs. The host metadata version changes only after success.
+  `--server-only` skips the client installation.
+
+Existing-LXC beta updates are online operations; `--template-file` and
+`--airgapped` are rejected on that path. Fresh installs and migrations retain the
+shared installer's local-template and air-gap options. Wait for deployments and
+template builds to finish, take backups, and allow a maintenance window before
+updating. Running the standard installer against an existing LXC still leaves
+the server unchanged.
+
+`R2_BUCKET_BASE_URL` overrides the beta binary/installer origin (default:
+`https://beta-files.ludus.cloud`); `LUDUS_R2_BASE` independently overrides the LXC
+template origin (default: `https://lxc.ludus.cloud`). Prerelease documentation is
+published at <https://beta.ludus.cloud/docs/intro>.
+
 # Moving a host-installed server into an LXC
 
 Use the target LXC release's `install.sh --migrate-host`, not

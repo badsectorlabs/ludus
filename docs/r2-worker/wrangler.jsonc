@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ludus-beta-docs",
+  "main": "worker.js",
+  "compatibility_date": "2025-10-11",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {"pattern": "beta.ludus.cloud", "custom_domain": true}
+  ],
+  "r2_buckets": [
+    {"binding": "DOCS_BUCKET", "bucket_name": "ludus-beta-docs"}
+  ]
+}

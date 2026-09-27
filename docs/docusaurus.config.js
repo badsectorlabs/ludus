@@ -6,17 +6,20 @@
 
 import {themes as prismThemes} from 'prism-react-renderer';
 
+const isBeta = process.env.DOCS_CHANNEL === 'beta';
+const betaVersion = (process.env.DOCS_VERSION || 'beta').replace(/[&<>"']/g, '');
+const localApi = isBeta || process.env.DOCS_LOCAL_API === 'true';
+
+
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: 'Ludus',
   tagline: 'Cyber Ranges for Everyone',
   favicon: 'img/favicon.ico',
 
-  // Set the production url of your site here
-  url: 'https://ludus.cloud',
-  // Set the /<baseUrl>/ pathname under which your site is served
-  // For GitHub pages deployment, it is often '/<projectName>/'
-  baseUrl: '/ludus/',
+  url: process.env.DOCS_URL || (isBeta ? 'https://beta.ludus.cloud' : 'https://ludus.cloud'),
+  baseUrl: process.env.DOCS_BASE_URL || (isBeta ? '/' : '/ludus/'),
+  ...(isBeta ? {noIndex: true, trailingSlash: false} : {}),
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
@@ -76,6 +79,7 @@ const config = {
       'classic',
       /** @type {import('@docusaurus/preset-classic').Options} */
       ({
+        ...(isBeta ? {sitemap: false} : {}),
         docs: {
           sidebarPath: './sidebars.js',
           //editUrl: 'https://gitlab.com/badsectorlabs/ludus/-/edit/main/docs/',
@@ -83,7 +87,7 @@ const config = {
           includeCurrentVersion: true,
           versions: {
             current: {
-              label: 'Ludus 2',
+              label: isBeta ? `Ludus ${betaVersion}` : 'Ludus 2',
               badge: false,
             },
           },
@@ -108,12 +112,21 @@ const config = {
     ({
       // Replace with your project's social card
       image: 'img/ludus-social-card.jpg',
+      ...(isBeta ? {
+        announcementBar: {
+          id: `beta-${betaVersion}`,
+          content: `Beta documentation — ${betaVersion}. This is a prerelease, not the stable release.`,
+          backgroundColor: '#fff3cd',
+          textColor: '#332701',
+          isCloseable: false,
+        },
+      } : {}),
       colorMode: {
         defaultMode: 'dark',
         disableSwitch: false,
         respectPrefersColorScheme: false,
       },
-      algolia: {
+      ...(!isBeta ? {algolia: {
         // The application ID provided by Algolia
         appId: 'N1Z8B4158Z',
         // Public API key: it is safe to commit it
@@ -125,7 +138,7 @@ const config = {
         },
         // Optional: path for search page that enabled by default (`false` to disable it)
         searchPagePath: 'search',
-      },
+      }} : {}),
       navbar: {
         title: 'Ludus',
         logo: {
@@ -146,12 +159,12 @@ const config = {
           {
             label: 'API',
             position: 'left',
-            href: 'https://api-docs.ludus.cloud/'
+            href: localApi ? 'pathname:///api/index.html' : 'https://api-docs.ludus.cloud/'
           },
           {
             type: 'docsVersionDropdown',
             versions: {
-              current: {label: 'Ludus 2'},
+              current: {label: isBeta ? `Ludus ${betaVersion}` : 'Ludus 2'},
               '1': {label: 'Ludus 1'}
             }
           },

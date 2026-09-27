@@ -486,7 +486,6 @@ pages:
   resource_group: ludus-build-vm
   variables:
     LUDUS_BUILD_TYPE: any-built
-    PAGES_PREFIX: "" # No prefix by default (main)
     # Preserve docs/node_modules and Docusaurus' webpack cache across runs.
     # The build VM is not rolled back, so the cache persists; default
     # `git clean -ffdx` would otherwise wipe it every job.
@@ -494,6 +493,8 @@ pages:
   tags:
     - ludus-proxmox-runner-parallel
   rules:
+    - if: $CI_COMMIT_TAG =~ /-beta/
+      when: never
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_MESSAGE =~ /\[build pages\]/
     - if: $CI_COMMIT_MESSAGE == "Automatic backup from Apidog"
@@ -507,9 +508,7 @@ pages:
     max: 2
   script:
     - cd docs
-    # Change the base URL as we are hosting the site straight off the root of the domain
-    - "sed -i \"s|baseUrl: '/ludus/'|baseUrl: '/'|\" docusaurus.config.js"
-    - "sed -i \"s|/ludus/|/|\" static/api/index.html"
+    - export DOCS_BASE_URL=/
     - yarn install
     - yarn build
     - rm -f ./build/video/*
@@ -517,6 +516,64 @@ pages:
   artifacts:
     paths:
       - public
+
+beta-docs-build:
+  stage: pages
+  resource_group: ludus-build-vm
+  variables:
+    LUDUS_BUILD_TYPE: any-built
+    GIT_CLEAN_FLAGS: "-ffdx --exclude=docs/node_modules --exclude=docs/.docusaurus"
+    DOCS_CHANNEL: beta
+    DOCS_URL: https://beta.ludus.cloud
+    DOCS_BASE_URL: /
+  tags:
+    - ludus-proxmox-runner-parallel
+  rules:
+    - if: $CI_COMMIT_TAG =~ /-beta/
+  script:
+    - export DOCS_VERSION="${CI_COMMIT_TAG}"
+    - cd docs
+    - yarn install
+    - yarn build
+    - rm -f ./build/video/*
+    - |
+      printf 'User-agent: *\nDisallow: /\n' > ./build/robots.txt
+    - mv ./build ../beta-docs
+  artifacts:
+    paths:
+      - beta-docs
+    expire_in: 1 week
+
+beta-docs-publish:
+  stage: release-binaries
+  resource_group: ludus-build-vm
+  variables:
+    LUDUS_BUILD_TYPE: any-built
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: beta-docs-build
+      artifacts: true
+    - job: go-unit-tests
+      artifacts: false
+    - job: test-lxc-airgap
+      artifacts: false
+    - job: test-install-sh
+      artifacts: false
+  rules:
+    - if: $CI_COMMIT_TAG =~ /-beta/
+  script:
+    - export CLOUDFLARE_ACCOUNT_ID="${R2_ACCOUNT_ID}"
+    - ': "${CLOUDFLARE_API_TOKEN:?Required to deploy the beta docs Worker and custom domain}"'
+    - npm ci --prefix docs/r2-worker
+    - npm test --prefix docs/r2-worker
+    - export RCLONE_CONFIG_R2_TYPE="s3"
+    - export RCLONE_CONFIG_R2_PROVIDER="Cloudflare"
+    - export RCLONE_CONFIG_R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}"
+    - export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}"
+    - export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+    - rclone sync beta-docs/ r2:ludus-beta-docs/ --s3-no-check-bucket
+    - npm run deploy --prefix docs/r2-worker
 
 documentation:
   stage: documentation
@@ -545,8 +602,7 @@ documentation:
     max: 2
   script:
     - cd docs
-    # Replace the API link to a local link
-    - "sed -i \"s|https://api-docs.ludus.cloud/|pathname:///api/index.html|\" docusaurus.config.js"
+    - export DOCS_LOCAL_API=true
     - yarn install
     - yarn build
     - rm -f ./build/video/*
@@ -683,7 +739,7 @@ build all:
     - cd ..
     # Release plugins are standalone RPC executables and may be built independently of the server's ludus-api package revision.
     - |
-      if [[ ! -z ${CI_COMMIT_TAG+x} ]] && [[ ! ${CI_COMMIT_TAG} == *"beta"* ]]; then
+      if [[ ! -z ${CI_COMMIT_TAG+x} ]] && [[ ! ${CI_COMMIT_TAG} == *"-beta"* ]]; then
         git clone https://ludus-enterprise:${LUDUS_ENTERPRISE_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-enterprise-plugin.git
         go work use ./ludus-enterprise-plugin
         cd ludus-enterprise-plugin
@@ -3004,7 +3060,10 @@ test-install-sh:
   timeout: 30m
   script:
     - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
-    - sudo -E ./install.sh --no-prompt --template-file "ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst" --vmid 9999 --storage local
+    - |
+      INSTALLER=./install.sh
+      if [[ "${LUDUS_VERSION}" == *-beta* ]]; then INSTALLER=./install-beta.sh; fi
+      sudo -E bash "${INSTALLER}" --no-prompt --template-file "ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst" --vmid 9999 --storage local
     - sudo pct exec 9999 -- curl -fsk https://127.0.0.1:8080/api/health | jq -e '.code == 200'
 
 #################
@@ -3272,22 +3331,24 @@ beta-release:
       artifacts: false
     - job: test-install-sh
       artifacts: false
+    - job: upload-lxc-r2
+      artifacts: false
   variables:
     LUDUS_BUILD_TYPE: any-built
   rules:
-    - if: $CI_COMMIT_TAG =~ /beta/
+    - if: $CI_COMMIT_TAG =~ /-beta/
   script:
+    - cp install.sh install-beta.sh binaries/
     - cd binaries
-    - sha256sum ludus-server >> ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_linux-amd64 >> ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_linux-arm64 >> ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_linux-arm >> ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_macOS-amd64 >> ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_macOS-arm64 >> ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_windows-amd64.exe >> ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_windows-386.exe >> ludus_${CI_COMMIT_TAG}_checksums.txt
-    - sha256sum ludus-client_windows-arm64.exe >> ludus_${CI_COMMIT_TAG}_checksums.txt
-    - echo "${CI_COMMIT_TAG}" > latest.txt
+    - |
+      release_files=(
+        ludus-server
+        ludus-client_linux-amd64 ludus-client_linux-arm64 ludus-client_linux-arm
+        ludus-client_macOS-amd64 ludus-client_macOS-arm64
+        ludus-client_windows-amd64.exe ludus-client_windows-386.exe ludus-client_windows-arm64.exe
+        install.sh install-beta.sh
+      )
+      sha256sum "${release_files[@]}" > "ludus_${CI_COMMIT_TAG}_checksums.txt"
     - export RCLONE_CONFIG_R2_TYPE="s3"
     - export RCLONE_CONFIG_R2_PROVIDER="Cloudflare"
     - export RCLONE_CONFIG_R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
@@ -3295,13 +3356,12 @@ beta-release:
     - export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
     - echo "Uploading files to Cloudflare R2..."
     - |
-      for file in $(ls -1 .); do
-        if [[ ${file} == "latest.txt" ]]; then
-          rclone copy ${file} r2:ludus-beta/ --s3-no-check-bucket
-        else
-          rclone copy ${file} r2:ludus-beta/${CI_COMMIT_TAG}/ --s3-no-check-bucket
-        fi
+      for file in "${release_files[@]}" "ludus_${CI_COMMIT_TAG}_checksums.txt"; do
+        rclone copy "$file" "r2:ludus-beta/${CI_COMMIT_TAG}/" --s3-no-check-bucket
       done
+    - rclone copy install-beta.sh r2:ludus-beta/ --s3-no-check-bucket
+    # The release pointer is last, after versioned artifacts and the LXC upload have succeeded.
+    - printf '%s\n' "${CI_COMMIT_TAG}" | rclone rcat r2:ludus-beta/latest.txt --s3-no-check-bucket
 
 upload-lxc-r2:
   stage: upload
@@ -3335,7 +3395,7 @@ upload-lxc-r2:
     - rclone copy "${TMPL}" "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
     - rclone copy "${TMPL}.sha256" "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
     - rclone copy checksums.txt "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
-    - if [[ "$VER" != *beta* ]]; then echo "${VER}" | rclone rcat "r2:ludus-lxc/latest.txt" --s3-no-check-bucket; fi
+    - if [[ "$VER" != *-beta* ]]; then echo "${VER}" | rclone rcat "r2:ludus-lxc/latest.txt" --s3-no-check-bucket; fi
 
 gitlab-upload:
   stage: upload
@@ -3355,7 +3415,7 @@ gitlab-upload:
     PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ludus/${CI_COMMIT_TAG}"
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   rules:
-    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /beta/
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /-beta/
   script:
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-server ${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}'
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}'
@@ -3392,7 +3452,7 @@ keygen-upload:
     LUDUS_BUILD_TYPE: any-built
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   rules:
-    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /beta/
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /-beta/
   script:
     - THIS_VERSION=$(echo ${CI_COMMIT_TAG} | tr -d 'v')
     - curl -sSL https://raw.pkg.keygen.sh/keygen/cli/latest/install.sh | sudo sh
@@ -3479,7 +3539,7 @@ release:
     GIT_STRATEGY: none # Don't re-clone the repo, since this will always come after the build stage
   when: manual
   rules:
-    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /beta/
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /-beta/
   script:
     - wget "https://github.com/orhun/git-cliff/releases/download/v2.7.0/git-cliff-2.7.0-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/git-cliff.tar.gz
     - tar -xvzf /tmp/git-cliff.tar.gz -C /tmp

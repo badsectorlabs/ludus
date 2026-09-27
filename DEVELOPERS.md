@@ -309,3 +309,77 @@ ludus user list
 ./testing.sh tunnel stop
 ./testing.sh release 1008
 ```
+
+## Beta releases and documentation
+
+A tag containing lowercase `-beta`, such as `2.4.0-beta.1`, selects the beta
+release jobs. Beta binaries remain in the `ludus-beta` R2 bucket; LXC templates
+remain in `ludus-lxc`. The versioned beta directory includes both installers and
+their checksum manifest. `beta-release` waits for the LXC upload, publishes all
+versioned files, then the root `install-beta.sh`, and updates `latest.txt` last.
+Failed artifact uploads must not advance that pointer. Enterprise/Anti-Sandbox
+plugins and stable release publishing remain excluded from beta tags.
+
+`test-install-sh` uses the beta entry point on beta tags and the standard entry
+point otherwise. See [UPDATING.md](UPDATING.md) for client, fresh LXC, migration,
+and existing-LXC beta update commands.
+
+### Hosting beta docs on Cloudflare
+
+GitLab Free does not provide parallel Pages deployments. Beta tags therefore
+skip the production `pages` job. `beta-docs-build` builds the tagged source;
+`beta-docs-publish` syncs it to the separate `ludus-beta-docs` R2 bucket and
+deploys `docs/r2-worker` at **https://beta.ludus.cloud**. Publication waits for
+the Go, LXC air-gap, and installer checks.
+
+The hostname belongs to a **Workers Custom Domain**, not an R2 bucket custom
+domain. Raw R2 object hosting does not resolve directory indexes. The Worker
+serves clean Docusaurus `.html` routes, static directory indexes, canonical
+redirects, GET/HEAD requests, and genuine 404 responses from the private bucket.
+There is no SPA fallback for missing assets.
+
+One-time account and CI setup:
+
+1. Create an R2 bucket named `ludus-beta-docs` in the account used by
+   `R2_ACCOUNT_ID`. Keep it dedicated to this site: publication uses
+   `rclone sync`, which removes obsolete objects.
+2. Grant the existing `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` credentials
+   object read/write access to this bucket in addition to the release buckets.
+3. Add a masked GitLab variable `CLOUDFLARE_API_TOKEN`. Use Cloudflare's
+   [Edit Cloudflare Workers token template](https://developers.cloudflare.com/fundamentals/api/reference/template/),
+   scoped to the deployment account and the `ludus.cloud` zone. It must permit
+   creating/deploying `ludus-beta-docs` and managing its Custom Domain
+   (Workers Scripts and zone Workers Routes permissions). See
+   [Cloudflare's permission reference](https://developers.cloudflare.com/workers/authorization/workers/).
+   The job derives `CLOUDFLARE_ACCOUNT_ID` from `R2_ACCOUNT_ID`; no second account
+   variable is needed.
+4. Ensure `ludus.cloud` is an active Cloudflare zone in that account.
+   `beta.ludus.cloud` must not already belong to another Worker, an R2 custom
+   domain, or a conflicting DNS record. Wrangler provisions the Worker domain
+   and its TLS certificate; do not point it directly at the bucket.
+5. The existing build runner needs Node.js 22 or newer, npm, Yarn, and rclone.
+   If credentials are protected variables, protect the `*-beta*` tag pattern
+   so beta pipelines can access them. Cloudflare Workers/R2 account limits
+   still apply independently of GitLab's plan.
+
+The beta build uses `DOCS_CHANNEL=beta`, `DOCS_VERSION=$CI_COMMIT_TAG`,
+`DOCS_URL=https://beta.ludus.cloud`, and `DOCS_BASE_URL=/`. It displays a
+prerelease banner/version, disables production Algolia search and the sitemap,
+and emits no-index metadata and `robots.txt`. The Worker also sends
+`X-Robots-Tag: noindex, nofollow`. The API reference and its schema are local at
+`/api/index.html` and `/api/ludus.openapi.yaml`. Production Pages and embedded
+documentation retain their own origin/base-path settings.
+
+Local checks (installer channel tests require a non-Proxmox client host):
+
+```bash
+python3 ludus-server/lxc/test_installer_channels.py
+npm ci --prefix docs/r2-worker
+npm test --prefix docs/r2-worker
+npm run deploy --prefix docs/r2-worker -- --dry-run
+DOCS_CHANNEL=beta DOCS_VERSION=2.4.0-beta.1 npm run build --prefix docs
+```
+
+The Worker tests use a real local Miniflare R2 binding. A successful build or
+Wrangler dry run does not provision the remote bucket, DNS, TLS, or credentials;
+those require the account setup above and a successful beta-tag pipeline.
