@@ -199,7 +199,7 @@ installers, or files downloaded by user-supplied Ansible roles.
 
 The simplest reliable process is:
 
-1. Stage the installer and LXC appliance before disconnecting the cluster.
+1. Stage the separate offline installer, its matching shared installer, and signed media before disconnecting the cluster.
 2. Build every required Proxmox VM template while the cluster still has access
    to its package and artifact sources.
 3. Preload any package caches using the same range configuration that will be
@@ -210,41 +210,62 @@ The simplest reliable process is:
 If the cluster must be offline from its first boot, provide internal mirrors for
 every required URL or import VM templates prepared elsewhere.
 
-### Stage the installer and appliance
+### Stage the offline distribution
 
-On a connected Linux system, download one release and verify it before transfer:
+Use `install-offline.sh`, not the public installer URL or `install.sh --airgapped`.
+The offline entry point must be supplied alongside the **same release's
+`install.sh`**. It sources the shared provisioning code locally and never
+downloads a replacement. Public installer uploads do not include
+`install-offline.sh`; obtain the two-script distribution through your approved
+offline delivery channel.
+
+Stage the following on a connected preparation system:
+
+- Both installer scripts from the same release.
+- The versioned `ludus-<version>-debian13-amd64.tar.zst` appliance.
+- Every pinned ISO listed by `AIRGAPPED_ISO_FILENAMES` in `install-offline.sh`,
+  including both VirtIO images, in one local ISO directory.
+- A SHA-256 manifest, its detached signature, and a trusted release-signing
+  public key. The manifest must cover the appliance, all ISOs, and any plugin,
+  offline license, or state archive supplied to the installer.
+- Any site-specific CA certificate required by the environment.
+
+Verify the distribution before executing either script. On the disconnected
+Proxmox node, run the offline entry point using a shared storage pool that
+supports ISO content:
 
 ```shell
-VERSION=2.3.0
-BASE="https://lxc.ludus.cloud/ludus-lxc/${VERSION}"
-IMAGE="ludus-${VERSION}-debian13-amd64.tar.zst"
+VERSION=2.4.0
+MEDIA=/root/ludus-offline
 
-curl -fLO https://ludus.cloud/install
-mv install install.sh
-curl -fLO "${BASE}/${IMAGE}"
-curl -fLO "${BASE}/checksums.txt"
-sha256sum -c checksums.txt --ignore-missing
-```
-
-Transfer `install.sh`, the `.tar.zst` archive, and `checksums.txt` through the
-approved path into the offline environment. Verify the checksum again after the
-transfer.
-
-Run the local install on a Proxmox node:
-
-```shell
-chmod 0755 /root/install.sh
-/root/install.sh \
-  --template-file "/root/ludus-${VERSION}-debian13-amd64.tar.zst" \
-  --version "$VERSION" \
+sudo bash "${MEDIA}/install-offline.sh" \
+  --template-file "${MEDIA}/ludus-${VERSION}-debian13-amd64.tar.zst" \
+  --version "${VERSION}" \
+  --iso-directory "${MEDIA}/isos" \
+  --iso-storage shared-isos \
+  --checksum-file "${MEDIA}/checksums.txt" \
+  --checksum-signature "${MEDIA}/checksums.txt.sig" \
+  --checksum-public-key "${MEDIA}/release-signing.pub" \
   --bridge vmbr0 \
   --nameserver 10.0.0.53 \
-  --ca-certificate /root/site-root-ca.crt
+  --ca-certificate "${MEDIA}/site-root-ca.crt"
 ```
 
-Omit `--ca-certificate` if the environment does not use a private CA. With a
-local template and an explicit or filename-derived version, the server-only
-installer does not need to contact the Ludus release servers.
+Omit `--ca-certificate` if the environment does not use a private CA. A version
+can also be inferred from the standard appliance filename; an unrecognized
+filename requires `--version` and never triggers public release discovery.
+`--skip-verification` is only for deliberately unsigned development media; it
+does not waive the requirement for all local files or shared ISO storage.
+
+For a host-to-LXC migration, add `--migrate-host` and follow the
+[migration prerequisites](../infrastructure-operations/migrate-to-lxc.md).
+Install `conntrack` on the host before disconnecting it: the offline entry point
+never installs missing host dependencies. It does not support updates of an
+existing LXC.
+
+The shared installer retains `--template-file` for CI and development, but that
+option alone does not enable the supported air-gap workflow. The distribution
+split does not change runtime licensing or restrict access to repository source.
 
 ### Offline infrastructure requirements
 
@@ -265,16 +286,11 @@ The LXC has two interfaces: `eth0` on the bridge selected with `--bridge` and
 with `--vlan-tag`. Internal mirrors must be reachable from the systems that use
 them; reachability from only the Proxmox management addresses is insufficient.
 
-For Pro or Enterprise, copy the signed offline license into the container and
-restart the services:
-
-```shell
-pct push 900 /root/license.lic /opt/ludus/install/license.lic --perms 0600
-pct exec 900 -- chown root:root /opt/ludus/install/license.lic
-pct exec 900 -- systemctl restart ludus ludus-admin
-```
-
-The configured license key is used to decrypt that file.
+For a licensed offline installation, also pass `--enterprise-plugin`,
+`--license-file`, and `--license` to `install-offline.sh`. Include the plugin and
+license in the signed artifact manifest. The wrapper installs the license at
+`/opt/ludus/license.lic` before services restart; the configured license key
+decrypts it. Community installations can omit those three options.
 
 ### ISOs and template builds
 
@@ -286,6 +302,7 @@ The current built-in template inputs are:
 
 | Template | Required installation media and sources |
 | --- | --- |
+| Debian 13 | `debian-13.7.0-amd64-netinst.iso` and a Debian 13 APT repository |
 | Debian 11 | `debian-11.7.0-amd64-netinst.iso` and a Debian 11 APT repository |
 | Debian 12 | `debian-12.14.0-amd64-netinst.iso` and a Debian 12 APT repository |
 | Kali | `kali-linux-2026.1-installer-netinst-amd64.iso`, a Kali package repository, and the pinned KasmVNC package bundled with the template |
@@ -299,12 +316,12 @@ ISO URL to an internal server.
 
 :::warning
 
-Do not assume that uploading an ISO to Proxmox storage is sufficient. The
-built-in Packer definitions contain `iso_url` values and may retrieve those
-URLs through the Proxmox download API. Test reuse of the staged ISO, make the
-configured URL available through an internal mirror, copy the template
-definition and point it at an internal HTTP(S) URL, or import a compatible
-Proxmox template built elsewhere.
+The offline installer verifies and stages all pinned ISOs in the selected shared
+pool and sets `airgapped_install: true`. The built-in Packer definitions then use
+local ISO volume IDs instead of their public download URLs. Custom template
+definitions may still contain external URLs: mirror or replace those sources,
+or import compatible Proxmox templates built elsewhere. Staging ISOs does not
+provide the package repositories used later in the guest installation.
 
 :::
 
@@ -313,10 +330,9 @@ Linux, or HTTPS WinRM and PowerShell for Windows. It must use the credentials
 Ludus expects and be in the `SHARED` pool. See
 [Non-automated OS template builds](../using-ludus/templates.md#non-automated-os-template-builds).
 
-The Debian 11 template is also the default range router. Build it from a current
-Ludus release: its template build installs the packages needed for offline
-router configuration. The LXC supplies Blocky to the router during range
-deployment, so the router does not download Blocky from GitHub.
+Build range-router templates from a current Ludus release: their template builds
+install the packages needed for offline router configuration. The LXC supplies
+Blocky to routers during range deployment, so they do not download it from GitHub.
 
 ### APT mirror or cache
 
@@ -363,11 +379,11 @@ Those vendor payloads must also be hosted internally or repackaged into an
 internal Chocolatey package. This applies in particular to browsers, Office,
 Visual Studio workloads, and packages that always install their latest release.
 
-Set `airgapped_install: true` in `/opt/ludus/config.yml` so Office 2016, 2019,
-and 2021 provisioning uses the pinned Chocolatey package version instead of
-querying the GitHub API. Visual Studio and Office installers still download
-large payloads from Microsoft unless those vendor sources are mirrored
-internally.
+The offline installer sets `airgapped_install: true` in `/opt/ludus/config.yml`,
+so Office 2016, 2019, and 2021 provisioning uses the pinned Chocolatey package
+version instead of querying the GitHub API. Visual Studio and Office installers
+still download large payloads from Microsoft unless those vendor sources are
+mirrored internally.
 
 For a range that does not need those tools, keep the Windows configuration
 small:
@@ -410,7 +426,8 @@ router:
 
 Before removing egress, verify all of the following:
 
-- The installer, LXC archive, and checksums are stored inside the environment.
+- `install-offline.sh`, its matching `install.sh`, the LXC archive, all pinned
+  ISOs, and the signed manifest/signature/trusted key are stored locally.
 - The Proxmox cluster is quorate and all configured API endpoints answer.
 - DNS and NTP work without Internet access.
 - `ludus templates list` reports `BUILT` for every template in the range.

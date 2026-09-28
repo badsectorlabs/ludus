@@ -310,6 +310,48 @@ ludus user list
 ./testing.sh release 1008
 ```
 
+## Offline installer distribution
+
+`install.sh` is both the public online entry point and the shared implementation.
+When sourced, it defines its functions without parsing arguments or installing
+anything. `install-offline.sh` requires a compatible local copy from the same
+release (`LUDUS_INSTALLER_API=1`); it never downloads that dependency.
+
+The offline entry point reuses argument parsing, local artifact verification,
+LXC provisioning, CA/plugin staging, migration, health checks, and final host
+metadata. It owns the pinned ISO list, ISO upload/reuse, offline-license staging,
+and offline dependency policy. Its preparation overrides and guest-config
+customization run before services restart. Supplied license keys are retained
+rather than replaced by the interactive community default.
+
+Public `install.sh` and `install-beta.sh` reject the former offline options.
+`--template-file` remains available for CI/development and does not enable the
+full air-gap workflow. The separate entry point supports fresh installs and
+host migrations, not updates of an existing LXC. Use `--version` or a correctly
+named local archive; missing versions never fall back to public discovery.
+
+An approved offline distribution must contain both scripts from the same
+release, the LXC archive, every pinned ISO, a signed checksum manifest and its
+detached signature, and a trusted verification key. Include any required plugin,
+offline license, or imported state archive in the manifest too. Verify the
+distribution before executing its scripts. Site-specific CA certificates remain
+separate inputs. The repository does not define a private-media publisher;
+assemble and deliver this distribution through the approved offline channel.
+Do not add `install-offline.sh` to the public beta upload list, public installer
+URLs, or the appliance image. Repository access still exposes the source: this
+split does not introduce entitlement enforcement or change runtime licensing.
+
+The offline boundary tests use real OpenSSL signatures and file checksums while
+blocking external downloads and Proxmox commands. They are included in the
+`go-unit-tests` CI gate and can also run on a non-Proxmox workstation:
+
+```bash
+python3 -B ludus-server/lxc/test_installer_offline.py
+```
+
+See [the offline installation procedure](docs/docs/deployment-options/proxmox-lxc.md#install-on-an-offline-proxmox-cluster)
+for operator commands and infrastructure requirements.
+
 ## Beta releases and documentation
 
 A tag containing lowercase `-beta`, such as `2.4.0-beta.1`, selects the beta

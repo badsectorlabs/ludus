@@ -22,17 +22,32 @@ branch. In a source checkout it uses the adjacent `install.sh`.
   database, or range VMs. The host metadata version changes only after success.
   `--server-only` skips the client installation.
 
-Existing-LXC beta updates are online operations; `--template-file` and
-`--airgapped` are rejected on that path. Fresh installs and migrations retain the
-shared installer's local-template and air-gap options. Wait for deployments and
-template builds to finish, take backups, and allow a maintenance window before
-updating. Running the standard installer against an existing LXC still leaves
-the server unchanged.
+Existing-LXC beta updates are online operations and reject `--template-file`.
+Fresh installs and migrations retain local-template support for CI/development,
+but full air-gap installation now requires the separate `install-offline.sh`.
+Both public entry points reject `--airgapped`, `--iso-directory`, and
+`--license-file`. Wait for deployments and template builds to finish, take
+backups, and allow a maintenance window before updating. Running the standard
+installer against an existing LXC still leaves the server unchanged.
 
 `R2_BUCKET_BASE_URL` overrides the beta binary/installer origin (default:
 `https://beta-files.ludus.cloud`); `LUDUS_R2_BASE` independently overrides the LXC
 template origin (default: `https://lxc.ludus.cloud`). Prerelease documentation is
 published at <https://beta.ludus.cloud/docs/intro>.
+
+# Offline installation
+
+Transfer `install-offline.sh` together with the **same release's `install.sh`**
+and the signed local media. Run `install-offline.sh` directly; there is no
+`--airgapped` switch. The wrapper reuses the shared LXC installation/migration
+engine without downloading its companion script, discovering a public release,
+or installing a client. It requires a local LXC archive, all pinned ISOs, and an
+explicit shared ISO storage pool. Existing-LXC updates are not supported.
+
+The public installer downloads do not include the offline entry point. This is
+a distribution split, not a new license check or a restriction on source access.
+See [the offline procedure](docs/docs/deployment-options/proxmox-lxc.md#install-on-an-offline-proxmox-cluster)
+for signed-media, license, CA, and internal-mirror requirements.
 
 # Moving a host-installed server into an LXC
 

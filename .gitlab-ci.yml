@@ -625,6 +625,7 @@ go-unit-tests:
     - if: $CI_COMMIT_BRANCH
     - if: $CI_COMMIT_TAG
   script:
+    - python3 -B ludus-server/lxc/test_installer_offline.py
     - cd ludus-api && go test ./... -v -race -coverprofile=coverage.out
     - cd ../dynamic-inventory && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o ../ludus-server/ansible/range-management/dynamic-inventory
     - cd ../ludus-server && go test ./... -v -race
@@ -3338,6 +3339,7 @@ beta-release:
   rules:
     - if: $CI_COMMIT_TAG =~ /-beta/
   script:
+    # Offline media is distributed separately; never add install-offline.sh here.
     - cp install.sh install-beta.sh binaries/
     - cd binaries
     - |
