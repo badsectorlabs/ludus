@@ -35,6 +35,7 @@
         owner: ludus
         group: ludus
         mode: '0770'
+      when: user_has_default_range | default(create_default_range | default(true)) | bool
 
     - name: Create range config for the user's default range
       ansible.builtin.template:
@@ -43,6 +44,7 @@
         owner: ludus
         group: ludus
         mode: '0600'
+      when: user_has_default_range | default(create_default_range | default(true)) | bool
 
     - name: Add the user to the host
       ansible.builtin.user:
@@ -179,6 +181,7 @@
           - PVEAdmin
           - "-role"
           - PVESDNAdmin
+      when: user_has_default_range | default(create_default_range | default(true)) | bool
 
     - name: Set the acls users pool for admins
       ansible.builtin.command:
@@ -192,6 +195,7 @@
           - PVEAdmin
           - "-role"
           - PVESDNAdmin
+      when: user_has_default_range | default(create_default_range | default(true)) | bool
 
     - name: Set acls for local "/storage/local"
       ansible.builtin.command:

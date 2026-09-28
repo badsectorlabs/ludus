@@ -210,7 +210,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		return se.Next()
 	})
 
-	// Hook the OAuth2 user creation to populate the userID and userNumber fields
+	// Enforce the SSO account policy and provision users only when explicitly allowed.
 	app.OnRecordAuthWithOAuth2Request("users").BindFunc(func(e *core.RecordAuthWithOAuth2RequestEvent) error {
 		return populateUserFieldsFromOAuth2Provider(e)
 	})

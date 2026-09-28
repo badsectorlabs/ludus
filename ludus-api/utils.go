@@ -623,9 +623,16 @@ func GrantUserProxmoxAccessToDefaultRange(txApp core.App, user *models.User) err
 	return nil
 }
 
-// CreateDefaultUserRangeForBootstrap creates a default range for a user without a request event.
-// Used when creating the initial admin user during InstallDb (no HTTP request context).
+// CreateDefaultUserRangeForBootstrap creates a default range if enabled by server configuration.
+// Used for manual and SSO user provisioning and the initial admin account, without a request event.
 func CreateDefaultUserRangeForBootstrap(txApp core.App, user *models.User) error {
+	ConfigMu.RLock()
+	createDefaultRange := ServerConfiguration.CreateDefaultRange
+	ConfigMu.RUnlock()
+	if !createDefaultRange {
+		return nil
+	}
+
 	rangeNumber := findNextAvailableRangeNumber(txApp)
 
 	rangeCollection, err := txApp.FindCollectionByNameOrId("ranges")
