@@ -2,19 +2,19 @@
 
 # /opt/ludus/ci/prepare-cluster.sh
 #
-# Prepares cluster nodes (VMIDs 1005/1006) for cluster CI tests.
+# Prepares the selected profile's dedicated cluster nodes for CI tests.
 #
 # Cluster slot acquisition is now done by the dedicated claim-cluster YAML
 # job (which runs claim-cluster.sh and creates the lock dir). This script
 # only handles the per-job rollback / take-snapshot / SSH-wait logic.
 
 currentDir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-source "${currentDir}/base.sh"
+source "${currentDir}/base.sh" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
 
 echo "CUSTOM_ENV_LUDUS_BUILD_TYPE: $CUSTOM_ENV_LUDUS_BUILD_TYPE"
 
 # Populate CLUSTER_NODE{1,2}_IP / CLUSTER_NODES via Proxmox API
-discover_cluster_ips
+discover_cluster_ips || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
 
 NODE1=$CLUSTER_NODE1_VMID
 NODE2=$CLUSTER_NODE2_VMID
@@ -134,7 +134,7 @@ restart_cluster_ceph_services() {
 
     for IP in $CLUSTER_NODES; do
         if ! ssh -o ConnectTimeout=10 -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" \
-            "sudo bash -s" <<'REMOTE'
+            "sudo CI_PROFILE='$CI_PROFILE' bash -s" <<'REMOTE'
 set -euo pipefail
 
 if ! command -v ceph >/dev/null 2>&1; then
@@ -147,6 +147,13 @@ systemctl reset-failed \
     "ceph-mgr@${NODE_HOSTNAME}.service" \
     "ceph-mds@${NODE_HOSTNAME}.service" \
     pvestatd.service 2>/dev/null || true
+
+if [[ "$CI_PROFILE" == "lxc-2.4" ]]; then
+    # RAM snapshots also restore OSD connections and leases. Reset those with
+    # the monitors/MDS rather than waiting for stale sessions to time out.
+    systemctl reset-failed 'ceph-osd@*.service' 2>/dev/null || true
+    systemctl restart 'ceph-osd@*.service'
+fi
 
 for service in \
     "ceph-mon@${NODE_HOSTNAME}.service" \
@@ -276,7 +283,7 @@ elif [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "cluster-from-snapshot" ]]; then
         echo "Snapshot $SNAP not found, falling back to full build"
         exit "${BUILD_FAILURE_EXIT_CODE:-1}"
     fi
-    if [[ ! -f "/tmp/.ludus-ci-cluster-${PIPELINE_ID}-${SNAP}-rolled-back" ]]; then
+    if [[ ! -f "/tmp/.ludus-ci-cluster-${CI_NAMESPACE}${PIPELINE_ID}-${SNAP}-rolled-back" ]]; then
         SNAPTIME=$(pvesh get "/nodes/$PROXMOX_NODE/qemu/$NODE1/snapshot" --output-format=json | jq --arg S "$SNAP" '.[] | select(.name==$S) | .snaptime')
         DIFF=$(( $(date +%s) - SNAPTIME ))
         if [[ "$DIFF" -gt 120 ]]; then
@@ -286,7 +293,7 @@ elif [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "cluster-from-snapshot" ]]; then
         else
             echo "$SNAP snapshot is < 2 minutes old. Not rolling back."
         fi
-        touch "/tmp/.ludus-ci-cluster-${PIPELINE_ID}-${SNAP}-rolled-back"
+        touch "/tmp/.ludus-ci-cluster-${CI_NAMESPACE}${PIPELINE_ID}-${SNAP}-rolled-back"
         qm reboot "$NODE1"
         qm reboot "$NODE2"
         wait_for_cluster_ssh 90 || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
@@ -315,7 +322,7 @@ done
 ensure_cluster_sdn_zone
 
 # Tidy old rollback tracking files
-find /tmp/ -name '.ludus-ci-cluster-*' -type f -mtime +2 -exec rm {} + 2>/dev/null || true
+find /tmp/ -name ".ludus-ci-cluster-${CI_NAMESPACE}[0-9]*" -type f -mtime +2 -exec rm {} + 2>/dev/null || true
 
 # Export VM_ID and VM_IP for run.sh
 export VM_ID=$NODE1

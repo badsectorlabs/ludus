@@ -1,3 +1,6 @@
+variables:
+  LUDUS_CI_PROFILE: lxc-2.4
+
 stages:
   - pages
   - documentation
@@ -38,45 +41,8 @@ stages:
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
   - *qm-guest-exec-retry
-  # Set the config to use the "user" API by default
-  - mkdir -p ~/.config/ludus/
-  - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
-  # Start as the ROOT user
-  - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
-  # Download the build all artifacts from this pipeline if they are not present AND the version of Ludus we are running does not match the commit hash
-  - export BUILT_SHA=$(ludus version 2>&1 | grep '+' | cut -d '+' -f 2)
-  - |
-    if [[ ! -d binaries && "$BUILT_SHA" != "${CI_COMMIT_SHORT_SHA}" ]]; then
-      echo "binaries/ not found; downloading build all artifacts from this pipeline"
-
-      build_job_id="$(
-        curl --fail --silent --show-error --globoff \
-          --header "PRIVATE-TOKEN: ${JOB_READ_PAT}" \
-          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/pipelines/${CI_PIPELINE_ID}/jobs?scope[]=success&per_page=100" \
-        | jq -r '[.[] | select(.name == "build all")][0].id // empty'
-      )"
-
-      if [ -z "$build_job_id" ]; then
-        echo "Could not find successful build all job in pipeline ${CI_PIPELINE_ID}"
-        exit 1
-      fi
-
-      curl --fail --location --silent --show-error \
-        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
-        --output /tmp/build-all-artifacts.zip \
-        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/jobs/${build_job_id}/artifacts"
-
-      unzip -o /tmp/build-all-artifacts.zip
-    fi
-  - |
-    if [ -d binaries ]; then
-      cd binaries
-      # Update the server to make sure we are running the latest version if a packer or ansible build is not running
-      pgrep -f 'ansible|packer' || sudo ./ludus-server --update
-      # Move the latest client to /usr/local/bin for clean commands
-      sudo cp -f ludus-client_linux-amd64 /usr/local/bin/ludus
-      cd ..
-    fi
+  - source "${CI_PROJECT_DIR}/ludus-server/ci/job-server.sh"
+  - ci_job_setup
 
 
 .wait-for-range-success: &wait-for-range-success
@@ -128,10 +94,8 @@ stages:
   - *common-setup
   # Add the CIA user if it doesn't already exist, try 5 times since the server just restarted the first might fail
   - for i in {1..5}; do (ludus users list all | grep -q 'Continuous Integration Admin' || ludus users add -a -n "Continuous Integration Admin" -i CIA -e "cia@ludus.internal" -p "cicdpassword") && break || sleep 5; done
-  # Switch to CIA user API Key - only request it once, save it to disk
-  - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then ludus --user CIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-admin; fi
-  # Set the CIA user key as the key for all future ludus operations
-  - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
+  # Request the key from the running server, never a pre-migration host cache.
+  - export LUDUS_API_KEY=$(ludus --user CIA users apikey --no-prompt --value)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
   - *powered-on-and-not-in-testing
   # Set the config to simple-domain.yml if all templates are built
@@ -141,10 +105,8 @@ stages:
   - *common-setup
   # Add the CIU user if it doesn't already exist, try 5 times since the server just restarted the first might fail
   - for i in {1..5}; do (ludus users list all | grep -q 'Continuous Integration User' || ludus users add -n "Continuous Integration User" -i CIU -e "ciu@ludus.internal" -p "cicdpassword") && break || sleep 5; done
-  # Switch to CIU user API Key - only request it once, save it to disk
-  - if [ ! -f /opt/ludus/ci/.apikey-user ]; then ludus --user CIU users apikey --no-prompt --value > /opt/ludus/ci/.apikey-user; fi
-  # Set the CIU user key as the key for all future ludus operations
-  - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
+  # Request the key from the running server, never a pre-migration host cache.
+  - export LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
   - *powered-on-and-not-in-testing
   # Set the config to simple-domain.yml
@@ -178,10 +140,11 @@ stages:
   - |
     (
       set -euo pipefail
-      python3 -m http.server 18080 --bind 127.0.0.1 --directory /opt/ludus/ci/fixtures &
-      archive_server=$!
-      trap 'kill "$archive_server" 2>/dev/null || true; wait "$archive_server" 2>/dev/null || true' EXIT
-      archive_url=http://127.0.0.1:18080/ludus_ci-http_archive-1.0.0.tar.gz
+      ci_server_exec mkdir -p /tmp/ludus-ci-archives
+      ci_server_push /opt/ludus/ci/fixtures/ludus_ci-http_archive-1.0.0.tar.gz /tmp/ludus-ci-archives/ludus_ci-http_archive-1.0.0.tar.gz 0644
+      ci_server_exec systemd-run --unit=ludus-ci-archive --collect python3 -m http.server 18080 --bind "$CI_SERVER_IP" --directory /tmp/ludus-ci-archives
+      trap 'ci_server_exec systemctl stop ludus-ci-archive' EXIT
+      archive_url="http://${CI_SERVER_IP}:18080/ludus_ci-http_archive-1.0.0.tar.gz"
       curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 "$archive_url" --output /dev/null
       ludus ansible collection add "$archive_url" --force
       ludus ansible collection add "${archive_url}?token=ci" --force
@@ -436,20 +399,8 @@ stages:
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
   - *qm-guest-exec-retry
-  # Update server binary if available
-  - |
-    if [ -f binaries/ludus-server ]; then
-      cd binaries
-      pgrep -f 'ansible|packer' || sudo ./ludus-server --update
-      cd ..
-    fi
-    if [ -f binaries/ludus-client_linux-amd64 ]; then
-      sudo cp -f binaries/ludus-client_linux-amd64 /usr/local/bin/ludus
-    fi
-  - mkdir -p ~/.config/ludus/
-  # Cluster install uses custom port (9090) to exercise the configurable-port path
-  - 'echo "url: https://127.0.0.1:9090" > ~/.config/ludus/config.yml'
-  - export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key)
+  - source "${CI_PROJECT_DIR}/ludus-server/ci/job-server.sh"
+  - ci_job_setup
   # Create cluster CI admin user
   - |
     for i in {1..5}; do
@@ -468,14 +419,12 @@ stages:
       fi
 
       sudo pveum user delete cluster-ci-admin@pam 2>/dev/null || true
-      sudo userdel -r cluster-ci-admin 2>/dev/null || true
+      ci_server_exec userdel -r cluster-ci-admin 2>/dev/null || true
       ludus users add -a -n "Cluster CI Admin" -i CCIA -e "ccia@ludus.internal" -p "cicdpassword" && break
       sleep 5
     done
     ludus users list all | grep -q 'Cluster CI Admin'
-  - if [ ! -s /opt/ludus/ci/.apikey-cluster-admin ]; then rm -f /opt/ludus/ci/.apikey-cluster-admin; ludus --user CCIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-cluster-admin; fi
-  - test -s /opt/ludus/ci/.apikey-cluster-admin
-  - export LUDUS_API_KEY=$(cat /opt/ludus/ci/.apikey-cluster-admin)
+  - export LUDUS_API_KEY=$(ludus --user CCIA users apikey --no-prompt --value)
   - export LUDUS_USER_ID=$(ludus user list --json | jq -r '.[].userID')
 
 #################
@@ -659,6 +608,8 @@ build all:
     paths:
       - binaries/*
       - ludus-server/ansible/range-management/dynamic-inventory
+      - ludus-server/ci/
+      - ludus-server/packer/
     expire_in: 1 week
   variables:
     LUDUS_BUILD_TYPE: any-built # we are just building go code, use any CI VM
@@ -772,6 +723,9 @@ build-lxc-template:
     - if: $CI_COMMIT_MESSAGE =~ /\[(full build|build-lxc)\]/
     - changes:
         - install.sh
+        - install-beta.sh
+        - .gitlab-ci.yml
+        - ludus-server/ci/job-server.sh
         - ludus-server/ci/test-lxc*.sh
         - ludus-server/ci/test-install*.sh
         - ludus-server/lxc/**/*
@@ -935,7 +889,7 @@ templates check:
     - ludus-proxmox-runner-parallel
   needs:
     - templates build
-  dependencies: [] # Prevent download of build artifacts, use local cache
+    - build all
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -973,7 +927,7 @@ templates check:
 
       # If there is no template building process, start one.
       # This may happen on a failed ISO upload.
-      pgrep -f 'packer' >/dev/null || ludus templates build
+      ci_server_exec pgrep -f 'packer' >/dev/null || ludus templates build
 
       while true; do
         UNBUILT_TEMPLATES=$(ludus templates list --json | jq -r '.[] | select(.built == false) | .name')
@@ -981,7 +935,7 @@ templates check:
           break
         fi
 
-        if pgrep -f 'packer' >/dev/null; then
+        if ci_server_exec pgrep -f 'packer' >/dev/null; then
           date
           sleep 60
           continue
@@ -1203,7 +1157,6 @@ post-deploy power-as-admin:
     - build all
     - job: post-deploy testing-as-admin
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1249,7 +1202,6 @@ post-deploy ansible-as-admin:
     - build all
     - job: post-deploy power-as-admin
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1298,7 +1250,6 @@ post-deploy user-cmds-as-admin:
     - build all
     - job: post-deploy ansible-as-admin
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -1567,8 +1518,8 @@ post-deploy blueprints-as-admin:
     - ludus blueprint list | grep ci-bp-main
     - ludus range create -r ci-bp-range --name "CI Blueprint Range" --from-blueprint ci-bp-main
     - ludus range create -r ci-bp-range --name "CI Blueprint Range" --from-blueprint ci-bp-main
-    - 'test -z "$(sudo find /opt/ludus/ranges/ci-bp-range \( ! -user ludus -o ! -group ludus \) -print -quit)"'
-    - 'test "$(sudo stat -c "%a %U %G" /opt/ludus/ranges/ci-bp-range)" = "770 ludus ludus"'
+    - 'test -z "$(ci_server_exec find /opt/ludus/ranges/ci-bp-range \( ! -user ludus -o ! -group ludus \) -print -quit)"'
+    - 'test "$(ci_server_exec stat -c "%a %U %G" /opt/ludus/ranges/ci-bp-range)" = "770 ludus ludus"'
     - ludus blueprint config get ci-bp-main > /tmp/ci-bp-main-raw.yml
     - test -s /tmp/ci-bp-main-raw.yml
     - ludus blueprint access users ci-bp-main | grep CIA
@@ -1591,7 +1542,7 @@ post-deploy blueprints-as-admin:
     - 'grep -q "Min Ludus:.*2.1.0" /tmp/ci-bp-scratch.info'
     - 'grep -q alpha /tmp/ci-bp-scratch.info && grep -q beta /tmp/ci-bp-scratch.info'
     # Local blueprint dirs must never carry an on-disk blueprint.yml (DB is canonical; manifest is synthesized at export)
-    - '! sudo find /opt/ludus/blueprints -maxdepth 2 -name "blueprint.yml" | grep .'
+    - '! ci_server_exec find /opt/ludus/blueprints -maxdepth 2 -name "blueprint.yml" | grep .'
     - ludus blueprint export ci-bp-scratch -o /tmp/ci-bp-scratch.tar.gz
     - tar tzf /tmp/ci-bp-scratch.tar.gz | grep -q "^ci-bp-scratch/blueprint.yml$"
     - ludus blueprint rm ci-bp-scratch --no-prompt
@@ -1682,7 +1633,7 @@ post-deploy sources-as-admin:
     # Retry hygiene: the legacy-compat block below plants a bare-named role
     # dir and cleans it up; a retry that lands between the two must not
     # inherit it — the "no bare-name dir" asserts depend on a clean slate.
-    - sudo rm -rf /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
+    - ci_server_exec rm -rf /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
     # Sources — registered from a bundled fixture so CI never depends on a remote repo.
     # The fixture ships a blueprint, a shared packer template, and a shared local ansible role.
     # Table asserts use `grep pat >/dev/null`, not `grep -q`: -q exits at the
@@ -1698,8 +1649,8 @@ post-deploy sources-as-admin:
     # identity from meta (here ludus.say_hello), never the bare dir name — so
     # `ansible role list` and namespaced range-config references agree.
     - 'ludus ansible role list | grep "ludus.say_hello" >/dev/null'
-    - sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/ludus.say_hello
-    - '! sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello'
+    - ci_server_exec test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/ludus.say_hello
+    - '! ci_server_exec test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello'
     - ludus blueprint info ci-src/example | tee /tmp/ci-src-example.info
     - 'grep -q "Authors:" /tmp/ci-src-example.info'
     # Negative-path: a non-owner can't delete an admin-created source. CIU is created on demand here since this job runs admin-only setup.
@@ -1786,11 +1737,11 @@ post-deploy sources-as-admin:
     - ludus ansible collection rm ludusci.ci_utils || true
     - ludus templates rm -n example-debian-12-template || true
     - '! ludus templates list | grep "example-debian-12-template" >/dev/null'
-    - '! sudo find /opt/ludus/users/continuous-integration-admin -path "*/ansible_collections/ludusci/ci_utils/galaxy.yml" | grep -q .'
+    - '! ci_server_exec find /opt/ludus/users/continuous-integration-admin -path "*/ansible_collections/ludusci/ci_utils/galaxy.yml" | grep -q .'
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-impl --blueprints example
     - 'ludus blueprint list | grep "ci-src-impl/example" >/dev/null'
     - 'ludus templates list | grep "example-debian-12-template" >/dev/null'
-    - 'sudo find /opt/ludus/users/continuous-integration-admin -path "*/ansible_collections/ludusci/ci_utils/galaxy.yml" | grep -q .'
+    - 'ci_server_exec find /opt/ludus/users/continuous-integration-admin -path "*/ansible_collections/ludusci/ci_utils/galaxy.yml" | grep -q .'
     - ludus source list ci-src-impl --catalog --json | jq -e '[.localCollections[] | select(.name=="ludusci.ci_utils") | .state] == ["installed"]'
     # Every view agrees on the install: the read-only deps view, and
     # ansible-galaxy itself — the vendored install synthesizes a minimal
@@ -1802,7 +1753,7 @@ post-deploy sources-as-admin:
     - 'ludus ansible collection list | grep "ludusci.ci_utils" >/dev/null'
     # Legacy compat: installs that predate the synthesized receipt carry only
     # galaxy.yml — the catalog must still read them as installed.
-    - sudo rm /opt/ludus/users/continuous-integration-admin/.ansible/collections/ansible_collections/ludusci/ci_utils/MANIFEST.json
+    - ci_server_exec rm /opt/ludus/users/continuous-integration-admin/.ansible/collections/ansible_collections/ludusci/ci_utils/MANIFEST.json
     - ludus source list ci-src-impl --catalog --json | jq -e '[.localCollections[] | select(.name=="ludusci.ci_utils") | .state] == ["installed"]'
     - ludus ansible role rm ludus.say_hello || true
     - '! ludus ansible role list | grep "say_hello" >/dev/null'
@@ -1816,12 +1767,12 @@ post-deploy sources-as-admin:
     # vendored collections get via their galaxy.yml FQCN.
     - ludus ansible role rm ludus.say_hello
     - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="ludus.say_hello") | .state] == ["not_installed"]'
-    - sudo cp -r /opt/ludus/ci/fixtures/source-template/ansible/roles/say_hello /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
+    - ci_server_push_tree /opt/ludus/ci/fixtures/source-template/ansible/roles/say_hello /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
     - >-
-      sudo sh -c 'printf "install_date: \"\"\nversion: 9.9.9\n" > /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello/meta/.galaxy_install_info'
+      ci_server_exec sh -c 'printf "install_date: \"\"\nversion: 9.9.9\n" > /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello/meta/.galaxy_install_info'
     - 'ludus ansible role list | grep "say_hello" >/dev/null'
     - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="ludus.say_hello") | .scopes[] | "\(.scope):\(.version)"] == ["user:9.9.9"]'
-    - sudo rm -rf /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
+    - ci_server_exec rm -rf /opt/ludus/users/continuous-integration-admin/.ansible/roles/say_hello
     - ludus source list ci-src-impl --catalog --json | jq -e '[.localRoles[] | select(.name=="ludus.say_hello") | .state] == ["not_installed"]'
     - ludus source rm ci-src-impl --no-prompt
     # Regression: a blueprint requiring a vendored role by its PUBLISHED galaxy
@@ -1838,11 +1789,11 @@ post-deploy sources-as-admin:
     - 'ludus blueprint list | grep "ci-src-vendrole/vendored_role" >/dev/null'
     # Installed under the namespaced name, with the vendored copy's version.
     - 'ludus ansible role list | grep "acme.vendored_demo" >/dev/null'
-    - sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/acme.vendored_demo
+    - ci_server_exec test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/acme.vendored_demo
     - ludus source list ci-src-vendrole --catalog --json | jq -e '[.blueprints.requiredRoles[] | select(.name=="acme.vendored_demo") | .state] == ["installed"]'
     - ludus source list ci-src-vendrole --catalog --json | jq -e '[.blueprints.requiredRoles[] | select(.name=="acme.vendored_demo") | .scopes[] | "\(.scope):\(.version)"] == ["user:2.0.0"]'
     # No bare-name copy is left behind — the requirement drives the namespaced install only.
-    - '! sudo test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/vendored_demo'
+    - '! ci_server_exec test -d /opt/ludus/users/continuous-integration-admin/.ansible/roles/vendored_demo'
     - ludus ansible role rm acme.vendored_demo
     - '! ludus ansible role list | grep "acme.vendored_demo" >/dev/null'
     - ludus source rm ci-src-vendrole --no-prompt
@@ -1850,26 +1801,26 @@ post-deploy sources-as-admin:
     # global-roles dir, not the owner's per-user ansible roles dir.
     - ludus source rm ci-src-global --no-prompt || true
     - ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-global --all --global --force
-    - test -d /opt/ludus/resources/global-roles/ludus.say_hello
-    - '! test -d /opt/ludus/resources/global-roles/say_hello'   # identity-named install — no bare-name dir
+    - ci_server_exec test -d /opt/ludus/resources/global-roles/ludus.say_hello
+    - '! ci_server_exec test -d /opt/ludus/resources/global-roles/say_hello'   # identity-named install — no bare-name dir
     # The example blueprint pulls a galaxy role (geerlingguy.docker). Under
     # --global that install runs ansible-galaxy as the service against a
     # read-only /home, so it only succeeds when the install is handed a
     # writable ANSIBLE_HOME. Asserting the role landed guards the read-only
     # filesystem regression.
-    - test -d /opt/ludus/resources/global-roles/geerlingguy.docker
+    - ci_server_exec test -d /opt/ludus/resources/global-roles/geerlingguy.docker
     # A vendored role required by its galaxy identity installs globally too,
     # from the local copy under the namespaced name (acme.vendored_demo is not
     # a real Galaxy role, so --global success proves the vendored path).
-    - test -d /opt/ludus/resources/global-roles/acme.vendored_demo
+    - ci_server_exec test -d /opt/ludus/resources/global-roles/acme.vendored_demo
     # Globally-installed roles (local and galaxy alike) are removed via
     # `ansible role rm --global` — there is no source-level uninstall.
     - ludus ansible role rm ludus.say_hello --global
-    - '! test -d /opt/ludus/resources/global-roles/ludus.say_hello'
+    - '! ci_server_exec test -d /opt/ludus/resources/global-roles/ludus.say_hello'
     - ludus ansible role rm geerlingguy.docker --global
-    - '! test -d /opt/ludus/resources/global-roles/geerlingguy.docker'
+    - '! ci_server_exec test -d /opt/ludus/resources/global-roles/geerlingguy.docker'
     - ludus ansible role rm acme.vendored_demo --global
-    - '! test -d /opt/ludus/resources/global-roles/acme.vendored_demo'
+    - '! ci_server_exec test -d /opt/ludus/resources/global-roles/acme.vendored_demo'
     - ludus source rm ci-src-global --no-prompt
     # Non-admin safety: a non-admin's role remove must never touch the SHARED
     # global-roles dir — ansible-galaxy runs against their per-user
@@ -1877,12 +1828,12 @@ post-deploy sources-as-admin:
     # install + remove a same-named local role: CIU's own copy goes, the
     # shared global one stays.
     - ludus source rm ci-src-ciu --no-prompt || true
-    - sudo mkdir -p /opt/ludus/resources/global-roles/ludus.say_hello
+    - ci_server_exec mkdir -p /opt/ludus/resources/global-roles/ludus.say_hello
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus source add -d /opt/ludus/ci/fixtures/source-template --id ci-src-ciu --blueprints secondary --source-roles ludus.say_hello'
     - 'LUDUS_API_KEY=$(ludus --user CIU users apikey --no-prompt --value) ludus ansible role rm ludus.say_hello'
-    - test -d /opt/ludus/resources/global-roles/ludus.say_hello   # non-admin remove left the shared global role intact
+    - ci_server_exec test -d /opt/ludus/resources/global-roles/ludus.say_hello   # non-admin remove left the shared global role intact
     - ludus source rm ci-src-ciu --no-prompt
-    - sudo rm -rf /opt/ludus/resources/global-roles/ludus.say_hello
+    - ci_server_exec rm -rf /opt/ludus/resources/global-roles/ludus.say_hello
     # --no-deps: blueprints register and source-local content still installs,
     # but the galaxy dependency install is skipped — only what's already on
     # disk is used. example declares geerlingguy.docker, so its absence after
@@ -1915,7 +1866,6 @@ post-deploy ranges-as-admin:
       optional: true
     - job: post-deploy sources-as-admin
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -2105,7 +2055,6 @@ post-deploy templates-as-admin:
     - build all
     - job: post-deploy ranges-as-admin
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -2250,7 +2199,6 @@ post-deploy power-as-user:
     - build all
     - job: post-deploy testing-as-user
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -2295,7 +2243,6 @@ post-deploy ansible-as-user:
     - build all
     - job: post-deploy power-as-user
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -2339,7 +2286,6 @@ post-deploy user-cmds-as-user:
     - build all
     - job: post-deploy ansible-as-user
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -2402,7 +2348,7 @@ post-deploy user-cmds-as-user:
     # Try to get an api key for another user
     - ludus user apikey --user CIA --no-prompt 2>&1 | grep "You are not an admin and cannot impersonate other users"
     # Get a new API for ourselves
-    - ludus user apikey --no-prompt --value > /opt/ludus/ci/.apikey-user
+    - export LUDUS_API_KEY=$(ludus user apikey --no-prompt --value)
 
 post-deploy blueprints-as-user:
   stage: test
@@ -2412,7 +2358,6 @@ post-deploy blueprints-as-user:
     - build all
     - job: post-deploy user-cmds-as-user
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -2444,9 +2389,9 @@ post-deploy blueprints-as-user:
     when: script_failure
   script:
     - *ci-setup-user
-    - if [ ! -f /opt/ludus/ci/.apikey-admin ]; then export LUDUS_API_KEY=$(sudo cat /opt/ludus/install/root-api-key); ludus --user CIA users apikey --no-prompt --value > /opt/ludus/ci/.apikey-admin; fi
-    - export CIU_API_KEY=$(cat /opt/ludus/ci/.apikey-user)
-    - export CIA_API_KEY=$(cat /opt/ludus/ci/.apikey-admin)
+    - export CIU_API_KEY=$LUDUS_API_KEY
+    - export LUDUS_API_KEY=$(ci_server_exec cat /opt/ludus/install/root-api-key)
+    - export CIA_API_KEY=$(ludus --user CIA users apikey --no-prompt --value)
     - export LUDUS_API_KEY=$CIA_API_KEY
     # Cleanup from prior retries
     - ludus groups delete ci-bp-cli-group || true
@@ -2542,7 +2487,6 @@ post-deploy templates-as-user:
     - build all
     - job: post-deploy blueprints-as-user
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -2583,7 +2527,6 @@ post-deploy snapshots-as-user:
     - build all
     - job: post-deploy templates-as-user
       optional: true
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
@@ -2734,39 +2677,11 @@ cluster install kickoff:
   <<: *cluster-rules
   variables:
     LUDUS_BUILD_TYPE: clean-cluster
-    LUDUS_INSTALL_STEP: kickoff
     GIT_STRATEGY: none
   timeout: 60m
   script:
-    - sudo timedatectl set-ntp off && sudo timedatectl set-ntp on
-    - date
-    - cd binaries
-    - |
-      cat > config.yml <<'EOF'
-      proxmox_node: ludus
-      proxmox_interface: ens18
-      proxmox_invalid_cert: true
-      proxmox_url: https://127.0.0.1:8006
-      proxmox_hostname: ludus
-      proxmox_local_ip: 203.0.113.184
-      proxmox_public_ip: 203.0.113.184
-      proxmox_gateway: 203.0.113.254
-      proxmox_netmask: 255.255.255.0
-      proxmox_vm_storage_pool: ceph
-      proxmox_vm_storage_format: raw
-      proxmox_iso_storage_pool: cephfs
-      ludus_nat_interface: ludusnat
-      prevent_user_ansible_add: false
-      expose_admin_port: false
-      port: 9090
-      admin_port: 9091
-      reserved_range_numbers: []
-      data_directory: /opt/ludus/db
-      wireguard_port: 51820
-      sdn_zone: ludus
-      vxlan_tag_base: 0
-      EOF
-    - sudo ./ludus-server --no-prompt
+    - *ci-setup-cluster-admin
+    - test "$CI_SERVER_PORT" = 9090
 
 cluster-install-check:
   stage: test
@@ -2775,27 +2690,26 @@ cluster-install-check:
   needs:
     - claim-cluster
     - cluster install kickoff
-  dependencies: []
+    - build all
   <<: *cluster-rules
   variables:
     LUDUS_BUILD_TYPE: cluster
-    LUDUS_INSTALL_STEP: check
     GIT_STRATEGY: none
   timeout: 1h
   script:
-    - sudo cat /opt/ludus/install/install.log
-    - sudo grep -E '^ListenPort = 51820$' /etc/wireguard/wg0.conf
-    - echo "Install check completed via custom executor check loop"
+    - *ci-setup-cluster-admin
+    - ci_server_exec test -f /opt/ludus/install/.bootstrap-complete
+    - ci_server_exec grep -E '^ListenPort = 51820$' /etc/wireguard/wg0.conf
 
 cluster-verify-sdn:
   stage: test
   tags:
     - ludus-proxmox-runner-parallel
-  dependencies: []
   <<: *cluster-rules
   needs:
     - claim-cluster
     - cluster-install-check
+    - build all
   variables:
     LUDUS_BUILD_TYPE: cluster
     GIT_STRATEGY: none
@@ -2841,7 +2755,7 @@ cluster-templates-check:
   needs:
     - claim-cluster
     - cluster-templates-build
-  dependencies: []
+    - build all
   <<: *cluster-rules
   variables:
     LUDUS_BUILD_TYPE: cluster
@@ -2852,7 +2766,7 @@ cluster-templates-check:
   script:
     - *ci-setup-cluster-admin
     # If there is no template building process, start one
-    - pgrep -f 'packer' || ludus templates build -n debian-13-x64-server-template
+    - ci_server_exec pgrep -f 'packer' || ludus templates build -n debian-13-x64-server-template
     # Wait for the debian 13 template to build
     - while [ $(ludus templates list --json | jq '[.[] | select(.name == "debian-13-x64-server-template") | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
     - ludus templates list
@@ -2898,7 +2812,7 @@ cluster-verify-placement:
   needs:
     - claim-cluster
     - cluster-range-deploy
-  dependencies: []
+    - build all
   <<: *cluster-rules
   variables:
     LUDUS_BUILD_TYPE: cluster
@@ -2930,11 +2844,11 @@ cluster-verify-vxlan:
   stage: test
   tags:
     - ludus-proxmox-runner-parallel
-  dependencies: []
   <<: *cluster-rules
   needs:
     - claim-cluster
     - cluster-verify-placement
+    - build all
   variables:
     LUDUS_BUILD_TYPE: cluster
     LUDUS_SNAPSHOT_NAME: cluster_range_built
@@ -3025,7 +2939,7 @@ test-lxc-airgap:
   stage: test
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: clean_install
+    LUDUS_SNAPSHOT_NAME: proxmox
     LUDUS_CI_SERIES: lxc-airgap
     LXC_ROOTFS_STORAGE: local
     LUDUS_NAT_GATEWAY: "192.0.2.49"
@@ -3034,6 +2948,8 @@ test-lxc-airgap:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - job: build all
+      artifacts: true
     - job: build-lxc-template
       artifacts: true
   rules: *lxc-rules
@@ -3042,6 +2958,8 @@ test-lxc-airgap:
     - sudo pvesm set local --content "$ROOTDIR_CONTENT"
   timeout: 30m
   script:
+    - '! sudo test -e /etc/ludus-lxc.json'
+    - '! sudo test -f /opt/ludus/config.yml'
     - VMID=$(sudo pvesh get /cluster/nextid --output-format json | jq -r '.')
     - sudo -E ludus-server/ci/test-lxc-airgap.sh "$VMID" "ludus-${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}-debian13-amd64.tar.zst"
 
@@ -3049,23 +2967,50 @@ test-install-sh:
   stage: test
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
-    LUDUS_SNAPSHOT_NAME: clean_install
+    LUDUS_SNAPSHOT_NAME: proxmox
     LUDUS_CI_SERIES: lxc-install
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - job: build all
+      artifacts: true
     - job: build-lxc-template
       artifacts: true
   rules: *lxc-rules
   before_script: *lxc-storage-setup
   timeout: 30m
   script:
+    - '! sudo test -e /etc/ludus-lxc.json'
+    - '! sudo test -f /opt/ludus/config.yml'
     - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
     - |
       INSTALLER=./install.sh
       if [[ "${LUDUS_VERSION}" == *-beta* ]]; then INSTALLER=./install-beta.sh; fi
-      sudo -E bash "${INSTALLER}" --no-prompt --template-file "ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst" --vmid 9999 --storage local
+      sudo -E bash "${INSTALLER}" --no-prompt --template-file "ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst" --vmid 9999 --storage local --bridge ci24mgmt --ip 172.31.24.2/24 --gw 172.31.24.1 --nameserver 1.1.1.1
     - sudo pct exec 9999 -- curl -fsk https://127.0.0.1:8080/api/health | jq -e '.code == 200'
+    - source ludus-server/ci/job-server.sh
+    - ci_job_setup
+    - ludus users list all --json | jq -e 'type == "array"'
+
+test-lxc-migration:
+  stage: test
+  variables:
+    LUDUS_BUILD_TYPE: from-snapshot
+    LUDUS_SNAPSHOT_NAME: legacy_migration
+    LUDUS_CI_SERIES: lxc-migration
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - job: build all
+      artifacts: true
+    - job: build-lxc-template
+      artifacts: true
+  rules: *lxc-rules
+  before_script: *lxc-storage-setup
+  timeout: 1h
+  script:
+    - export LUDUS_VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
+    - bash ludus-server/ci/test-lxc-migration.sh "ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst"
 
 #################
 # RELEASE CLAIM #
@@ -3099,6 +3044,22 @@ release lxc-install-vm:
   variables:
     LUDUS_BUILD_TYPE: vm-release
     LUDUS_CI_SERIES: lxc-install
+    GIT_STRATEGY: none
+  timeout: 5m
+  script:
+    - /opt/ludus/ci/release-vm.sh
+
+release lxc-migration-vm:
+  stage: release-claim
+  tags:
+    - ludus-proxmox-runner-parallel
+  needs:
+    - test-lxc-migration
+  dependencies: []
+  rules: *lxc-rules
+  variables:
+    LUDUS_BUILD_TYPE: vm-release
+    LUDUS_CI_SERIES: lxc-migration
     GIT_STRATEGY: none
   timeout: 5m
   script:
@@ -3305,7 +3266,6 @@ manual testing:
     - ludus-proxmox-runner-parallel
   needs:
     - build all
-  dependencies: [] # Prevent download of build artifacts, use local cache
   rules:
     - *skip-build-rule
     - if: $CI_COMMIT_MESSAGE =~ /\[manual\]/

@@ -2,6 +2,9 @@
 
 # /opt/ludus/ci/base.sh
 
+# Reject unknown profiles before performing host-side setup.
+source "$(dirname "${BASH_SOURCE[0]}")/ci-profile.sh" || return 1
+
 # Export variables needed for dynamic inventory
 export PROXMOX_USERNAME=gitlab-runner@pam
 export PROXMOX_PASSWORD=$(cat /opt/ludus/ci/.gitlab-runner-password)
@@ -15,7 +18,7 @@ export PROXMOX_HOSTNAME=127.0.0.1
 export LUDUS_DIR=/opt/ludus
 
 # Dynamic CI clone assignment directory (must exist on the Proxmox host)
-export CI_ASSIGNMENT_DIR=/opt/ludus/ci/vm-assignments
+export CI_ASSIGNMENT_DIR="/opt/ludus/ci/${CI_NAMESPACE}vm-assignments"
 mkdir -p "$CI_ASSIGNMENT_DIR"
 
 # Dynamic clones are built from Ludus seeds that have a static CI-network
@@ -30,29 +33,8 @@ export CI_CLONE_DNS_SERVERS=${CI_CLONE_DNS_SERVERS:-"1.1.1.1 8.8.8.8"}
 
 # Backward-compatible name for cluster lock scripts. Pool locks are no
 # longer used for non-cluster CI.
-export POOL_ASSIGNMENT_DIR=/opt/ludus/ci/pool-assignments
+export POOL_ASSIGNMENT_DIR="/opt/ludus/ci/${CI_NAMESPACE}pool-assignments"
 mkdir -p "$POOL_ASSIGNMENT_DIR"
-
-# --- CI Seed VM Definitions ---
-# These VMIDs are protected source templates. Test jobs clone from them and
-# run against the per-pipeline clone instead of rolling back shared pools.
-export CI_SEED_BASE_VMID=${CI_SEED_BASE_VMID:-1000}
-export CI_SEED_CLEAN_INSTALL_VMID=${CI_SEED_CLEAN_INSTALL_VMID:-1001}
-export CI_SEED_TEMPLATES_BUILT_VMID=${CI_SEED_TEMPLATES_BUILT_VMID:-1002}
-export CI_SEED_RANGE_ADMIN_VMID=${CI_SEED_RANGE_ADMIN_VMID:-1003}
-export CI_SEED_RANGE_USER_VMID=${CI_SEED_RANGE_USER_VMID:-1004}
-export CI_SEED_INTEGRATION_VMID=${CI_SEED_INTEGRATION_VMID:-1007}
-
-# Dynamic clones inherit storage from the seed by default. Full clones are the
-# safest default across Proxmox storage backends; linked clones can be enabled
-# with CI_CLONE_FULL=0 where supported.
-export CI_CLONE_STORAGE=${CI_CLONE_STORAGE:-}
-export CI_CLONE_FULL=${CI_CLONE_FULL:-0}
-
-# Shared VMs (not dynamically cloned yet)
-export CLUSTER_NODE1_VMID=1005
-export CLUSTER_NODE2_VMID=1006
-export BUILD_VMID=1012
 
 # Pipeline ID for pool tracking
 export PIPELINE_ID="${CUSTOM_ENV_CI_PIPELINE_ID}"
@@ -105,6 +87,8 @@ get_source_stage() {
 
     if [[ "$BUILD_TYPE" == "from-snapshot" ]]; then
         case "$SNAPSHOT_NAME" in
+            "proxmox")           echo "base" ;;
+            "legacy_migration")  echo "legacy-migration" ;;
             "clean_install")     echo "clean-install" ;;
             "templates_built")   echo "templates-built" ;;
             "range_built_admin") echo "range-admin" ;;
@@ -131,6 +115,13 @@ get_seed_vmid_for_stage() {
         "range-admin")     echo "$CI_SEED_RANGE_ADMIN_VMID" ;;
         "range-user")      echo "$CI_SEED_RANGE_USER_VMID" ;;
         "integration")     echo "$CI_SEED_INTEGRATION_VMID" ;;
+        "legacy-migration")
+            if [[ -z "$CI_SEED_LEGACY_MIGRATION_VMID" ]]; then
+                echo "Error: legacy_migration is unavailable for profile $CI_PROFILE" >&2
+                return 1
+            fi
+            echo "$CI_SEED_LEGACY_MIGRATION_VMID"
+            ;;
         *)
             echo "Error: Unknown CI source stage: $SOURCE_STAGE" >&2
             return 1
@@ -188,7 +179,7 @@ get_assignment_file() {
 
 get_ip_assignment_file() {
     local SERIES="$1"
-    echo "$CI_IP_ASSIGNMENT_DIR/${PIPELINE_ID}-${SERIES}.ip"
+    echo "$CI_IP_ASSIGNMENT_DIR/${CI_NAMESPACE}${PIPELINE_ID}-${SERIES}.ip"
 }
 
 get_vm_name_by_vmid() {
@@ -196,10 +187,83 @@ get_vm_name_by_vmid() {
     qm config "$VMID" 2>/dev/null | awk -F': ' '$1 == "name" { print $2; exit }'
 }
 
+
+# Check every assigned clone before any start, guest command, or destruction.
+# Fixed fixtures from both generations remain protected even with overrides.
+assert_ci_clone_vmid() {
+    local VMID="$1"
+    if [[ ! "$VMID" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Error: Invalid CI clone VMID '$VMID'" >&2
+        return 1
+    fi
+    case "$VMID" in
+        100[0-7]|1012|240[0-9]|241[0-2])
+            echo "Error: Refusing to mutate protected fixture VM $VMID" >&2
+            return 1
+            ;;
+    esac
+    local SEED
+    for SEED in "$CI_SEED_BASE_VMID" "$CI_SEED_CLEAN_INSTALL_VMID" \
+        "$CI_SEED_TEMPLATES_BUILT_VMID" "$CI_SEED_RANGE_ADMIN_VMID" \
+        "$CI_SEED_RANGE_USER_VMID" "$CI_SEED_INTEGRATION_VMID" \
+        "$CI_SEED_LEGACY_MIGRATION_VMID" "$CLUSTER_NODE1_VMID" \
+        "$CLUSTER_NODE2_VMID" "$BUILD_VMID"; do
+        if [[ "$VMID" == "$SEED" ]]; then
+            echo "Error: Refusing to mutate source/shared VM $VMID as a clone" >&2
+            return 1
+        fi
+    done
+    if (( VMID < CI_CLONE_MIN_VMID )); then
+        echo "Error: Clone VM $VMID is below profile $CI_PROFILE minimum $CI_CLONE_MIN_VMID" >&2
+        return 1
+    fi
+}
+
+validate_ci_assignment() {
+    local SERIES="$1"
+    assert_ci_clone_vmid "${VM_ID:-}" || return 1
+    if [[ "${VM_NAME:-}" != "${CI_VM_NAME_PREFIX}-${PIPELINE_ID}-${SERIES}-"* ]]; then
+        echo "Error: Assignment has unexpected clone name '${VM_NAME:-}'" >&2
+        return 1
+    fi
+}
+
+next_ci_clone_vmid() {
+    if [[ "$CI_PROFILE" == "lxc-2.4" ]]; then
+        # nextid's --vmid checks one ID; it does not search from that ID.
+        # Include all cluster VM/container IDs, not just the local node.
+        pvesh get /cluster/resources --type vm --output-format=json \
+            | jq -er --argjson minimum "$CI_CLONE_MIN_VMID" \
+                'reduce ([.[].vmid | tonumber] | sort | .[]) as $used
+                    ($minimum; if . == $used then . + 1 else . end)'
+    else
+        pvesh get /cluster/nextid
+    fi
+}
+
+set_ci_control_link() {
+    local VMID="$1"
+    local LINK_DOWN="$2"
+    local NET_CONFIG
+    assert_ci_clone_vmid "$VMID" || return 1
+    NET_CONFIG=$(qm config "$VMID" | awk -F': ' '$1 == "net0" { print $2; exit }') || return 1
+    if [[ -z "$NET_CONFIG" ]]; then
+        echo "Error: CI clone $VMID has no net0 control interface" >&2
+        return 1
+    fi
+    if [[ "$NET_CONFIG" =~ (^|,)link_down=[01](,|$) ]]; then
+        NET_CONFIG="${NET_CONFIG/link_down=0/link_down=$LINK_DOWN}"
+        NET_CONFIG="${NET_CONFIG/link_down=1/link_down=$LINK_DOWN}"
+    else
+        NET_CONFIG="${NET_CONFIG},link_down=$LINK_DOWN"
+    fi
+    qm set "$VMID" --net0 "$NET_CONFIG" >/dev/null
+}
 load_ci_assignment() {
     local SERIES="$1"
     local ASSIGNMENT_FILE
     ASSIGNMENT_FILE=$(get_assignment_file "$SERIES")
+    unset VM_ID VM_NAME VM_SOURCE_STAGE VM_SERIES VM_IP_STATIC
     if [[ -f "$ASSIGNMENT_FILE" ]]; then
         # shellcheck disable=SC1090
         source "$ASSIGNMENT_FILE"
@@ -257,13 +321,17 @@ guest_exec_wait() {
     shift
 
     local OUTPUT EXITCODE ERRORS
-    if ! OUTPUT=$(qm guest exec "$VMID" -- "$@" 2>&1); then
+    if ! OUTPUT=$(qm guest exec "$VMID" --timeout "${CI_GUEST_EXEC_TIMEOUT:-30}" -- "$@" 2>&1); then
         echo "$OUTPUT" >&2
         return 1
     fi
 
     EXITCODE=$(printf '%s' "$OUTPUT" | jq -r '.exitcode // empty' 2>/dev/null)
-    if [[ -n "$EXITCODE" && "$EXITCODE" != "0" ]]; then
+    if [[ -z "$EXITCODE" ]]; then
+        echo "Error: Guest command on VM $VMID did not complete: $OUTPUT" >&2
+        return 1
+    fi
+    if [[ "$EXITCODE" != "0" ]]; then
         ERRORS=$(printf '%s' "$OUTPUT" | jq -r '."err-data" // empty' 2>/dev/null)
         [[ -n "$ERRORS" ]] && echo "$ERRORS" >&2
         echo "$OUTPUT" >&2
@@ -398,7 +466,61 @@ ip route replace default via "${CI_CLONE_GATEWAY}" dev ens18
 EOF
 )
 
-    guest_exec_wait "$VMID" /bin/bash -lc "$SCRIPT"
+    guest_exec_wait "$VMID" /bin/bash -lc "$SCRIPT" || return 1
+
+    if [[ "$CI_PROFILE" == "lxc-2.4" ]]; then
+        # Only relocate the public CI WireGuard address. Container Proxmox
+        # endpoints must keep their private, nested-host-reachable addresses.
+        SCRIPT=$(cat <<'EOF'
+set -e
+[[ -f /etc/ludus-lxc.json ]] || exit 0
+CTID=$(python3 -c 'import json; v=json.load(open("/etc/ludus-lxc.json"))["vmid"]; assert type(v) is int and v > 0; print(v)')
+for _ in {1..60}; do
+    if pct status "$CTID" | grep -q 'status: running'; then
+        break
+    fi
+    sleep 2
+done
+pct exec "$CTID" -- python3 - "$1" "$2" <<'PY'
+import ipaddress
+import os
+from pathlib import Path
+import re
+import sys
+import tempfile
+
+path = Path("/opt/ludus/config.yml")
+text = path.read_text()
+match = re.search(r"^wireguard_endpoint:[ \t]*(?P<value>[^\r\n#]*)(?P<comment>#[^\r\n]*)?$", text, re.MULTILINE)
+if match is None:
+    raise SystemExit("LXC config is missing wireguard_endpoint")
+endpoint = match["value"].strip().strip("\"'")
+try:
+    address = ipaddress.ip_address(endpoint)
+except ValueError:
+    sys.exit(0)  # Explicit DNS/public endpoints are not clone-local.
+if address not in ipaddress.ip_network(sys.argv[2] + ".0/24") or endpoint == sys.argv[1]:
+    sys.exit(0)
+value = sys.argv[1] + (" " if match["comment"] else "")
+text = text[:match.start("value")] + value + text[match.end("value"):]
+stat = path.stat()
+with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as temp:
+    temporary = temp.name
+    temp.write(text)
+    os.fchmod(temp.fileno(), stat.st_mode)
+    os.fchown(temp.fileno(), stat.st_uid, stat.st_gid)
+try:
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+# The API watches config.yml and hot-reloads WireguardEndpoint on replacement.
+print(f"Relocated LXC WireGuard endpoint: {endpoint} -> {sys.argv[1]}")
+PY
+EOF
+)
+        CI_GUEST_EXEC_TIMEOUT=180 guest_exec_wait "$VMID" timeout 150 /bin/bash -c "$SCRIPT" -- "$IP" "$CI_CLONE_IP_PREFIX" || return 1
+    fi
 }
 
 wait_for_ci_vm_ssh() {
@@ -423,11 +545,17 @@ wait_for_ludus_command() {
     local KEY_FILE="$2"
     local CHECK_CMD="$3"
     local LABEL="$4"
+    local REMOTE_COMMAND
+    if [[ "$CI_PROFILE" == "lxc-2.4" ]]; then
+        REMOTE_COMMAND="export LUDUS_CI_PROFILE=lxc-2.4; source /opt/ludus/ci/job-server.sh && ci_server_init && ci_client_config && LUDUS_API_KEY=\$(ci_server_exec cat '$KEY_FILE') && export LUDUS_API_KEY && $CHECK_CMD >/dev/null 2>&1"
+    else
+        REMOTE_COMMAND="test -f '$KEY_FILE' && LUDUS_API_KEY=\$(cat '$KEY_FILE') && export LUDUS_API_KEY && $CHECK_CMD >/dev/null 2>&1"
+    fi
 
     echo "Waiting for Ludus API readiness on $IP ($LABEL)..."
     for i in {1..60}; do
         if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no -F /home/gitlab-runner/.ssh/config gitlab-runner@"$IP" \
-            "test -f '$KEY_FILE' && export LUDUS_API_KEY=\$(cat '$KEY_FILE') && $CHECK_CMD >/dev/null 2>&1"; then
+            "$REMOTE_COMMAND"; then
             echo "Ludus API is ready on $IP ($LABEL)"
             return 0
         fi
@@ -453,6 +581,7 @@ ensure_ci_vm() {
         flock -x 9
 
         if load_ci_assignment "$SERIES"; then
+            validate_ci_assignment "$SERIES" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
             if qm status "$VM_ID" >/dev/null 2>&1; then
                 local ACTUAL_VM_NAME
                 ACTUAL_VM_NAME="$(get_vm_name_by_vmid "$VM_ID")"
@@ -463,9 +592,8 @@ ensure_ci_vm() {
                         printf 'VM_IP_STATIC=%q\n' "$VM_IP_STATIC" >> "$ASSIGNMENT_FILE"
                     fi
                 else
-                    echo "Existing assignment $ASSIGNMENT_FILE points at VM $VM_ID named '$ACTUAL_VM_NAME', expected '$VM_NAME'; recreating" >&2
-                    rm -f "$ASSIGNMENT_FILE" "$(get_ip_assignment_file "$SERIES")"
-                    unset VM_ID VM_NAME VM_SOURCE_STAGE VM_SERIES VM_IP_STATIC
+                    echo "Error: Assignment $ASSIGNMENT_FILE points at VM $VM_ID named '$ACTUAL_VM_NAME', expected '$VM_NAME'; refusing to reuse its lease" >&2
+                    exit "${BUILD_FAILURE_EXIT_CODE:-1}"
                 fi
             else
                 echo "Existing assignment $ASSIGNMENT_FILE points at missing VM $VM_ID; recreating" >&2
@@ -475,16 +603,13 @@ ensure_ci_vm() {
         fi
 
         if [[ -z "${VM_ID:-}" ]]; then
-            local NEWID NAME CLONE_ARGS CLONE_FULL CLONE_OUTPUT
-            NAME="ci-${PIPELINE_ID}-${SERIES}-$(printf '%s' "$SOURCE_STAGE" | sanitize_slug)"
-            CLONE_FULL="$CI_CLONE_FULL"
+            local NEWID NAME CLONE_ARGS CLONE_OUTPUT
+            NAME="${CI_VM_NAME_PREFIX}-${PIPELINE_ID}-${SERIES}-$(printf '%s' "$SOURCE_STAGE" | sanitize_slug)"
 
             for _ in {1..10}; do
-                NEWID=$(pvesh get /cluster/nextid)
-                CLONE_ARGS=(clone "$SEED_VMID" "$NEWID" --name "$NAME" --pool CICD --full "$CLONE_FULL")
-                if [[ -n "$CI_CLONE_STORAGE" ]]; then
-                    CLONE_ARGS+=(--storage "$CI_CLONE_STORAGE")
-                fi
+                NEWID=$(next_ci_clone_vmid) || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+                assert_ci_clone_vmid "$NEWID" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+                CLONE_ARGS=(clone "$SEED_VMID" "$NEWID" --name "$NAME" --pool CICD --full "$CI_CLONE_FULL")
 
                 echo "Cloning seed VM $SEED_VMID ($SOURCE_STAGE) to VM $NEWID ($NAME)"
                 if CLONE_OUTPUT=$(qm "${CLONE_ARGS[@]}" 2>&1); then
@@ -496,10 +621,6 @@ ensure_ci_vm() {
                 fi
 
                 echo "$CLONE_OUTPUT" >&2
-                if [[ "$CLONE_FULL" == "0" && "$CLONE_OUTPUT" == *"Linked clone feature is not supported"* ]]; then
-                    echo "Linked clone is not supported for seed VM $SEED_VMID; retrying with a full clone" >&2
-                    CLONE_FULL=1
-                fi
                 echo "Clone attempt with VMID $NEWID failed; retrying with a fresh VMID" >&2
                 sleep 2
             done
@@ -509,7 +630,7 @@ ensure_ci_vm() {
                 exit "${BUILD_FAILURE_EXIT_CODE:-1}"
             fi
 
-            qm set "$VM_ID" --description "{\"groups\":[\"cicd\"],\"pipeline\":\"${PIPELINE_ID}\",\"series\":\"${SERIES}\",\"source\":\"${SOURCE_STAGE}\"}" >/dev/null
+            qm set "$VM_ID" --description "{\"groups\":[\"cicd\"],\"pipeline\":\"${PIPELINE_ID}\",\"series\":\"${SERIES}\",\"source\":\"${SOURCE_STAGE}\",\"profile\":\"${CI_PROFILE}\"}" >/dev/null || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
             VM_IP_STATIC=$(allocate_ci_ip "$SERIES") || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
             {
                 printf 'VM_ID=%q\n' "$VM_ID"
@@ -519,12 +640,19 @@ ensure_ci_vm() {
                 printf 'VM_IP_STATIC=%q\n' "$VM_IP_STATIC"
             } > "$ASSIGNMENT_FILE"
         fi
-    ) 9>"$LOCK_FILE"
+    ) 9>"$LOCK_FILE" || return 1
 
     load_ci_assignment "$SERIES" || return 1
+    validate_ci_assignment "$SERIES" || return 1
+
+    if [[ "$CI_PROFILE" == "lxc-2.4" ]]; then
+        # Prevent an inherited seed address from appearing on the CI network.
+        # The guest agent uses its host channel and works with net0 disconnected.
+        set_ci_control_link "$VM_ID" 1 || return 1
+    fi
 
     if [[ "$(qm status "$VM_ID" | awk '{print $2}')" != "running" ]]; then
-        qm start "$VM_ID"
+        qm start "$VM_ID" || return 1
     fi
 
     if [[ -n "${VM_IP_STATIC:-}" ]]; then
@@ -532,6 +660,10 @@ ensure_ci_vm() {
         VM_IP="$VM_IP_STATIC"
     else
         VM_IP=$(get_vm_ip_by_vmid "$VM_ID") || return 1
+    fi
+
+    if [[ "$CI_PROFILE" == "lxc-2.4" ]]; then
+        set_ci_control_link "$VM_ID" 0 || return 1
     fi
 
     export VM_ID VM_IP VM_NAME VM_SOURCE_STAGE VM_SERIES VM_IP_STATIC
@@ -549,15 +681,16 @@ destroy_ci_vm() {
         return 0
     fi
 
+    validate_ci_assignment "$SERIES" || return 1
     if [[ -z "${VM_ID:-}" || -z "${VM_NAME:-}" ]]; then
         echo "Assignment $ASSIGNMENT_FILE is missing VM_ID or VM_NAME; refusing to destroy" >&2
         return 1
     fi
 
     local EXPECTED_PREFIX ACTUAL_VM_NAME
-    EXPECTED_PREFIX="ci-${PIPELINE_ID}-${SERIES}-"
+    EXPECTED_PREFIX="${CI_VM_NAME_PREFIX}-${PIPELINE_ID}-${SERIES}-"
 
-    if [[ "$VM_NAME" != ci-"$PIPELINE_ID"-"$SERIES"-* ]]; then
+    if [[ "$VM_NAME" != "$EXPECTED_PREFIX"* ]]; then
         echo "Refusing to destroy VM $VM_ID with unexpected name '$VM_NAME'" >&2
         return 1
     fi
@@ -575,8 +708,11 @@ destroy_ci_vm() {
     fi
 
     echo "Destroying successful CI clone VM $VM_ID ($VM_NAME)"
+    # Clones inherit the seed's protection flag. Clear it only after the
+    # disposable-ID and live-name ownership checks above have both passed.
+    qm set "$VM_ID" --protection 0 >/dev/null || return 1
     qm shutdown "$VM_ID" --timeout 60 || qm stop "$VM_ID" --skiplock 1 || true
-    qm destroy "$VM_ID" --purge 1 --destroy-unreferenced-disks 1
+    qm destroy "$VM_ID" --purge 1 --destroy-unreferenced-disks 1 || return 1
     rm -f "$ASSIGNMENT_FILE" "$CI_ASSIGNMENT_DIR/${PIPELINE_ID}-${SERIES}.lock" "$(get_ip_assignment_file "$SERIES")"
 }
 
@@ -644,7 +780,7 @@ resolve_vm() {
     if [[ "$BUILD_TYPE" == "any-built" ]]; then
         VM_ID=$BUILD_VMID
         export VM_ID
-        VM_IP=$(get_vm_ip_by_vmid "$VM_ID")
+        VM_IP=$(get_vm_ip_by_vmid "$VM_ID") || return 1
         export VM_IP
         echo "Build job, using dedicated build VM: $VM_ID ($VM_IP)"
         return 0
@@ -653,7 +789,7 @@ resolve_vm() {
     # Full and snapshot-based tests use per-pipeline clones from seed VMs.
     if [[ "$BUILD_TYPE" == "full" || "$BUILD_TYPE" == "from-snapshot" ]]; then
         ensure_ci_vm
-        return 0
+        return $?
     fi
 
     echo "Error: Unknown LUDUS_BUILD_TYPE: $BUILD_TYPE" >&2

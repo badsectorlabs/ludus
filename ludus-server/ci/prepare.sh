@@ -54,7 +54,14 @@ if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "full" || "$CUSTOM_ENV_LUDUS_BUILD_TYPE"
     wait_for_ci_vm_ssh "$VM_ID" "$VM_IP" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
 fi
 
-if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
+if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" && "$CI_PROFILE" == "lxc-2.4" ]]; then
+    case "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" in
+        proxmox|legacy_migration) ;; # No LXC API exists before install/migration.
+        *)
+            wait_for_ludus_command "$VM_IP" "/opt/ludus/install/root-api-key" "ludus users list all" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+            ;;
+    esac
+elif [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
     case "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" in
         "templates_built")
             wait_for_ludus_command "$VM_IP" "/opt/ludus/ci/.apikey-admin" "ludus templates list --json" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
@@ -68,5 +75,3 @@ if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
     esac
 fi
 
-# --- Clean up old tracking files (over 2 days old) ---
-find /tmp/ -name '.ludus-ci-*' -type f -mtime +2 -exec rm {} + 2>/dev/null || true

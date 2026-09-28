@@ -7,7 +7,7 @@
 # - All other jobs are SSH'd into the resolved VM.
 
 currentDir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-source "${currentDir}/base.sh"
+source "${currentDir}/base.sh" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
 
 # --- Claim/release jobs run on the runner host (gitlab-runner shell) ---
 if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"claim"* || "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"release"* ]]; then
@@ -16,11 +16,11 @@ if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == *"claim"* || "$CUSTOM_ENV_LUDUS_BUILD_TY
 fi
 
 # --- Resolve target VM (sets VM_ID, VM_IP) ---
-resolve_vm
+resolve_vm || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
 
 # If we are in the install-check step, run a custom check loop.
 # We must loop as the box reboots twice during install.
-if [[ -n "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP" = "check" ]]; then
+if [[ "$CI_PROFILE" == "host-2.3" && -n "$CUSTOM_ENV_LUDUS_INSTALL_STEP" && "$CUSTOM_ENV_LUDUS_INSTALL_STEP" = "check" ]]; then
     while true; do
         (ssh -F /home/gitlab-runner/.ssh/config gitlab-runner@"$VM_IP" /bin/bash --login < "$LUDUS_DIR/ci/check-install-status.sh" | tee /dev/stderr | grep -q 'Ludus install completed successfully') 2>&1
         if [[ $? -eq 0 ]]; then

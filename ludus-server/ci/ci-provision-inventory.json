@@ -1,0 +1,12 @@
+{
+  "base": {"id_var": "CI_SEED_BASE_VMID", "name": "ci-24-seed-base", "source": "base", "kind": "base", "memory": 8192, "cores": 4},
+  "clean-install": {"id_var": "CI_SEED_CLEAN_INSTALL_VMID", "name": "ci-24-seed-clean-install", "source": "clean-install", "kind": "lxc", "memory": 12288, "cores": 4},
+  "templates-built": {"id_var": "CI_SEED_TEMPLATES_BUILT_VMID", "name": "ci-24-seed-templates-built", "source": "templates-built", "kind": "lxc", "memory": 24576, "cores": 8},
+  "range-admin": {"id_var": "CI_SEED_RANGE_ADMIN_VMID", "name": "ci-24-seed-range-admin", "source": "range-admin", "kind": "lxc", "memory": 32768, "cores": 8},
+  "range-user": {"id_var": "CI_SEED_RANGE_USER_VMID", "name": "ci-24-seed-range-user", "source": "range-user", "kind": "lxc", "memory": 32768, "cores": 8},
+  "cluster-node1": {"id_var": "CLUSTER_NODE1_VMID", "name": "ci-24-cluster-node1", "source": "base", "kind": "cluster", "hostname": "ludus", "memory": 8192, "cores": 4},
+  "cluster-node2": {"id_var": "CLUSTER_NODE2_VMID", "name": "ci-24-cluster-node2", "source": "base", "kind": "cluster", "hostname": "ludus2", "memory": 8192, "cores": 4},
+  "integration": {"id_var": "CI_SEED_INTEGRATION_VMID", "name": "ci-24-seed-integration", "source": "integration", "kind": "lxc", "memory": 32768, "cores": 8},
+  "legacy-migration": {"id_var": "CI_SEED_LEGACY_MIGRATION_VMID", "name": "ci-24-seed-legacy-migration", "source": "clean-install", "kind": "legacy", "memory": 12288, "cores": 4},
+  "build": {"id_var": "BUILD_VMID", "name": "ci-24-build-machine", "source": "clean-install", "kind": "build", "memory": 16384, "cores": 8}
+}

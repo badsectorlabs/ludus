@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # Run the LXC bootstrap/provisioning test inside a nested Proxmox node.
-# By default this uses the CI cluster runtime VMID from base.sh/README (1005).
+# Require an explicitly selected disposable nested Proxmox clone.
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 LXC_TEMPLATE=${LXC_TEMPLATE:-${1:-}}
 TEST_VMID=${TEST_VMID:-9320}
-NESTED_PVE_VMID=${NESTED_PVE_VMID:-1005}
+NESTED_PVE_VMID=${NESTED_PVE_VMID:?Set the VMID of a disposable nested Proxmox clone}
 NESTED_PVE_HOST=${NESTED_PVE_HOST:-}
 NESTED_PVE_USER=${NESTED_PVE_USER:-gitlab-runner}
 NESTED_PVE_SSH_CONFIG=${NESTED_PVE_SSH_CONFIG:-/home/gitlab-runner/.ssh/config}
@@ -17,6 +17,14 @@ TOKEN_SECRET=${TOKEN_SECRET:-}
 LXC_ROOTFS_STORAGE=${LXC_ROOTFS_STORAGE:-local-lvm}
 LUDUS_NAT_BRIDGE=${LUDUS_NAT_BRIDGE:-ludusnat}
 NESTED_PVE_IP_REGEX=${NESTED_PVE_IP_REGEX:-^203\\.0\\.113\\.}
+
+case "$NESTED_PVE_VMID" in
+  100[0-7]|1012|240[0-9]|2412)
+    echo "Refusing to mutate protected or persistent CI VMID $NESTED_PVE_VMID" >&2
+    exit 1
+    ;;
+esac
+[[ "$NESTED_PVE_VMID" =~ ^[1-9][0-9]*$ ]] || exit 1
 
 if [[ -z "$LXC_TEMPLATE" || ! -f "$LXC_TEMPLATE" ]]; then
   echo "Usage: LXC_TEMPLATE=/path/to/ludus-<version>-debian13-amd64.tar.zst $0"

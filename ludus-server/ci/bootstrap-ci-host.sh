@@ -17,6 +17,18 @@ if [[ $(id -u) -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+
+# Dispatch before legacy recreation, runner configuration, credentials or syncing.
+case "${CUSTOM_ENV_LUDUS_CI_PROFILE:-${LUDUS_CI_PROFILE:-host-2.3}}" in
+    lxc-2.4)
+        exec python3 "$SCRIPT_DIR/provision-ci.py" "$@"
+        ;;
+    host-2.3) ;;
+    *)
+        echo "Error: unknown LUDUS_CI_PROFILE" >&2
+        exit 1
+        ;;
+esac
 REPO_DIR="${REPO_DIR:-"$SCRIPT_DIR/../../ludus-source"}"
 LUDUS_DIR="${LUDUS_DIR:-/opt/ludus}"
 CI_DIR="$LUDUS_DIR/ci"

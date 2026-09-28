@@ -1,0 +1,272 @@
+---
+- name: Configure nested Proxmox cluster runtime VMs
+  hosts: ci_pve_cluster
+  gather_facts: true
+  become: true
+  tags: ci-cluster
+  vars:
+    pve_group: ci_pve_cluster
+    pve_cluster_enabled: true
+    pve_cluster_clustername: "{{ ci_cluster_name | default('ludus-ci') }}"
+    pve_cluster_addr0: "{{ ansible_host }}"
+    pve_ceph_enabled: true
+    pve_ceph_network: "{{ ci_cluster_network | default('203.0.113.0/24') }}"
+    pve_ceph_nodes: ci_pve_cluster
+    pve_ceph_mon_group: ci_pve_cluster
+    pve_ceph_mgr_group: ci_pve_cluster
+    pve_ceph_mds_group: "{{ ci_cluster_mds_group | default('ci_pve_cluster') }}"
+    pve_ceph_osds: []
+    pve_ceph_default_version: tentacle
+    pve_ceph_pools:
+      - name: ceph
+        storage: true
+        application: rbd
+        size: 2
+        min_size: 1
+        pgs: "{{ ci_cluster_ceph_pg_num | default(32) }}"
+    pve_ceph_fs:
+      - name: cephfs
+        storage: true
+        pgs: "{{ ci_cluster_ceph_pg_num | default(32) }}"
+        rule: replicated_rule
+    pve_storages:
+      - name: ceph
+        type: rbd
+        content:
+          - images
+          - rootdir
+        pool: ceph
+        username: admin
+      - name: cephfs
+        type: cephfs
+        content:
+          - iso
+          - vztmpl
+          - backup
+    pve_run_system_upgrades: false
+    pve_run_proxmox_upgrades: false
+    pve_reboot_on_kernel_update: true
+    pve_reboot_on_kernel_update_delay: 15
+  pre_tasks:
+    - name: Ensure sudo can resolve root-only Proxmox and Ceph commands
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers
+        regexp: '^Defaults\s+secure_path='
+        insertafter: '^Defaults'
+        owner: root
+        group: root
+        mode: "0440"
+        line: 'Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+        validate: "/usr/sbin/visudo -cf %s"
+
+    - name: Discover CI Ceph OSD block device
+      ansible.builtin.shell: |
+        set -euo pipefail
+        desired="{{ ci_cluster_ceph_osd_disk_size | default('100G') }}"
+        case "$desired" in
+          *[Gg]) desired_bytes=$((${desired%[Gg]} * 1024 * 1024 * 1024)) ;;
+          *[Mm]) desired_bytes=$((${desired%[Mm]} * 1024 * 1024)) ;;
+          *) desired_bytes="$desired" ;;
+        esac
+
+        root_source=$(readlink -f "$(findmnt -n -o SOURCE /)")
+        root_parent=$(lsblk -no PKNAME "$root_source" | head -n1 || true)
+        if [ -n "$root_parent" ]; then
+          root_disk="/dev/$root_parent"
+        else
+          root_disk="$root_source"
+        fi
+
+        for candidate in /dev/disk/by-path/virtio-pci-* /dev/vd? /dev/sd?; do
+          [ -e "$candidate" ] || continue
+          device=$(readlink -f "$candidate")
+          [ -b "$device" ] || continue
+          [ "$device" != "$root_disk" ] || continue
+          [ "$(lsblk -dn -o TYPE "$device")" = "disk" ] || continue
+          size=$(lsblk -bdn -o SIZE "$device")
+          if [ "$size" = "$desired_bytes" ]; then
+            echo "$device"
+            exit 0
+          fi
+        done
+
+        echo "No non-root block device matching $desired ($desired_bytes bytes)" >&2
+        lsblk -o NAME,PATH,TYPE,SIZE,MOUNTPOINT >&2
+        exit 1
+      args:
+        executable: /bin/bash
+      register: ci_ceph_osd_device
+      changed_when: false
+
+    - name: Configure discovered CI Ceph OSD device
+      ansible.builtin.set_fact:
+        pve_ceph_osds:
+          - device: "{{ ci_ceph_osd_device.stdout | trim }}"
+
+    - name: Show discovered CI Ceph OSD device
+      ansible.builtin.debug:
+        var: ci_ceph_osd_device.stdout
+
+    - name: Check if ceph config is present on cluster
+      ansible.builtin.stat:
+        path: /usr/sbin/ceph-volume
+      register: __ceph_installed
+
+    - name: Check if pveceph is available
+      ansible.builtin.stat:
+        path: /usr/bin/pveceph
+      register: __pveceph
+
+    - name: Install ceph
+      ansible.builtin.command:
+        argv:
+          - "pveceph"
+          - "install"
+          - "--repository"
+          - "no-subscription"
+        stdin: 'Y\nY\n'
+      when: not __ceph_installed.stat.exists and __pveceph.stat.exists
+      changed_when: true
+
+  roles:
+    - role: lae.proxmox
+  post_tasks:
+    # pveceph mds create rewrites the shared Ceph configuration. Creating both
+    # daemons concurrently can make the second read a partially written file.
+    - name: Create remaining MDS daemons after primary filesystem initialization
+      ansible.builtin.command: pveceph mds create
+      args:
+        creates: "/var/lib/ceph/mds/ceph-{{ ansible_facts.hostname }}"
+      throttle: 1
+      when:
+        - ci_cluster_mds_group is defined
+        - inventory_hostname not in groups[pve_ceph_mds_group]
+
+    - name: Wait for the new cluster standby MDS
+      ansible.builtin.command: ceph mds stat -f json
+      register: ci_standby_mds
+      changed_when: false
+      until: (ci_standby_mds.stdout | from_json).fsmap.standbys | length > 0
+      retries: 30
+      delay: 2
+      run_once: true
+      when: ci_cluster_mds_group is defined
+
+    - name: Ensure chrony is installed for cluster CI time-sync setup
+      ansible.builtin.apt:
+        name: chrony
+        state: present
+        update_cache: true
+
+    - name: Ensure CephFS storage is active on cluster CI nodes
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if timeout 15 pvesm status --storage cephfs 2>/dev/null | awk '$1 == "cephfs" && $3 == "active" { found=1 } END { exit(found ? 0 : 1) }'; then
+          exit 0
+        fi
+
+        timeout 10 umount -f -l /mnt/pve/cephfs 2>/dev/null || true
+        mkdir -p /mnt/pve/cephfs
+        systemctl restart pvestatd || true
+
+        timeout 30 pvesm status --storage cephfs 2>/dev/null | awk '$1 == "cephfs" && $3 == "active" { found=1 } END { exit(found ? 0 : 1) }'
+      args:
+        executable: /bin/bash
+
+    - name: Verify nested Proxmox cluster has two nodes
+      ansible.builtin.shell: |
+        pvesh get /cluster/status --output-format=json | jq -e '[.[] | select(.type == "node")] | length == 2'
+      changed_when: false
+      run_once: true
+
+    - name: Verify required Ceph-backed Proxmox storages exist
+      ansible.builtin.command: "pvesh get /storage/{{ item }} --output-format=json"
+      changed_when: false
+      loop:
+        - ceph
+        - cephfs
+      run_once: true
+
+    - name: Configure Ceph for two-node CI replication
+      ansible.builtin.shell: |
+        set -euo pipefail
+        sed -i -E 's/^\s*osd_pool_default_size\s*=.*/\tosd_pool_default_size = 2/' /etc/pve/ceph.conf
+        sed -i -E 's/^\s*osd_pool_default_min_size\s*=.*/\tosd_pool_default_min_size = 1/' /etc/pve/ceph.conf
+        ceph config set global osd_pool_default_size 2
+        ceph config set global osd_pool_default_min_size 1
+        ceph config set mon osd_pool_default_size 2
+        ceph config set mon osd_pool_default_min_size 1
+        ceph config set mgr osd_pool_default_size 2
+        ceph config set mgr osd_pool_default_min_size 1
+        ceph config set mon mon_clock_drift_allowed 1
+        for pool in ceph cephfs_data cephfs_metadata; do
+          ceph osd pool set "$pool" size 2
+          ceph osd pool set "$pool" min_size 1
+        done
+      args:
+        executable: /bin/bash
+      run_once: true
+
+    - name: Restart Ceph daemons after two-node default changes
+      ansible.builtin.shell: |
+        set -euo pipefail
+        systemctl restart "ceph-mon@$(hostname).service"
+        systemctl restart "ceph-mgr@$(hostname).service"
+      args:
+        executable: /bin/bash
+      throttle: 1
+
+    - name: Wait for Ceph health to be HEALTH_OK
+      block:
+        - name: Wait for Ceph health to settle
+          ansible.builtin.command: ceph health
+          register: ci_ceph_health
+          changed_when: false
+          until: ci_ceph_health.stdout is defined and ci_ceph_health.stdout.startswith('HEALTH_OK')
+          retries: 20
+          delay: 10
+          run_once: true
+      rescue:
+        - name: Require tentacle
+          ansible.builtin.command: ceph osd require-osd-release tentacle
+        - name: Wait for Ceph health to settle
+          ansible.builtin.command: ceph health
+          register: ci_ceph_health
+          changed_when: false
+          until: ci_ceph_health.stdout is defined and ci_ceph_health.stdout.startswith('HEALTH_OK')
+          retries: 20
+          delay: 10
+          run_once: true
+
+    - name: Ensure Ludus VXLAN SDN zone exists for cluster CI
+      ansible.builtin.shell: |
+        set -euo pipefail
+        zone="{{ ci_cluster_sdn_zone | default('ludus') }}"
+        peers="{{ groups['ci_pve_cluster'] | map('extract', hostvars, 'ansible_host') | join(',') }}"
+        nodes="{{ groups['ci_pve_cluster'] | sort | join(',') }}"
+
+        if pvesh get /cluster/sdn/zones --output-format=json | jq -e --arg zone "$zone" 'any(.[]; .type == "vxlan" and .zone == $zone)' >/dev/null; then
+          pvesh set "/cluster/sdn/zones/$zone" --peers "$peers" --nodes "$nodes"
+        else
+          pvesh create /cluster/sdn/zones --zone "$zone" --type vxlan --peers "$peers" --nodes "$nodes"
+        fi
+
+        pvesh set /cluster/sdn
+      args:
+        executable: /bin/bash
+      run_once: true
+
+- name: Snapshot clean nested Proxmox cluster runtime VMs
+  hosts: localhost
+  gather_facts: false
+  tags: [ci-cluster, ci-cluster-snapshot]
+  tasks:
+    - name: Recreate 'clean' snapshot for cluster VMs
+      ansible.builtin.shell: |
+        if sudo qm listsnapshot {{ hostvars[item].ci_vmid }} | grep -q '\-> clean'; then
+          sudo qm delsnapshot {{ hostvars[item].ci_vmid }} clean
+        fi
+        sudo qm snapshot {{ hostvars[item].ci_vmid }} clean --vmstate true
+      loop: "{{ groups['ci_pve_cluster'] }}"
+      loop_control:
+        label: "{{ hostvars[item].ci_vmid }} ({{ item }})"

@@ -6,7 +6,7 @@
 # lock is still owned by this pipeline. Idempotent.
 
 currentDir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-source "${currentDir}/base.sh"
+source "${currentDir}/base.sh" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
 
 LOCK="$POOL_ASSIGNMENT_DIR/cluster.lock"
 if [[ ! -d "$LOCK" ]]; then
@@ -23,6 +23,6 @@ else
 fi
 
 # Tidy this pipeline's cluster rollback tracking files
-rm -f /tmp/.ludus-ci-cluster-"${PIPELINE_ID}"-* 2>/dev/null || true
+rm -f /tmp/.ludus-ci-cluster-"${CI_NAMESPACE}${PIPELINE_ID}"-* 2>/dev/null || true
 
 exit 0

@@ -2,7 +2,7 @@
 
 # /opt/ludus/ci/claim-cluster.sh
 #
-# Atomically claims the single cluster slot (VMIDs 1005/1006) for the
+# Atomically claims the selected profile's dedicated cluster slot for the
 # current pipeline. The gitlab-ci.yml claim-cluster job runs this and
 # all cluster-* jobs depend on it via `needs:`.
 #

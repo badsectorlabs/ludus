@@ -19,7 +19,7 @@
         clone: debian-13-x64-server-ludus-ci-template
         name: "{{ runner_vm_name }}"
         pool: CICD
-        full: true # TODO determine why the auto-built template doesn't support linked clones
+        full: false
         timeout: 600
       register: clone_vm
 

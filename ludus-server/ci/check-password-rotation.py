@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--user")
     parser.add_argument("--api-key-env", default="LUDUS_API_KEY")
     parser.add_argument("--proxmox-url", default="https://127.0.0.1:8006")
-    parser.add_argument("--ludus-url", default="https://127.0.0.1:8080")
+    parser.add_argument("--ludus-url", default=os.environ.get("CI_SERVER_URL", "https://127.0.0.1:8080"))
     args = parser.parse_args()
     old_password = sys.stdin.read()
     if not old_password:

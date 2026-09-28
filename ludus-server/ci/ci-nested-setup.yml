@@ -1,0 +1,48 @@
+---
+- name: Install standalone nested Proxmox on fresh CI base copies
+  hosts: ci_nested
+  gather_facts: true
+  become: true
+  vars:
+    pve_group: ci_nested
+    pve_cluster_enabled: false
+    pve_ceph_enabled: false
+    pve_run_system_upgrades: false
+    pve_run_proxmox_upgrades: false
+    pve_reboot_on_kernel_update: true
+    pve_reboot_on_kernel_update_delay: 15
+    pve_storages:
+      - name: local
+        type: dir
+        path: /var/lib/vz
+        content: [images, rootdir, iso, vztmpl, backup, snippets]
+  pre_tasks:
+    - name: Refuse an existing cluster or populated Ludus installation
+      ansible.builtin.shell: |
+        test ! -e /etc/pve/corosync.conf
+        test ! -e /opt/ludus/config.yml
+      changed_when: false
+
+    - name: Remove loopback mapping for the nested hostname
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1\s+'
+        state: absent
+
+    - name: Resolve nested hostname through its fixed management address
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^{{ ansible_host | regex_escape }}\s+'
+        line: '{{ ansible_host }} {{ ansible_facts.hostname }}'
+
+  roles:
+    - role: lae.proxmox
+
+  post_tasks:
+    - name: Verify standalone Proxmox API is available
+      ansible.builtin.command: pvesh get /version --output-format json
+      changed_when: false
+
+    - name: Verify no legacy cluster identity was inherited
+      ansible.builtin.command: test ! -e /etc/pve/corosync.conf
+      changed_when: false
