@@ -8,6 +8,7 @@ repomix*.xml
 ludus-gui
 ludus-antisandbox-plugin
 ludus-enterprise-plugin
+*-integration-review.md
 ### VScode ###
 .vscode
 
