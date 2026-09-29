@@ -3390,7 +3390,9 @@ beta-release:
       done
     - rclone copy install-beta.sh r2:ludus-beta/ --s3-no-check-bucket
     # The release pointer is last, after versioned artifacts and the LXC upload have succeeded.
-    - printf '%s\n' "${CI_COMMIT_TAG}" | rclone rcat r2:ludus-beta/latest.txt --s3-no-check-bucket
+    # Use a local file + copyto (known size) instead of rcat; R2 returns NotImplemented for rcat's streaming upload.
+    - printf '%s\n' "${CI_COMMIT_TAG}" > latest.txt
+    - rclone copyto latest.txt r2:ludus-beta/latest.txt --s3-no-check-bucket
 
 upload-lxc-r2:
   stage: upload
@@ -3424,7 +3426,12 @@ upload-lxc-r2:
     - rclone copy "${TMPL}" "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
     - rclone copy "${TMPL}.sha256" "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
     - rclone copy checksums.txt "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
-    - if [[ "$VER" != *-beta* ]]; then echo "${VER}" | rclone rcat "r2:ludus-lxc/latest.txt" --s3-no-check-bucket; fi
+    # Use a local file + copyto (known size) instead of rcat; R2 returns NotImplemented for rcat's streaming upload.
+    - |
+      if [[ "$VER" != *-beta* ]]; then
+        printf '%s\n' "${VER}" > latest.txt
+        rclone copyto latest.txt "r2:ludus-lxc/latest.txt" --s3-no-check-bucket
+      fi
 
 gitlab-upload:
   stage: upload
