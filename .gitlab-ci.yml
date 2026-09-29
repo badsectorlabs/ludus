@@ -690,15 +690,24 @@ build all:
         TAGS=""
       else
         WEBUI_URL="https://ludus-webui:${LUDUS_WEBUI_GITLAB_TOKEN}@gitlab.com/badsectorlabs/ludus-gui.git"
+        # Beta tags use WEBUI_BETA_BRANCH, everything else uses WEBUI_DEFAULT_BRANCH (both set in the GitLab CI/CD variables).
+        # Beta tags fall back to WEBUI_DEFAULT_BRANCH, and then to master, when the variable is unset or empty.
+        if [[ "${CI_COMMIT_TAG:-}" == *"-beta"* ]]; then
+          WEBUI_BRANCH="${WEBUI_BETA_BRANCH:-${WEBUI_DEFAULT_BRANCH:-master}}"
+        else
+          WEBUI_BRANCH="${WEBUI_DEFAULT_BRANCH:-master}"
+        fi
+        echo "Using ludus-gui branch: ${WEBUI_BRANCH}"
         if [[ ! -d ludus-gui/.git ]]; then
           rm -rf ludus-gui
           git clone "$WEBUI_URL"
         else
-          # Refresh the URL in case the token rotated, then update to latest master
+          # Refresh the URL in case the token rotated
           git -C ludus-gui remote set-url origin "$WEBUI_URL"
-          git -C ludus-gui fetch origin
-          git -C ludus-gui reset --hard origin/master
         fi
+        # Update to the latest commit of the selected branch (the dir may be cached from a run that used another branch)
+        git -C ludus-gui fetch origin "$WEBUI_BRANCH"
+        git -C ludus-gui checkout --force -B "$WEBUI_BRANCH" FETCH_HEAD
         TAGS="embedwebui"
       fi
     - |
