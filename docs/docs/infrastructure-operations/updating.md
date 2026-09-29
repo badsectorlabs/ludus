@@ -84,6 +84,32 @@ Ludus updated to v1.5.0+2d39950
 
 :::
 
+### Server configuration defaults
+
+Every server update replaces `/opt/ludus/ansible/server-config.yml` with the
+defaults bundled in the new release. The pre-update file remains in the
+timestamped backup at
+`/opt/ludus/previous-versions/<timestamp>/ansible/server-config.yml`.
+
+If the file contents differ, the updater prints a warning with the full backup
+path and the destination where you can restore it. Configuration values are not
+printed. Identical files and missing pre-update files do not produce a
+configuration-change warning.
+
+To retain customizations, compare the backup with the newly installed file and
+merge the settings you need. Alternatively, restore the entire old file with
+the command below, replacing `TIMESTAMP` with the value printed by the updater.
+Review the new release defaults first: restoring the old file also restores
+its old defaults.
+
+```shell
+sudo cp -- /opt/ludus/previous-versions/TIMESTAMP/ansible/server-config.yml /opt/ludus/ansible/server-config.yml
+```
+
+For LXC installations, these paths and the restore command are inside the Ludus
+LXC, not on the Proxmox host. This applies to ordinary updates; the one-time
+[host-to-LXC migration](./migrate-to-lxc.md) preserves the imported defaults.
+
 ## Updating the Ludus client
 
 <Tabs groupId="operating-systems">

@@ -164,7 +164,7 @@ run_ludus_server_install() {
 }
 
 # Update only the appliance named by host metadata. Never run the server on the
-# Proxmox host or recreate the guest: --update preserves its database/config.
+# Proxmox host or recreate the guest: --update preserves its database and config.yml.
 ludus_update_lxc() (
   set -Eeuo pipefail
   umask 077

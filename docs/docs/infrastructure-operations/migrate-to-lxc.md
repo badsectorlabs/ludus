@@ -9,6 +9,10 @@ The normal installer detects a legacy host installation and starts the LXC
 migration instead of running the old in-place server update. Do **not** run the
 LXC server binary with `--update` on the old host: it refuses that operation
 before stopping services. After migration, ordinary updates run inside the LXC.
+Those later updates replace `ansible/server-config.yml` with the release defaults,
+back up the old file, and warn if its contents differ. See
+[Server configuration defaults](./updating.md#server-configuration-defaults)
+for restoring customizations.
 
 ## Before migration
 

@@ -26,8 +26,10 @@ families can be qualified without losing the original failure boundaries.
    have been exercised with a committed source write after initial staging.
 3. **B3 — Global Ansible defaults:** export/import and fingerprint
    `ansible/server-config.yml` separately from obsolete playbooks, and preserve it
-   during payload refresh. Actual custom-directory upgrades preserved its exact
-   bytes and existing router defaults.
+   through migration import. Actual custom-directory upgrades preserved its exact
+   bytes and existing router defaults. Subsequent ordinary updates back up and
+   replace this file with the release defaults, warning with the backup file path
+   when its contents differ so administrators can restore their customizations.
 
 The later review additionally identified cluster-upgrade and early-rollback
 blockers. Their implementation changes, fault recovery, and observed runtime
@@ -304,9 +306,13 @@ share a single migrated fixture. All cases inherit the common assertions above.
   injected private CA, and expiring/mismatched cert. Supported cases retain original
   certificate identity and trust; mismatched pairs fail preflight. Do not mask checks with `-k`.
 - **DATA-05 · P1 · F4 · B3:** Distinct global defaults in `ansible/server-config.yml`, partial
-  range defaults, and a custom router template/name. Reapply a deployed range and deploy
-  a new one; expect the original effective defaults plus intentional version changes,
-  no router replacement, and no silent fallback to appliance defaults.
+  range defaults, and a custom router template/name. After migration, reapply a deployed
+  range and deploy a new one; expect the original effective defaults, no router
+  replacement, and no silent fallback to appliance defaults. A subsequent ordinary
+  update must install the release defaults, preserve the old file in its timestamped
+  backup, and report the backup and restore paths when the contents differ. Restoring
+  that backup must recover the custom defaults; identical or absent pre-update files
+  must not produce a configuration-change warning.
 - **DATA-06 · P1 · F4:** Local/private Git sources, SSH known_hosts/keys, HTTP credentials,
   resource uploads, user/global Ansible roles and collections, and custom template files.
   Sync a source and build from it. Expect files/modes/ownership and usable credentials,

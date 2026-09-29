@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"io"
@@ -157,13 +158,12 @@ func extractDirectory(embeddedFS embed.FS, embeddedBaseDir, installPath string) 
 	}
 }
 
-// Replace versioned playbooks, but retain the supported administrator defaults.
-// Read before backup/extraction so an unreadable or non-regular config cannot
-// silently turn into factory settings.
+// Replace the Ansible payload, including release defaults. Read the old defaults
+// before backup/extraction so comparison errors cannot silently discard them.
 func replaceAnsibleFiles(installPath, timestamp string) error {
 	filename := filepath.Join(installPath, "ansible/server-config.yml")
 	var defaults []byte
-	var mode os.FileMode
+	var changed bool
 	st, err := os.Lstat(filename)
 	if err == nil {
 		if !st.Mode().IsRegular() {
@@ -173,17 +173,20 @@ func replaceAnsibleFiles(installPath, timestamp string) error {
 		if err != nil {
 			return err
 		}
-		mode = st.Mode().Perm()
+		bundledDefaults, err := embeddedAnsbileDir.ReadFile("ansible/server-config.yml")
+		if err != nil {
+			return err
+		}
+		changed = !bytes.Equal(defaults, bundledDefaults)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 	backupDir("ansible", timestamp, installPath)
 	extractDirectory(embeddedAnsbileDir, "ansible", installPath)
-	if st != nil {
-		if err := os.WriteFile(filename, defaults, mode); err != nil {
-			return err
-		}
-		return os.Chmod(filename, mode)
+	if changed {
+		backupFilename := filepath.Join(installPath, "previous-versions", timestamp, "ansible", "server-config.yml")
+		log.Printf("WARNING: %s differs from the pre-update version and has been replaced with the defaults bundled in this release.", filename)
+		log.Printf("Previous configuration: %s. To keep your customizations, review this backup and copy it back to %s.", backupFilename, filename)
 	}
 	return nil
 }
@@ -213,7 +216,7 @@ func checkDirAndReplaceFiles() {
 
 	log.Printf("Extracting ludus to %s...\n", ludusInstallPath)
 	if err := replaceAnsibleFiles(ludusInstallPath, timestamp); err != nil {
-		log.Fatalf("Preserve global Ansible defaults: %v", err)
+		log.Fatalf("Replace Ansible payload: %v", err)
 	}
 
 	// dynamic-inventory has to be executable or it will not work!
