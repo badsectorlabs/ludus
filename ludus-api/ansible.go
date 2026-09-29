@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -930,9 +931,7 @@ func ansibleCollectionsSearchPath(proxmoxUsername string) string {
 	return userCollectionsPath(proxmoxUsername) + ":" + globalCollectionsPath()
 }
 
-// galaxyArtifact selects the per-type conventions for an ansible-galaxy install:
-// which install-path flag to use, and whether a global install must also export
-// ANSIBLE_COLLECTIONS_PATH.
+// galaxyArtifact selects the install-path flag and collection search-path behavior.
 type galaxyArtifact int
 
 const (
@@ -952,15 +951,18 @@ func (a galaxyArtifact) pathFlag() string {
 // {"collection","install"}, or {action} for the legacy role install/remove
 // form); target is what's being installed (an FQCN/URL, or {"-r", file}).
 //
-// When scopePath is non-empty the install is global: it is written there via the
-// artifact's path flag, and for collections scopePath is also exported as
-// ANSIBLE_COLLECTIONS_PATH so ansible-galaxy treats the global directory as a
-// configured search path instead of warning that it sits outside the search path
-// (roles emit no such warning, so they never need it). ansibleHome, when set,
-// pins ANSIBLE_HOME to keep galaxy off the systemd-protected /home default.
+// scopePath pins the install destination. Per-user collections default to
+// ansibleHome/collections, never an inherited service-wide collection path.
+// Collection destinations are also search paths; per-user installs retain
+// inherited paths for already installed dependencies. ansibleHome, when set,
+// keeps galaxy off the systemd-protected /home default.
 //
 // Callers set cmd.Dir themselves where the working directory matters (tar / -r installs).
 func galaxyInstallCmd(artifact galaxyArtifact, base, target []string, force bool, scopePath, ansibleHome string) *exec.Cmd {
+	userCollection := artifact == galaxyCollection && scopePath == "" && ansibleHome != ""
+	if userCollection {
+		scopePath = filepath.Join(ansibleHome, "collections")
+	}
 	args := make([]string, 0, len(base)+len(target)+3)
 	args = append(args, base...)
 	args = append(args, target...)
@@ -976,7 +978,13 @@ func galaxyInstallCmd(artifact galaxyArtifact, base, target []string, force bool
 		cmd.Env = append(cmd.Env, "ANSIBLE_HOME="+ansibleHome)
 	}
 	if scopePath != "" && artifact == galaxyCollection {
-		cmd.Env = append(cmd.Env, "ANSIBLE_COLLECTIONS_PATH="+scopePath)
+		searchPath := scopePath
+		if userCollection {
+			if inherited := os.Getenv("ANSIBLE_COLLECTIONS_PATH"); inherited != "" {
+				searchPath += string(os.PathListSeparator) + inherited
+			}
+		}
+		cmd.Env = append(cmd.Env, "ANSIBLE_COLLECTIONS_PATH="+searchPath)
 	}
 	return cmd
 }

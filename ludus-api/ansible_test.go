@@ -3,6 +3,8 @@ package ludusapi
 import (
 	"encoding/json"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,6 +127,68 @@ func TestAnsibleConfigDefaults(t *testing.T) {
 			}
 			if got.Precedence != wantPrecedence {
 				t.Errorf("unrelated variable precedence = %q, want %q", got.Precedence, wantPrecedence)
+			}
+		})
+	}
+}
+
+func TestGalaxyCollectionInstallScope(t *testing.T) {
+	if _, err := exec.LookPath("ansible-galaxy"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("CI requires ansible-galaxy for collection scope regression coverage")
+		}
+		t.Skip("requires ansible-galaxy")
+	}
+
+	server := httptest.NewServer(http.FileServer(http.Dir("../ludus-server/ci/fixtures")))
+	t.Cleanup(server.Close)
+	tests := []struct {
+		name             string
+		global           bool
+		preinstallGlobal bool
+		force            bool
+		wantScopes       []string
+	}{
+		{name: "user", force: true, wantScopes: []string{"user"}},
+		{name: "explicit global", global: true, force: true, wantScopes: []string{"global"}},
+		{name: "reuse global", preinstallGlobal: true, wantScopes: []string{"global"}},
+		{name: "force user copy", preinstallGlobal: true, force: true, wantScopes: []string{"global", "user"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			home := filepath.Join(root, "user", ".ansible")
+			global := filepath.Join(root, "global-collections")
+			t.Setenv("ANSIBLE_HOME", filepath.Join(root, "service-home"))
+			t.Setenv("ANSIBLE_LOCAL_TEMP", filepath.Join(root, "tmp"))
+			// The LXC service exports this global search path. It must not
+			// redirect a per-user install or prevent an explicit global install.
+			t.Setenv("ANSIBLE_COLLECTIONS_PATH", global)
+			t.Setenv("ANSIBLE_FORCE_COLOR", "false")
+
+			install := func(scopePath string, force bool) {
+				t.Helper()
+				cmd := galaxyInstallCmd(galaxyCollection, []string{"collection", "install"},
+					[]string{server.URL + "/ludus_ci-http_archive-1.0.0.tar.gz?token=ci"},
+					force, scopePath, home)
+				if output, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("collection install: %v\n%s", err, output)
+				}
+			}
+			if test.preinstallGlobal {
+				install(global, true)
+			}
+			scopePath := ""
+			if test.global {
+				scopePath = global
+			}
+			install(scopePath, test.force)
+			var want []InstalledCollection
+			for _, scope := range test.wantScopes {
+				want = append(want, InstalledCollection{FQCN: "ludus_ci.http_archive", Version: "1.0.0", Scope: scope})
+			}
+			if got := scanInstalledCollections([]string{home}, global); !reflect.DeepEqual(got, want) {
+				t.Fatalf("installed collections = %#v, want %#v", got, want)
 			}
 		})
 	}

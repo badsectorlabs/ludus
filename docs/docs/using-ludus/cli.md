@@ -121,12 +121,18 @@ Add an ansible collection to the ludus host
 
 Specify a collection name (to pull from galaxy.ansible.com), or a URL to a tar.gz collection artifact
 
+Collections are installed for the requesting user by default. Administrators can
+use `--global` to install for all users. `--force` replaces the collection only
+in the selected scope: a forced per-user install does not overwrite a global
+copy. Globally installed collections remain available for dependency resolution.
+
 ```
 Usage:
   ludus ansible collection add [flags]
 
 Flags:
     -f, --force            force the collection to be added
+        --global           install for all users (administrators only)
         --version string   the collection version to install
 ```
 
