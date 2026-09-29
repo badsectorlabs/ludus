@@ -412,6 +412,13 @@ for attempt in $(seq 1 120); do
 done
 exit 1
 ''')
+        if migrate:
+            # A copied loopback registration can outlive the retired host DNS
+            # service and hide the management interface's upstream resolver.
+            self.guest(vm, """if command -v resolvconf >/dev/null && ! systemctl is-active --quiet dnsmasq; then
+    resolvconf -d lo.dnsmasq
+fi
+""")
         self.validate(vm)
 
     def build(self, vm):
@@ -434,7 +441,7 @@ git lfs install --system
         self.build_health(vm)
 
     def build_health(self, vm):
-        self.guest(vm, "/usr/local/go/bin/go version; gcc --version; git lfs version; node --version | grep -E '^v22[.]'; npm --version; yarn --version; sudo -u gitlab-runner /home/gitlab-runner/.bun/bin/bun --version; ansible-playbook --version; rclone version; command -v dab make unzip debootstrap zstd rsync openssl")
+        self.guest(vm, "getent ahostsv4 gitlab.com; /usr/local/go/bin/go version; gcc --version; git lfs version; node --version | grep -E '^v22[.]'; npm --version; yarn --version; sudo -u gitlab-runner /home/gitlab-runner/.bun/bin/bun --version; ansible-playbook --version; rclone version; command -v dab make unzip debootstrap zstd rsync openssl")
 
     def cluster_health(self, vm):
         self.guest(vm, "pvesh get /cluster/status --output-format json | jq -e '[.[] | select(.type == \"node\" and .online == 1)] | length == 2'; ceph health | grep -qx HEALTH_OK; pvesm status --storage ceph; pvesm status --storage cephfs")

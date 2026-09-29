@@ -140,6 +140,12 @@ Current series:
 | `post-deploy-user`    | all `post-deploy *-as-user` jobs                               |
 | `integration`         | `test-everything` from `ci-seed-integration`                   |
 
+Testing-mode jobs check completed guest curl exit codes for blocked HTTPS:
+DNS failure (`6`), connection failure (`7`), or timeout (`28`), not curl's
+version-dependent error text. After allowing a domain, they clear the forwarding
+DC and Windows client's DNS caches so the probe uses the router's newly pinned
+address rather than a cached pre-allow answer.
+
 The `release <series>-vm` jobs in `release-claim` call
 `/opt/ludus/ci/release-vm.sh`. They run only when their upstream jobs succeed.
 If any job in the series fails, the release job does not run and the clone stays
@@ -229,6 +235,11 @@ embedded Ansible, inventory and Packer resources; it never replaces only the
 executable. A failed installation retains its VM for inspection. If the installer
 created an API token before rolling back, inspect that new VM and remove only
 that failed attempt's unused token before retrying; never revoke a legacy token.
+
+After migration, provisioning removes any stale `lo.dnsmasq` resolver registration
+when host `dnsmasq` is inactive. This lets the management interface's upstream
+resolver take over instead of leaving host DNS pointed at an inactive loopback
+service. Build-VM readiness also requires resolving `gitlab.com` before freezing.
 
 Deploy `job-server.sh` to the nested hosts before freezing. Finally run
 `validate --network "$N" --version "$VERSION"` and then
