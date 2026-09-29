@@ -563,10 +563,6 @@ beta-docs-publish:
       artifacts: true
     - job: go-unit-tests
       artifacts: false
-    - job: test-lxc-airgap
-      artifacts: false
-    - job: test-install-sh
-      artifacts: false
   rules:
     - if: $CI_COMMIT_TAG =~ /-beta/
   script:
@@ -784,7 +780,7 @@ build-lxc-template:
   needs:
     - job: "build all"
       artifacts: true
-  rules: &lxc-rules
+  rules:
     - *skip-build-rule
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_MESSAGE =~ /\[(full build|build-lxc)\]/
@@ -3019,7 +3015,10 @@ test-lxc-airgap:
       artifacts: true
     - job: build-lxc-template
       artifacts: true
-  rules: *lxc-rules
+  rules: &lxc-test-rules
+    - if: $CI_COMMIT_TAG # Tags/Releases are created manually after successful full builds
+      when: never
+    - !reference [build-lxc-template, rules]
   before_script: &lxc-storage-setup
     - ROOTDIR_CONTENT=$(sudo pvesh get /storage/local --output-format json | jq -r '.content | split(",") | . + ["rootdir"] | unique | join(",")')
     - sudo pvesm set local --content "$ROOTDIR_CONTENT"
@@ -3043,7 +3042,7 @@ test-install-sh:
       artifacts: true
     - job: build-lxc-template
       artifacts: true
-  rules: *lxc-rules
+  rules: *lxc-test-rules
   before_script: *lxc-storage-setup
   timeout: 30m
   script:
@@ -3072,7 +3071,7 @@ test-lxc-migration:
       artifacts: true
     - job: build-lxc-template
       artifacts: true
-  rules: *lxc-rules
+  rules: *lxc-test-rules
   before_script: *lxc-storage-setup
   timeout: 1h
   script:
@@ -3091,7 +3090,7 @@ release lxc-airgap-vm:
   needs:
     - test-lxc-airgap
   dependencies: []
-  rules: *lxc-rules
+  rules: *lxc-test-rules
   variables:
     LUDUS_BUILD_TYPE: vm-release
     LUDUS_CI_SERIES: lxc-airgap
@@ -3107,7 +3106,7 @@ release lxc-install-vm:
   needs:
     - test-install-sh
   dependencies: []
-  rules: *lxc-rules
+  rules: *lxc-test-rules
   variables:
     LUDUS_BUILD_TYPE: vm-release
     LUDUS_CI_SERIES: lxc-install
@@ -3123,7 +3122,7 @@ release lxc-migration-vm:
   needs:
     - test-lxc-migration
   dependencies: []
-  rules: *lxc-rules
+  rules: *lxc-test-rules
   variables:
     LUDUS_BUILD_TYPE: vm-release
     LUDUS_CI_SERIES: lxc-migration
@@ -3355,10 +3354,6 @@ beta-release:
     - build all
     - job: go-unit-tests
       artifacts: false
-    - job: test-lxc-airgap
-      artifacts: false
-    - job: test-install-sh
-      artifacts: false
     - job: upload-lxc-r2
       artifacts: false
   variables:
@@ -3404,10 +3399,6 @@ upload-lxc-r2:
       artifacts: true
     - job: go-unit-tests
       artifacts: false
-    - job: test-lxc-airgap
-      artifacts: false
-    - job: test-install-sh
-      artifacts: false
   variables:
     LUDUS_BUILD_TYPE: any-built
     GIT_STRATEGY: none
@@ -3441,10 +3432,6 @@ gitlab-upload:
   needs:
     - build all
     - job: go-unit-tests
-      artifacts: false
-    - job: test-lxc-airgap
-      artifacts: false
-    - job: test-install-sh
       artifacts: false
   variables:
     LUDUS_BUILD_TYPE: any-built
