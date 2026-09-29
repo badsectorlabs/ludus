@@ -268,7 +268,7 @@ stages:
   - ludus range status | grep "${LUDUS_USER_ID}-ad-dc-win2022-server-x64" | grep 'On'
   - ludus range status | grep "${LUDUS_USER_ID}-router-debian13-x64" | grep 'On'
 
-.template-tests: &template-tests # `templates add` CLI tests. The bundled template library moved to the ludus-source-bsl source; a throwaway fixture exercises add/force/ownership, and an embedded (server-included) template covers the build smoke-test.
+.template-tests: &template-tests # A throwaway fixture exercises add/force/ownership; a source-installed Debian 10 template covers the build test.
   - ludus templates list --json | jq -r '.[] | select(.name == "ci-add-test-template") | .name' | grep -q 'ci-add-test-template' && ludus templates rm -n "ci-add-test-template" || echo "No ci-add-test template on the server"
   # Remove the debian10 template if it exists (retry)
   - ludus templates list --json | jq -r '.[] | select(.name == "debian-10-x64-server-template") | .name' | grep -q 'debian-10-x64-server-template' && ludus templates rm -n "debian-10-x64-server-template" || echo "No debian10 on the server"
@@ -287,18 +287,73 @@ stages:
   - ludus templates add -d ludus-server/ci/fixtures/templates/ci-add-test --force
   - ludus templates rm -n "ci-add-test-template"
   - ludus source add https://github.com/badsectorlabs/ludus-source-bsl --templates debian-10-x64-server-template
-  - ludus templates build -n debian-10-x64-server-template
-  - ludus templates status
-  - ludus templates status | grep debian-10-x64-server-template
-  - ludus templates status | grep continuous-integration-
-  # Wait for the template to build
-  - while [ $(ludus templates list --json | jq '[.[] | select(.built == false)] | length' || echo 1) -ne 0 ]; do date; sleep 60; done
-  - ludus templates logs
+  # This is a big nasty block to build debian 10 and check the status of it to fail quickly vs the previous wait-to-timeout method. More code, but faster fails.
+  - |
+    TEMPLATE_NAME=debian-10-x64-server-template
+    # History is scoped to the calling user. Ignore every entry that predates this request.
+    TEMPLATE_LOG_BASELINE=$(timeout 60 ludus templates logs --history --json | jq -ce '[.[].id]') || exit 1
+    TEMPLATE_LOG_ID=
+    TEMPLATE_BUILD_DEADLINE=$((SECONDS + 1800))
+    TEMPLATE_REGISTRATION_DEADLINE=$((SECONDS + 120))
+    timeout 60 ludus templates build -n "$TEMPLATE_NAME" || exit 1
+
+    while true; do
+      TEMPLATE_HISTORY=$(timeout 60 ludus templates logs --history --json) || exit 1
+      if [ -z "$TEMPLATE_LOG_ID" ]; then
+        TEMPLATE_LOG_ID=$(printf '%s\n' "$TEMPLATE_HISTORY" | jq -r \
+          --arg name "$TEMPLATE_NAME" --argjson baseline "$TEMPLATE_LOG_BASELINE" \
+          '[.[] | select(.template == $name) | select(.id as $id | $baseline | index($id) | not)] |
+           if length == 0 then ""
+           elif length == 1 then .[0].id
+           else error("Multiple new builds found for the requested template") end') || exit 1
+      fi
+
+      if [ -n "$TEMPLATE_LOG_ID" ]; then
+        TEMPLATE_BUILD_STATUS=$(printf '%s\n' "$TEMPLATE_HISTORY" | jq -er \
+          --arg id "$TEMPLATE_LOG_ID" '.[] | select(.id == $id) | .status') || exit 1
+        echo "$TEMPLATE_NAME build $TEMPLATE_LOG_ID: $TEMPLATE_BUILD_STATUS"
+        case "$TEMPLATE_BUILD_STATUS" in
+          success)
+            # Proxmox's template inventory can lag behind Packer's completion.
+            TEMPLATE_BUILT=$(timeout 60 ludus templates list --json | jq -r \
+              --arg name "$TEMPLATE_NAME" 'any(.[]; .name == $name and .built == true)') || exit 1
+            if [ "$TEMPLATE_BUILT" = true ]; then break; fi
+            ;;
+          running) ;;
+          *)
+            echo "Template build did not succeed: $TEMPLATE_BUILD_STATUS"
+            timeout 60 ludus templates logs --history --id "$TEMPLATE_LOG_ID" || true
+            exit 1
+            ;;
+        esac
+      elif [ "$SECONDS" -ge "$TEMPLATE_REGISTRATION_DEADLINE" ]; then
+        echo "No new log history entry appeared for $TEMPLATE_NAME within 120 seconds"
+        timeout 60 ludus templates status || true
+        exit 1
+      fi
+
+      # Status registration is asynchronous and a fast build may already be finished.
+      # Validate the requested template's owner whenever its running status is visible;
+      # terminal history above also proves the build belongs to the calling user.
+      TEMPLATE_STATUS=$(timeout 60 ludus templates status --json) || exit 1
+      printf '%s\n' "$TEMPLATE_STATUS" | jq -e --arg name "$TEMPLATE_NAME" \
+        'all((. // [])[] | select(.template == $name); .user | startswith("continuous-integration-"))' || exit 1
+
+      if [ "$SECONDS" -ge "$TEMPLATE_BUILD_DEADLINE" ]; then
+        echo "Timed out waiting for $TEMPLATE_NAME build $TEMPLATE_LOG_ID after 1800 seconds"
+        if [ -n "$TEMPLATE_LOG_ID" ]; then
+          timeout 60 ludus templates logs --history --id "$TEMPLATE_LOG_ID" || true
+        fi
+        exit 1
+      fi
+      sleep 10
+    done
+    export TEMPLATE_LOG_ID
+  - timeout 60 ludus templates logs --history --id "$TEMPLATE_LOG_ID"
   - ludus templates list
-  # Log history: verify a log entry was saved after the template build
-  - ludus templates logs --history --json | jq -e 'length > 0'
-  - export TEMPLATE_LOG_ID=$(ludus templates logs --history --json | jq -r '.[0].id')
-  - ludus templates logs --history --id "$TEMPLATE_LOG_ID" | grep -q "=>"
+  - ludus templates list --json | jq -e --arg name "$TEMPLATE_NAME" 'any(.[]; .name == $name and .built == true)'
+  # Log history assertions must refer to this request, not an older successful build.
+  - ludus templates logs --history --json | jq -e --arg id "$TEMPLATE_LOG_ID" --arg name "$TEMPLATE_NAME" 'any(.[]; .id == $id and .template == $name and .status == "success")'
 
 .snapshot-tests: &snapshot-tests
   - ludus snapshots list
