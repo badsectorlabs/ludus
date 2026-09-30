@@ -71,13 +71,14 @@ function Get-Architecture {
 
 #---  FUNCTION  ----------------------------------------------------------------
 #          NAME:  Fetch-ReleaseLinks
-#   DESCRIPTION:  Fetches the release links from GitLab API.
+#   DESCRIPTION:  Fetches the latest stable release links from GitLab API.
 #    PARAMETERS:  none
 #       RETURNS:  JSON object containing the release links.
 #-------------------------------------------------------------------------------
 function Fetch-ReleaseLinks {
-    $releaseLinks = (Invoke-WebRequest -Uri "https://gitlab.com/api/v4/projects/54052321/releases/permalink/latest/assets/links" -UseBasicParsing).Content | ConvertFrom-Json
-    return $releaseLinks
+    $releases = (Invoke-WebRequest -Uri "https://gitlab.com/api/v4/projects/54052321/releases" -UseBasicParsing).Content | ConvertFrom-Json
+    $latestStableRelease = $releases | Where-Object { $_.tag_name -notmatch '-beta' } | Select-Object -First 1
+    return $latestStableRelease.assets.links
 }
 
 #---  FUNCTION  ----------------------------------------------------------------

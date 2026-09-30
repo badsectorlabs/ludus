@@ -68,6 +68,7 @@ chmod +x install.sh
 ```
 
 The `install.sh` script will install the `ludus` client, and optionally shell completions, and then prompt to install the server.
+It selects the latest stable tag, ignoring tags containing `-beta`.
 Follow the interactive installer. If you are unsure of any option, just accept the default value. The installer will start and reboot the machine.
 
 After the reboot, the install will continue automatically. To monitor its progress, ssh into

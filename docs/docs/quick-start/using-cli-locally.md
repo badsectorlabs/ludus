@@ -86,6 +86,8 @@ This documentation assumes the use of the Windows Terminal and Powershell (not c
 
 :::
 
+The PowerShell installer selects the latest stable release, ignoring tags containing `-beta`.
+
 ```shell-session
 # terminal-command-powershell
 irm https://ludus.cloud/install-client.ps1 | iex

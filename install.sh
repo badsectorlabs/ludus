@@ -540,9 +540,9 @@ main() {
   fi
 
   if command_exists curl; then
-    LATEST_TAG=$(curl -s "https://gitlab.com/api/v4/projects/$PROJECT_ID/repository/tags" | grep -o '"name":"[^"]*' | cut -d'"' -f4 | head -n1)
+    LATEST_TAG=$(curl -s "https://gitlab.com/api/v4/projects/$PROJECT_ID/repository/tags" | grep -o '"name":"[^"]*' | cut -d'"' -f4 | grep -v -- '-beta' | head -n1)
   elif command_exists wget; then
-    LATEST_TAG=$(wget -qO- "https://gitlab.com/api/v4/projects/$PROJECT_ID/repository/tags" | grep -o '"name":"[^"]*' | cut -d'"' -f4 | head -n1)
+    LATEST_TAG=$(wget -qO- "https://gitlab.com/api/v4/projects/$PROJECT_ID/repository/tags" | grep -o '"name":"[^"]*' | cut -d'"' -f4 | grep -v -- '-beta' | head -n1)
   else
       echo "Error: Neither curl nor wget is available. Please install one of them."
       exit 1
