@@ -926,8 +926,8 @@ ludus_install_server() {
   elif [[ ! -f "${TMPL_CACHE}" ]]; then
     print_message "[+] Downloading LXC template ${TMPL_NAME} ..." "info"
     R2_BASE="${LUDUS_R2_BASE:-https://lxc.ludus.cloud}"
-    curl -fL "${R2_BASE}/ludus-lxc/${LUDUS_VERSION}/${TMPL_NAME}" -o "${TMPL_CACHE}"
-    curl -fsSL "${R2_BASE}/ludus-lxc/${LUDUS_VERSION}/checksums.txt" -o /tmp/ludus-checksums.txt
+    curl -fL "${R2_BASE}/${LUDUS_VERSION}/${TMPL_NAME}" -o "${TMPL_CACHE}"
+    curl -fsSL "${R2_BASE}/${LUDUS_VERSION}/checksums.txt" -o /tmp/ludus-checksums.txt
     ( cd /var/lib/vz/template/cache && sha256sum -c /tmp/ludus-checksums.txt --ignore-missing ) \
       || { print_message "[!] Template checksum verification failed" "error"; exit 1; }
   else
