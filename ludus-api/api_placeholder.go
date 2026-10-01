@@ -161,6 +161,12 @@ func RegisterPluginPlaceholderRoutes(se *core.ServeEvent) {
 			Pattern:     "/range/auto-shutdown",
 			HandlerFunc: PlaceholderHandler,
 		},
+		PocketBaseRoute{
+			Name:        "GetMachineCredentials",
+			Method:      http.MethodGet,
+			Pattern:     "/range/machine-credentials",
+			HandlerFunc: PlaceholderHandler,
+		},
 	}
 
 	RegisterRoutesWithPocketBase(se, pluginRoutes)

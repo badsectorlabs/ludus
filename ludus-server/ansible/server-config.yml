@@ -15,6 +15,8 @@ defaults:
   ad_domain_safe_mode_password: password
   timezone: "America/New_York"
   enable_dynamic_wallpaper: true
+  use_cert_auth: false
+  cert_auth_create_accounts: false
 
 ########################################################################################
 #### Nothing below needs to be manually changed unless you know what you are doing #####
@@ -23,6 +25,12 @@ defaults:
 ludus_install_path: /opt/ludus
 ludus_users_dir: "{{ ludus_install_path }}/users"
 ludus_ranges_dir: "{{ ludus_install_path }}/ranges"
+ludus_machine_credentials_dir: "{{ ludus_ranges_dir }}/{{ range_id }}/machine-credentials"
+ludus_ssh_private_key_path: "{{ ludus_machine_credentials_dir }}/ssh/ludus_ed25519"
+ludus_ssh_public_key_path: "{{ ludus_ssh_private_key_path }}.pub"
+ludus_winrm_ca_cert_path: "{{ ludus_machine_credentials_dir }}/winrm/ca_cert.pem"
+ludus_winrm_client_cert_path: "{{ ludus_machine_credentials_dir }}/winrm/client_cert.pem"
+ludus_winrm_client_key_path: "{{ ludus_machine_credentials_dir }}/winrm/client_key.pem"
 
 # Wireguard config
 wg_server_allowed_ips: "198.51.100.0/24"

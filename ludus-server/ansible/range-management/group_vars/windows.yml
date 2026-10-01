@@ -1,6 +1,11 @@
 ansible_connection: winrm
-ansible_user: localuser
-ansible_password: password
+ludus_template_user: localuser
+ludus_template_password: password
+ansible_user: "{{ defaults.cert_auth_windows_user | default(ludus_template_user, true) if defaults.use_cert_auth | default(false) else ludus_template_user }}"
+ansible_password: "{{ none if defaults.use_cert_auth | default(false) else ludus_template_password }}"
+ansible_winrm_transport: "{{ 'certificate' if defaults.use_cert_auth | default(false) else 'ssl' }}"
+ansible_winrm_cert_pem: "{{ ludus_winrm_client_cert_path if defaults.use_cert_auth | default(false) else '' }}"
+ansible_winrm_cert_key_pem: "{{ ludus_winrm_client_key_path if defaults.use_cert_auth | default(false) else '' }}"
 ansible_winrm_scheme: https
 ansible_winrm_server_cert_validation: ignore
 win_async_startup_timeout: 3600 # Prevent timeouts, see https://docs.ansible.com/ansible/latest/reference_appendices/config.html#win-async-startup-timeout

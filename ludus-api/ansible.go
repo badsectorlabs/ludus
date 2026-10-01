@@ -67,35 +67,43 @@ func getMergedDefaults(serverConfigPath, rangeConfigPath string) map[string]inte
 	return mergedDefaults
 }
 
-func ansibleConfigExtraVars(installPath, rangeConfigPath string) ([]string, error) {
+func certAuthEnabled(defaults map[string]interface{}, entitlements []string) (bool, error) {
+	raw, exists := defaults["use_cert_auth"]
+	if !exists {
+		return false, nil
+	}
+	enabled, ok := raw.(bool)
+	if !ok {
+		return false, fmt.Errorf("defaults.use_cert_auth must be a boolean")
+	}
+	if enabled && !slices.Contains(entitlements, "ENTERPRISE_PLUGIN") {
+		return false, fmt.Errorf("certificate authentication requires the enterprise plugin entitlement")
+	}
+	return enabled, nil
+}
+
+func ansibleConfigExtraVars(installPath, rangeConfigPath string) ([]string, map[string]interface{}, error) {
 	serverConfigPath := fmt.Sprintf("%s/ansible/server-config.yml", installPath)
 	configs := []string{"@" + installPath + "/config.yml", "@" + serverConfigPath}
 	if rangeConfigPath != "" {
 		configs = append(configs, "@"+rangeConfigPath)
 	}
 
+	mergedDefaults := getMergedDefaults(serverConfigPath, rangeConfigPath)
 	defaults, err := json.Marshal(map[string]interface{}{
-		"defaults": getMergedDefaults(serverConfigPath, rangeConfigPath),
+		"defaults": mergedDefaults,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("encoding merged defaults: %w", err)
+		return nil, nil, fmt.Errorf("encoding merged defaults: %w", err)
 	}
 	// go-ansible emits ExtraVars before ExtraVarsFile. Put this defaults-only
 	// JSON after the configs so a partial range dictionary cannot replace it.
-	return append(configs, string(defaults)), nil
+	return append(configs, string(defaults)), mergedDefaults, nil
 }
 
 // Runs an ansible playbook with an arbitrary amount of extraVars
 // Returns a tuple of the playbook output and an error
 func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
-
-	// Ensure SSH keys and WinRM certificates exist before running any playbook
-	if slices.Contains(s.Entitlements, "ENTERPRISE_PLUGIN") {
-		if err := EnsureLudusAuthMaterial(); err != nil {
-			logger.Error(fmt.Sprintf("Failed to ensure auth material: %v", err))
-			// Non-fatal: continue with playbook execution, bootstrap may still work with passwords
-		}
-	}
 
 	buff := new(bytes.Buffer)
 
@@ -153,9 +161,32 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		}
 	}
 
-	serverAndUserConfigs, err := ansibleConfigExtraVars(ludusInstallPath, rangeConfigPath)
+	serverAndUserConfigs, defaults, err := ansibleConfigExtraVars(ludusInstallPath, rangeConfigPath)
 	if err != nil {
 		return "", err
+	}
+
+	useCertAuth, err := certAuthEnabled(defaults, s.Entitlements)
+	if err != nil {
+		return "", err
+	}
+	if useCertAuth {
+		canBootstrap := false
+		if slices.Contains(playbookPathArray, fmt.Sprintf("%s/ansible/range-management/ludus.yml", ludusInstallPath)) {
+			for _, tag := range strings.Split(tags, ",") {
+				if tag == "" || tag == "all" || tag == "bootstrap-auth" {
+					canBootstrap = true
+				}
+			}
+		}
+		if canBootstrap {
+			err = ensureLudusAuthMaterial(usersRange.RangeId())
+		} else {
+			_, err = MachineCredentialsDirForRange(usersRange.RangeId())
+		}
+		if err != nil {
+			return "", fmt.Errorf("certificate authentication material unavailable for range %s: %w", usersRange.RangeId(), err)
+		}
 	}
 
 	// Check if the user specified a limit, and if so, make sure it has 'localhost' in it
@@ -591,8 +622,11 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 	// Always include the ludus, server, and user configs
 	// Use .tmp-range-config.yml since this function is called during PutConfig before the file is renamed
 	rangeConfigPath := fmt.Sprintf("%s/ranges/%s/.tmp-range-config.yml", ludusInstallPath, usersRange.RangeId())
-	serverAndUserConfigs, err := ansibleConfigExtraVars(ludusInstallPath, rangeConfigPath)
+	serverAndUserConfigs, defaults, err := ansibleConfigExtraVars(ludusInstallPath, rangeConfigPath)
 	if err != nil {
+		return "", err
+	}
+	if _, err := certAuthEnabled(defaults, server.Entitlements); err != nil {
 		return "", err
 	}
 	inventory := "127.0.0.1"

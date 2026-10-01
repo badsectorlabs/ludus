@@ -3,6 +3,25 @@
   tags: [always]
   gather_facts: false
   tasks:
+    - name: Require enterprise entitlement for certificate authentication
+      ansible.builtin.assert:
+        that:
+          - ludus_entitlements is defined and 'ENTERPRISE_PLUGIN' in ludus_entitlements
+        fail_msg: "Certificate-based authentication requires the ENTERPRISE_PLUGIN entitlement"
+      when: defaults.use_cert_auth | default(false)
+
+    - name: Reject certificate authentication on Windows domain controllers before changing any VM
+      ansible.builtin.assert:
+        that:
+          - item.domain.role | default('') not in ['primary-dc', 'alt-dc']
+        fail_msg: "Certificate authentication does not support Windows domain controllers (WinRM certificate mappings require a local SAM account). Use a separate password-auth range for these hosts."
+      loop: "{{ ludus | default([]) }}"
+      loop_control:
+        label: "{{ item.vm_name }}"
+      when:
+        - defaults.use_cert_auth | default(false)
+        - not item.unmanaged | default(false)
+
     - name: Check for Proxmox token
       ansible.builtin.assert:
         that:

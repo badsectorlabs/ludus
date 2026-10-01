@@ -93,7 +93,27 @@
                 },
                 "use_cert_auth": {
                     "type": "boolean",
-                    "description": "Use SSH key auth for Linux VMs and WinRM certificate auth for Windows VMs instead of passwords. When enabled, a bootstrap step injects keys/certs on first deploy, and all subsequent Ansible operations use certificate-based authentication. Default: false",
+                    "description": "Use range-scoped SSH keys for Linux and macOS and WinRM client certificates for Windows (Enterprise). Template passwords are used only for bootstrap, then replaced. Default: false",
+                    "default": false
+                },
+                "cert_auth_linux_user": {
+                    "type": "string",
+                    "pattern": "^[a-z_][a-z0-9_-]{0,31}$",
+                    "description": "Linux provisioning account when use_cert_auth is enabled, including the Linux router. Omit to keep each template's account with passwordless sudo; use root for direct privileged SSH. Replaced template accounts are removed after verifying key authentication."
+                },
+                "cert_auth_macos_user": {
+                    "type": "string",
+                    "pattern": "^[a-z_][a-z0-9_-]{0,31}$",
+                    "description": "macOS provisioning account when use_cert_auth is enabled. Omit to keep the template account with passwordless sudo; use root for direct privileged SSH. Independent of cert_auth_linux_user. Replaced template accounts are removed after verifying key authentication."
+                },
+                "cert_auth_windows_user": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,19}$",
+                    "description": "Local Windows provisioning account when use_cert_auth is enabled. Omit to keep the template account; use Administrator for the built-in administrator. Replaced template accounts are removed after verifying certificate authentication."
+                },
+                "cert_auth_create_accounts": {
+                    "type": "boolean",
+                    "description": "Create missing or enable disabled custom certificate-auth provisioning accounts. Without this opt-in the selected account must already exist and be enabled. Default: false",
                     "default": false
                 }
             },

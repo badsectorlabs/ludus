@@ -45,6 +45,8 @@ func TestAnsibleConfigDefaults(t *testing.T) {
 		"timezone":                 "America/New_York",
 		"snapshot_with_RAM":        true,
 		"stale_hours":              float64(7),
+		"use_cert_auth":            true,
+		"cert_auth_linux_user":     "root",
 	}
 	writeConfig(t, filepath.Join(root, "config.yml"), map[string]interface{}{"precedence": "config"})
 	writeConfig(t, filepath.Join(root, "ansible", "server-config.yml"), map[string]interface{}{"defaults": serverDefaults})
@@ -61,6 +63,7 @@ func TestAnsibleConfigDefaults(t *testing.T) {
 		{name: "defaults omitted", filename: "range-config.yml"},
 		{name: "no range config"},
 		{name: "false and zero", filename: "range-config.yml", defaults: map[string]interface{}{"snapshot_with_RAM": false, "stale_hours": float64(0)}},
+		{name: "disable inherited cert auth", filename: "range-config.yml", defaults: map[string]interface{}{"use_cert_auth": false}},
 		{name: "complete defaults", filename: "range-config.yml", defaults: map[string]interface{}{
 			"ad_domain_admin":          "rangeadmin",
 			"ad_domain_admin_password": "range-password",
@@ -85,7 +88,7 @@ func TestAnsibleConfigDefaults(t *testing.T) {
 			}
 			wantDefaults := maps.Clone(serverDefaults)
 			maps.Copy(wantDefaults, test.defaults)
-			configs, err := ansibleConfigExtraVars(root, rangePath)
+			configs, _, err := ansibleConfigExtraVars(root, rangePath)
 			if err != nil {
 				t.Fatal(err)
 			}
