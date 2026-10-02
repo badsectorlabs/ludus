@@ -2,115 +2,11 @@ package ludusapi
 
 import (
 	"bytes"
-	"crypto/rsa"
-	"crypto/x509"
-	"encoding/hex"
-	"encoding/pem"
 	"os"
+	"os/user"
 	"path/filepath"
 	"testing"
-	"time"
 )
-
-func TestGenerateWinRMClientCertMaterial(t *testing.T) {
-	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
-
-	caPEM, certPEM, keyPEM, err := generateWinRMClientCertMaterial(now)
-	if err != nil {
-		t.Fatalf("generateWinRMClientCertMaterial() error = %v", err)
-	}
-
-	caCert := mustParseCertificatePEM(t, caPEM)
-	clientCert := mustParseCertificatePEM(t, certPEM)
-	clientKey := mustParseRSAPrivateKeyPEM(t, keyPEM)
-
-	if !caCert.IsCA {
-		t.Fatal("CA certificate is not marked as a CA")
-	}
-	if clientCert.IsCA {
-		t.Fatal("client certificate is marked as a CA")
-	}
-	if err := clientCert.CheckSignatureFrom(caCert); err != nil {
-		t.Fatalf("client certificate is not signed by generated CA: %v", err)
-	}
-	if !hasExtKeyUsage(clientCert, x509.ExtKeyUsageClientAuth) {
-		t.Fatal("client certificate is missing client auth EKU")
-	}
-
-	expectedUPN, err := winRMUPNSANExtension(winrmClientUPN)
-	if err != nil {
-		t.Fatalf("winRMUPNSANExtension() error = %v", err)
-	}
-	expectedUPNValue, err := hex.DecodeString("3025a023060a2b060104018237140203a0150c136c6f63616c75736572406c6f63616c686f7374")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(expectedUPN.Value, expectedUPNValue) {
-		t.Fatalf("UPN SAN DER = %x, want %x", expectedUPN.Value, expectedUPNValue)
-	}
-	if !hasExtension(clientCert.Extensions, expectedUPN.Id, expectedUPN.Value) {
-		t.Fatal("client certificate is missing expected UPN SAN")
-	}
-	if !rsaPublicKeysEqual(clientCert.PublicKey, &clientKey.PublicKey) {
-		t.Fatal("client certificate public key does not match private key")
-	}
-}
-
-func TestWinRMClientCertMaterialValidAt(t *testing.T) {
-	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
-	caPEM, certPEM, keyPEM, err := generateWinRMClientCertMaterial(now)
-	if err != nil {
-		t.Fatalf("generateWinRMClientCertMaterial() error = %v", err)
-	}
-
-	dir := t.TempDir()
-	certPath := filepath.Join(dir, "client_cert.pem")
-	keyPath := filepath.Join(dir, "client_key.pem")
-	caPath := filepath.Join(dir, "ca_cert.pem")
-
-	if err := os.WriteFile(certPath, certPEM, 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(caPath, caPEM, 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	if !winRMClientCertMaterialValidAt(certPath, keyPath, caPath, now) {
-		t.Fatal("generated certificate material was not valid")
-	}
-	if winRMClientCertMaterialValidAt(certPath, keyPath, caPath, now.Add(3651*24*time.Hour)) {
-		t.Fatal("expired credentials were accepted")
-	}
-	otherCA, _, otherKey, err := generateWinRMClientCertMaterial(now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(keyPath, otherKey, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if winRMClientCertMaterialValidAt(certPath, keyPath, caPath, now) {
-		t.Fatal("a private key not matching the certificate was accepted")
-	}
-	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(caPath, otherCA, 0644); err != nil {
-		t.Fatal(err)
-	}
-	if winRMClientCertMaterialValidAt(certPath, keyPath, caPath, now) {
-		t.Fatal("a certificate signed by another range's CA was accepted")
-	}
-
-	if err := os.Remove(caPath); err != nil {
-		t.Fatal(err)
-	}
-	if winRMClientCertMaterialValidAt(certPath, keyPath, caPath, now) {
-		t.Fatal("certificate material without a CA certificate should be invalid")
-	}
-}
 
 func TestAuthMaterialPathsForRange(t *testing.T) {
 	paths, err := authMaterialPathsForRange("TEST2")
@@ -139,10 +35,73 @@ func TestAuthMaterialPathsForRange(t *testing.T) {
 	}
 }
 
+func TestSSHAuthMaterialInitializationAndReuse(t *testing.T) {
+	if os.Geteuid() == 0 {
+		if _, err := user.Lookup("ludus"); err != nil {
+			t.Skip("credential ownership requires the ludus system account when running as root")
+		}
+	}
+	rangesDir := t.TempDir()
+	rangeDir := filepath.Join(rangesDir, "TEST2")
+	if err := os.Mkdir(rangeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	paths := authMaterialPaths(rangesDir, filepath.Join(rangeDir, "machine-credentials"))
+	if err := ensureAuthMaterial(paths); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(rangeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].Name() != ".machine-credentials-initialized" || entries[1].Name() != "machine-credentials" {
+		t.Fatalf("initialization left unexpected range entries: %v", entries)
+	}
+	entries, err = os.ReadDir(paths.MachineCredDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "ssh" || !entries[0].IsDir() {
+		t.Fatalf("initialization created non-SSH material: %v", entries)
+	}
+	for _, path := range []string{paths.MachineCredDir, paths.SSHKeyDir, paths.SSHKeyPath, authMaterialMarkerPath(paths)} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm()&0077 != 0 {
+			t.Fatalf("%s is accessible by group or other users", path)
+		}
+	}
+	original := map[string][]byte{}
+	for _, path := range []string{paths.SSHKeyPath, paths.SSHPubKeyPath} {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		original[path] = contents
+	}
+	unrelatedPath := filepath.Join(paths.MachineCredDir, "unrelated-material")
+	unrelated := []byte("unrelated material must not be validated, replaced, or deleted")
+	if err := os.WriteFile(unrelatedPath, unrelated, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureAuthMaterial(paths); err != nil {
+		t.Fatalf("existing SSH-only credentials were not reusable: %v", err)
+	}
+	original[unrelatedPath] = unrelated
+	for path, want := range original {
+		got, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("reuse changed existing material %s: %v", path, err)
+		}
+	}
+}
+
 func TestExistingAuthMaterialFailsClosedWithoutRotation(t *testing.T) {
 	rangesDir := t.TempDir()
 	paths := authMaterialPaths(rangesDir, filepath.Join(rangesDir, "TEST2", "machine-credentials"))
-	if err := validateAuthMaterial(paths, time.Now()); !os.IsNotExist(err) {
+	if err := validateAuthMaterial(paths); !os.IsNotExist(err) {
 		t.Fatalf("missing credentials should be reported without creation, got %v", err)
 	}
 	if _, err := os.Stat(paths.MachineCredDir); !os.IsNotExist(err) {
@@ -151,17 +110,17 @@ func TestExistingAuthMaterialFailsClosedWithoutRotation(t *testing.T) {
 	if err := os.MkdirAll(paths.MachineCredDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := generateAuthMaterial(paths, time.Now()); err != nil {
+	if err := generateAuthMaterial(paths); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateAuthMaterial(paths, time.Now()); err != nil {
+	if err := validateAuthMaterial(paths); err != nil {
 		t.Fatalf("generated material was rejected: %v", err)
 	}
 	if err := markAuthMaterialInitialized(paths); err != nil {
 		t.Fatal(err)
 	}
 	original := map[string][]byte{}
-	for _, path := range []string{paths.SSHKeyPath, paths.SSHPubKeyPath, paths.WinRMCACertPath, paths.WinRMCertPath, paths.WinRMKeyPath} {
+	for _, path := range []string{paths.SSHKeyPath, paths.SSHPubKeyPath} {
 		contents, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -175,8 +134,8 @@ func TestExistingAuthMaterialFailsClosedWithoutRotation(t *testing.T) {
 	}{
 		{"missing public key", paths.SSHPubKeyPath, true},
 		{"corrupt SSH private key", paths.SSHKeyPath, false},
-		{"missing WinRM CA", paths.WinRMCACertPath, true},
-		{"corrupt WinRM private key", paths.WinRMKeyPath, false},
+		{"missing private key", paths.SSHKeyPath, true},
+		{"corrupt SSH public key", paths.SSHPubKeyPath, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if test.remove {
@@ -216,7 +175,7 @@ func TestExistingAuthMaterialFailsClosedWithoutRotation(t *testing.T) {
 	if err := os.Chmod(paths.SSHKeyPath, 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateAuthMaterial(paths, time.Now()); err == nil {
+	if err := validateAuthMaterial(paths); err == nil {
 		t.Fatal("group-readable private key was accepted")
 	}
 	if err := os.Chmod(paths.SSHKeyPath, 0600); err != nil {
@@ -232,7 +191,7 @@ func TestExistingAuthMaterialFailsClosedWithoutRotation(t *testing.T) {
 	if err := os.Symlink(outside, paths.SSHKeyPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateAuthMaterial(paths, time.Now()); err == nil {
+	if err := validateAuthMaterial(paths); err == nil {
 		t.Fatal("credential symlink outside the range was accepted")
 	}
 	if err := os.RemoveAll(paths.MachineCredDir); err != nil {
@@ -267,30 +226,4 @@ func TestCertificateAuthenticationRequiresEntitlement(t *testing.T) {
 			}
 		})
 	}
-}
-
-func mustParseCertificatePEM(t *testing.T, data []byte) *x509.Certificate {
-	t.Helper()
-	block, _ := pem.Decode(data)
-	if block == nil || block.Type != "CERTIFICATE" {
-		t.Fatalf("expected CERTIFICATE PEM block, got %#v", block)
-	}
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		t.Fatalf("ParseCertificate() error = %v", err)
-	}
-	return cert
-}
-
-func mustParseRSAPrivateKeyPEM(t *testing.T, data []byte) *rsa.PrivateKey {
-	t.Helper()
-	block, _ := pem.Decode(data)
-	if block == nil || block.Type != "RSA PRIVATE KEY" {
-		t.Fatalf("expected RSA PRIVATE KEY PEM block, got %#v", block)
-	}
-	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		t.Fatalf("ParsePKCS1PrivateKey() error = %v", err)
-	}
-	return key
 }

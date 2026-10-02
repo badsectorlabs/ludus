@@ -259,6 +259,14 @@
       loop: "{{ ludus }}"
       when: item.unmanaged is not defined or (item.unmanaged is defined and not item.unmanaged)
 
+    - name: Collect managed Windows SSH bootstrap hosts
+      ansible.builtin.set_fact:
+        windows_ssh_vms: "{{ ((windows_ssh_vms | default([])) + [item.vm_name]) | unique }}"
+      loop: "{{ ludus }}"
+      when:
+        - item.windows is defined
+        - not item.unmanaged | default(false)
+
 - name: Ensure all VMs have an IP address
   hosts: localhost
   gather_facts: false
@@ -327,6 +335,7 @@
       when:
         - item.unmanaged is not defined or (item.unmanaged is defined and not item.unmanaged)
         - item.windows is defined
+        - not defaults.use_cert_auth | default(false)
 
     - name: Wait for Linux and macOS VMs to accept SSH connections
       ansible.builtin.wait_for:
@@ -343,7 +352,7 @@
         - (item.linux is defined and item.linux) or (item.macos is defined and item.macos)
 
 # ==========================================================
-# Bootstrap SSH key / WinRM cert auth on newly deployed VMs
+# Bootstrap SSH key authentication on newly deployed VMs
 # (only when defaults.use_cert_auth is true)
 # ==========================================================
 - name: Bootstrap SSH key auth on Linux and macOS VMs
@@ -355,18 +364,30 @@
       ansible.builtin.include_tasks: tasks/bootstrap/bootstrap-ssh-key.yml
       when:
         - defaults.use_cert_auth | default(false)
-        - hostvars[inventory_hostname].ansible_connection | default('ssh') == 'ssh'
+        - (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).windows is not defined
 
-- name: Bootstrap WinRM cert auth on Windows VMs
+- name: Bootstrap SSH key authentication on Windows VMs
   tags: [bootstrap-auth, sysprep]
-  hosts: "{{ hostvars['localhost']['range_vms'] | default([]) }}"
+  hosts: "{{ hostvars['localhost']['windows_ssh_vms'] | default([]) }}"
+  serial: 1
+  any_errors_fatal: true
   gather_facts: false
   tasks:
-    - name: Bootstrap Windows WinRM cert
-      ansible.builtin.include_tasks: tasks/bootstrap/bootstrap-windows-winrm-cert.yml
+    - name: Bootstrap Windows SSH keys
+      ansible.builtin.include_tasks: tasks/bootstrap/bootstrap-windows-ssh-key.yml
       when:
         - defaults.use_cert_auth | default(false)
-        - hostvars[inventory_hostname].ansible_connection | default('ssh') == 'winrm'
+
+- name: Retire Windows template credentials after all SSH bootstraps
+  tags: [bootstrap-auth, sysprep]
+  hosts: "{{ hostvars['localhost']['windows_ssh_vms'] | default([]) }}"
+  serial: 1
+  any_errors_fatal: true
+  gather_facts: false
+  tasks:
+    - name: Finalize verified Windows SSH authentication
+      ansible.builtin.include_tasks: tasks/bootstrap/finalize-windows-ssh-key.yml
+      when: defaults.use_cert_auth | default(false)
 
 
 - name: Configure IP and Hostname for all VMs
@@ -468,9 +489,19 @@
     - name: Configure automatic login for Windows
       ansible.builtin.include_tasks: tasks/windows/configure-autologon.yml
     - name: Configure Domain Controller
-      ansible.builtin.include_tasks: tasks/windows/configure-dc.yml
+      ansible.builtin.include_tasks:
+        file: tasks/windows/configure-dc.yml
+        apply:
+          become: "{{ defaults.use_cert_auth | default(false) }}"
+          become_method: runas
+          become_user: SYSTEM
     - name: Configure GPOs
-      ansible.builtin.include_tasks: tasks/windows/gpo/gpo.yml
+      ansible.builtin.include_tasks:
+        file: tasks/windows/gpo/gpo.yml
+        apply:
+          become: "{{ defaults.use_cert_auth | default(false) }}"
+          become_method: runas
+          become_user: SYSTEM
   vars:
     primary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan | string + '.254') }}"
     secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).secondary_dns_server | default(omit) }}"
@@ -516,7 +547,12 @@
     - name: Configure automatic login for Windows
       ansible.builtin.include_tasks: tasks/windows/configure-autologon.yml
     - name: Configure additional Domain Controllers
-      ansible.builtin.include_tasks: tasks/windows/configure-additional-dc.yml
+      ansible.builtin.include_tasks:
+        file: tasks/windows/configure-additional-dc.yml
+        apply:
+          become: "{{ defaults.use_cert_auth | default(false) }}"
+          become_method: runas
+          become_user: SYSTEM
   vars:
     primary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).primary_dns_server | default('10.' + range_second_octet | string + '.' + (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).vlan | string + '.254') }}"
     secondary_dns_server: "{{ (ludus | selectattr('vm_name', 'equalto', inventory_hostname) | first).secondary_dns_server | default(omit) }}"

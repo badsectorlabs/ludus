@@ -132,3 +132,84 @@ func TestAnsibleConfigDefaults(t *testing.T) {
 		})
 	}
 }
+
+func TestRangeAnsibleRuntimeSelection(t *testing.T) {
+	// An unset override is different from an explicitly empty override.
+	t.Setenv("LUDUS_ANSIBLE_BINARY", "")
+	if err := os.Unsetenv("LUDUS_ANSIBLE_BINARY"); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	binary := filepath.Join(root, "runtimes", "ansible-windows-ssh", "bin", "ansible-playbook")
+	if err := os.MkdirAll(filepath.Dir(binary), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name        string
+		config      string
+		useCertAuth bool
+		wantModern  bool
+	}{
+		{"password Windows", "ludus:\n  - windows: {}", false, false},
+		{"Linux only", "ludus:\n  - linux: true", true, false},
+		{"macOS only", "ludus:\n  - macos: true", true, false},
+		{"Windows mapping", "ludus:\n  - windows:\n      sysprep: false", true, true},
+		{"Windows empty key", "ludus:\n  - windows:", true, true},
+		{"Windows legacy boolean", "ludus:\n  - windows: true", true, true},
+		{"Windows disabled", "ludus:\n  - windows: false\n    linux: true", true, false},
+		{"Windows unmanaged", "ludus:\n  - windows: {}\n    unmanaged: true", true, false},
+		{"mixed range", "ludus:\n  - linux: true\n  - windows: {}\n    unmanaged: false", true, true},
+		{"managed after unmanaged", "ludus:\n  - windows: {}\n    unmanaged: true\n  - windows: {}", true, true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "range-config.yml")
+			if err := os.WriteFile(path, []byte(test.config), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := rangeAnsibleBinary(root, path, test.useCertAuth)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := ""
+			if test.wantModern {
+				want = binary
+			}
+			if got != want {
+				t.Fatalf("selected runtime %q, want %q", got, want)
+			}
+		})
+	}
+	if got, err := rangeAnsibleBinary(root, "", true); err != nil || got != "" {
+		t.Fatalf("controller-only run selected %q, error %v", got, err)
+	}
+}
+
+func TestRangeAnsibleRuntimeMissingAndOverride(t *testing.T) {
+	t.Setenv("LUDUS_ANSIBLE_BINARY", "")
+	if err := os.Unsetenv("LUDUS_ANSIBLE_BINARY"); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "range-config.yml")
+	if err := os.WriteFile(path, []byte("ludus:\n  - windows: {}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rangeAnsibleBinary(root, path, true); err == nil {
+		t.Fatal("Windows SSH silently fell back to legacy Ansible without its runtime")
+	}
+	if got, err := rangeAnsibleBinary(root, path, false); err != nil || got != "" {
+		t.Fatalf("password mode required isolated runtime: binary %q, error %v", got, err)
+	}
+	t.Setenv("LUDUS_ANSIBLE_BINARY", "/custom/bin/ansible-playbook")
+	if got, err := rangeAnsibleBinary(root, path, true); err != nil || got != "/custom/bin/ansible-playbook" {
+		t.Fatalf("explicit binary override lost precedence: binary %q, error %v", got, err)
+	}
+	t.Setenv("LUDUS_ANSIBLE_BINARY", "")
+	if got, err := rangeAnsibleBinary(root, path, true); err != nil || got != "" {
+		t.Fatalf("explicit empty override lost precedence: binary %q, error %v", got, err)
+	}
+}

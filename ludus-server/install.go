@@ -134,6 +134,9 @@ func installAnsibleWithPip() {
 		log.Println("  Printing ansible version...")
 		Run("ansible --version", true, true)
 	}
+	if err := ensureWindowsSSHRuntime(); err != nil {
+		log.Printf("warning: could not provision optional Windows SSH runtime; retry with --update before deploying Windows SSH ranges: %v", err)
+	}
 }
 
 func installAnsibleRequirements() {

@@ -202,8 +202,8 @@ defaults:
   timezone: America/New_York               # The timezone for all VMs, use the TZ identifier format from https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
   enable_dynamic_wallpaper: true           # Enable dynamic wallpaper (red/green) for all Windows VMs in the range
   target_node: pve1                        # The proxmox node to deploy the range to (cluster mode only) if a vm object does not have it's own target_node value. Leave empty for Ludus to decide the node for each VM based on resource utilization
-  use_cert_auth: false                    # Enterprise: SSH keys on Linux/macOS and WinRM certificates on Windows; see below before enabling
-  cert_auth_create_accounts: false        # Opt in to creating or enabling the selected certificate-auth accounts
+  use_cert_auth: false                    # Enterprise: SSH keys on Linux, macOS, and Windows, including DCs; see below before enabling
+  cert_auth_create_accounts: false        # Opt in to creating or enabling the selected SSH provisioning accounts
 
 # Use the notify key to send a notification when a range deployment finishes or fails.
 # Notification "urls" look like the following. For more information about service specific configuration see
@@ -231,68 +231,6 @@ notify:
    - "script:///file/path/on/disk"
    - "https://www.example.com/path"
 ```
-
-## Certificate authentication and provisioning accounts
-
-Certificate authentication requires the Enterprise plugin. Add this to an existing range configuration, then run a full `ludus range deploy`:
-
-```yaml
-defaults:
-  use_cert_auth: true
-```
-
-Omitted certificate-auth settings inherit the server defaults, even when the range defines a partial `defaults` object. An explicit `use_cert_auth: false` overrides a server-level `true`.
-
-Ludus keeps each template's provisioning account, installs a range-scoped SSH key on Linux or macOS or a WinRM client certificate on Windows, and replaces the template password. Non-root Linux and macOS accounts receive passwordless sudo. Later deployments and testing-mode operations use the key or certificate, not the template password.
-
-To provision directly as `root` on Linux and macOS and `Administrator` on Windows:
-
-```yaml
-defaults:
-  use_cert_auth: true
-  cert_auth_linux_user: root
-  cert_auth_macos_user: root
-  cert_auth_windows_user: Administrator
-  cert_auth_create_accounts: true
-```
-
-`cert_auth_linux_user` selects the Linux SSH provisioning account, including the Linux router. `cert_auth_macos_user` selects the macOS SSH account, and `cert_auth_windows_user` selects the Windows account. These settings are independent: macOS never falls back to `cert_auth_linux_user`. Omit an OS's username to retain its template account (`localuser` on macOS). Windows usernames must be unqualified local account names, not domain accounts.
-
-`cert_auth_create_accounts` defaults to `false`. Without it, a selected custom account must already exist and be enabled. With it, Ludus can create a missing account or enable a disabled one, including `Administrator`. Selected accounts receive administrative provisioning privileges.
-
-When a custom account replaces the template account, Ludus verifies a fresh key/certificate login before removing the old account and its home/profile. Windows may reboot to end old sessions before deleting a loaded profile. UID-zero Linux and macOS accounts and the Windows RID-500 administrator are never deleted; their template passwords are retired instead.
-
-:::caution
-
-Template passwords will no longer work for SSH, WinRM, console login, or RDP. Windows template autologon is disabled, and template-account RDP files are no longer generated. Clearing `use_cert_auth` does **not** restore deleted accounts or passwords.
-
-Preserve `/opt/ludus/ranges/<rangeID>/machine-credentials` and its sibling `.machine-credentials-initialized` marker in your server backups. Ludus does not silently regenerate missing, corrupt, or expired credentials for provisioned VMs.
-
-:::
-
-### Downloading a range's keys and certificates
-
-An authorized range user can download the existing credentials through the API:
-
-```bash
-umask 077
-curl --fail --cacert /path/to/ludus-server-ca.pem \
-  -H "X-API-KEY: $LUDUS_API_KEY" \
-  "$LUDUS_URL/api/v2/range/machine-credentials?rangeID=MYRANGE" \
-  -o machine-credentials.zip
-```
-
-Use your server's trusted CA, or omit `--cacert` if its certificate is already trusted by your system. URL-encode the range ID when necessary. The archive contains the SSH private/public key and the WinRM client certificate, client private key, and CA certificate. It does not create or rotate credentials. Treat the archive as administrative access to that range.
-
-### Compatibility
-
-This mode supports Linux and macOS over SSH, and Windows with the PowerShell LocalAccounts module (Windows 10 / Windows Server 2016 and newer). macOS templates must have Remote Login enabled and Python 3 available. Windows domain-controller provisioning remains unsupported: WinRM certificate mappings require a local SAM account.
-
-On macOS, credential retirement refuses to change a SecureToken account while FileVault is enabled, and stops if FileVault is still encrypting/decrypting or its state cannot be determined. Use a fully decrypted disposable template or provisioning accounts that are not needed for disk unlock; preserve a separately verified unlock/recovery method. Automatic retirement of a replaced macOS template account also requires its standard `/Users/<username>` home directory.
-
-Request Windows sysprep before the first certificate-auth deployment. Adding sysprep to an already certificate-provisioned VM requires recreating that VM because generalization changes its local identity and protected mapping secret.
-
-
 
 # Third-party Data
 

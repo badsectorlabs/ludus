@@ -12,6 +12,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -101,6 +102,58 @@ func ansibleConfigExtraVars(installPath, rangeConfigPath string) ([]string, map[
 	return append(configs, string(defaults)), mergedDefaults, nil
 }
 
+// Only ranges with managed Windows hosts need the newer controller runtime.
+// Leave Linux-only and password-mode ranges on the Python-2-compatible Ansible.
+func rangeAnsibleBinary(installPath, rangeConfigPath string, useCertAuth bool) (string, error) {
+	if binary, ok := os.LookupEnv("LUDUS_ANSIBLE_BINARY"); ok {
+		return binary, nil
+	}
+	if !useCertAuth || rangeConfigPath == "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(rangeConfigPath)
+	if err != nil {
+		return "", fmt.Errorf("reading range config for Ansible runtime selection: %w", err)
+	}
+	var config struct {
+		Ludus []struct {
+			Windows   json.RawMessage `json:"windows"`
+			Unmanaged bool            `json:"unmanaged"`
+		} `json:"ludus"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return "", fmt.Errorf("parsing range config for Ansible runtime selection: %w", err)
+	}
+	for _, vm := range config.Ludus {
+		// The documented mapping (including an empty windows: key) and the
+		// legacy true boolean both identify Windows. Explicit false does not.
+		if vm.Unmanaged || len(vm.Windows) == 0 || string(vm.Windows) == "false" {
+			continue
+		}
+		binary := filepath.Join(installPath, "runtimes", "ansible-windows-ssh", "bin", "ansible-playbook")
+		info, err := os.Stat(binary)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+			return "", fmt.Errorf("Windows SSH Ansible runtime unavailable at %s; run the current ludus-server installer or --update to provision it", binary)
+		}
+		return binary, nil
+	}
+	return "", nil
+}
+
+func setRangeAnsibleBinary(command *playbook.AnsiblePlaybookCmd, binary string) {
+	command.Binary = binary
+	if binary == "" {
+		return
+	}
+	// Child ansible-inventory/ansible-galaxy commands must use the same
+	// installation and its bundled collections as the selected playbook.
+	if resolved, err := exec.LookPath(binary); err == nil {
+		if absolute, err := filepath.Abs(resolved); err == nil {
+			command.Exec.(*execute.DefaultExecute).EnvVars["PATH"] = filepath.Dir(absolute) + string(os.PathListSeparator) + os.Getenv("PATH")
+		}
+	}
+}
+
 // Runs an ansible playbook with an arbitrary amount of extraVars
 // Returns a tuple of the playbook output and an error
 func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookPathArray []string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
@@ -187,6 +240,11 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		if err != nil {
 			return "", fmt.Errorf("certificate authentication material unavailable for range %s: %w", usersRange.RangeId(), err)
 		}
+	}
+
+	ansibleBinary, err := rangeAnsibleBinary(ludusInstallPath, rangeConfigPath, useCertAuth)
+	if err != nil {
+		return "", err
 	}
 
 	// Check if the user specified a limit, and if so, make sure it has 'localhost' in it
@@ -287,10 +345,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		StdoutCallback:    "default",
 	}
 
-	// Set the ansible binary from the environment if it exists
-	if ansibleBinary, ok := os.LookupEnv("LUDUS_ANSIBLE_BINARY"); ok {
-		playbook.Binary = ansibleBinary
-	}
+	setRangeAnsibleBinary(playbook, ansibleBinary)
 
 	// Check for a user-defined-roles playbook (included in ludus) and create a placeholder if it doesn't exist
 	userDefinedRolePath := fmt.Sprintf("%s/ranges/%s/user-defined-roles.yml", ludusInstallPath, usersRange.RangeId())
@@ -626,7 +681,12 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 	if err != nil {
 		return "", err
 	}
-	if _, err := certAuthEnabled(defaults, server.Entitlements); err != nil {
+	useCertAuth, err := certAuthEnabled(defaults, server.Entitlements)
+	if err != nil {
+		return "", err
+	}
+	ansibleBinary, err := rangeAnsibleBinary(ludusInstallPath, rangeConfigPath, useCertAuth)
+	if err != nil {
 		return "", err
 	}
 	inventory := "127.0.0.1"
@@ -641,6 +701,8 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 		// Set the ansible home to the user's ansible directory
 		execute.WithEnvVar("ANSIBLE_HOME", fmt.Sprintf("%s/users/%s/.ansible", ludusInstallPath, user.ProxmoxUsername())),
 		execute.WithEnvVar("ANSIBLE_SSH_CONTROL_PATH_DIR", fmt.Sprintf("%s/users/%s/.ansible/cp", ludusInstallPath, user.ProxmoxUsername())),
+		execute.WithEnvVar("ANSIBLE_ROLES_PATH", ansibleRolesSearchPath(user.ProxmoxUsername())),
+		execute.WithEnvVar("ANSIBLE_COLLECTIONS_PATH", ansibleCollectionsSearchPath(user.ProxmoxUsername())),
 	)
 
 	// Loop over the environment and add any that start with LUDUS_SECRET_ to the execute object
@@ -670,10 +732,7 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 		StdoutCallback:    "default",
 	}
 
-	// Set the ansible binary from the environment if it exists
-	if ansibleBinary, ok := os.LookupEnv("LUDUS_ANSIBLE_BINARY"); ok {
-		playbook.Binary = ansibleBinary
-	}
+	setRangeAnsibleBinary(playbook, ansibleBinary)
 
 	err = playbook.Run(context.TODO())
 	if err != nil {

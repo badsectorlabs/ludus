@@ -138,7 +138,7 @@
 - name: Wait for the host's network interface to come back up (Windows)
   ansible.builtin.wait_for:
     host: "{{ static_ip }}"
-    port: 5986
+    port: "{{ ansible_port | default(5986) }}"
     delay: 3
     state: started
   delegate_to: localhost
@@ -201,10 +201,10 @@
     - current_hostname.stdout | trim != vm_hostname
     - res.reboot_required
 
-- name: Wait for the host's control interface (WinRM via HTTPS) to come up
+- name: Wait for the host's provisioning connection to become available
   ansible.builtin.wait_for:
     host: "{{ static_ip }}"
-    port: 5986
+    port: "{{ ansible_port | default(5986) }}"
     delay: 3
     state: started
   delegate_to: localhost
