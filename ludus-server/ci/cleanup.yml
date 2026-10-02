@@ -1,13 +1,16 @@
 - name: Power off and remove the CI VM
   hosts: localhost
+  module_defaults:
+    group/community.proxmox.proxmox:
+      validate_certs: false
   tasks:
     - name: Check inventory
       ansible.builtin.fail:
         msg: The CI/CD runner VM {{runner_vm_name}} does not exist.
-      when: "'{{runner_vm_name}}' not in hostvars"
+      when: runner_vm_name not in hostvars
 
     - name: Power off runner VM
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -21,7 +24,7 @@
         seconds: 5
 
     - name: Remove runner VM
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"

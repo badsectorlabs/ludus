@@ -3,14 +3,13 @@
 # proxmox_url, proxmox_api_host, proxmox_api_port, proxmox_token_id (full form:
 # user@realm!name), proxmox_token_secret, and proxmox_node are all injected as
 # extra-vars and therefore have highest precedence. The split forms below are
-# what community.general.proxmox_* modules expect.
+# what community.proxmox modules expect.
 api_host: "{{ proxmox_api_host }}"
 api_port: "{{ proxmox_api_port | default(8006) }}"
 api_user: "{{ proxmox_token_id.split('!')[0] }}"
 api_token_id: "{{ proxmox_token_id.split('!')[1] }}"
 api_token_secret: "{{ proxmox_token_secret }}"
 node_name: "{{ proxmox_node }}"
-proxmox_default_behavior: compatibility
 ansible_remote_tmp: "{{ '/opt/ludus/ansible/tmp' if (lookup('env', 'USER') != 'root') else '/tmp/.ansible/tmp' }}"
 ludus_office_chocolatey_version: "16.0.20131.20090"
 

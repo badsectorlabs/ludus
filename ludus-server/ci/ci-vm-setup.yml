@@ -29,6 +29,9 @@
 - name: Clone CI seed and runtime VMs from template
   hosts: localhost
   gather_facts: false
+  module_defaults:
+    group/community.proxmox.proxmox:
+      validate_certs: false
   vars:
     ci_template_name: debian-13-x64-server-ludus-ci-template
     ci_bridge: ludusci
@@ -81,7 +84,7 @@
       failed_when: false
 
     - name: Clone missing VMs from CI template
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -102,7 +105,7 @@
         label: "{{ item.vmid }} ({{ item.name }})"
 
     - name: Configure VM resources
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -140,7 +143,7 @@
         label: "{{ item.vmid }} ({{ item.name }})"
 
     - name: Set VM network to CI bridge
-      community.general.proxmox_nic:
+      community.proxmox.proxmox_nic:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -198,7 +201,7 @@
       tags: ci-cluster
 
     - name: Start all VMs
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"

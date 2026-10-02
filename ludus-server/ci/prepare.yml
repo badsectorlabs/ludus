@@ -1,5 +1,8 @@
 - name: Create the VM for this CI run and power it on waiting for SSH to be available
   hosts: localhost
+  module_defaults:
+    group/community.proxmox.proxmox:
+      validate_certs: false
   tasks:
     - name: Only run if needed
       when: "runner_vm_name in hostvars or (skip_build is defined and skip_build == 'true')"
@@ -11,7 +14,7 @@
           meta: end_play
 
     - name: Create CI VM from a Debian 13 template
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -30,7 +33,7 @@
       until: vm_id != -1
 
     - name: Start the VM
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -46,7 +49,7 @@
     - name: Wait for VM to be running, and try to start it if not running after 20 seconds
       block:
         - name: Check VM running status
-          community.general.proxmox_kvm:
+          community.proxmox.proxmox_kvm:
             api_user: "{{ api_user }}"
             api_password: "{{ api_password }}"
             api_host: "{{ api_host }}"
@@ -59,7 +62,7 @@
           delay: 5
       rescue:
         - name: Start the VM
-          community.general.proxmox_kvm:
+          community.proxmox.proxmox_kvm:
             api_user: "{{ api_user }}"
             api_password: "{{ api_password }}"
             api_host: "{{ api_host }}"
@@ -71,7 +74,7 @@
       command: ansible-inventory -i {{ ludus_install_path }}/ansible/range-management/dynamic-inventory --host {{ runner_vm_name }}
       register: nodecheck
       changed_when: false
-      until: (nodecheck.stdout | default('') | from_json).ansible_host | default('') | ansible.utils.ipaddr
+      until: (nodecheck.stdout | default('') | from_json).ansible_host | default('') | ansible.utils.ipaddr != false
       retries: 30
       delay: 5
       when: clone_vm is changed

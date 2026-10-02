@@ -187,7 +187,7 @@
   when: defaults.timezone is defined and windows_tz == "NOT FOUND"
 
 - name: Set the timezone (Windows)
-  community.windows.win_timezone:
+  ansible.windows.win_timezone:
     timezone: "{{ windows_tz }}"
   when: defaults.timezone is defined
 

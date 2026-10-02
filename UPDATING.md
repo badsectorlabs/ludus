@@ -81,13 +81,59 @@ env LANG=C.UTF-8 LC_ALL=C.UTF-8 \
 ```
 
 Use a new server binary outside `/opt/ludus`; wait for any running deployment or
-template build to finish first. `--no-dep-update` skips the plugin refresh.
-Local role uploads now create a new user's Ansible temporary directory on first
+template build to finish first. `--no-dep-update` skips **all** controller Python,
+collection, role, and Packer dependency updates, not just the plugin refresh.
+Do not use it to move an older dependency set to this release.
+Local role uploads create a new user's Ansible temporary directory on first
 use, rather than requiring a prior Ansible run.
 
 Match the VM disk format to the selected storage backend. In particular,
 `--vm-storage local-lvm` requires `--vm-storage-format raw`; the default `qcow2`
 format is not supported by LVM-thin storage.
+
+## Ansible 2.21.4
+
+The appliance and online updater use **ansible-core 2.21.4**, not the `ansible`
+community-package version. Python dependencies come from
+`ludus-server/lxc/python-requirements.txt`; collection and role pins come from
+`ludus-server/ansible/requirements.yml`. The managed controller environment is
+`/opt/ludus/venv`, using Debian 13's Python 3.13. Core 2.21 requires Python
+3.12–3.14 on the controller and 3.9–3.14 on managed Linux nodes; see the
+[upstream support matrix](https://docs.ansible.com/projects/ansible/latest/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix).
+
+Online updates install the exact Python requirements, check the environment,
+then stage and validate the pinned collections and roles before replacing their
+global copies. Copies of those same shipped identities under users' `.ansible`
+directories are removed so they cannot shadow the release pins. Unrelated
+user-installed roles and collections are retained. Back up any local changes to
+shipped dependencies before updating. Dependency failures after replacement has
+started leave the API services stopped: correct the reported error and rerun the
+update, or restore the LXC backup. Do not treat a binary-only rollback as a
+dependency rollback.
+
+Proxmox tasks use `community.proxmox` 2.0.0 with `proxmoxer` 2.3.0. VM deployment
+resolves existing destination names before cloning: the new module's clone mode
+does not preserve name-based idempotence by itself. Repeated deployments reuse
+the existing VMID instead of creating duplicate VMs.
+Windows timezone tasks use `ansible.windows.win_timezone`. Galaxy collections
+are installed unmodified. Ludus's `json_query` calls use field lookups and string
+filtering, which work with the pinned provider. For numeric operations on Ansible
+values, use built-in filters such as `sum`, `sort`, and `map(attribute=...)`;
+numeric `json_query` functions can reject Ansible-tagged integers and floats.
+`geerlingguy.packer` 1.0.2 and `ansible-thoteam.nexus3-oss` v2.5.2 remain pinned
+because they are still their latest releases.
+
+Fresh offline appliances contain the controller wheels, collections, and roles.
+This does **not** add offline update support: existing-LXC offline updates remain
+unsupported.
+
+The controller upgrade does not repair old VM images or existing guests.
+Debian 10, Ubuntu 20.04, and Rocky 8 need a supported guest interpreter **and**
+their package-manager bindings. Update the first-party source and rebuild those
+templates, or bootstrap retained guests over SSH before Ansible gathers facts.
+Installing the distro's old `python3-apt` or `python3-dnf` package does not make
+its bindings usable by a private Python 3.11. See the
+[first-party template runtime guidance](https://github.com/badsectorlabs/ludus-source-bsl/blob/main/templates/README.md).
 
 # Upgrading from Ludus < 2.0.0
 For these older installations, complete the following database upgrade using a

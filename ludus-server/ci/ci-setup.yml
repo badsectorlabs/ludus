@@ -1,5 +1,8 @@
 - name: Create the gitlab-runner user and deploy a Debian 13 VM
   hosts: localhost
+  module_defaults:
+    group/community.proxmox.proxmox:
+      validate_certs: false
   vars:
     ci_vm_disk_size: "250G"
   tasks:
@@ -106,7 +109,7 @@
       when: dnsmasq_written is changed
 
     - name: Create CI VM from a Debian 13 template
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -144,7 +147,7 @@
       when: clone_vm is changed and clone_vm.vmid != -1
 
     - name: Update the VM description by vmid
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -157,7 +160,7 @@
       register: update_desc
 
     - name: Update the VM's options
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -172,7 +175,7 @@
       when: clone_vm is changed and clone_vm.vmid != -1
 
     - name: Update the VM network interfaces
-      community.general.proxmox_nic:
+      community.proxmox.proxmox_nic:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -182,7 +185,7 @@
       when: clone_vm is changed and clone_vm.vmid != -1
 
     - name: Start the VM
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -198,7 +201,7 @@
     - name: Wait for VM to be running, and try to start it if not running after 20 seconds
       block:
         - name: Check VM running status
-          community.general.proxmox_kvm:
+          community.proxmox.proxmox_kvm:
             api_user: "{{ api_user }}"
             api_password: "{{ api_password }}"
             api_host: "{{ api_host }}"
@@ -211,7 +214,7 @@
           delay: 5
       rescue:
         - name: Start the VM
-          community.general.proxmox_kvm:
+          community.proxmox.proxmox_kvm:
             api_user: "{{ api_user }}"
             api_password: "{{ api_password }}"
             api_host: "{{ api_host }}"
@@ -466,6 +469,9 @@
       
 - name: Add gitlab-runner to proxmox and convert the VM to a template
   hosts: localhost
+  module_defaults:
+    group/community.proxmox.proxmox:
+      validate_certs: false
   tasks:
     - name: Load gitlab-runner Proxmox password
       ansible.builtin.set_fact:
@@ -499,7 +505,7 @@
         - { path: "/sdn/zones/localnetwork/ludusci", principal_type: "-user", principal: "gitlab-runner@pam", role: "PVESDNUser" }
 
     - name: Change name
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -510,7 +516,7 @@
         update: true
 
     - name: Power off template VM
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"
@@ -524,7 +530,7 @@
         seconds: 5
 
     - name: Convert to template
-      community.general.proxmox_kvm:
+      community.proxmox.proxmox_kvm:
         api_user: "{{ api_user }}"
         api_password: "{{ api_password }}"
         api_host: "{{ api_host }}"

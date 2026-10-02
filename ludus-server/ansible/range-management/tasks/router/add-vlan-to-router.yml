@@ -90,11 +90,13 @@
   when: interface_name is undefined or vlan_mac_command.stdout | length == 0
 
 - name: Add network interface to router
-  community.general.proxmox_nic:
+  community.proxmox.proxmox_nic:
     api_user: "{{ api_user }}"
     api_token_id: "{{ api_token_id }}"
     api_token_secret: "{{ proxmox_token_secret }}"
     api_host: "{{ api_host }}"
+    api_port: "{{ api_port | default(8006) }}"
+    validate_certs: false
     vmid: "{{ router_vm_id }}"
     interface: "net{{ router_net_interface }}"
     bridge: "{{ range_bridge_name }}"

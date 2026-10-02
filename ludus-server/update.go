@@ -35,11 +35,14 @@ Refusing to continue as the install process removes this binary.
 Move the updated binary to a different location and run it with --update to complete the update.`)
 	}
 
+	loadConfig()
+	if config.AirgappedInstall && !noAnsibleUpdate {
+		log.Fatal("Dependency updates require internet access; existing air-gapped LXC updates are not supported.")
+	}
+
 	// Stop ludus and ludus-admin
 	Run("systemctl stop ludus", false, true)
 	Run("systemctl stop ludus-admin", false, true)
-
-	loadConfig()
 
 	// Backup, and extract files from this binary
 	checkDirAndReplaceFiles()
@@ -57,11 +60,6 @@ Move the updated binary to a different location and run it with --update to comp
 	os.Chmod(ludusServerBinaryPath, 0711)
 
 	ensurePocketBaseStoragePermissions()
-
-	// Start ludus and ludus-admin
-	Run("systemctl start ludus", false, true)
-	time.Sleep(2 * time.Second) // Wait for ludus to start
-	Run("systemctl start ludus-admin", false, true)
 
 	if !noAnsibleUpdate {
 		err := migratePermissions() // Required for direct PVE downloads via packer
@@ -81,6 +79,12 @@ Move the updated binary to a different location and run it with --update to comp
 			log.Fatal(err)
 		}
 	}
+
+	// Do not accept jobs while the controller or its shipped content is changing.
+	// A failed dependency installation leaves services stopped and returns failure.
+	Run("systemctl start ludus", false, true)
+	time.Sleep(2 * time.Second) // Wait for ludus to start
+	Run("systemctl start ludus-admin", false, true)
 
 	fmt.Printf("Ludus updated to %s\n", LudusVersion)
 }

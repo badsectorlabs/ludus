@@ -1,5 +1,5 @@
-ansible-core==2.19.4
-proxmoxer==2.0.1
+ansible-core==2.21.4
+proxmoxer==2.3.0
 requests==2.32.3
 netaddr==1.2.1
 pywinrm==0.4.3

@@ -249,7 +249,7 @@ run_ci_template_setup() {
             gitlab_runner_concurrent: $gitlab_runner_concurrent
         }' > "$extra_vars_file"
 
-    ansible-galaxy collection install community.general ansible.utils ansible.posix >/dev/null
+    ansible-galaxy collection install -r "$LUDUS_DIR/ansible/requirements.yml" --force >/dev/null
 
     set +e
     ansible-playbook -i "$LUDUS_DIR/ansible/range-management/dynamic-inventory" \
@@ -310,8 +310,8 @@ run_seed_setup() {
             ci_template_parallel: $ci_template_parallel
         }' > "$extra_vars_file"
 
-    ansible-galaxy role install lae.proxmox >/dev/null
-    ansible-galaxy collection install community.general ansible.utils ansible.posix >/dev/null
+    ansible-galaxy role install -r "$LUDUS_DIR/ansible/requirements.yml" --force >/dev/null
+    ansible-galaxy collection install -r "$LUDUS_DIR/ansible/requirements.yml" --force >/dev/null
 
     set +e
     ANSIBLE_ALLOW_BROKEN_CONDITIONALS="${ANSIBLE_ALLOW_BROKEN_CONDITIONALS:-true}" \

@@ -85,8 +85,13 @@ if [[ ! -f deps/bginfo.exe ]]; then
 fi
 printf '%s  %s\n' "${BGINFO_SHA256}" "deps/bginfo.exe" | sha256sum --check --status
 
+# The appliance runs Debian 13's CPython 3.13 on amd64, regardless of the
+# builder's interpreter. Never package wheels selected for the build host.
+rm -rf deps/python-wheels
 mkdir -p deps/python-wheels
-python3 -m pip download --only-binary=:all: --dest deps/python-wheels -r python-requirements.txt
+python3 -m pip download --only-binary=:all: --python-version 3.13 --implementation cp \
+  --abi cp313 --platform manylinux2014_x86_64 --platform manylinux_2_28_x86_64 \
+  --dest deps/python-wheels -r python-requirements.txt
 
 rm -rf deps/collections deps/roles
 mkdir -p deps/collections deps/roles

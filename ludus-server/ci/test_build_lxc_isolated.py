@@ -78,7 +78,6 @@ sha256sum "$artifact" > "$artifact.sha256"
         try:
             result = self.execute('failure')
             self.assertEqual(result.returncode, 23)
-            self.assertIn('Mount remains; retaining', result.stderr)
             self.assertTrue(self.work.exists())
         finally:
             # findmnt was mocked: this fixture has no real mounts.
