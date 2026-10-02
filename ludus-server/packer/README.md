@@ -8,6 +8,8 @@ Ludus template builds export `ANSIBLE_ROLES_PATH` and `ANSIBLE_COLLECTIONS_PATH`
 
 Template builds also load Ludus's `packer/ansible/vars_plugins/ludus_winrm_shell.py` through `ANSIBLE_VARS_PLUGINS`. It changes Packer's legacy inventory setting `ansible_shell_type=powershell` to `cmd` for WinRM connections, including the `ansible.builtin.winrm` and `ansible.legacy.winrm` names. WinRM starts commands through `cmd.exe`; Windows modules still run PowerShell. This applies to existing HCL and JSON templates without modifying them. SSH and PSRP connections are unchanged, and this plugin is not enabled for range deployments.
 
+The shell override is a literal inventory value, not a Jinja template. The plugin deliberately avoids newer template-trust APIs so it can also load under older ansible-core versions used for CI inventory checks.
+
 The vars-plugin path retains the user's and system's standard plugin directories and any inherited custom paths. Templates that replace `ANSIBLE_VARS_PLUGINS` must retain the inherited Ludus path to keep this correction. Normal Ansible variable precedence still applies: play/task variables and `--extra-vars` can override the corrected inventory value. An explicit shell override for WinRM must use `cmd` with ansible-core 2.21.
 
 ```

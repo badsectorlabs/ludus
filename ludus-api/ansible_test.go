@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/apenella/go-ansible/pkg/playbook"
+	yaml "sigs.k8s.io/yaml"
 )
 
 func TestAnsibleConfigDefaults(t *testing.T) {
@@ -257,7 +258,8 @@ ansible_shell_type=powershell
 		t.Run(stage, func(t *testing.T) {
 			t.Setenv("ANSIBLE_RUN_VARS_PLUGINS", stage)
 			for _, override := range []bool{false, true} {
-				args := []string{"-i", inventory, "--list"}
+				// YAML preserves scalar values without version-specific JSON trust tags.
+				args := []string{"-i", inventory, "--list", "--yaml"}
 				if override {
 					args = append(args, "--extra-vars", "ansible_shell_type=powershell")
 				}
@@ -269,22 +271,31 @@ ansible_shell_type=powershell
 					t.Fatal(err)
 				}
 				var got struct {
-					Meta struct {
-						Hostvars map[string]map[string]interface{} `json:"hostvars"`
-					} `json:"_meta"`
+					All struct {
+						Children map[string]struct {
+							Hosts map[string]struct {
+								Shell string `json:"ansible_shell_type"`
+							} `json:"hosts"`
+						} `json:"children"`
+					} `json:"all"`
 				}
-				if err := json.Unmarshal(output, &got); err != nil {
+				if err := yaml.Unmarshal(output, &got); err != nil {
 					t.Fatalf("decoding Ansible inventory: %v\n%s", err, output)
+				}
+				shells := make(map[string]string, len(expected))
+				for _, group := range got.All.Children {
+					for host, variables := range group.Hosts {
+						shells[host] = variables.Shell
+					}
 				}
 				for host, want := range expected {
 					if override {
 						want = "powershell"
 					}
-					variables, ok := got.Meta.Hostvars[host]
+					shell, ok := shells[host]
 					if !ok {
 						t.Fatalf("missing inventory host %q", host)
 					}
-					shell, _ := variables["ansible_shell_type"].(string)
 					if shell != want {
 						t.Errorf("%s shell (explicit override=%v) = %q, want %q", host, override, shell, want)
 					}

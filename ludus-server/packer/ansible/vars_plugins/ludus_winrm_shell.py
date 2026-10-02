@@ -3,7 +3,6 @@
 from ansible.inventory.helpers import get_group_vars
 from ansible.inventory.host import Host
 from ansible.plugins.vars import BaseVarsPlugin
-from ansible.template import trust_as_template
 
 
 class VarsModule(BaseVarsPlugin):
@@ -27,5 +26,5 @@ class VarsModule(BaseVarsPlugin):
                 and variables.get("ansible_shell_type") == "powershell"
             ):
                 # WinRS starts cmd.exe; PowerShell quoting breaks EncodedCommand.
-                return {"ansible_shell_type": trust_as_template("cmd")}
+                return {"ansible_shell_type": "cmd"}
         return {}
