@@ -333,6 +333,7 @@ func buildVMFromTemplateWithPacker(user *models.User, packerFile string, templat
 		`PACKER_CACHE_DIR={{.UsersPackerDir}}/packer_cache ` +
 		`ANSIBLE_ROLES_PATH='{{.AnsibleRolesPath}}' ` +
 		`ANSIBLE_COLLECTIONS_PATH='{{.AnsibleCollectionsPath}}' ` +
+		`ANSIBLE_VARS_PLUGINS='{{.LudusInstallPath}}/packer/ansible/vars_plugins':'{{.UsersAnsibleDir}}/plugins/vars':/usr/share/ansible/plugins/vars${ANSIBLE_VARS_PLUGINS:+:"$ANSIBLE_VARS_PLUGINS"} ` +
 		`PKR_VAR_proxmox_password="" ` +
 		`PKR_VAR_proxmox_username='{{ .ProxmoxTokenID }}' ` +
 		`PKR_VAR_airgapped_install={{ .AirgappedInstall }} ` +

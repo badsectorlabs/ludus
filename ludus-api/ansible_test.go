@@ -193,3 +193,103 @@ func TestGalaxyCollectionInstallScope(t *testing.T) {
 		})
 	}
 }
+
+func TestPackerWinRMShellCompatibility(t *testing.T) {
+	ansible, err := exec.LookPath("ansible-inventory")
+	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("CI requires ansible-inventory for Packer WinRM compatibility coverage")
+		}
+		t.Skip("requires ansible-inventory")
+	}
+	plugins, err := filepath.Abs("../ludus-server/packer/ansible/vars_plugins")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	t.Setenv("ANSIBLE_HOME", filepath.Join(root, "home"))
+	t.Setenv("ANSIBLE_LOCAL_TEMP", filepath.Join(root, "tmp"))
+	t.Setenv("ANSIBLE_VARS_PLUGINS", plugins)
+	t.Setenv("ANSIBLE_VARS_ENABLED", "host_group_vars")
+	t.Setenv("ANSIBLE_NOCOLOR", "true")
+	t.Setenv("PYTHONDONTWRITEBYTECODE", "1")
+	config := filepath.Join(root, "ansible.cfg")
+	if err := os.WriteFile(config, []byte("[defaults]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ANSIBLE_CONFIG", config)
+	inventory := filepath.Join(root, "inventory.ini")
+	// Packer generates these connection and shell variables directly on hosts.
+	// Include grouped inventory and mixed transports to catch cross-host leakage.
+	if err := os.WriteFile(inventory, []byte(`[all]
+winrm ansible_connection=winrm ansible_shell_type=powershell
+winrm_builtin ansible_connection=ansible.builtin.winrm ansible_shell_type=powershell
+winrm_legacy ansible_connection=ansible.legacy.winrm ansible_shell_type=powershell
+winrm_cmd ansible_connection=winrm ansible_shell_type=cmd
+winrm_default ansible_connection=winrm
+windows_ssh ansible_connection=ssh ansible_shell_type=powershell
+linux_ssh ansible_connection=ssh ansible_shell_type=sh
+psrp ansible_connection=psrp ansible_shell_type=powershell
+
+[windows]
+inherited
+ssh_override ansible_connection=ssh ansible_shell_type=powershell
+
+[windows:vars]
+ansible_connection=winrm
+ansible_shell_type=powershell
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	expected := map[string]string{
+		"winrm":         "cmd",
+		"winrm_builtin": "cmd",
+		"winrm_legacy":  "cmd",
+		"winrm_cmd":     "cmd",
+		"winrm_default": "",
+		"windows_ssh":   "powershell",
+		"linux_ssh":     "sh",
+		"psrp":          "powershell",
+		"inherited":     "cmd",
+		"ssh_override":  "powershell",
+	}
+	for _, stage := range []string{"start", "demand"} {
+		t.Run(stage, func(t *testing.T) {
+			t.Setenv("ANSIBLE_RUN_VARS_PLUGINS", stage)
+			for _, override := range []bool{false, true} {
+				args := []string{"-i", inventory, "--list"}
+				if override {
+					args = append(args, "--extra-vars", "ansible_shell_type=powershell")
+				}
+				output, err := exec.Command(ansible, args...).Output()
+				if err != nil {
+					if exit, ok := err.(*exec.ExitError); ok {
+						t.Fatalf("ansible-inventory: %v\n%s", err, exit.Stderr)
+					}
+					t.Fatal(err)
+				}
+				var got struct {
+					Meta struct {
+						Hostvars map[string]map[string]interface{} `json:"hostvars"`
+					} `json:"_meta"`
+				}
+				if err := json.Unmarshal(output, &got); err != nil {
+					t.Fatalf("decoding Ansible inventory: %v\n%s", err, output)
+				}
+				for host, want := range expected {
+					if override {
+						want = "powershell"
+					}
+					variables, ok := got.Meta.Hostvars[host]
+					if !ok {
+						t.Fatalf("missing inventory host %q", host)
+					}
+					shell, _ := variables["ansible_shell_type"].(string)
+					if shell != want {
+						t.Errorf("%s shell (explicit override=%v) = %q, want %q", host, override, shell, want)
+					}
+				}
+			}
+		})
+	}
+}

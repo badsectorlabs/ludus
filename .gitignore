@@ -1,5 +1,5 @@
-./ludus-source-bsl/
-./plugins/
+ludus-source-bsl/
+plugins/
 offline-*
 TEST-PLAN.md
 .gograph

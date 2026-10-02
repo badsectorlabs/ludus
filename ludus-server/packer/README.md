@@ -6,6 +6,10 @@ You also need to set `skip_version_check = true` since the env variables are not
 
 Ludus template builds export `ANSIBLE_ROLES_PATH` and `ANSIBLE_COLLECTIONS_PATH` for Packer's Ansible provisioners. Each path searches the initiating user's installed roles or collections first, then the instance-wide global directory, matching range deployments. Templates do not need to add these variables to `ansible_env_vars`; setting them explicitly overrides the inherited paths.
 
+Template builds also load Ludus's `packer/ansible/vars_plugins/ludus_winrm_shell.py` through `ANSIBLE_VARS_PLUGINS`. It changes Packer's legacy inventory setting `ansible_shell_type=powershell` to `cmd` for WinRM connections, including the `ansible.builtin.winrm` and `ansible.legacy.winrm` names. WinRM starts commands through `cmd.exe`; Windows modules still run PowerShell. This applies to existing HCL and JSON templates without modifying them. SSH and PSRP connections are unchanged, and this plugin is not enabled for range deployments.
+
+The vars-plugin path retains the user's and system's standard plugin directories and any inherited custom paths. Templates that replace `ANSIBLE_VARS_PLUGINS` must retain the inherited Ludus path to keep this correction. Normal Ansible variable precedence still applies: play/task variables and `--extra-vars` can override the corrected inventory value. An explicit shell override for WinRM must use `cmd` with ansible-core 2.21.
+
 ```
 variable "ansible_home" {
   type =  string
