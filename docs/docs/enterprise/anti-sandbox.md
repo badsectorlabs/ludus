@@ -30,10 +30,11 @@ The Ludus Anti-Sandbox plugin uses custom compiled QEMU and OVMF packages that h
   * Can configure custom registered organization and owner information
 
 * Removes virtualization artifacts:
-  * Uninstalls VirtIO Serial Driver
+  * Uninstalls the VirtIO Serial Driver using its actual INF package, without assuming an OEM driver number
   * Removes QEMU Guest Agent and related services
   * Deletes RedHat registry keys
   * Removes virtualization-related folders (C:\ludus, C:\Tools, C:\QEMU-ga)
+  * Removes disconnected virtual devices through Windows PnP; preserves active PCI/SCSI devices and the VM Generation ID needed for safe domain-controller operation
 
 * Configures a more realistic desktop environment:
   * Restores default Windows wallpaper
@@ -85,6 +86,9 @@ ludus templates build -n win11-22h2-x64-enterprise-antisandbox-template
 
 You can now use the `win11-22h2-x64-enterprise-antisandbox` template in ranges.
 You should also set `force_ip: true` in the range config to ensure the VMs maintain their IP addresses for ansible after the QEMU guest agent is removed.
+The inventory also uses the range config's `windows` settings when guest-agent
+OS information is unavailable. This preserves the WinRM connection group even
+when the agent answers network queries before its OS queries after a reboot.
 
 ```yaml
 ludus:
@@ -109,6 +113,46 @@ The custom QEMU and OVMF packages apply to the entire Ludus host.
 
 :::
 
+### LXC node access
+
+The RPC plugin runs inside the Ludus LXC. Proxmox API requests still use the
+configured token, but `qm`, package inspection, and QEMU/OVMF installation must
+execute on the Proxmox node. Configure a dedicated root SSH key, an explicitly
+pinned host key, and a node-to-address map for `ludus-admin` inside the LXC:
+
+```ini
+# /etc/systemd/system/ludus-admin.service.d/antisandbox-ssh.conf
+[Service]
+Environment="LUDUS_ANTISANDBOX_SSH_KEY_FILE=/etc/ludus/antisandbox/node_ed25519"
+Environment="LUDUS_ANTISANDBOX_SSH_KNOWN_HOSTS_FILE=/etc/ludus/antisandbox/known_hosts"
+Environment='LUDUS_ANTISANDBOX_SSH_HOSTS={"pve1":"192.0.2.254"}'
+```
+
+Replace `pve1` and its address with the actual Proxmox node name and a reachable
+address. Map every node that can host the target VMs. Addresses can include an
+SSH port. Provision the private key as root-only inside the LXC and authorize
+its public key on the selected nodes. Pin host keys obtained through a trusted
+channel; the plugin requires strict host-key checking. Restrict the authorized
+key to the LXC's source address and disable forwarding and PTY allocation.
+This access permits root commands on the mapped nodes; it is not a sandbox for
+untrusted plugins.
+
+After provisioning the credentials and drop-in, run inside the LXC:
+
+```shell
+systemctl daemon-reload
+systemctl restart ludus-admin
+```
+
+VM operations select the VM's actual node. Package/status API routes accept
+`?node=<Proxmox-node-name>` and otherwise use `proxmox_node` from the server
+configuration. An absent mapping or failed SSH connection is an error, not an
+indication that packages are missing. Custom packages must have a compatible
+published version; do not replace host-wide QEMU/OVMF packages during active
+builds or without a recovery plan.
+
+### Deploy and enable
+
 Once your range config is updated to use the `win11-22h2-x64-enterprise-antisandbox` template, deploy the range:
 
 ```shell-session
@@ -128,6 +172,20 @@ ludus antisandbox enable -n 179
 [INFO]  Enabling Anti-Sandbox settings for VM(s), this can take some time. Please wait.
 [INFO]  Successfully enabled anti-sandbox for VM(s): 179
 ```
+
+Before changing virtual hardware, the plugin stages a one-shot NIC migration
+and requests a clean Windows shutdown. It changes the node's VM configuration
+only after the guest has stopped, then starts the VM and waits for Proxmox to
+report it running before generating Ansible inventory. IPv4 addresses, routes,
+and DNS settings move to the replacement Intel NIC; the migration task and its
+files remove themselves after success. A failed shutdown is an error, not a
+reason to hard-stop Windows and risk losing cached disk writes.
+
+Configured domain members and controllers use `defaults.ad_domain_admin` and
+`defaults.ad_domain_admin_password` over NTLM for management. The domain must
+already be deployed. Standalone Windows VMs use the template's `localuser`
+account. Enable waits for authenticated WinRM, not just an open TCP port:
+domain controllers can open port 5986 before domain authentication is ready.
 
 You can also specify `--drop-files` to populate the autologon user's desktop and download folders with random files (PPTX, DOC, XLSX, and PDF). The `--org` and `--owner` flags can be used to specify the organization and owner of the Machine set in the registry.
 
@@ -155,6 +213,15 @@ options kvm report_ignored_msrs=0
 Use `--browser-data` to populate Microsoft Edge and Google Chrome on the VM with profile data. This adds browsing history, bookmarks, Top Sites, saved passwords, cookies, autofill entries, address profiles, and `TypedURLs` registry entries.
 
 Edge is pre-installed on Windows 11, so it will be populated by default. To also populate Chrome, add `googlechrome` to the `chocolatey_packages` list in the range config so it is installed before the range is deployed.
+
+Windows Server images may contain neither browser. Install `googlechrome` and/or
+`microsoft-edge` before requesting browser data. The plugin starts installed
+browsers with the autologon user's persistent data directory and waits for their
+native profile databases before seeding. Missing browsers or incomplete profile
+initialization fail the operation rather than silently omitting data.
+On domain controllers, use an account permitted to log on interactively, such
+as the synthetic domain administrator in an isolated lab. Profile paths are
+resolved from Windows rather than assumed to match the account name.
 
 ```shell-session
 #terminal-command-local

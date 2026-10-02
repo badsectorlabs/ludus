@@ -3581,4 +3581,4 @@ release:
       {\"name\":\"ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe\"},
       {\"name\":\"ludus-client_windows-386-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-386-${CI_COMMIT_TAG}.exe\"},
       {\"name\":\"ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe\"},
-      {\"name\":\"ludus-${CI_COMMIT_TAG}-debian13-amd64.tar.zst\", \"url\":\"https://lxc.ludus.cloud/ludus-lxc/${CI_COMMIT_TAG}/ludus-${CI_COMMIT_TAG}-debian13-amd64.tar.zst\", \"link_type\":\"package\"}]"'
+      {\"name\":\"ludus-${CI_COMMIT_TAG}-debian13-amd64.tar.zst\", \"url\":\"https://lxc.ludus.cloud/${CI_COMMIT_TAG}/ludus-${CI_COMMIT_TAG}-debian13-amd64.tar.zst\", \"link_type\":\"package\"}]"'

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -56,9 +57,17 @@ type Server struct {
 }
 
 func (s *Server) LoadPlugin(path string) error {
+	return s.loadPlugin(path, "")
+}
+
+func (s *Server) loadPlugin(path, expectedName string) error {
 	managed, err := startManagedPlugin(path, s.Logger)
 	if err != nil {
 		return err
+	}
+	if expectedName != "" && managed.metadata.Name != expectedName {
+		managed.client.Kill()
+		return fmt.Errorf("expected plugin %q, got %q", expectedName, managed.metadata.Name)
 	}
 
 	s.pluginMu.Lock()
@@ -271,8 +280,13 @@ func (s *Server) initializePlugin(plugin *managedPlugin) error {
 				if runErr != nil {
 					return fmt.Errorf("run plugin job %s: %w", jobName, runErr)
 				}
-				s.applyPluginState(result.State)
-				if jobName == "license-check" {
+				if plugin.metadata.Name == "Ludus Enterprise" && jobName == "license-check" {
+					s.applyPluginState(result.State)
+				}
+				if err := s.loadRequestedPlugins(plugin.metadata.Name, result.LoadPlugins); err != nil {
+					return err
+				}
+				if plugin.metadata.Name == "Ludus Enterprise" && jobName == "license-check" {
 					return s.refreshLicensedPlugins(ctx)
 				}
 				return nil
@@ -280,9 +294,11 @@ func (s *Server) initializePlugin(plugin *managedPlugin) error {
 		})
 	}
 
-	s.applyPluginState(response.State)
+	if plugin.metadata.Name == "Ludus Enterprise" {
+		s.applyPluginState(response.State)
+	}
 	plugin.initialized = true
-	return nil
+	return s.loadRequestedPlugins(plugin.metadata.Name, response.LoadPlugins)
 }
 
 func (s *Server) pluginState() pluginrpc.ServerState {
@@ -304,16 +320,44 @@ func (s *Server) pluginState() pluginrpc.ServerState {
 func (s *Server) applyPluginState(state pluginrpc.ServerState) {
 	s.licenseMu.Lock()
 	defer s.licenseMu.Unlock()
-	// Preserve host entitlements when a plugin reports a valid license with an
-	// empty entitlement list (offline/fallback paths often cannot re-fetch them).
-	if len(state.Entitlements) > 0 || !state.LicenseValid {
-		s.Entitlements = append(s.Entitlements[:0], state.Entitlements...)
-	}
+	// The enterprise license job retains cached grants on offline fallback.
+	// An authoritative empty list means the grants have been revoked.
+	s.Entitlements = append(s.Entitlements[:0], state.Entitlements...)
 	s.LicenseMessage = state.LicenseMessage
 	s.LicenseValid = state.LicenseValid
 	s.LicenseKey = state.LicenseKey
 	s.LicenseName = state.LicenseName
 	s.LicenseExpiry = state.LicenseExpiry
+}
+
+// Add-on loading is reserved for the root enterprise runtime. Resource plugins
+// and arbitrary paths must not turn this into a general executable loader.
+func (s *Server) loadRequestedPlugins(requester string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if requester != "Ludus Enterprise" || os.Geteuid() != 0 {
+		return errors.New("only the admin enterprise plugin can request add-on loading")
+	}
+	state := s.pluginState()
+	if !state.LicenseValid || !slices.Contains(state.Entitlements, "ANTISANDBOX_PLUGIN") {
+		return errors.New("anti-sandbox add-on requires a valid entitled license")
+	}
+	allowedPath := filepath.Join(s.LudusInstallPath, "plugins", "enterprise", "admin", "ludus-antisandbox.plugin")
+	for _, path := range paths {
+		if path != allowedPath {
+			return fmt.Errorf("enterprise requested an unsupported add-on path %q", path)
+		}
+	}
+	if _, loaded := s.loadedPluginMetadata("Ludus Enterprise Anti-Sandbox Plugin"); loaded {
+		return nil
+	}
+	for _, path := range paths {
+		if err := s.loadPlugin(path, "Ludus Enterprise Anti-Sandbox Plugin"); err != nil {
+			return fmt.Errorf("load anti-sandbox add-on: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Server) RegisterPluginRoutes(_ *core.App) {
@@ -340,6 +384,12 @@ func (s *Server) registerPluginRoutes(plugin *managedPlugin) {
 		route := declaredRoute
 		logger.Info(fmt.Sprintf("Registering route for plugin %s: %s %s", plugin.metadata.Name, route.Method, route.Pattern))
 		LudusPluginHandlerManager.RegisterHandler(route.Method, route.Pattern, func(event *core.RequestEvent) error {
+			if plugin.metadata.Name == "Ludus Enterprise Anti-Sandbox Plugin" {
+				state := s.pluginState()
+				if !state.LicenseValid || !slices.Contains(state.Entitlements, "ANTISANDBOX_PLUGIN") {
+					return JSONError(event, http.StatusForbidden, "Anti-Sandbox requires a valid entitled license")
+				}
+			}
 			// A legacy URL must not bypass a resource plugin's per-user access.
 			if plugin.metadata.ID != "" && s.PluginResources != nil {
 				record, err := s.PluginResources.app.FindFirstRecordByFilter("plugin_resources", "pluginID = {:id} && system = true", dbx.Params{"id": plugin.metadata.ID})

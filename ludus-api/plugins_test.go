@@ -6,7 +6,7 @@ import (
 	"ludusapi/pluginrpc"
 )
 
-func TestApplyPluginStatePreservesEntitlementsOnEmptyValidState(t *testing.T) {
+func TestApplyPluginStateClearsRevokedEntitlementsOnValidLicense(t *testing.T) {
 	server := &Server{
 		Entitlements: []string{"ENTERPRISE_PLUGIN", "EXAMPLE_ADDON"},
 		LicenseValid: true,
@@ -16,19 +16,16 @@ func TestApplyPluginStatePreservesEntitlementsOnEmptyValidState(t *testing.T) {
 	server.applyPluginState(pluginrpc.ServerState{
 		Entitlements:   nil,
 		LicenseValid:   true,
-		LicenseMessage: "Unable to connect to license server (used fallback)",
+		LicenseMessage: "License active without add-ons",
 		LicenseKey:     "host-key",
-		LicenseName:    "fallback",
+		LicenseName:    "base",
 	})
 
-	if !server.HasEntitlement("ENTERPRISE_PLUGIN") || !server.HasEntitlement("EXAMPLE_ADDON") {
-		t.Fatalf("expected host entitlements to be preserved, got %v", server.Entitlements)
+	if server.HasEntitlement("ENTERPRISE_PLUGIN") || server.HasEntitlement("EXAMPLE_ADDON") {
+		t.Fatalf("expected revoked entitlements to be cleared, got %v", server.Entitlements)
 	}
 	if !server.LicenseValid {
 		t.Fatal("expected license to remain valid")
-	}
-	if server.LicenseMessage != "Unable to connect to license server (used fallback)" {
-		t.Fatalf("unexpected license message: %q", server.LicenseMessage)
 	}
 }
 

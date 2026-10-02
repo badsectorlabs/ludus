@@ -126,7 +126,12 @@ func bootstrapProxmoxObjects(ctx context.Context, pc PVEClient, cfg ludusapi.Con
 	logf("bootstrap: PVE %s, %d node(s), SDN zone type=%s", v.Version, nodes, zoneType)
 
 	// Roles, groups, pools
-	for name, privs := range map[string][]string{"LudusPacker": privsPacker, "LudusUser": privsUser, "LudusAdmin": privsAdmin} {
+	for name, privs := range map[string][]string{
+		"LudusPacker": privsPacker,
+		"LudusUser":   privsUser,
+		"LudusAdmin":  privsAdmin,
+		"LudusISO":    {"Datastore.Allocate"},
+	} {
 		if err := pc.EnsureRole(ctx, name, privs); err != nil {
 			return fmt.Errorf("role %s: %w", name, err)
 		}
@@ -181,6 +186,14 @@ func bootstrapProxmoxObjects(ctx context.Context, pc PVEClient, cfg ludusapi.Con
 			path, role string
 			groups     []string
 		}{"/storage/" + storage, "LudusPacker", []string{"ludus_users", "ludus_admins"}})
+	}
+	// PVE requires Datastore.Allocate to delete temporary Packer ISOs. Keep
+	// this privilege off VM-only storage and the general-purpose Packer role.
+	if cfg.ProxmoxISOStoragePool != "" {
+		acls = append(acls, struct {
+			path, role string
+			groups     []string
+		}{"/storage/" + cfg.ProxmoxISOStoragePool, "LudusISO", []string{"ludus_users", "ludus_admins"}})
 	}
 	for _, a := range acls {
 		if err := pc.EnsureACL(ctx, a.path, a.role, a.groups, nil); err != nil {

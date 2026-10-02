@@ -542,8 +542,12 @@ func buildHostVars(ctx context.Context, client *proxmox.Client, env ludusEnv, re
 				if resolvedIP != "" {
 					hvars["ansible_host"] = resolvedIP
 				}
-				if osID := getOSInfoFromConfig(env, vmName); osID != "" {
-					hvars["proxmox_os_id"] = osID
+			}
+			// OS information can lag behind network information after a reboot.
+			// Keep the configured transport group until the agent reports its OS.
+			if osID, _ := hvars["proxmox_os_id"].(string); osID == "" {
+				if configuredOS := getOSInfoFromConfig(env, vmName); configuredOS != "" {
+					hvars["proxmox_os_id"] = configuredOS
 				}
 			}
 		}

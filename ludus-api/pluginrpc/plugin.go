@@ -145,6 +145,8 @@ type ScheduledJob struct {
 type InitializeResponse struct {
 	Jobs  []ScheduledJob
 	State ServerState
+	// System enterprise plugins may ask the host to load entitled add-ons.
+	LoadPlugins []string
 }
 
 type Request struct {
@@ -169,7 +171,8 @@ type Response struct {
 }
 
 type JobResponse struct {
-	State ServerState
+	State       ServerState
+	LoadPlugins []string
 }
 
 // Plugin is the interface used by the Ludus host. Its implementation is an RPC

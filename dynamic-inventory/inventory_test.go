@@ -587,6 +587,52 @@ func TestMainHost_IncludesRangeConfigVMBeforePoolMembership(t *testing.T) {
 	}
 }
 
+func TestMainList_WindowsGroupSurvivesPartialAgentResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"os_info_error", http.StatusInternalServerError, `{"errors":"agent not ready"}`},
+		{"empty_os_info", http.StatusOK, `{"data":{"result":{}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetLudusEnv(t)
+			t.Setenv("LUDUS_RANGE_ID", "TEST7")
+			t.Setenv("LUDUS_RANGE_NUMBER", "7")
+			writeRangeConfig(t, `ludus:
+  - vm_name: "{{ range_id }}-dc"
+    vlan: 10
+    ip_last_octet: 11
+    windows:
+      sysprep: false
+`)
+			defer gock.Off()
+			gock.New(mockBase).Get("^/pools/$").MatchParam("poolid", "TEST7").
+				Reply(200).JSON(`{"data":[{"poolid":"TEST7","members":[]}]}`)
+			gock.New(mockBase).Get("^/cluster/resources$").
+				Reply(200).JSON(`{"data":[{"type":"qemu","vmid":100,"name":"TEST7-dc","node":"node1","status":"running"}]}`)
+			gock.New(mockBase).Get("^/nodes/node1/qemu/100/config$").
+				Reply(200).JSON(`{"data":{}}`)
+			gock.New(mockBase).Get("^/nodes/node1/qemu/100/agent/network-get-interfaces$").
+				Reply(200).JSON(`{"data":{"result":[{"name":"Ethernet","ip-addresses":[{"ip-address-type":"ipv4","ip-address":"10.7.10.11"}]}]}}`)
+			gock.New(mockBase).Get("^/nodes/node1/qemu/100/agent/get-osinfo$").
+				Reply(tc.status).JSON(tc.body)
+
+			got := mainList(context.Background(), newMockClient())
+			windows, _ := got["windows"].(map[string]interface{})
+			hosts, _ := windows["hosts"].([]string)
+			if !contains(hosts, "TEST7-dc") {
+				t.Fatalf("Windows VM lost its connection group after partial agent response: %v", got)
+			}
+			hostvars := got["_meta"].(map[string]interface{})["hostvars"].(map[string]map[string]interface{})
+			if ip := hostvars["TEST7-dc"]["ansible_host"]; ip != "10.7.10.11" {
+				t.Fatalf("OS fallback changed the working connection address: %v", ip)
+			}
+		})
+	}
+}
+
 func TestWriteJSON_EmptyHostvarsIsObject(t *testing.T) {
 	var buf bytes.Buffer
 	if err := writeJSON(&buf, emptyHostvars(), false); err != nil {

@@ -26,13 +26,22 @@ For Proxmox storage to work with Ludus it requires the following permissions:
 
 | **Path** | **User/Group/API Token** | **Role** | **Propagate** |
 |----------|--------------------------|----------|---------------|
-| `/storage/<new storage name>` | @ludus_users | PVEDatastoreAdmin | true |
+| `/storage/<new storage name>` | @ludus_users, @ludus_admins | LudusPacker | true |
+| `/storage/<ISO storage name>` | @ludus_users, @ludus_admins | LudusISO | true |
 
 ![Adding a group permission](/img/storage/group-permissions.png)
 
 ![Add permission dialog](/img/storage/add-permission.png)
 
-This allows all ludus users to use the new storage.
+`LudusPacker` grants the storage privileges needed to allocate VM disks and upload
+installation media. The additional `LudusISO` role grants `Datastore.Allocate`,
+which Proxmox requires to delete temporary Packer ISOs after a build or cancellation.
+Ludus bootstrap creates both roles.
+
+Grant `LudusISO` only on `proxmox_iso_storage_pool`, not on VM-only datastores.
+`Datastore.Allocate` also permits storage management and deletion of other volumes
+on that datastore. Use a separate ISO datastore to keep this permission away from
+VM disks; if VM and ISO storage share a datastore, the permission applies to both.
 
 Additionally, you can modify the Ludus configuration file at `/opt/ludus/config.yml` to use your new storage. Specifically, modify these values:
 
