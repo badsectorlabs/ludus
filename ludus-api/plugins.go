@@ -308,7 +308,7 @@ func (s *Server) pluginState() pluginrpc.ServerState {
 		Version:          s.Version,
 		VersionString:    s.VersionString,
 		LudusInstallPath: s.LudusInstallPath,
-		Entitlements:     append([]string(nil), s.Entitlements...),
+		Entitlements:     append([]string{}, s.Entitlements...),
 		LicenseMessage:   s.LicenseMessage,
 		LicenseValid:     s.LicenseValid,
 		LicenseKey:       s.LicenseKey,
@@ -323,6 +323,9 @@ func (s *Server) applyPluginState(state pluginrpc.ServerState) {
 	// The enterprise license job retains cached grants on offline fallback.
 	// An authoritative empty list means the grants have been revoked.
 	s.Entitlements = append(s.Entitlements[:0], state.Entitlements...)
+	if s.Entitlements == nil {
+		s.Entitlements = []string{}
+	}
 	s.LicenseMessage = state.LicenseMessage
 	s.LicenseValid = state.LicenseValid
 	s.LicenseKey = state.LicenseKey

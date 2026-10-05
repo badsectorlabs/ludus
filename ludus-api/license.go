@@ -58,6 +58,10 @@ func (releases *licensedPluginReleases) SetData(to func(interface{}) error) erro
 }
 
 func (s *Server) checkLicense() {
+	if s.Entitlements == nil {
+		s.Entitlements = []string{}
+	}
+
 	keygen.Account = LicenseAccount
 	keygen.Product = LicenseProductLudus
 	keygen.LicenseKey = s.LicenseKey

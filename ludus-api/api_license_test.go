@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"ludusapi/pluginrpc"
+
 	"github.com/keygen-sh/keygen-go/v3"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
@@ -61,13 +63,45 @@ func TestGetLicenseReportsInvalidKey(t *testing.T) {
 		t.Fatalf("GET /license returned HTTP %d: %s", response.Code, response.Body.String())
 	}
 	var license struct {
-		Active  bool   `json:"active"`
-		Message string `json:"message"`
+		Active       bool     `json:"active"`
+		Message      string   `json:"message"`
+		Entitlements []string `json:"entitlements"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &license); err != nil {
 		t.Fatal(err)
 	}
 	if license.Active || license.Message != "license key is invalid" {
 		t.Fatalf("GET /license retained stale license state: %s", response.Body.String())
+	}
+	if license.Entitlements == nil || len(license.Entitlements) != 0 {
+		t.Fatalf("GET /license must return an empty entitlement array: %s", response.Body.String())
+	}
+}
+
+func TestGetLicenseReportsEmptyPluginEntitlements(t *testing.T) {
+	originalServer := server
+	t.Cleanup(func() { server = originalServer })
+	server = &Server{}
+	server.applyPluginState(pluginrpc.ServerState{})
+
+	response := httptest.NewRecorder()
+	event := &core.RequestEvent{Event: router.Event{
+		Request:  httptest.NewRequest(http.MethodGet, "/license", nil),
+		Response: response,
+	}}
+	if err := GetLicense(event); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /license returned HTTP %d: %s", response.Code, response.Body.String())
+	}
+	var license struct {
+		Entitlements []string `json:"entitlements"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &license); err != nil {
+		t.Fatal(err)
+	}
+	if license.Entitlements == nil || len(license.Entitlements) != 0 {
+		t.Fatalf("GET /license must return an empty entitlement array after plugin fallback: %s", response.Body.String())
 	}
 }
