@@ -41,8 +41,14 @@
         msg: "{{ time_sync_command.stderr | default(time_sync_command.stdout) }}"
       when: "'The service has not been started' not in (time_sync_command.stdout | default(''))"
 
+# A successful join/reboot does not guarantee that AD and SYSVOL have converged.
+# Require policy application to succeed; persistent failures still stop deployment.
 - name: Update group policy
   ansible.windows.win_shell: "gpupdate /force"
+  register: group_policy_update
+  until: group_policy_update is succeeded
+  retries: 20
+  delay: 15
 
 - name: Gather Remote Desktop Users group name (multilingual)
   ansible.windows.win_shell: |

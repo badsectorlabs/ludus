@@ -37,6 +37,8 @@ Keep Windows provisioning and template account names separate from `defaults.ad_
 
 Before retiring shared domain credentials, every managed Windows VM must pass SSH bootstrap. Run the initial bootstrap without `--limit`; already-finalized ranges can use limited key-only redeployments. A replicated `[LudusSSH:<key sha256>]` suffix in the provisioning account's Description records password retirement across DCs. Preserve that suffix. Domain promotion and additional-DC provisioning refresh and verify the account's SSH identity after reboot. If promotion re-enables the retired RID-500 administrator, Ludus disables it again after verifying the selected key identity, without rotating either account's domain password.
 
+After a Windows member joins the domain, Ludus retries failed Group Policy updates up to 20 times with a 15-second delay between attempts, allowing new AD and SYSVOL state to converge. Persistent failures still stop deployment.
+
 :::caution
 
 Template passwords will no longer work for SSH, WinRM, console login, or RDP. Windows template autologon is disabled, and template-account RDP files are no longer generated. Clearing `use_cert_auth` does **not** restore deleted accounts or passwords.
