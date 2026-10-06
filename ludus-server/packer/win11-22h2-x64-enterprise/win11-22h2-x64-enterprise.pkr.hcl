@@ -220,4 +220,16 @@ build {
     skip_version_check = true
   }
 
+  provisioner "ansible" {
+    playbook_file = "../ansible/winrm-auto.yml"
+    use_proxy     = false
+    user          = "${var.winrm_username}"
+    extra_arguments = [
+      "-e", "ansible_winrm_server_cert_validation=ignore",
+      "-e", "ansible_winrm_connection_timeout=300"
+    ]
+    ansible_env_vars   = ["ANSIBLE_HOME=${var.ansible_home}"]
+    skip_version_check = true
+  }
+
 }

@@ -26,3 +26,12 @@ variable "ansible_home" {
     playbook_file   = "ansible/kali.yml"
   }
 ```
+
+## Windows WinRM startup
+
+The built-in Windows 11 22H2 Enterprise and Windows Server 2022 recipes run
+`ansible/winrm-auto.yml` as their final provisioner, immediately after
+`ansible/ngen.yml`. It uses `ansible.windows.win_service` with `start_mode: auto`
+and `state: started` to leave WinRM running with automatic, non-delayed startup.
+This targets earlier authenticated management readiness after boot, not faster
+WinRM command execution.

@@ -1,0 +1,9 @@
+- name: Start WinRM automatically without the delayed boot wait
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Configure automatic non-delayed WinRM startup
+      ansible.windows.win_service:
+        name: WinRM
+        start_mode: auto
+        state: started
