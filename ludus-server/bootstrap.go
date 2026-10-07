@@ -292,7 +292,7 @@ func bootstrapLocalState(cfg ludusapi.Configuration) error {
 		return fmt.Errorf("nftables: %w", err)
 	}
 	// Dirs
-	for _, d := range []string{"/opt/ludus/users", "/opt/ludus/ci", "/opt/ludus/previous-versions", "/opt/ludus/tls"} {
+	for _, d := range []string{"/opt/ludus/users", "/opt/ludus/ci", "/opt/ludus/previous-versions", "/opt/ludus/tls", "/opt/ludus/blueprints", "/opt/ludus/sources"} {
 		if err := os.MkdirAll(d, 0750); err != nil {
 			return err
 		}
