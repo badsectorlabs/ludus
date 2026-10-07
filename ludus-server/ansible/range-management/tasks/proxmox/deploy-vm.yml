@@ -19,6 +19,19 @@
     timeout: 500
   register: clone_vm
 
+# A fresh clone can reuse template account SIDs, but not its predecessor's state.
+- name: Clear controller credentials and retirement records for a newly cloned VM
+  ansible.builtin.file:
+    path: "{{ ludus_machine_credentials_dir }}/{{ ludus_credential_state }}/{{ lookup('file', ludus_ssh_public_key_path) | hash('sha256') }}/{{ vm_name }}"
+    state: absent
+  become: false
+  loop: [passwords, windows-retirement]
+  loop_control:
+    loop_var: ludus_credential_state
+  when:
+    - clone_vm is changed
+    - defaults.use_cert_auth | default(false)
+
 - name: Pause for 5 seconds to allow the vmid to populate
   ansible.builtin.pause:
     seconds: 5
