@@ -54,6 +54,12 @@ Move the updated binary to a different location and run it with --update to comp
 
 	ensurePocketBaseStoragePermissions()
 
+	// Try provisioning the opt-in Windows SSH runtime even for --no-dep-update
+	// builds, but do not prevent ordinary ranges or API services from running.
+	if err := ensureWindowsSSHRuntime(); err != nil {
+		log.Printf("warning: could not provision optional Windows SSH runtime; retry with --update before deploying Windows SSH ranges: %v", err)
+	}
+
 	// Start ludus and ludus-admin
 	Run("systemctl start ludus", false, true)
 	time.Sleep(2 * time.Second) // Wait for ludus to start

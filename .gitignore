@@ -1,3 +1,6 @@
+skills-lock.json
+.agents
+.apidog
 .gograph
 .ansible-home
 .ansible-tmp
@@ -66,3 +69,4 @@ output-*/
 .ludus-testing-vm.json
 .ludus-testing-tunnel.json
 .ludus-dev-env
+.ludus-testing-license

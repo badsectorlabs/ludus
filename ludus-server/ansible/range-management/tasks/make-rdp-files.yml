@@ -1,7 +1,10 @@
-- name: Delete RDP directory
+- name: Delete previous RDP files and archive
   ansible.builtin.file:
     state: absent
-    path: "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp/"
+    path: "{{ item }}"
+  loop:
+    - "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp/"
+    - "{{ ludus_install_path }}/ranges/{{ range_id }}/rdp.zip"
   ignore_errors: true
 
 - name: Create rdp directory for this range
@@ -79,6 +82,7 @@
   when:
     - hostvars[item]['proxmox_os_id'] is defined
     - hostvars[item]['proxmox_os_id'] == "windows"
+    - not defaults.use_cert_auth | default(false)
   vars:
     rdp_host: "{{ hostvars[item]['ansible_host'] }}"
     rdp_domain: "{{ item }}"

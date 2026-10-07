@@ -202,6 +202,8 @@ defaults:
   timezone: America/New_York               # The timezone for all VMs, use the TZ identifier format from https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
   enable_dynamic_wallpaper: true           # Enable dynamic wallpaper (red/green) for all Windows VMs in the range
   target_node: pve1                        # The proxmox node to deploy the range to (cluster mode only) if a vm object does not have it's own target_node value. Leave empty for Ludus to decide the node for each VM based on resource utilization
+  use_cert_auth: false                    # Enterprise: SSH keys on Linux, macOS, and Windows, including DCs; see below before enabling
+  cert_auth_create_accounts: false        # Opt in to creating or enabling the selected SSH provisioning accounts
 
 # Use the notify key to send a notification when a range deployment finishes or fails.
 # Notification "urls" look like the following. For more information about service specific configuration see
@@ -229,7 +231,6 @@ notify:
    - "script:///file/path/on/disk"
    - "https://www.example.com/path"
 ```
-
 
 # Third-party Data
 

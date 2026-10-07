@@ -380,9 +380,93 @@ func TestMainList_MswindowsRenamedToWindows(t *testing.T) {
 	}
 }
 
+func TestMainList_MacOSConfigFallback(t *testing.T) {
+	cases := []struct {
+		name      string
+		agentDown bool
+		osStatus  int
+		osBody    string
+		wantOS    string
+	}{
+		{name: "agent unavailable", agentDown: true, wantOS: "macos"},
+		{name: "os info unavailable", osStatus: 500, osBody: `{"errors":"unsupported"}`, wantOS: "macos"},
+		{name: "os info absent", osStatus: 200, osBody: `{"data":{}}`, wantOS: "macos"},
+		{name: "os id empty", osStatus: 200, osBody: `{"data":{"result":{"id":"","name":"macOS"}}}`, wantOS: "macos"},
+		{name: "agent macos", osStatus: 200, osBody: `{"data":{"result":{"id":"macos"}}}`, wantOS: "macos"},
+		{name: "agent osx", osStatus: 200, osBody: `{"data":{"result":{"id":"osx"}}}`, wantOS: "osx"},
+		{name: "agent OS takes precedence", osStatus: 200, osBody: `{"data":{"result":{"id":"ubuntu"}}}`, wantOS: "ubuntu"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetLudusEnv(t)
+			t.Setenv("LUDUS_RANGE_ID", "TEST7")
+			t.Setenv("LUDUS_RANGE_NUMBER", "7")
+			writeRangeConfig(t, `ludus:
+  - vm_name: "{{ range_id }}-runner"
+    vlan: 10
+    ip_last_octet: 9
+    macos: true
+    force_ip: true
+`)
+			defer gock.Off()
+			gock.New(mockBase).
+				Get("^/pools/$").
+				MatchParam("poolid", "TEST7").
+				Reply(200).
+				JSON(`{"data":[]}`)
+			gock.New(mockBase).
+				Get("^/cluster/resources$").
+				Reply(200).
+				JSON(`{"data":[
+					{"type":"qemu","vmid":400,"name":"TEST7-runner","node":"node1","status":"running","template":0}
+				]}`)
+			gock.New(mockBase).
+				Get("^/nodes/node1/qemu/400/config$").
+				Reply(200).
+				JSON(`{"data":{}}`)
+			if tc.agentDown {
+				gock.New(mockBase).
+					Get("^/nodes/node1/qemu/400/agent/network-get-interfaces$").
+					Times(2).
+					Reply(500).
+					JSON(`{"errors":"agent not running"}`)
+			} else {
+				gock.New(mockBase).
+					Get("^/nodes/node1/qemu/400/agent/network-get-interfaces$").
+					Reply(200).
+					JSON(`{"data":{"result":[]}}`)
+				gock.New(mockBase).
+					Get("^/nodes/node1/qemu/400/agent/get-osinfo$").
+					Reply(tc.osStatus).
+					JSON(tc.osBody)
+			}
+
+			got := mainList(context.Background(), newMockClient())
+			meta, _ := got["_meta"].(map[string]interface{})
+			hvars, _ := meta["hostvars"].(map[string]map[string]interface{})
+			host := hvars["TEST7-runner"]
+			if host["proxmox_os_id"] != tc.wantOS {
+				t.Errorf("proxmox_os_id = %v, want %s", host["proxmox_os_id"], tc.wantOS)
+			}
+			if host["ansible_host"] != "10.7.10.9" {
+				t.Errorf("ansible_host = %v, want 10.7.10.9", host["ansible_host"])
+			}
+			group, _ := got[tc.wantOS].(map[string]interface{})
+			hosts, _ := group["hosts"].([]string)
+			if !equalStrings(hosts, []string{"TEST7-runner"}) {
+				t.Errorf("%s.hosts = %v, want [TEST7-runner]", tc.wantOS, hosts)
+			}
+			if tc.wantOS != "macos" {
+				if _, exists := got["macos"]; exists {
+					t.Error("config fallback must not override the guest-agent OS group")
+				}
+			}
+		})
+	}
+}
+
 func TestMainList_MacOSNameFallback(t *testing.T) {
-	// This is the bug we fixed: when agent reports osinfo with an empty/absent id,
-	// a VM whose name contains "macos" should be tagged as macos.
+	// A VM name remains a last-resort hint when no OS info or config is available.
 	resetLudusEnv(t)
 	defer gock.Off()
 

@@ -90,6 +90,31 @@
                 "target_node": {
                     "type": "string",
                     "description": "The Proxmox node to deploy this range to. If not specified, Ludus will select the node with the most available resources (for cluster mode) or use the default node."
+                },
+                "use_cert_auth": {
+                    "type": "boolean",
+                    "description": "Use range-scoped SSH keys for Linux, macOS, and Windows (Enterprise), including Windows domain controllers. Template passwords are used only for bootstrap, then replaced. Default: false",
+                    "default": false
+                },
+                "cert_auth_linux_user": {
+                    "type": "string",
+                    "pattern": "^[a-z_][a-z0-9_-]{0,31}$",
+                    "description": "Linux provisioning account when use_cert_auth is enabled, including the Linux router. Omit to keep each template's account with passwordless sudo; use root for direct privileged SSH. Replaced template accounts are removed after verifying key authentication."
+                },
+                "cert_auth_macos_user": {
+                    "type": "string",
+                    "pattern": "^[a-z_][a-z0-9_-]{0,31}$",
+                    "description": "macOS provisioning account when use_cert_auth is enabled. Omit to keep the template account with passwordless sudo; use root for direct privileged SSH. Independent of cert_auth_linux_user. Replaced template accounts are removed after verifying key authentication."
+                },
+                "cert_auth_windows_user": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,19}$",
+                    "description": "Windows SSH provisioning account when use_cert_auth is enabled: local on standalone/member hosts, a domain account on domain controllers. Specify an unqualified SAM account name distinct from ad_domain_admin and ad_domain_user. Omit to keep the template account; use Administrator for the built-in administrator. Replaced template accounts are removed after verifying SSH key authentication."
+                },
+                "cert_auth_create_accounts": {
+                    "type": "boolean",
+                    "description": "Create missing or enable disabled SSH provisioning accounts. Without this opt-in the selected account must already exist and be enabled. Default: false",
+                    "default": false
                 }
             },
             "required": [],

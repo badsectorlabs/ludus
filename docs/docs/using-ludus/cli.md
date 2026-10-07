@@ -1103,6 +1103,7 @@ Available Commands:
   inventory   Get the ansible inventory file for a range
   list        List details about your range (alias: status)
   logs        Get the latest deploy logs from your range
+  machine-credentials  Download a range's machine credentials as a ZIP (enterprise only)
   rdp         Get a zip of RDP configuration files for all Windows hosts in a range
   revoke      Revoke range access from a user (admin only)
   rm          Destroy all VMs in your range (keeps range)
@@ -1394,6 +1395,26 @@ ludus range logs --history --id njec0ungvnc5ctk
 ```
 
 By default the server keeps the last 100 logs per range. This can be changed with `max_log_history` in `/opt/ludus/config.yml` (see [Admin Notes](../administration/admin)).
+
+### Range Machine Credentials
+
+Download a range's existing SSH private key, public key, and connection instructions as a ZIP (Enterprise only). This does not create or rotate credentials.
+
+```
+Usage:
+  ludus range machine-credentials [flags]
+
+Flags:
+    -o, --output string   the output file path (default "machine-credentials.zip")
+```
+
+Use `--range/-r` to select a range, or omit it to use your default range. Administrators can use `--user/-u` to impersonate a user.
+
+```bash
+ludus range machine-credentials -r MYRANGE -o my-range-credentials.zip
+```
+
+The archive grants administrative access to the range. Keep it private. On Unix-like systems, the downloaded file has owner-only read/write permissions (`0600`).
 
 ### Range Rdp
 

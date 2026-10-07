@@ -114,7 +114,7 @@ type LudusVM struct {
 	ForceIP     bool            `yaml:"force_ip"`
 	Windows     enabledOSConfig `yaml:"windows"`
 	Linux       enabledOSConfig `yaml:"linux"`
-	MacOS       bool            `yaml:"macOS"`
+	MacOS       bool            `yaml:"macos"`
 }
 
 type LudusConfig struct {
@@ -508,17 +508,21 @@ func buildHostVars(ctx context.Context, client *proxmox.Client, env ludusEnv, re
 				if resolvedIP != "" {
 					hvars["ansible_host"] = resolvedIP
 				}
-
-				// macOS bypass: agent reports no usable os-id but the VM name says macOS.
-				if _, hasOS := hvars["proxmox_os_id"]; !hasOS && strings.Contains(strings.ToLower(vmName), "macos") {
-					hvars["proxmox_os_id"] = "macos"
-				}
 			} else {
 				resolvedIP := checkIPAddresses(env, vmName, []string{})
 				if resolvedIP != "" {
 					hvars["ansible_host"] = resolvedIP
 				}
-				if osID := getOSInfoFromConfig(env, vmName); osID != "" {
+			}
+
+			// Prefer guest-agent OS information, then the configured OS, then
+			// the macOS name hint for guests without either source.
+			if osID, _ := hvars["proxmox_os_id"].(string); osID == "" {
+				osID = getOSInfoFromConfig(env, vmName)
+				if osID == "" && strings.Contains(strings.ToLower(vmName), "macos") {
+					osID = "macos"
+				}
+				if osID != "" {
 					hvars["proxmox_os_id"] = osID
 				}
 			}

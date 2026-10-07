@@ -3,6 +3,27 @@
   tags: [always]
   gather_facts: false
   tasks:
+    - name: Require enterprise entitlement for certificate authentication
+      ansible.builtin.assert:
+        that:
+          - ludus_entitlements is defined and 'ENTERPRISE_PLUGIN' in ludus_entitlements
+        fail_msg: "Certificate-based authentication requires the ENTERPRISE_PLUGIN entitlement"
+      when: defaults.use_cert_auth | default(false)
+
+    - name: Keep Windows SSH provisioning separate from domain role credentials
+      ansible.builtin.assert:
+        that:
+          - defaults.cert_auth_windows_user | default('localuser', true) | lower not in [defaults.ad_domain_admin | default('domainadmin') | lower, defaults.ad_domain_user | default('domainuser') | lower]
+        fail_msg: "The Windows SSH provisioning account must differ from defaults.ad_domain_admin and defaults.ad_domain_user. Domain roles still need those accounts and their configured passwords."
+      loop: "{{ ludus | default([]) }}"
+      loop_control:
+        label: "{{ item.vm_name }}"
+      when:
+        - defaults.use_cert_auth | default(false)
+        - not item.unmanaged | default(false)
+        - item.windows is defined
+        - item.domain is defined
+
     - name: Check for Proxmox token
       ansible.builtin.assert:
         that:

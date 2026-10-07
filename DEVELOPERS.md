@@ -10,6 +10,7 @@ This workflow uses a shared Ludus test VM on a Proxmox host. A VM is checked out
 - A local Ludus client.
 - Local `bash`, `curl`, `git`, `jq`, `nc`, `rsync`, and `ssh` commands.
 - An available test VM cloned from `ci-seed-integration`.
+- A clean `ludus-v*` release snapshot on the selected VM. Verify it exists before checkout; `release` cannot restore a VM without this baseline and leaves it checked out on failure.
 
 ## One-time Proxmox administrator setup
 
@@ -141,6 +142,16 @@ Run `./testing.sh status` to see the exact mappings for the current worktree. Tu
 ```
 
 `dev.sh` rsyncs the current worktree to `~/ludus-dev` on the checked-out VM and builds through the VM's root login environment. Run `./dev.sh -h` for all build, logging, plugin, and client options.
+
+For Enterprise-plugin changes, keep `ludus-enterprise-plugin/` in the worktree and omit `-s`:
+
+```bash
+./dev.sh -d
+```
+
+Configure an authorized test license in `/opt/ludus/config.yml` on the checked-out VM. A local `.ludus-testing-license` file can hold a reusable test key; keep it mode `0600`. This filename is gitignored and excluded from `dev.sh` source synchronization. It is not activated automatically or copied into the source tree on the VM.
+
+For certificate-auth changes, exercise a normal range, a certificate-auth range retaining template accounts, and a certificate-auth range using `Administrator`/`root`. Also test a disabled or missing account with `cert_auth_create_accounts` off and on. Verify fresh authenticated connections and rejection of the old template passwords, not just the deployment status.
 
 After the build, `dev.sh` checks the remote `~/.ludus-api-key` file. If it does not exist, the script uses `/opt/ludus/install/root-api-key` to create the following admin development user:
 

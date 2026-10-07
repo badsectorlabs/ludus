@@ -34,7 +34,7 @@ const (
 	ProxmoxPoolNameRegexString   = `^[A-Za-z][A-Za-z0-9_\-]*(\/[A-Za-z0-9_\-]+){0,2}$`
 )
 
-var ansibleTags = []string{"all", "access-control", "additional-tools", "allow-share-access", "assign-ip", "custom-choco", "custom-groups", "dcs", "debug", "dns-rewrites",
+var ansibleTags = []string{"all", "access-control", "additional-tools", "allow-share-access", "assign-ip", "bootstrap-auth", "custom-choco", "custom-groups", "dcs", "debug", "dns-rewrites",
 	"domain-join", "install-office", "install-visual-studio", "linux-packages", "network", "nexus", "share", "sysprep", "user-defined-roles", "vm-deploy", "windows"}
 
 // DeployRange - deploys the range according to the range config
@@ -75,6 +75,13 @@ func DeployRange(e *core.RequestEvent) error {
 
 	if usersRange.TestingEnabled() && !deployBody.Force {
 		return JSONError(e, http.StatusConflict, "Testing enabled; deploy requires internet access to succeed; run with --force if you really want to try a deploy with testing enabled")
+	}
+	defaults := getMergedDefaults(
+		fmt.Sprintf("%s/ansible/server-config.yml", ludusInstallPath),
+		fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId()),
+	)
+	if _, err := certAuthEnabled(defaults, server.Entitlements); err != nil {
+		return JSONError(e, http.StatusForbidden, err.Error())
 	}
 
 	// If the user specified roles, make sure they exist on the server before trying to use them

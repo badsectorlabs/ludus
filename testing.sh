@@ -70,8 +70,8 @@ require_commands() {
 load_proxmox_host() {
     local config_host
 
-    [ -z "$PROXMOX_HOST" ] || return
-    [ -f "$PVE_CONFIG_FILE" ] || return
+    [ -z "$PROXMOX_HOST" ] || return 0
+    [ -f "$PVE_CONFIG_FILE" ] || return 0
 
     config_host=$(jq -er '
         if .version != 1 then error("unsupported version") else . end

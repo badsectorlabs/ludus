@@ -330,7 +330,7 @@ func TestLoadLudusEnv(t *testing.T) {
   - vm_name: "{{ range_id }}-mac"
     vlan: 20
     ip_last_octet: 7
-    macOS: true
+    macos: true
 `
 		if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
 			t.Fatal(err)
