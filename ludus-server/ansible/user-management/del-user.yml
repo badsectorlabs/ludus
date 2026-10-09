@@ -67,6 +67,7 @@
       args:
         executable: /bin/bash
       when: wg_client_public_key_stat.stat.exists
+      ignore_errors: true
 
     # - name: Remove the portforward for this user (Enterprise)
     #   ansible.builtin.include_tasks: portforward-management.yml

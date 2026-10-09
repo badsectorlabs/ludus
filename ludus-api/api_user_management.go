@@ -186,9 +186,15 @@ func AddUser(e *core.RequestEvent) error {
 		wasError := false
 		defer func() {
 			if wasError {
-				removeUserFromHostSystem(user.ProxmoxUsername())
-				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
-				removePool(user.UserId())
+				if err := removeUserFromHostSystem(user.ProxmoxUsername()); err != nil {
+					logger.Error(fmt.Sprintf("WARN: cleanup failed - OS user %s may still exist on the host: %v", user.ProxmoxUsername(), err))
+				}
+				if err := removeUserFromProxmox(user.ProxmoxUsername(), "pam"); err != nil {
+					logger.Error(fmt.Sprintf("WARN: cleanup failed - Proxmox user %s@pam may still exist: %v", user.ProxmoxUsername(), err))
+				}
+				if err := removePool(user.UserId()); err != nil {
+					logger.Error(fmt.Sprintf("WARN: cleanup failed - Proxmox pool %s may still exist: %v", user.UserId(), err))
+				}
 				defaultRangeRecord, err := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
 				if err == nil {
 					txApp.Delete(defaultRangeRecord)
@@ -340,9 +346,15 @@ func ProvisionOAuth2User(e *core.RequestEvent) error {
 		wasError := false
 		defer func() {
 			if wasError {
-				removeUserFromHostSystem(user.ProxmoxUsername())
-				removeUserFromProxmox(user.ProxmoxUsername(), "pam")
-				removePool(user.UserId())
+				if err := removeUserFromHostSystem(user.ProxmoxUsername()); err != nil {
+					logger.Error(fmt.Sprintf("WARN: cleanup failed - OS user %s may still exist on the host: %v", user.ProxmoxUsername(), err))
+				}
+				if err := removeUserFromProxmox(user.ProxmoxUsername(), "pam"); err != nil {
+					logger.Error(fmt.Sprintf("WARN: cleanup failed - Proxmox user %s@pam may still exist: %v", user.ProxmoxUsername(), err))
+				}
+				if err := removePool(user.UserId()); err != nil {
+					logger.Error(fmt.Sprintf("WARN: cleanup failed - Proxmox pool %s may still exist: %v", user.UserId(), err))
+				}
 				defaultRangeRecord, findErr := txApp.FindFirstRecordByData("ranges", "rangeID", user.DefaultRangeId())
 				if findErr == nil && defaultRangeRecord != nil {
 					txApp.Delete(defaultRangeRecord)

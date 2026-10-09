@@ -135,6 +135,7 @@
         wg syncconf wg0 <(wg-quick strip wg0)
       args:
         executable: /bin/bash
+      ignore_errors: true
 
     # - name: Add the vmbr interface for this user
     #   ansible.builtin.include_tasks: vmbr-management.yml
@@ -168,6 +169,10 @@
           - "-group"
           - ludus_users
       no_log: true
+      register: pveum_add_result
+      failed_when:
+        - pveum_add_result.rc != 0
+        - "'already exists' not in pveum_add_result.stderr"
 
     - name: Set the acls for the user on their own pool
       ansible.builtin.command:
