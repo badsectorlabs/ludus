@@ -43,6 +43,15 @@ Restoring a VM or DC to a snapshot taken before an account was retired can resto
 
 :::
 
+## WebUI
+
+These options are available via the Web UI. Use the `...` menu to access the SSH Cert Auth options and to export the SSH key after deployment.
+
+![SSH Key Authentication Menu Screenshot](/img/enterprise/ssh-cert-auth/ssh-cert-auth-menu.png)
+
+![SSH Key Authentication Configs Screenshot](/img/enterprise/ssh-cert-auth/ssh-cert-auth-configs.png)
+
+
 ## Saved random passwords
 
 For Linux, macOS, and Windows, Ludus saves each generated password on the controller before creating or changing the account:
