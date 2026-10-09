@@ -737,6 +737,27 @@ func setupRangeRDPGET(command *cobra.Command) {
 	command.Flags().StringVarP(&outputPath, "output", "o", "rdp.zip", "the output file path")
 }
 
+var rangeMachineCredentialsCmd = &cobra.Command{
+	Use:   "machine-credentials",
+	Short: "Download a range's machine credentials as a ZIP (enterprise only)",
+	Long: `Download the existing SSH private key, public key, and connection instructions
+for a range. This does not create or rotate credentials.
+
+The archive grants administrative access to the range. Keep it private.`,
+	Args: cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		out, _ := cmd.Flags().GetString("output")
+		client := rest.InitClient(url, apiKey, proxy, verify, verbose, LudusVersion)
+		if _, success := rest.FileGet(client, buildURLWithRangeAndUserID("/range/machine-credentials"), out); success {
+			logger.Logger.Infof("File downloaded and saved as %s", out)
+		}
+	},
+}
+
+func setupRangeMachineCredentialsCmd(command *cobra.Command) {
+	command.Flags().StringP("output", "o", "machine-credentials.zip", "the output file path")
+}
+
 var rangeEtcHostsGET = &cobra.Command{
 	Use:   "etc-hosts",
 	Short: "Get an /etc/hosts formatted file for all hosts in the range",
@@ -1034,6 +1055,8 @@ func init() {
 	rangeCmd.AddCommand(rangeAbortCmd)
 	setupRangeRDPGET(rangeRDPGET)
 	rangeCmd.AddCommand(rangeRDPGET)
+	setupRangeMachineCredentialsCmd(rangeMachineCredentialsCmd)
+	rangeCmd.AddCommand(rangeMachineCredentialsCmd)
 	rangeCmd.AddCommand(rangeEtcHostsGET)
 	rangeCmd.AddCommand(rangeTaskOutputCmd)
 

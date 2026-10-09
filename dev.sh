@@ -294,6 +294,7 @@ rsync -av --progress \
     --exclude='/.ludus-dev-env' \
     --exclude='/.ludus-testing-vm.json' \
     --exclude='/.ludus-testing-tunnel.json' \
+    --exclude='/.ludus-testing-license' \
     --exclude='.vscode/' \
     --exclude='docs/' \
     --exclude='webUI/' \

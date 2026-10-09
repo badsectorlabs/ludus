@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pocketbase/pocketbase/core"
 )
 
 func TestPocketBaseClientReadsAndUpdatesPinnedLoopbackAPI(t *testing.T) {
@@ -232,6 +234,71 @@ func TestPluginRangeAccessIncludesDirectAndGroupUsers(t *testing.T) {
 		got := users[index]
 		if got.UserID != want.id || got.UserNumber != want.number || got.Name != want.name || got.AccessType != want.accessType {
 			t.Fatalf("accessible user %d = %+v, want %+v", index, got, want)
+		}
+	}
+}
+
+func TestPluginHasRangeAccessUsesDirectAndGroupRanges(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		query := request.URL.Query()
+		switch request.URL.Path {
+		case "/api/collections/users/records":
+			if query.Get("expand") != "ranges" {
+				http.Error(response, "missing direct range expansion", http.StatusBadRequest)
+				return
+			}
+			switch query.Get("filter") {
+			case `userID = "ALICE"`:
+				fmt.Fprint(response, `{"items":[{"id":"alice","userID":"ALICE","expand":{"ranges":[{"id":"direct","rangeNumber":2}]}}],"totalPages":1}`)
+			case `userID = "BOB"`:
+				fmt.Fprint(response, `{"items":[{"id":"bob","userID":"BOB"}],"totalPages":1}`)
+			default:
+				http.Error(response, "unexpected user filter "+query.Get("filter"), http.StatusBadRequest)
+			}
+		case "/api/collections/groups/records":
+			if query.Get("expand") != "ranges" {
+				http.Error(response, "missing group range expansion", http.StatusBadRequest)
+				return
+			}
+			switch query.Get("filter") {
+			case `members.id ?= "alice" || managers.id ?= "alice"`:
+				fmt.Fprint(response, `{"items":[{"id":"team","expand":{"ranges":[{"id":"shared","rangeNumber":3}]}}],"totalPages":1}`)
+			case `members.id ?= "bob" || managers.id ?= "bob"`:
+				fmt.Fprint(response, `{"items":[],"totalPages":1}`)
+			default:
+				http.Error(response, "unexpected group filter "+query.Get("filter"), http.StatusBadRequest)
+			}
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer api.Close()
+
+	client, err := NewPocketBaseClient(PocketBaseConnection{URL: api.URL, Token: "plugin-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	previousApp, previousClient := app, pluginPocketBase
+	app, pluginPocketBase = nil, client
+	t.Cleanup(func() {
+		app, pluginPocketBase = previousApp, previousClient
+	})
+
+	for _, test := range []struct {
+		user        string
+		rangeNumber int
+		want        bool
+	}{
+		{"ALICE", 2, true},
+		{"ALICE", 3, true},
+		{"ALICE", 4, false},
+		{"BOB", 2, false},
+	} {
+		event := &core.RequestEvent{}
+		if got := HasRangeAccess(event, test.user, test.rangeNumber); got != test.want {
+			t.Errorf("HasRangeAccess(%s, %d) = %v, want %v", test.user, test.rangeNumber, got, test.want)
 		}
 	}
 }

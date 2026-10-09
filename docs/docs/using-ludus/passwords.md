@@ -7,7 +7,7 @@ title: "🔑 Default Passwords"
 
 Ludus templates use default credentials for provisioning with Ansible.
 
-If your use case requires hardened machines, contact us for more information about a [Ludus Enterprise](../enterprise/) license which enables key based SSH and certificate based WinRM provisioning.
+To replace template passwords with SSH keys and optionally use custom provisioning accounts, see [SSH key authentication and provisioning accounts](../enterprise/ssh-key-authentication.md) (Ludus Enterprise).
 
 ## Default Machine Credentials
   - Kali

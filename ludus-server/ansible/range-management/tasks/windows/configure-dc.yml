@@ -50,6 +50,10 @@
     post_reboot_delay: 60
   when: domain_creation is changed
 
+- name: Refresh and verify SSH identity after domain promotion
+  ansible.builtin.include_tasks: tasks/bootstrap/refresh-windows-ssh-key.yml
+  when: defaults.use_cert_auth | default(false)
+
 - name: Configure default OUs
   microsoft.ad.ou:
     name: "{{ item }}"

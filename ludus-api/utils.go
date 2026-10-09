@@ -494,13 +494,23 @@ func HasRangeAccess(e *core.RequestEvent, userID string, rangeNumber int) bool {
 
 	rangesUserHasAccessTo := make([]int, 0)
 
-	// Check direct user-to-range assignment
-	userRecord, err := app.FindFirstRecordByData("users", "userID", userID)
+	// Check direct user-to-range assignment. Plugin processes have no PocketBase
+	// app and must query the host Web API instead.
+	client, _ := PluginPocketBase()
+	var userRecord *core.Record
+	var err error
+	if client != nil {
+		userRecord, err = client.FindFirstRecordByData(context.Background(), "users", "userID", userID, "ranges")
+	} else {
+		userRecord, err = app.FindFirstRecordByData("users", "userID", userID)
+	}
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error finding user: %s", err.Error()))
 		return false
 	}
-	app.ExpandRecord(userRecord, []string{"ranges"}, nil)
+	if client == nil {
+		app.ExpandRecord(userRecord, []string{"ranges"}, nil)
+	}
 	userRanges := userRecord.ExpandedAll("ranges")
 	for _, rangeRecord := range userRanges {
 		if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
@@ -509,23 +519,31 @@ func HasRangeAccess(e *core.RequestEvent, userID string, rangeNumber int) bool {
 	}
 
 	// Check group-based access
-	groupRecords, err := app.FindRecordsByFilter(
-		"groups", // collection name
-		"members.id ?= {:user_id} || managers.id ?= {:user_id}", // filter
-		"-created", // sort
-		0,          // limit
-		0,          // offset
-		dbx.Params{
-			"user_id": userRecord.Id,
-		},
-	)
+	var groupRecords []*core.Record
+	if client != nil {
+		groupRecords, err = client.ListRecords(context.Background(), "groups",
+			fmt.Sprintf("members.id ?= %q || managers.id ?= %q", userRecord.Id, userRecord.Id), "ranges")
+	} else {
+		groupRecords, err = app.FindRecordsByFilter(
+			"groups", // collection name
+			"members.id ?= {:user_id} || managers.id ?= {:user_id}", // filter
+			"-created", // sort
+			0,          // limit
+			0,          // offset
+			dbx.Params{
+				"user_id": userRecord.Id,
+			},
+		)
+	}
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
 		return false
 	}
 	//logger.Debug(fmt.Sprintf("Found %d groups for user %s", len(groupRecords), userRecord.GetString("userID")))
 	for _, groupRecord := range groupRecords {
-		app.ExpandRecord(groupRecord, []string{"ranges"}, nil)
+		if client == nil {
+			app.ExpandRecord(groupRecord, []string{"ranges"}, nil)
+		}
 		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
 			if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
 				rangesUserHasAccessTo = append(rangesUserHasAccessTo, rangeRecord.GetInt("rangeNumber"))

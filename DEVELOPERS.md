@@ -10,6 +10,7 @@ This workflow uses a shared Ludus test VM on a Proxmox host. A VM is checked out
 - A local Ludus client.
 - Local `bash`, `curl`, `git`, `jq`, `nc`, `rsync`, and `ssh` commands.
 - An available test VM cloned from `ci-seed-integration`, or an administrator-prepared installer test VM with a named baseline snapshot.
+- Without `--baseline`, a clean `ludus-v*` release snapshot on the selected VM. Verify it exists before checkout; `release` cannot restore a VM without this baseline and leaves it checked out on failure.
 - On the build target: Linux amd64, Go 1.25 or newer (matching `go.work` and the modules), a C compiler and libc development headers for CGO, `git`, `rsync`, and CA certificates. On Debian/Proxmox, install `build-essential git rsync ca-certificates` and a suitable Go toolchain. Go must be on root's login-shell `PATH`; the distribution's default Go package may be too old. Dependency downloads require network access or a populated Go module/toolchain cache.
 - Optional UI builds (`-w`) also require Bun on the build target. Optional plugins need their own build prerequisites; build-only mode skips plugin installation scripts.
 
@@ -154,6 +155,16 @@ The SSH connection still terminates on the checked-out test VM through the outer
 `dev.sh` rsyncs the current worktree to `~/ludus-dev` on the checked-out VM and builds through the VM's root login environment. Run `./dev.sh -h` for all build, logging, plugin, and client options.
 
 The ordinary flow installs into the SSH target: for an LXC installation, target the container's root SSH login with `-t` (and `-p` if needed), using an SSH config entry with the required jump host. Do not run the ordinary update flow against a legacy host or bare Proxmox when testing the installer; use `-B` as described below.
+
+For Enterprise-plugin changes, keep `ludus-enterprise-plugin/` in the worktree and omit `-s`:
+
+```bash
+./dev.sh -d
+```
+
+Configure an authorized test license in `/opt/ludus/config.yml` on the checked-out VM. A local `.ludus-testing-license` file can hold a reusable test key; keep it mode `0600`. This filename is gitignored and excluded from `dev.sh` source synchronization. It is not activated automatically or copied into the source tree on the VM.
+
+For certificate-auth changes, exercise a normal range, a certificate-auth range retaining template accounts, and a certificate-auth range using `Administrator`/`root`. Also test a disabled or missing account with `cert_auth_create_accounts` off and on. Verify fresh authenticated connections and rejection of the old template passwords, not just the deployment status.
 
 After the build, `dev.sh` checks the remote `~/.ludus-api-key` file. If it does not exist, the script uses `/opt/ludus/install/root-api-key` to create the following admin development user:
 

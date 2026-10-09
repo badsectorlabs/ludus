@@ -461,3 +461,10 @@ func (s *Server) HasEntitlement(code string) bool {
 	defer s.licenseMu.RUnlock()
 	return slices.Contains(s.Entitlements, code)
 }
+
+// EntitlementsSnapshot returns a copy that license refreshes cannot mutate.
+func (s *Server) EntitlementsSnapshot() []string {
+	s.licenseMu.RLock()
+	defer s.licenseMu.RUnlock()
+	return slices.Clone(s.Entitlements)
+}

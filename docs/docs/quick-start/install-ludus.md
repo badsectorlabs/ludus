@@ -68,6 +68,7 @@ chmod +x install.sh
 ```
 
 The `install.sh` script will install the `ludus` client, and optionally shell completions, and then prompt to install the server.
+It selects the latest stable tag, ignoring tags containing `-beta`.
 Follow the interactive installer. On standalone Debian, the installer starts and reboots the machine. On Proxmox, it creates the LXC without rebooting the host.
 
 On Proxmox, use the [LXC installer guide](../deployment-options/proxmox-lxc.md)

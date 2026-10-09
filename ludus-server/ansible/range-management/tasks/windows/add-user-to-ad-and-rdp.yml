@@ -11,8 +11,8 @@
     groups:
       add:
         - Remote Desktop Users
-    domain_username: "{{ netbios_name }}\\Administrator"
-    domain_password: password
+    domain_username: "{{ netbios_name }}\\{{ defaults.ad_domain_admin }}"
+    domain_password: "{{ defaults.ad_domain_admin_password }}"
 
 # "The users have to be part of the RDusers group locally on the server you want to login via RDP, not only in the AD."
 # https://serverfault.com/questions/265531/members-of-remote-desktop-users-group-cannot-login
@@ -22,3 +22,5 @@
     members:
       add:
         - "{{ netbios_name }}\\{{ username }}"
+    domain_username: "{{ netbios_name }}\\{{ defaults.ad_domain_admin }}"
+    domain_password: "{{ defaults.ad_domain_admin_password }}"
