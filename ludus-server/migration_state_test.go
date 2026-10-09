@@ -216,6 +216,43 @@ func TestMigrationPreservesLegacyGlobalRouterDefault(t *testing.T) {
 	}
 }
 
+func TestMigrationAddsReleaseVariablesWithoutReplacingAdministratorValues(t *testing.T) {
+	stage := t.TempDir()
+	name := "opt/ludus/ansible/server-config.yml"
+	// A 2.3.x file predates the machine credential paths used by cert auth.
+	migrationTestWrite(t, stage, name, "defaults:\n  snapshot_with_RAM: false\nludus_ranges_dir: /srv/ludus-ranges\n")
+	if err := migrationAddReleaseVariables(stage); err != nil {
+		t.Fatal(err)
+	}
+	values, err := migrationReadYAML(filepath.Join(stage, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["ludus_ranges_dir"] != "/srv/ludus-ranges" {
+		t.Fatalf("administrator value replaced: %v", values["ludus_ranges_dir"])
+	}
+	defaults := values["defaults"].(map[interface{}]interface{})
+	if len(defaults) != 1 || defaults["snapshot_with_RAM"] != false {
+		t.Fatalf("administrator range defaults changed: %v", defaults)
+	}
+	for _, key := range []string{"ludus_machine_credentials_dir", "ludus_ssh_private_key_path", "ludus_ssh_public_key_path"} {
+		if _, ok := values[key]; !ok {
+			t.Fatalf("release variable %s was not added", key)
+		}
+	}
+	before, err := os.ReadFile(filepath.Join(stage, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationAddReleaseVariables(stage); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(stage, name))
+	if err != nil || string(before) != string(after) {
+		t.Fatal("complete global defaults were rewritten")
+	}
+}
+
 // The helper is a real RPC subprocess, exercising the same handshake and metadata
 // validation used by production, without compiling a fixture during tests.
 type migrationProcessPlugin struct{ pluginrpc.Plugin }

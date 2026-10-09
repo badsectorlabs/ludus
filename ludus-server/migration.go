@@ -1656,6 +1656,39 @@ func migrationPreserveRouterDefault(stage, template string) error {
 	return os.WriteFile(filename, content, 0600)
 }
 
+// Migration keeps the administrator's global defaults, but release playbooks can
+// require variables added after the legacy release (e.g. machine credential
+// paths). Add only absent top-level keys; never replace administrator values.
+func migrationAddReleaseVariables(stage string) error {
+	filename := filepath.Join(stage, "opt/ludus/ansible/server-config.yml")
+	values, err := migrationReadYAML(filename)
+	if err != nil {
+		return err
+	}
+	content, err := embeddedAnsbileDir.ReadFile("ansible/server-config.yml")
+	if err != nil {
+		return err
+	}
+	var bundled map[string]interface{}
+	if err := yaml.Unmarshal(content, &bundled); err != nil {
+		return fmt.Errorf("parse bundled global Ansible defaults: %w", err)
+	}
+	changed := false
+	for key, value := range bundled {
+		if _, ok := values[key]; !ok {
+			values[key] = value
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if content, err = yaml.Marshal(values); err != nil {
+		return err
+	}
+	return os.WriteFile(filename, content, 0600)
+}
+
 func importMigrationState(archive string) error {
 	if err := migrationStopped(); err != nil {
 		return err
@@ -1709,6 +1742,9 @@ func importMigrationState(archive string) error {
 	}
 	if err := migrationPreserveRouterDefault(stage, m.RouterTemplate); err != nil {
 		return err
+	}
+	if err := migrationAddReleaseVariables(stage); err != nil {
+		return fmt.Errorf("add release Ansible variables: %w", err)
 	}
 	if err := migrationMergeResources(stage); err != nil {
 		return fmt.Errorf("preserve appliance resources: %w", err)
