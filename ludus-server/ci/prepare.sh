@@ -62,15 +62,17 @@ if [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" && "$CI_PROFILE" == "lxc
             ;;
     esac
 elif [[ "$CUSTOM_ENV_LUDUS_BUILD_TYPE" == "from-snapshot" ]]; then
+    # Authenticate with the durable install key and impersonate the seeded CI
+    # user: `--update` replaces /opt/ludus/ci, removing .apikey-admin/.apikey-user.
     case "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" in
         "templates_built")
-            wait_for_ludus_command "$VM_IP" "/opt/ludus/ci/.apikey-admin" "ludus templates list --json" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+            wait_for_ludus_command "$VM_IP" "/opt/ludus/install/root-api-key" "ludus --user CIA templates list --json | jq -e 'type == \"array\"'" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
             ;;
         "range_built_admin")
-            wait_for_ludus_command "$VM_IP" "/opt/ludus/ci/.apikey-admin" "ludus range list --json" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+            wait_for_ludus_command "$VM_IP" "/opt/ludus/install/root-api-key" "ludus --user CIA range list --json | jq -e 'type == \"object\"'" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
             ;;
         "range_built_user"|"integration_ready")
-            wait_for_ludus_command "$VM_IP" "/opt/ludus/ci/.apikey-user" "ludus range list --json" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
+            wait_for_ludus_command "$VM_IP" "/opt/ludus/install/root-api-key" "ludus --user CIU range list --json | jq -e 'type == \"object\"'" "$CUSTOM_ENV_LUDUS_SNAPSHOT_NAME" || exit "${BUILD_FAILURE_EXIT_CODE:-1}"
             ;;
     esac
 fi

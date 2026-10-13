@@ -540,6 +540,10 @@ wait_for_ci_vm_ssh() {
     return 1
 }
 
+# Host profile: KEY_FILE is read with sudo on the target. The durable install
+# key (/opt/ludus/install/root-api-key) is root-only and survives `--update`,
+# which replaces /opt/ludus/ci. The CLI exits 0 on API errors, so host-profile
+# CHECK_CMD must validate its output (e.g. pipe JSON into `jq -e`).
 wait_for_ludus_command() {
     local IP="$1"
     local KEY_FILE="$2"
@@ -549,7 +553,7 @@ wait_for_ludus_command() {
     if [[ "$CI_PROFILE" == "lxc-2.4" ]]; then
         REMOTE_COMMAND="export LUDUS_CI_PROFILE=lxc-2.4; source /opt/ludus/ci/job-server.sh && ci_server_init && ci_client_config && LUDUS_API_KEY=\$(ci_server_exec cat '$KEY_FILE') && export LUDUS_API_KEY && $CHECK_CMD >/dev/null 2>&1"
     else
-        REMOTE_COMMAND="test -f '$KEY_FILE' && LUDUS_API_KEY=\$(cat '$KEY_FILE') && export LUDUS_API_KEY && $CHECK_CMD >/dev/null 2>&1"
+        REMOTE_COMMAND="LUDUS_API_KEY=\$(sudo -n cat '$KEY_FILE' 2>/dev/null) && export LUDUS_API_KEY && { $CHECK_CMD; } >/dev/null 2>&1"
     fi
 
     echo "Waiting for Ludus API readiness on $IP ($LABEL)..."

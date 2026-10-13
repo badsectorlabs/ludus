@@ -127,6 +127,17 @@ For non-cluster tests, `prepare.sh` calls `base.sh:resolve_vm()`. That function:
 Sequential jobs in the same series use the same clone, so state carries through
 the series. Independent series get independent clones and can run in parallel.
 
+Before running host-profile `from-snapshot` jobs past `clean_install`,
+`prepare.sh` waits for the Ludus API with the durable install key
+`/opt/ludus/install/root-api-key` (root-only, read via `sudo`) and impersonates
+the seeded CI user (`--user CIA` for `templates_built`/`range_built_admin`,
+`--user CIU` for `range_built_user`/`integration_ready`). It does not use
+`/opt/ludus/ci/.apikey-*`: `ludus-server --update` replaces `/opt/ludus/ci`,
+so those seed keys disappear when a job retries on an updated clone. The CLI
+exits 0 on API errors, so each check validates its JSON output with `jq -e`.
+The LXC profile reads the same key inside the container and checks
+`ludus users list all`.
+
 Current series:
 
 | Series                | Jobs                                                           |
