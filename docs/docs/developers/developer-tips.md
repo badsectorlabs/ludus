@@ -84,7 +84,7 @@ ludus user list
 
 This sets `LUDUS_URL` to `https://127.0.0.1:<selected-ludus-port>` and `LUDUS_API_KEY` to the development user's key. Start the tunnel before using the local client.
 
-Release rolls the VM back through the Proxmox API, starts it if necessary, and updates it to the latest public Ludus release over root SSH to the VM. If that release does not match the restored snapshot, release creates a new snapshot before replacing all VM tags with `available`. If any restore, update, or snapshot step fails, the VM remains checked out so the failure can be inspected and the release retried.
+Release rolls the VM back through the Proxmox API, starts it if necessary, restarts its time synchronization (a RAM-state rollback resumes the clock at snapshot time), and updates it to the latest public Ludus release over root SSH to the VM. If that release does not match the restored snapshot, release creates a new snapshot before replacing all VM tags with `available`. If any restore, clock, update, or snapshot step fails, the VM remains checked out so the failure can be inspected and the release retried.
 
 ## DEBUG logging
 

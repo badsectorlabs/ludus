@@ -180,13 +180,14 @@ choose_local_port() {
 pve_api() {
     local method=$1
     local path=$2
-    local response
+    local response http_status message
     local curl_args
 
     shift 2
-    curl_args=(-fsS
+    curl_args=(-sS
         --request "$method"
-        --header "Authorization: PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}")
+        --header "Authorization: PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}"
+        --write-out '\n%{http_code}')
     case "$PVE_CURL_TLS_MODE" in
         insecure) curl_args+=(--insecure) ;;
         ca-file) curl_args+=(--cacert "$PVE_CA_FILE") ;;
@@ -194,6 +195,20 @@ pve_api() {
     response=$(curl "${curl_args[@]}" \
         "$@" \
         "${PVE_API_URL}/api2/json${path}") || return 1
+    http_status=${response##*$'\n'}
+    response=${response%$'\n'*}
+    case "$http_status" in
+        2??) ;;
+        *)
+            message=$(printf '%s\n' "$response" | jq -r '.message // empty' 2>/dev/null || true)
+            echo "Error: Proxmox API $method $path returned HTTP $http_status${message:+: $message}" >&2
+            # Status 75 marks a VM config lock timeout, which callers may retry.
+            case "$message" in
+                *"can't lock file"*"got timeout"*) return 75 ;;
+            esac
+            return 1
+            ;;
+    esac
     printf '%s\n' "$response" | jq -c '
         if has("data") then .data else error("Proxmox API response has no data field") end
     '
@@ -268,9 +283,27 @@ set_vm_tags() {
     local vmid=$2
     local tags=$3
     local digest=$4
-    pve_api PUT "/nodes/${node}/qemu/${vmid}/config" \
-        --data-urlencode "tags=$tags" \
-        --data-urlencode "digest=$digest" >/dev/null
+    local attempts=12
+    local attempt=1
+    local status
+
+    # Proxmox can keep the VM config locked for about 30 seconds after a
+    # snapshot rollback task reports completion. Retry only that lock timeout.
+    while true; do
+        if pve_api PUT "/nodes/${node}/qemu/${vmid}/config" \
+            --data-urlencode "tags=$tags" \
+            --data-urlencode "digest=$digest" >/dev/null; then
+            return 0
+        else
+            status=$?
+        fi
+        if [ "$status" -ne 75 ] || [ "$attempt" -ge "$attempts" ]; then
+            return "$status"
+        fi
+        echo "Retrying the VM $vmid tag update ($attempt/$attempts)..." >&2
+        attempt=$((attempt + 1))
+        sleep 5
+    done
 }
 
 find_vm_resource() {
@@ -867,6 +900,31 @@ wait_for_guest_ssh() {
     return 1
 }
 
+sync_guest_clock() {
+    local ip=$1
+    local attempts=30
+    local attempt=0
+    local guest_time skew
+
+    # A RAM-state rollback resumes the guest clock at snapshot time, and the
+    # running NTP daemon only slews it. Restarting time sync steps the clock.
+    ssh_guest no-stdin "$ip" timedatectl set-ntp false
+    ssh_guest no-stdin "$ip" timedatectl set-ntp true
+    while [ "$attempt" -lt "$attempts" ]; do
+        guest_time=$(ssh_guest no-stdin "$ip" date +%s)
+        skew=$((guest_time - $(date +%s)))
+        skew=${skew#-}
+        if [ "$skew" -le 60 ]; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    echo "Error: test VM $ip clock is still ${skew}s from local time after restarting NTP" >&2
+    return 1
+}
+
 update_guest() {
     local ip=$1
     local release=$2
@@ -994,6 +1052,8 @@ release_vm() {
     mark_checked_out "$RELEASE_NODE" "$state_vmid" "$RELEASE_BRANCH_TAG"
     ensure_vm_running "$RELEASE_NODE" "$state_vmid"
     wait_for_guest_ssh "$ip"
+    echo "Synchronizing the VM $state_vmid clock..."
+    sync_guest_clock "$ip"
 
     echo "Updating VM $state_vmid to public Ludus release $release..."
     update_guest "$ip" "$release"

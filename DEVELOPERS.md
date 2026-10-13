@@ -205,11 +205,12 @@ Release:
 1. verifies that the VM is checked out by this worktree;
 2. rolls back the newest `ludus-v*` snapshot;
 3. starts the VM if the rollback leaves it stopped;
-4. updates Ludus to the latest public release over root SSH to the test VM;
-5. creates a new release snapshot when the public release differs from the restored snapshot;
-6. replaces all VM tags with `available` and removes `.ludus-testing-vm.json`.
+4. restarts time synchronization on the VM, because a RAM-state rollback resumes its clock at snapshot time;
+5. updates Ludus to the latest public release over root SSH to the test VM;
+6. creates a new release snapshot when the public release differs from the restored snapshot;
+7. replaces all VM tags with `available` and removes `.ludus-testing-vm.json`.
 
-The rollback discards development changes on the VM. If rollback, update, or snapshot creation fails, the VM remains tagged `in-use` and the checkout state is retained. Inspect the failure and rerun `release` when it is safe.
+The rollback discards development changes on the VM. If rollback, clock synchronization, update, or snapshot creation fails, the VM remains tagged `in-use` and the checkout state is retained. Inspect the failure and rerun `release` when it is safe.
 
 ## Typical session
 
