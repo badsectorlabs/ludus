@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -146,7 +147,11 @@ func TestPluginResourcesAccessAndLifecycle(t *testing.T) {
 		t.Helper()
 		r := httptest.NewRequest(method, path, bytes.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+token)
-		r.Header.Set("Content-Type", "application/json")
+		contentType := "application/json"
+		if method == "POST" && strings.Contains(path, "/plugins/install") && bytes.HasPrefix(body, []byte("PK")) {
+			contentType = "application/zip"
+		}
+		r.Header.Set("Content-Type", contentType)
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, r)
 		if response.Code != want {
@@ -158,6 +163,14 @@ func TestPluginResourcesAccessAndLifecycle(t *testing.T) {
 	call("", "GET", base, nil, 401)
 	m := PluginManifest{SchemaVersion: 1, ID: "example-plugin", Name: "Example", Version: "1", UI: "ui/index.html"}
 	call(ownerToken, "POST", base+"/install", testPackage(t, m, map[string]string{"ui/index.html": "<h1>Example</h1>"}), 201)
+	githubManifest := PluginManifest{SchemaVersion: 1, ID: "github-plugin", Name: "GitHub Plugin", Version: "1", UI: "ui/index.html"}
+	p.githubTransport = githubFixtureTransport(t, testPackage(t, githubManifest, map[string]string{"ui/index.html": "<h1>GitHub</h1>"}), "plugin.zip")
+	call(ownerToken, "POST", base+"/install", []byte(`{"githubURL":"https://github.com/example/plugin"}`), 201)
+	p.githubTransport = nil
+	imported, err := pb.FindFirstRecordByData("plugin_resources", "pluginID", githubManifest.ID)
+	if err != nil || imported.GetString("owner") != owner.Id || imported.GetBool("allUsers") {
+		t.Fatal("GitHub import did not preserve private ownership")
+	}
 	r, _ := pb.FindFirstRecordByData("plugin_resources", "pluginID", m.ID)
 	if r.GetString("owner") != owner.Id || r.GetBool("allUsers") {
 		t.Fatal("upload not private to authenticated owner")
@@ -274,9 +287,22 @@ func TestPluginResourcesAccessAndLifecycle(t *testing.T) {
 	call(adminToken, "POST", base+"/install?replace=true&resourceID="+global.Id, replacement, 500)
 	p.root = root
 	call(peerToken, "GET", base+"/global-plugin/ui", nil, 200)
+	// A rejected database update must also preserve the old package and runtime.
+	reject := pb.OnRecordUpdate("plugin_resources").BindFunc(func(e *core.RecordEvent) error {
+		if e.Record.Id == global.Id {
+			return errors.New("injected update failure")
+		}
+		return e.Next()
+	})
+	call(adminToken, "POST", base+"/install?replace=true&resourceID="+global.Id, replacement, 500)
+	pb.OnRecordUpdate("plugin_resources").Unbind(reject)
+	if !strings.Contains(call(peerToken, "GET", base+"/"+global.Id+"/ui", nil, 200).Body.String(), "global") {
+		t.Fatal("failed replacement changed existing UI")
+	}
+
 	call(adminToken, "POST", base+"/install?replace=true&resourceID="+global.Id, replacement, 201)
 	updated, _ := pb.FindFirstRecordByData("plugin_resources", "pluginID", m.ID)
-	if updated.GetString("owner") != global.GetString("owner") || !updated.GetBool("allUsers") || resourceManifest(updated).Version != "2" || p.runtimes[global.Id] != nil {
+	if updated.Id != global.Id || updated.GetString("owner") != global.GetString("owner") || !updated.GetBool("allUsers") || resourceManifest(updated).Version != "2" || p.runtimes[global.Id] != nil {
 		t.Fatal("replacement did not preserve ownership/scope or stop old version")
 	}
 	call(peerToken, "GET", base+"/global-plugin/ui", nil, 409)
@@ -284,8 +310,11 @@ func TestPluginResourcesAccessAndLifecycle(t *testing.T) {
 	if !strings.Contains(call(peerToken, "GET", base+"/global-plugin/ui", nil, 200).Body.String(), "new version") {
 		t.Fatal("replacement served old UI")
 	}
-	if _, err := os.Stat(filepath.Join(root, global.Id)); !os.IsNotExist(err) {
-		t.Fatal("replacement left superseded package files")
+	if !strings.Contains(call(peerToken, "GET", base+"/"+global.Id+"/ui", nil, 200).Body.String(), "new version") {
+		t.Fatal("original installation URL did not serve replacement")
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(root, ".replacement-*")); len(leftovers) != 0 {
+		t.Fatal("replacement staging leaked")
 	}
 	m.ID = "personal-plugin"
 	call(ownerToken, "POST", base+"/install?replace=true", testPackage(t, m, map[string]string{"ui/index.html": "personal v2"}), 201)
@@ -325,6 +354,9 @@ func TestPluginResourcesAccessAndLifecycle(t *testing.T) {
 	}
 	m.Version = "2"
 	aV2 := uploadID(ownerToken, "?replace=true&resourceID="+aID, testPackage(t, m, map[string]string{"ui/index.html": "new owner version"}))
+	if aV2 != aID {
+		t.Fatal("replacement changed installation identity")
+	}
 	call(ownerToken, "POST", base+"/"+aV2+"/activate", nil, 200)
 	if !strings.Contains(call(ownerToken, "GET", base+"/same-plugin/ui", nil, 200).Body.String(), "new owner version") {
 		t.Fatal("owner slug loaded the wrong version")

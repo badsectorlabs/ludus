@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -32,11 +33,12 @@ type resourceRuntime struct {
 // Resource operations are serialized; each request re-reads its access record.
 // These ACLs govern use of trusted plugins, not isolation of server executables.
 type PluginResources struct {
-	mu       sync.Mutex
-	app      core.App
-	server   *Server
-	root     string
-	runtimes map[string]*resourceRuntime
+	mu              sync.Mutex
+	app             core.App
+	server          *Server
+	root            string
+	runtimes        map[string]*resourceRuntime
+	githubTransport http.RoundTripper
 }
 
 func newPluginResources(app core.App, server *Server) *PluginResources {
@@ -204,10 +206,33 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 	if allUsers && !pluginAdmin(e.Auth) {
 		return JSONError(e, 403, "only administrators can install global plugins")
 	}
-	e.Request.Body = http.MaxBytesReader(e.Response, e.Request.Body, pluginUploadLimit)
-	data, err := io.ReadAll(e.Request.Body)
-	if err != nil {
-		return JSONError(e, 413, "plugin package exceeds 128 MiB")
+	var data []byte
+	var err error
+	mediaType, _, _ := mime.ParseMediaType(e.Request.Header.Get("Content-Type"))
+	if mediaType == "application/json" {
+		e.Request.Body = http.MaxBytesReader(e.Response, e.Request.Body, 4096)
+		var body struct {
+			GitHubURL string `json:"githubURL"`
+		}
+		decoder := json.NewDecoder(e.Request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&body); err != nil {
+			return JSONError(e, 400, "invalid GitHub import request")
+		}
+		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+			return JSONError(e, 400, "invalid GitHub import request")
+		}
+		var status int
+		data, status, err = importGitHubPlugin(e.Request.Context(), body.GitHubURL, p.githubTransport)
+		if err != nil {
+			return JSONError(e, status, err.Error())
+		}
+	} else {
+		e.Request.Body = http.MaxBytesReader(e.Response, e.Request.Body, pluginUploadLimit)
+		data, err = io.ReadAll(e.Request.Body)
+		if err != nil {
+			return JSONError(e, 413, "plugin package exceeds 128 MiB")
+		}
 	}
 	pkg, err := readPluginPackage(data)
 	if err != nil {
@@ -278,6 +303,9 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 		return JSONError(e, 500, err.Error())
 	}
 	r := core.NewRecord(c)
+	if existing != nil {
+		r = existing.Fresh()
+	}
 	r.Set("pluginID", pkg.manifest.ID)
 	r.Set("owner", e.Auth.Id)
 	r.Set("allowedUsers", []string{e.Auth.Id})
@@ -291,33 +319,76 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 	r.Set("manifest", pkg.manifest)
 	r.Set("sha256", pkg.digest)
 	r.Set("state", "pending")
-	// Stage into a fresh generated record directory. A rejected or failed upload
-	// leaves both the previous database record and running process intact.
-	if err := p.app.RunInTransaction(func(tx core.App) error {
-		if existing != nil {
-			if err := tx.Delete(existing); err != nil {
+	if existing != nil {
+		// An installation keeps its identity across upgrades: GUI links and ACL
+		// references must not point at a deleted record after replacement.
+		err = p.replacePackage(r, pkg)
+	} else {
+		err = p.app.RunInTransaction(func(tx core.App) error {
+			if err := tx.Save(r); err != nil {
 				return err
 			}
-		}
-		if err := tx.Save(r); err != nil {
-			return err
-		}
-		return storePluginPackage(p.root, r.Id, pkg)
-	}); err != nil {
-		if len(r.Id) == 15 {
+			return storePluginPackage(p.root, r.Id, pkg)
+		})
+		if err != nil && len(r.Id) == 15 {
 			_ = os.RemoveAll(filepath.Join(p.root, r.Id))
 		}
+	}
+	if err != nil {
 		return JSONError(e, 500, "could not store plugin package: "+err.Error())
 	}
 	if existing != nil {
 		p.stop(existing.Id)
-		// This directory belongs only to the superseded generated package record;
-		// plugin-created data is separate and remains available to the new version.
-		if err := os.RemoveAll(filepath.Join(p.root, existing.Id)); err != nil {
-			p.server.Logger.Error("could not remove superseded plugin package", "plugin", pkg.manifest.ID, "error", err)
-		}
 	}
 	return e.JSON(201, p.response(r, e.Auth))
+}
+
+// replacePackage stages bytes before touching the current package. Resource
+// operations hold p.mu, so no request can observe the filesystem swap before
+// the corresponding record update commits. Failed updates restore the old files.
+func (p *PluginResources) replacePackage(r *core.Record, pkg *pluginPackage) error {
+	stage, err := os.MkdirTemp(p.root, ".replacement-")
+	if err != nil {
+		return err
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(stage)
+		}
+	}()
+	if err := storePluginPackage(stage, r.Id, pkg); err != nil {
+		return err
+	}
+	current, backup := filepath.Join(p.root, r.Id), filepath.Join(stage, "previous")
+	movedOld, installed := false, false
+	err = p.app.RunInTransaction(func(tx core.App) error {
+		if err := tx.Save(r); err != nil {
+			return err
+		}
+		if err := os.Rename(current, backup); err != nil {
+			return err
+		}
+		movedOld = true
+		if err := os.Rename(filepath.Join(stage, r.Id), current); err != nil {
+			return err
+		}
+		installed = true
+		return nil
+	})
+	if err != nil && movedOld {
+		if installed {
+			if removeErr := os.RemoveAll(current); removeErr != nil {
+				cleanup = false
+				return fmt.Errorf("%w; previous package retained at %s: %v", err, backup, removeErr)
+			}
+		}
+		if restoreErr := os.Rename(backup, current); restoreErr != nil {
+			cleanup = false
+			return fmt.Errorf("%w; previous package retained at %s: %v", err, backup, restoreErr)
+		}
+	}
+	return err
 }
 
 func validateResourceMetadata(m PluginManifest, metadata pluginrpc.Metadata) error {

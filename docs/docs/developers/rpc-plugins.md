@@ -58,10 +58,12 @@ flowchart TB
 ## Installing a plugin
 
 1. Open **Resources → Plugins** in the web UI.
-2. Upload the plugin's ZIP package.
+2. Upload the plugin's ZIP package or import a public GitHub release.
 3. Select **Activate** to enable it.
 
 Uploading stores the package. Activation starts its server component, if it has one, and makes its web interface available. Activated plugins load again when Ludus restarts. If a plugin crashes, select **Activate** to start it again.
+
+For GitHub import, paste a repository URL to use its latest published release, a release-tag URL, or a direct link to a release ZIP asset. The release must contain a packaged plugin ZIP; GitHub's automatically generated source archives are not plugin packages. If the release has multiple ZIP assets, select the specific asset URL. Private releases are not supported. Ludus validates the downloaded package using the same rules as a direct upload.
 
 :::warning
 Only activate plugins from authors you trust. Server components run with the Ludus service account's privileges and have privileged access to Ludus data.
@@ -87,7 +89,7 @@ Sharing a plugin does not grant access to your ranges. Each user still needs acc
 
 ## Updating and deleting plugins
 
-To update an uploaded plugin, upload the new package and select **Replace existing version**. This keeps its owner and sharing settings. Activate the new version before using it.
+To update an uploaded plugin, upload or import the new package and select **Replace existing version**. This keeps its installation ID, owner, and sharing settings. Activate the new version before using it.
 
 **Remove** hides a shared plugin from your list without affecting other users. Use **Show plugins available to add back** to restore it to your list.
 
