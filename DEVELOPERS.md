@@ -218,11 +218,12 @@ Release:
 1. verifies that the VM is checked out by this worktree;
 2. rolls back the newest `ludus-v*` snapshot;
 3. starts the VM if the rollback leaves it stopped;
-4. updates Ludus to the latest public release over root SSH to the test VM;
-5. creates a new release snapshot when the public release differs from the restored snapshot;
-6. replaces all VM tags with `available` and removes `.ludus-testing-vm.json`.
+4. restarts time synchronization on the VM, because a RAM-state rollback resumes its clock at snapshot time;
+5. updates Ludus to the latest public release over root SSH to the test VM;
+6. creates a new release snapshot when the public release differs from the restored snapshot;
+7. replaces all VM tags with `available` and removes `.ludus-testing-vm.json`.
 
-The rollback discards development changes on the VM. If rollback, update, or snapshot creation fails, the VM remains tagged `in-use` and the checkout state is retained. Inspect the failure and rerun `release` when it is safe.
+The rollback discards development changes on the VM. If rollback, clock synchronization, update, or snapshot creation fails, the VM remains tagged `in-use` and the checkout state is retained. Inspect the failure and rerun `release` when it is safe.
 
 ## Snapshot-based installer and migration tests
 
@@ -300,7 +301,7 @@ Use the installed instance's credentials for API checks. Build-only mode deliber
 ./testing.sh release 1008
 ```
 
-With an explicit baseline, release rechecks that snapshot, rolls back to it, reasserts the checkout tags restored by rollback, starts the VM if necessary, and waits for root SSH. It then marks the VM `available` and removes checkout state. It does **not** query the latest public Ludus release, run a public update, or create a release snapshot, so releasing bare Proxmox does not require Ludus to be installed. Failure retains checkout state and reasserts `in-use` ownership. A missing baseline is an error, never a fallback to the public-release flow.
+With an explicit baseline, release rechecks that snapshot, rolls back to it, reasserts the checkout tags restored by rollback, starts the VM if necessary, waits for root SSH, and restarts its time synchronization. It then marks the VM `available` and removes checkout state. It does **not** query the latest public Ludus release, run a public update, or create a release snapshot, so releasing bare Proxmox does not require Ludus to be installed. Failure retains checkout state and reasserts `in-use` ownership. A missing baseline is an error, never a fallback to the public-release flow.
 
 For a migration test, use `./testing.sh checkout 1008 --baseline legacy-host` and `./dev.sh -B` instead. Keep the legacy installation untouched until invoking the installer migration command. Release discards the installed container and other test changes by restoring the entire nested-host snapshot. Stop the worktree's tunnel before release; even stale tunnel state must be cleaned with `tunnel stop`.
 

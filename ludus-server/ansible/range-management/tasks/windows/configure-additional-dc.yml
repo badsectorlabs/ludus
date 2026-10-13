@@ -63,7 +63,7 @@
     - name: Wait for the provisioning connection to become available
       ansible.builtin.wait_for:
         host: "{{ ansible_host }}"
-        port: "{{ ansible_port | default(5986) }}"
+        port: "{{ ansible_port | default(ludus_windows_control_port) }}"
         delay: 10
         state: started
       delegate_to: localhost

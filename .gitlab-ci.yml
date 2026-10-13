@@ -2659,20 +2659,11 @@ test-everything:
     when: script_failure
   script:
     - *ci-setup-user
-    # Delete the range to start fresh the first time the job is run
+    # Always deploy into an empty range. GitLab retries reuse this VM, and redeploying over a failed
+    # attempt skips one-shot steps (e.g. sysprep once Sysprep_succeeded.tag exists), hiding first-deploy failures.
     - |
-      if [[ $(ludus range list --json  | jq '.VMs[] | select(.name == "CIU-redirector") | .name' | wc -l) -eq 0 ]]; then
-        ludus range rm --no-prompt
-        timeout 180 bash -c 'until [[ $(ludus range list --json | jq ".numberOfVMs") == 0 ]]; do sleep 5; done'
-      fi
-    # Power cycle the range if this is a retry
-    - |
-      if [[ $(ludus range list --json  | jq '.VMs[] | select(.name == "CIU-redirector") | .name' | wc -l) -eq 1 ]]; then
-        ludus power off -n all
-        timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == false)") == "true" ]]; do sleep 5; done'
-        ludus power on -n all
-        timeout 180 bash -c 'until [[ $(ludus range list --json | jq "all(.VMs[].poweredOn; . == true)") == "true" ]]; do sleep 5; done'
-      fi
+      ludus range rm --no-prompt
+      timeout 180 bash -c 'until [[ $(ludus range list --json | jq ".numberOfVMs") == 0 ]]; do sleep 5; done'
     - ludus ansible role add geerlingguy.docker || true
     - ludus range config set -f /opt/ludus/ci/configs/integration-test.yml
     - ludus range deploy
