@@ -51,9 +51,9 @@ ludus:
     testing:                # This key controls the behavior of the VM in testing mode. If undefined, both values are set to true
       snapshot: true        # Snapshot this VM going into testing, and revert it coming out of testing. Default: true
       block_internet: true  # Cut this VM off from the internet during testing. Default true
-    roles:                  # This key is an array of user-defined roles that will be installed on this VM. Roles must exist on the Ludus server and can be installed with `ludus ansible role add`
+    roles:                  # This key is an array of user-defined roles that will be installed on this VM. Roles must exist on the Ludus server and can be installed with `ludus ansible role add`. Roles on a VM run in the order they are listed
       - geerlingguy.docker  # Arbitrary role name, as it appears in `ludus ansible roles list`
-      - name: badsectorlabs.ludus_elastic_agent # You can also specify a role with a an array of dependencies that have to run first
+      - name: badsectorlabs.ludus_elastic_agent # You can also specify a role with a an array of dependencies that have to run first. If a role is run early because something depends on it, the roles listed above it on its VM run before it. A depends_on that requires a role listed later on the same VM overrides the list order
         depends_on:
           - vm_name: "{{ range_id }}-elastic"  # In this case, we have to set up the elastic container (server) before the agent
             role: badsectorlabs.ludus_elastic_container

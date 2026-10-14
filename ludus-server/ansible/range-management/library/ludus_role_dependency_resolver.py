@@ -10,6 +10,9 @@ short_description: Resolve dependencies in Ludus configuration
 description:
     - This module reads a Ludus configuration array and returns an ordered array of VM names and role names
       that satisfies all the 'depends_on' restrictions.
+    - Roles on the same VM (or the router) run in the order they are listed, unless an explicit 'depends_on'
+      chain requires a later role to run first. A role pulled forward by a dependency brings the roles listed
+      above it on its VM along with it.
     - If a circular dependency is found, it returns an error message.
     - The result is deterministic and consistent across multiple runs.
 options:
@@ -55,39 +58,60 @@ error:
     sample: "ERROR: Circular dependency found for vm1:role1"
 '''
 
+def add_vm_roles(vm_name, roles, graph, nodes):
+    """Add one VM's roles and their explicit depends_on edges. Returns the VM's role nodes in list order."""
+    ordered = []
+    for role in roles:
+        if isinstance(role, str):
+            role_name = role
+            depends_on = []
+        elif isinstance(role, dict):
+            role_name = role['name']
+            depends_on = role.get('depends_on', [])
+        else:
+            continue
+        node = (vm_name, role_name)
+        nodes[node] = True
+        graph[node] = [(dep['vm_name'], dep['role']) for dep in depends_on]
+        ordered.append(node)
+    return ordered
+
+def depends_on_transitively(graph, node, target):
+    """True if node already depends on target through any chain of edges."""
+    stack = [node]
+    seen = set()
+    while stack:
+        current = stack.pop()
+        if current == target:
+            return True
+        if current in seen:
+            continue
+        seen.add(current)
+        # Unknown dependencies are reported by topological_sort
+        stack.extend(graph.get(current, []))
+    return False
+
+def add_list_order_edges(graph, ordered_roles_per_vm):
+    """Make each role depend on the role listed above it on the same VM, unless explicit depends_on edges
+    already require the opposite order. Runs after all explicit edges exist so cross-VM chains are seen."""
+    for ordered in ordered_roles_per_vm:
+        for prev, node in zip(ordered, ordered[1:]):
+            if not depends_on_transitively(graph, prev, node):
+                graph[node].append(prev)
+
 def parse_ludus_config(ludus, router, default_router_vm_name):
     graph = OrderedDict()
     nodes = OrderedDict()
+    ordered_roles_per_vm = []
 
-    for vm in ludus: # config.get('ludus', []):
-        vm_name = vm['vm_name']
-        roles = vm.get('roles', [])
-
-        for role in roles:
-            if isinstance(role, str):
-                role_name = role
-                nodes[(vm_name, role_name)] = True
-                graph[(vm_name, role_name)] = []
-            elif isinstance(role, dict):
-                role_name = role['name']
-                nodes[(vm_name, role_name)] = True
-                graph[(vm_name, role_name)] = []
-                for dep in role.get('depends_on', []):
-                    dep_vm = dep['vm_name']
-                    dep_role = dep['role']
-                    graph[(vm_name, role_name)].append((dep_vm, dep_role))
+    for vm in ludus:
+        ordered_roles_per_vm.append(add_vm_roles(vm['vm_name'], vm.get('roles', []), graph, nodes))
     # Also check router roles
     if router is not None:
         router_vm_name = router.get('vm_name', default_router_vm_name)
-        for role in router.get('roles', []):
-            if isinstance(role, str):
-                role_name = role
-                nodes[(router_vm_name, role_name)] = True
-                graph[(router_vm_name, role_name)] = []
-            elif isinstance(role, dict):
-                role_name = role['name']
-                nodes[(router_vm_name, role_name)] = True
+        ordered_roles_per_vm.append(add_vm_roles(router_vm_name, router.get('roles', []), graph, nodes))
 
+    add_list_order_edges(graph, ordered_roles_per_vm)
     return graph, nodes
 
 def topological_sort(graph, nodes):

@@ -836,6 +836,13 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    # The generated user-defined-roles playbook also runs router roles; check here so `-t user-defined-roles` can't skip the router play's check
+    - name: Check for Pro entitlement for router roles
+      ansible.builtin.assert:
+        that: '"PRO_ROLES" in (ludus_entitlements | default([], true))'
+        fail_msg: "The router roles feature requires the PRO_ROLES entitlement"
+      when: (router | default({})).roles | default([]) | length > 0
+
     - name: Collect VMs with user-defined roles
       ansible.builtin.set_fact:
         custom_roles_vms: "{{ ((custom_roles_vms | default([])) + [item.vm_name]) | unique }}"

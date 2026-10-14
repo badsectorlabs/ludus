@@ -213,6 +213,10 @@ stages:
   - ludus range config set -f /opt/ludus/ci/configs/depends-on.yml
   - ludus range deploy -t user-defined-roles
   - *wait-for-range-success
+  # Depends on - a role pulled forward by depends_on brings the roles listed above it on its VM
+  - ludus range config set -f /opt/ludus/ci/configs/depends-on-list-order.yml
+  - ludus range deploy -t user-defined-roles
+  - *wait-for-range-success
   # Depends on - dependency that doesn't exist test
   - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
   - 'ludus range config set -f /opt/ludus/ci/configs/depends-on-not-found.yml 2>&1 | egrep "ERROR: Dependency not found \w+-ad-dc-win2022-server-x64-1:geerlingguy.docker"'
