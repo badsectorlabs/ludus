@@ -24,7 +24,10 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-const pluginTokenRefreshInterval = 24 * time.Hour
+const (
+	pluginTokenRefreshInterval = time.Hour
+	pluginTokenRefreshWindow   = 12 * time.Hour
+)
 
 type PocketBaseConnection struct {
 	URL               string
@@ -123,7 +126,7 @@ func (c *PocketBaseClient) StartTokenRefresh(logger *slog.Logger) {
 			for {
 				select {
 				case <-ticker.C:
-					if err := c.refreshToken(context.Background(), true); err != nil && logger != nil {
+					if err := c.refreshToken(context.Background(), false); err != nil && logger != nil {
 						logger.Error("plugin PocketBase token refresh failed", "error", err)
 					}
 				case <-c.stop:
@@ -341,12 +344,12 @@ func (c *PocketBaseClient) setToken(token string) {
 }
 
 func (c *PocketBaseClient) refreshToken(ctx context.Context, force bool) error {
-	if !force && !tokenNeedsRefresh(c.currentToken(), 48*time.Hour) {
+	if !force && !tokenNeedsRefresh(c.currentToken(), pluginTokenRefreshWindow) {
 		return nil
 	}
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
-	if !force && !tokenNeedsRefresh(c.currentToken(), 48*time.Hour) {
+	if !force && !tokenNeedsRefresh(c.currentToken(), pluginTokenRefreshWindow) {
 		return nil
 	}
 	var response struct {

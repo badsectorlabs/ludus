@@ -120,7 +120,9 @@ func TestPocketBaseClientRejectsWrongCertificate(t *testing.T) {
 }
 
 func TestPocketBaseClientRefreshesExpiringToken(t *testing.T) {
-	initialToken := testPluginToken(t, time.Now().Add(time.Minute))
+	// A _superusers token normally lasts one day. Renewing only when it is
+	// almost expired leaves too little room for a delayed refresh attempt.
+	initialToken := testPluginToken(t, time.Now().Add(11*time.Hour))
 	refreshCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
@@ -156,6 +158,48 @@ func TestPocketBaseClientRefreshesExpiringToken(t *testing.T) {
 	}
 	if refreshCalls != 1 {
 		t.Fatalf("auth refresh calls = %d, want 1", refreshCalls)
+	}
+}
+
+func TestPluginTokenRefreshSchedulePrecedesSuperuserExpiry(t *testing.T) {
+	const defaultSuperuserTokenLifetime = 24 * time.Hour
+	if pluginTokenRefreshInterval >= pluginTokenRefreshWindow || pluginTokenRefreshWindow >= defaultSuperuserTokenLifetime {
+		t.Fatalf("refresh interval %s and window %s must allow renewal before the %s superuser token expires",
+			pluginTokenRefreshInterval, pluginTokenRefreshWindow, defaultSuperuserTokenLifetime)
+	}
+}
+
+func TestPocketBaseClientKeepsFreshToken(t *testing.T) {
+	initialToken := testPluginToken(t, time.Now().Add(24*time.Hour))
+	refreshCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/api/collections/_superusers/auth-refresh":
+			refreshCalls++
+			http.Error(response, `{"message":"unexpected refresh"}`, http.StatusBadRequest)
+		case "/api/collections/ranges/records":
+			if token := request.Header.Get("Authorization"); token != initialToken {
+				t.Errorf("list Authorization = %q, want initial token", token)
+			}
+			fmt.Fprint(response, `{"page":1,"perPage":500,"totalItems":0,"totalPages":0,"items":[]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewPocketBaseClient(PocketBaseConnection{URL: server.URL, Token: initialToken})
+	if err != nil {
+		t.Fatalf("NewPocketBaseClient() error = %v", err)
+	}
+	defer client.Close()
+
+	if _, err := client.ListRecords(context.Background(), "ranges", ""); err != nil {
+		t.Fatalf("ListRecords() error = %v", err)
+	}
+	if refreshCalls != 0 {
+		t.Fatalf("auth refresh calls = %d, want 0", refreshCalls)
 	}
 }
 
