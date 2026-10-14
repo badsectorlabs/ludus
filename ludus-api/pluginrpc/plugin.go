@@ -142,7 +142,16 @@ type ScheduledJob struct {
 	Interval time.Duration
 }
 
+// WebApplication is an optional private HTTP endpoint for the official Guacamole app.
+// The host validates the loopback address and supplies Token on every proxy request.
+type WebApplication struct {
+	URL   string
+	Token string
+}
+
 type InitializeResponse struct {
+	WebApplication *WebApplication
+
 	Jobs  []ScheduledJob
 	State ServerState
 	// System enterprise plugins may ask the host to load entitled add-ons.
@@ -150,6 +159,8 @@ type InitializeResponse struct {
 }
 
 type Request struct {
+	GuacAppBasePath string
+
 	Method         string
 	Route          string
 	Path           string

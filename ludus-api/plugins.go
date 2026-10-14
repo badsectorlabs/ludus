@@ -22,9 +22,10 @@ import (
 )
 
 type managedPlugin struct {
-	rpc      pluginrpc.Plugin
-	client   *hcplugin.Client
-	metadata pluginrpc.Metadata
+	rpc            pluginrpc.Plugin
+	client         *hcplugin.Client
+	metadata       pluginrpc.Metadata
+	webApplication *pluginrpc.WebApplication
 
 	mu               sync.Mutex
 	initialized      bool
@@ -259,6 +260,10 @@ func (s *Server) initializePlugin(plugin *managedPlugin) error {
 	})
 	if err != nil {
 		return fmt.Errorf("initialize plugin %s: %w", plugin.metadata.Name, err)
+	}
+
+	if err := configurePluginWebApplication(plugin, response.WebApplication); err != nil {
+		return err
 	}
 
 	for _, scheduledJob := range response.Jobs {

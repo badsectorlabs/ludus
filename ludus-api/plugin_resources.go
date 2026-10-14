@@ -460,6 +460,9 @@ func (p *PluginResources) start(r *core.Record) error {
 	if err != nil {
 		return err
 	}
+	if err := configurePluginWebApplication(runtime, response.WebApplication); err != nil {
+		return err
+	}
 	for _, job := range response.Jobs {
 		if job.Name == "" || job.Interval < time.Second {
 			return fmt.Errorf("invalid scheduled job")
@@ -723,6 +726,9 @@ func (p *PluginResources) RPC(e *core.RequestEvent) error {
 		if err != nil {
 			return JSONError(e, 400, "invalid plugin request")
 		}
+		if plugin.metadata.ID == "ludus-guacamole" {
+			request.GuacAppBasePath = "/guacamole/" + r.Id + "/"
+		}
 		request.Route = route.Name
 		request.Path = APIBasePath + route.Pattern
 		response, err := plugin.rpc.Handle(request)
@@ -811,6 +817,9 @@ func (p *PluginResources) Close() {
 
 func registerPluginResourceRoutes(se *core.ServeEvent, p *PluginResources) {
 	base := APIBasePath + "/plugins"
+	for _, method := range []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"} {
+		se.Router.Route(method, "/guacamole/{pluginID}/{appPath...}", p.GuacamoleWebApplication)
+	}
 	se.Router.GET(base, p.List)
 	se.Router.POST(base+"/install", p.Upload)
 	se.Router.POST(base+"/{pluginID}/add", p.Add)
