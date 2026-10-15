@@ -33,6 +33,23 @@ func configurePluginWebApplication(plugin *managedPlugin, app *pluginrpc.WebAppl
 	return nil
 }
 
+// The package chooses its own ID, so the ID alone cannot authorize use of
+// the Guacamole proxy.
+func trustedGuacamoleResource(app core.App, record *core.Record) bool {
+	if record == nil || record.GetString("pluginID") != "ludus-guacamole" {
+		return false
+	}
+	if record.GetBool("system") {
+		return true
+	}
+	ownerID := record.GetString("owner")
+	if ownerID == "" {
+		return false
+	}
+	owner, err := app.FindRecordById("users", ownerID)
+	return err == nil && pluginAdmin(owner)
+}
+
 // The private plugin endpoint authenticates a one-time launch ticket and then
 // an HttpOnly session cookie. It owns session expiry, revocation and authorization.
 // This route is outside the JSON RPC bridge so HTTP streaming/WebSocket upgrades
@@ -42,7 +59,7 @@ func (p *PluginResources) GuacamoleWebApplication(e *core.RequestEvent) error {
 	id := e.Request.PathValue("pluginID")
 	record, err := p.app.FindRecordById("plugin_resources", id)
 	runtime := p.runtimes[id]
-	if err != nil || record.GetString("pluginID") != "ludus-guacamole" || record.GetString("state") != "approved" || runtime == nil || runtime.plugin == nil || runtime.plugin.webApplication == nil {
+	if err != nil || !trustedGuacamoleResource(p.app, record) || record.GetString("state") != "approved" || runtime == nil || runtime.plugin == nil || runtime.plugin.webApplication == nil {
 		p.mu.Unlock()
 		return e.NotFoundError("Guacamole is unavailable", nil)
 	}

@@ -238,6 +238,9 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, 400, err.Error())
 	}
+	if pkg.manifest.ID == "ludus-guacamole" && !pluginAdmin(e.Auth) {
+		return JSONError(e, 403, "only administrators can install the Guacamole plugin")
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	filter := dbx.HashExp{"pluginID": pkg.manifest.ID, "allUsers": allUsers, "system": false}
@@ -419,6 +422,9 @@ func validateResourceMetadata(m PluginManifest, metadata pluginrpc.Metadata) err
 
 func (p *PluginResources) start(r *core.Record) error {
 	m := resourceManifest(r)
+	if m.ID == "ludus-guacamole" && !trustedGuacamoleResource(p.app, r) {
+		return fmt.Errorf("only administrator-owned Guacamole plugins may be activated")
+	}
 	if runtime, exists := p.runtimes[r.Id]; exists {
 		if runtime.plugin == nil || runtime.plugin.client == nil || !runtime.plugin.client.Exited() {
 			return nil

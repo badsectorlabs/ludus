@@ -161,6 +161,22 @@ func TestPluginResourcesAccessAndLifecycle(t *testing.T) {
 	}
 	base := APIBasePath + "/plugins"
 	call("", "GET", base, nil, 401)
+	guacManifest := PluginManifest{SchemaVersion: 1, ID: "ludus-guacamole", Name: "Guacamole", Version: "1", UI: "ui/index.html"}
+	guacPackage := testPackage(t, guacManifest, map[string]string{"ui/index.html": "<h1>Guacamole</h1>"})
+	call(ownerToken, "POST", base+"/install", guacPackage, 403)
+	adminGuac := call(adminToken, "POST", base+"/install", guacPackage, 201)
+	var adminGuacResult struct{ ResourceID string `json:"resourceID"` }
+	if err := json.Unmarshal(adminGuac.Body.Bytes(), &adminGuacResult); err != nil {
+		t.Fatal(err)
+	}
+	guacRecord, err := pb.FindRecordById("plugin_resources", adminGuacResult.ResourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guacRecord.Set("owner", owner.Id)
+	if err := p.start(guacRecord); err == nil || !strings.Contains(err.Error(), "administrator-owned") {
+		t.Fatalf("non-administrator-owned Guacamole package was accepted: %v", err)
+	}
 	m := PluginManifest{SchemaVersion: 1, ID: "example-plugin", Name: "Example", Version: "1", UI: "ui/index.html"}
 	call(ownerToken, "POST", base+"/install", testPackage(t, m, map[string]string{"ui/index.html": "<h1>Example</h1>"}), 201)
 	githubManifest := PluginManifest{SchemaVersion: 1, ID: "github-plugin", Name: "GitHub Plugin", Version: "1", UI: "ui/index.html"}

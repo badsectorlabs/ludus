@@ -45,13 +45,14 @@ func TestGuacamoleProxyPreservesWebSocketAndPrivateHeaders(t *testing.T) {
 	}
 	defer pb.ResetBootstrapState()
 	collection := core.NewBaseCollection("plugin_resources")
-	collection.Fields.Add(&core.TextField{Name: "pluginID"}, &core.TextField{Name: "state"})
+	collection.Fields.Add(&core.TextField{Name: "pluginID"}, &core.TextField{Name: "state"}, &core.BoolField{Name: "system"})
 	if err := pb.Save(collection); err != nil {
 		t.Fatal(err)
 	}
 	record := core.NewRecord(collection)
 	record.Set("pluginID", "ludus-guacamole")
 	record.Set("state", "approved")
+	record.Set("system", true)
 	if err := pb.Save(record); err != nil {
 		t.Fatal(err)
 	}
@@ -105,11 +106,23 @@ func TestGuacamoleProxyPreservesWebSocketAndPrivateHeaders(t *testing.T) {
 	if err != nil || string(data) != message {
 		t.Fatalf("upgrade or payload failed: %q %v", data, err)
 	}
-	record.Set("state", "removed")
+	record.Set("system", false)
 	if err := pb.Save(record); err != nil {
 		t.Fatal(err)
 	}
 	response, err := http.Get(host.URL + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != 404 {
+		t.Fatalf("untrusted Guacamole resource remained exposed: %d", response.StatusCode)
+	}
+	record.Set("state", "removed")
+	if err := pb.Save(record); err != nil {
+		t.Fatal(err)
+	}
+	response, err = http.Get(host.URL + path)
 	if err != nil {
 		t.Fatal(err)
 	}
