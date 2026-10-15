@@ -167,6 +167,31 @@ stages:
   - ludus ansible role add geerlingguy.docker --force
   - ludus ansible role list | grep geerlingguy.docker
   - "! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1"
+  # Regression: a role install that succeeds with an ansible-galaxy warning is a success.
+  # dependency_warning lists geerlingguy.docker unpinned, so galaxy warns that it differs
+  # from the version installed above and still installs the role.
+  - |
+    (
+      set -euo pipefail
+      work=$(mktemp -d)
+      tar -czf "$work/dependency_warning.tar.gz" -C /opt/ludus/ci/roles dependency_warning
+      python3 -m http.server 18080 --bind 127.0.0.1 --directory "$work" &
+      archive_server=$!
+      trap 'kill "$archive_server" 2>/dev/null || true; wait "$archive_server" 2>/dev/null || true; rm -rf "$work"' EXIT
+      # Upload under the archive's filename, as REST clients do; the CLI sends the bare directory name.
+      curl --fail-with-body --silent --show-error --insecure --request PUT \
+        --header "X-API-KEY: ${LUDUS_API_KEY}" \
+        --form "file=@${work}/dependency_warning.tar.gz;filename=dependency_warning.tar.gz" \
+        --form force=true \
+        https://127.0.0.1:8080/api/v2/ansible/role/fromtar
+      ludus ansible role list --json | jq -e 'any(.[]; .name == "dependency_warning" and .version == "1.0.0")'
+      ludus ansible role rm dependency_warning
+      archive_url=http://127.0.0.1:18080/dependency_warning.tar.gz
+      curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 "$archive_url" --output /dev/null
+      ludus ansible role add "$archive_url" --force
+      ludus ansible role list --json | jq -e 'any(.[]; .name == "dependency_warning")'
+      ludus ansible role rm dependency_warning
+    )
   # Test collections
   - ludus ansible collection list
   - ludus ansible collection add maxhoesel.smallstep || true
@@ -1157,6 +1182,7 @@ post-deploy ansible-as-admin:
         - ludus-api/ansible.go
         - ludus-api/api_ansible*.go
         - ludus-server/ci/fixtures/ludus_ci-http_archive-*.tar.gz
+        - ludus-server/ci/roles/dependency_warning/**
         - .gitlab-ci.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
@@ -2186,6 +2212,7 @@ post-deploy ansible-as-user:
         - ludus-api/ansible.go
         - ludus-api/api_ansible*.go
         - ludus-server/ci/fixtures/ludus_ci-http_archive-*.tar.gz
+        - ludus-server/ci/roles/dependency_warning/**
         - .gitlab-ci.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
