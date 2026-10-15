@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"ludusapi/commandmanager"
 	"ludusapi/dto"
 	"ludusapi/models"
 	"net/http"
@@ -685,32 +684,37 @@ func GetAnsibleTagsForDeployment(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, response)
 }
 
-// AbortAnsible finds the ansible process deploying the requested range and
-// terminates it. The process is identified by LUDUS_RANGE_ID, so admins can
-// abort any range with `-r` regardless of which user owns the deploy.
+// AbortAnsible terminates the ansible run for the requested range and reports
+// success only after every process of that run has exited. Processes are
+// identified by LUDUS_RANGE_ID, so admins can abort any range with `-r`
+// regardless of which user owns the deploy.
 func AbortAnsible(e *core.RequestEvent) error {
 	targetRange, err := GetRange(e)
 	if err != nil {
 		return err
 	}
 
-	ansiblePidString, err := findAnsiblePidForRange(targetRange.RangeId())
+	pids, err := rangeProcessPIDs(targetRange.RangeId())
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
-
-	ansiblePid, err := strconv.Atoi(ansiblePidString)
-	if err != nil {
-		return JSONError(e, http.StatusInternalServerError, err.Error())
+	if len(pids) == 0 {
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("no ansible process found for range %s", targetRange.RangeId()))
 	}
-	commandmanager.KillProcessAndChildren(ansiblePid)
 
-	// Set range state to "ABORTED"
+	// Mark the range ABORTED before signaling so the deploy goroutine records
+	// the run as aborted rather than failed when ansible exits.
 	targetRange.SetRangeState(LudusRangeStateAborted)
 	err = e.App.Save(targetRange)
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, err.Error())
 	}
+
+	err = terminateRangeProcesses(targetRange.RangeId(), 10*time.Second, 5*time.Second)
+	if err != nil {
+		return JSONError(e, http.StatusInternalServerError, err.Error())
+	}
+
 	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, targetRange.RangeId())
 	finalizeRunningRangeLogHistory(e.App, targetRange.Id, "aborted", ansibleLogPath, time.Now())
 
