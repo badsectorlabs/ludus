@@ -137,8 +137,8 @@ router:
   ram_gb: 2
   ram_min_gb: 1
   cpus: 2
-  roles: # Enterprise only
-    - ludus_guacamole_server # You can add roles to the router VM just like any other VM
+  roles: # Enterprise/Pro only; Router roles run with the other user-defined roles (`user-defined-roles` tag), not the `network` tag
+    - ludus_guacamole_server # You can add roles to the router VM just like any other VM, as names or as `name`/`depends_on` objects
   role_vars: # Enterprise only
     somevar: value
   outbound_wireguard_config: |- # Enterprise only; Note: this config must have AllowedIPs set to 0.0.0.0/0, split tunnels are not supported (yet)

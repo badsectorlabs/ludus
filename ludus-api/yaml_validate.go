@@ -188,8 +188,9 @@ type VM struct {
 
 // Router represents the router section of the range config.
 type Router struct {
-	VMName     string `json:"vm_name"`
-	TargetNode string `json:"target_node,omitempty"` // Proxmox node for the router VM; overrides range default (cluster only)
+	VMName     string      `json:"vm_name"`
+	TargetNode string      `json:"target_node,omitempty"` // Proxmox node for the router VM; overrides range default (cluster only)
+	Roles      interface{} `json:"roles,omitempty"`
 }
 
 type Defaults struct {
@@ -212,6 +213,55 @@ var vmNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$`)
 func validateVMName(field, value string) error {
 	if !vmNameRE.MatchString(value) {
 		return fmt.Errorf("%s %q is invalid: must be 1-63 chars of letters, digits, '.' or '-' and start with a letter or digit", field, value)
+	}
+	return nil
+}
+
+// validateRolesInstalled checks that every role in a VM or router roles list,
+// including roles named in depends_on entries, is installed for the user.
+func validateRolesInstalled(e *core.RequestEvent, roles interface{}, userID string) error {
+	checkInstalled := func(name string) error {
+		exists, err := checkRoleExists(e, name)
+		if err != nil {
+			return fmt.Errorf("error checking if role exists on the server: %s", err)
+		}
+		if !exists {
+			return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, userID)
+		}
+		return nil
+	}
+	roleList, ok := roles.([]interface{})
+	if !ok {
+		return nil
+	}
+	for _, role := range roleList {
+		switch r := role.(type) {
+		case string:
+			if err := checkInstalled(r); err != nil {
+				return err
+			}
+		case map[string]interface{}:
+			logger.Debug("Yaml validate: checking role: " + godump.DumpStr(role))
+			name, ok := r["name"].(string)
+			if !ok {
+				continue
+			}
+			if err := checkInstalled(name); err != nil {
+				return err
+			}
+			dependsOn, _ := r["depends_on"].([]interface{})
+			for _, dep := range dependsOn {
+				depMap, ok := dep.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if depRole, ok := depMap["role"].(string); ok {
+					if err := checkInstalled(depRole); err != nil {
+						return err
+					}
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -251,6 +301,9 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 			if err := validateTargetNode(e, resolvedTargetNode); err != nil {
 				return fmt.Errorf("router target_node error: %w", err)
 			}
+		}
+		if err := validateRolesInstalled(e, config.Router.Roles, user.UserId()); err != nil {
+			return err
 		}
 	}
 
@@ -329,50 +382,8 @@ func validateRangeYAML(e *core.RequestEvent, yamlData []byte) error {
 				return fmt.Errorf("VM '%s' target_node error: %w", vm.VMName, err)
 			}
 		}
-		// Check the roles (if any) — every referenced role must be installed
-		// for this user.
-		if vm.Roles != nil {
-			switch roles := vm.Roles.(type) {
-			case []interface{}:
-				for _, role := range roles {
-					switch r := role.(type) {
-					case string:
-						exists, err := checkRoleExists(e, r)
-						if err != nil {
-							return fmt.Errorf("error checking if role exists on the server: %s", err)
-						}
-						if !exists {
-							return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, user.UserId())
-						}
-					case map[string]interface{}:
-						logger.Debug("Yaml validate: checking role: " + godump.DumpStr(role))
-						if name, ok := r["name"].(string); ok {
-							exists, err := checkRoleExists(e, name)
-							if err != nil {
-								return fmt.Errorf("error checking if role exists on the server: %s", err)
-							}
-							if !exists {
-								return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", name, user.UserId())
-							}
-							if dependsOn, ok := r["depends_on"].([]interface{}); ok {
-								for _, dep := range dependsOn {
-									if depMap, ok := dep.(map[string]interface{}); ok {
-										if role, ok := depMap["role"].(string); ok {
-											exists, err := checkRoleExists(e, role)
-											if err != nil {
-												return fmt.Errorf("error checking if role exists on the server: %s", err)
-											}
-											if !exists {
-												return fmt.Errorf("the role '%s' does not exist on the Ludus server for user %s", role, user.UserId())
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
+		if err := validateRolesInstalled(e, vm.Roles, user.UserId()); err != nil {
+			return err
 		}
 	}
 
