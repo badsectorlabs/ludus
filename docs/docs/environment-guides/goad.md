@@ -33,7 +33,7 @@ Synced 2h ago
 > [x] Game of Active Directory (GOAD)                              v1.1.35            ○ not installed
       Multi-forest AD attack lab based on GOAD.
 #terminal-command-local
-ludus range create -r GOAD --name GOAD --from-blueprint badsectorlabs-ludus-source-bsl/goad
+ludus range create -r GOAD --name GOAD --from-blueprint ludus-source-bsl/goad
 #terminal-command-local
 ludus range deploy -r GOAD
 #terminal-command-local
