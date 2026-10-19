@@ -54,6 +54,18 @@
   ansible.builtin.include_tasks: tasks/bootstrap/refresh-windows-ssh-key.yml
   when: defaults.use_cert_auth | default(false)
 
+# win_reboot returns when the transport is back; on a freshly promoted DC, ADWS may not serve requests yet.
+# Every microsoft.ad.* module and Get-AD* cmdlet below depends on it.
+- name: Wait for Active Directory Web Services
+  ansible.windows.win_powershell:
+    script: Get-ADDomain | Out-Null
+    error_action: stop
+  register: ludus_adws_ready
+  until: ludus_adws_ready is succeeded
+  retries: 20
+  delay: 15
+  changed_when: false
+
 - name: Configure default OUs
   microsoft.ad.ou:
     name: "{{ item }}"

@@ -90,43 +90,6 @@
     - name: Set any user defined firewall rules
       ansible.builtin.include_tasks: tasks/firewall/set-firewall-rules.yml
 
-- name: Apply all user defined roles to the router (Pro/Enterprise)
-  tags: [network]
-  hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
-  become: true
-  tasks:
-    - name: Check for Pro entitlement
-      ansible.builtin.assert:
-        that: '"PRO_ROLES" in (ludus_entitlements | default([], true))'
-        fail_msg: "The router roles feature requires the PRO_ROLES entitlement"
-      when:
-        - router.roles is defined
-        - router.roles | length > 0
-
-    - name: Check type of global_role_vars
-      ansible.builtin.assert:
-        that: global_role_vars | type_debug == 'dict'
-        fail_msg: "'global_role_vars' must be a dictionary. Remove the leading `-` from each value!"
-        success_msg: "'global_role_vars' is a dictionary"
-      when: 
-        - global_role_vars is defined
-        - router.roles is defined
-        - router.roles | length > 0
-
-    - name: Set global role variables
-      ansible.builtin.set_fact:
-        "{{ global_role_var.key }}": "{{ global_role_var.value }}"
-      loop: "{{ global_role_vars | default({}) | dict2items }}"
-      loop_control:
-        loop_var: global_role_var
-
-    - name: Apply user-defined roles to the router
-      ansible.builtin.include_tasks: tasks/router/user-defined-roles.yml
-      when:
-        - '"PRO_ROLES" in (ludus_entitlements | default([], true))'
-        - router.roles is defined
-        - router.roles | length > 0
-
 - name: Apply outbound WireGuard to the router (Enterprise)
   tags: [network]
   hosts: "{{ router.vm_name | default(default_router_vm_name) }}"
@@ -836,11 +799,23 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    # Router roles run only from the generated user-defined-roles playbook, so check the entitlement here
+    - name: Check for Pro entitlement for router roles
+      ansible.builtin.assert:
+        that: '"PRO_ROLES" in (ludus_entitlements | default([], true))'
+        fail_msg: "The router roles feature requires the PRO_ROLES entitlement"
+      when: (router | default({})).roles | default([]) | length > 0
+
     - name: Collect VMs with user-defined roles
       ansible.builtin.set_fact:
         custom_roles_vms: "{{ ((custom_roles_vms | default([])) + [item.vm_name]) | unique }}"
       loop: "{{ ludus }}"
       when: 'item.roles is defined and ((item.roles | length) > 0)'
+
+    - name: Collect the router if it has user-defined roles
+      ansible.builtin.set_fact:
+        custom_roles_router: ["{{ router.vm_name | default(default_router_vm_name) }}"]
+      when: (router | default({})).roles | default([]) | length > 0
 
 - name: Add user-defined roles to VMs
   hosts: "{{ hostvars['localhost']['custom_roles_vms'] | default([]) }}"
@@ -934,6 +909,40 @@
         - ansible_system == 'Linux'
         - ansible_default_ipv4 is defined
         - ansible_default_ipv4.mtu | int < 1500
+
+- name: Set role variables on the router
+  hosts: "{{ hostvars['localhost']['custom_roles_router'] | default([]) }}"
+  tags: [user-defined-roles]
+  gather_facts: false
+  tasks:
+    - name: Check type of global_role_vars
+      ansible.builtin.assert:
+        that: global_role_vars | type_debug == 'dict'
+        fail_msg: "'global_role_vars' must be a dictionary. Remove the leading `-` from each value!"
+        success_msg: "'global_role_vars' is a dictionary"
+      when: global_role_vars is defined
+
+    - name: Set global role variables
+      ansible.builtin.set_fact:
+        "{{ global_role_var.key }}": "{{ global_role_var.value }}"
+      loop: "{{ global_role_vars | default({}) | dict2items }}"
+      loop_control:
+        loop_var: global_role_var
+
+    - name: Check type of role_vars
+      ansible.builtin.assert:
+        that: router.role_vars | type_debug == 'dict'
+        fail_msg: "'role_vars' must be a dictionary. Remove the leading `-` from each value!"
+        success_msg: "'role_vars' is a dictionary"
+      when: router.role_vars is defined
+
+    # This is required because you cannot simply add vars to include_role, see https://github.com/ansible/ansible/issues/19084
+    - name: Set all role variables for non-arrays
+      ansible.builtin.set_fact:
+        "{{ role_item.key }}": "{{ role_item.value }}"
+      loop: "{{ (router.role_vars | dict2items) if router.role_vars is defined else [] }}"
+      loop_control:
+        loop_var: role_item
 
 - name: Run the user-defined roles playbook
   tags: [user-defined-roles]

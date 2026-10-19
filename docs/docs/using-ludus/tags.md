@@ -30,7 +30,7 @@ This is useful after an initial deployment to skip steps that are not needed on 
 | nexus | Deploy [Nexus cache](../infrastructure-operations/nexus-cache) VM |
 | share | Deploy Ludus Share VM - exposes `readonlyshare` and `readwriteshare`. Consider using the `anon_share_access` gpo to allow anonymous access to SMB shares on all Windows VMs |
 | sysprep | Run Sysprep on Windows VMs with a sysprep key set to `true` |
-| user-defined-roles | Apply all user defined roles to VMs |
+| user-defined-roles | Apply all user defined roles to VMs and the router |
 | vm-deploy | Deploy all VMs defined in the range config and make sure they are powered on |
 | windows | Configure all Windows VMs (automatic logon, firewall, RDP, SMB, Network Sharing) |
 

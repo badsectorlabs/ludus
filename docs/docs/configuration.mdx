@@ -51,9 +51,9 @@ ludus:
     testing:                # This key controls the behavior of the VM in testing mode. If undefined, both values are set to true
       snapshot: true        # Snapshot this VM going into testing, and revert it coming out of testing. Default: true
       block_internet: true  # Cut this VM off from the internet during testing. Default true
-    roles:                  # This key is an array of user-defined roles that will be installed on this VM. Roles must exist on the Ludus server and can be installed with `ludus ansible role add`
+    roles:                  # This key is an array of user-defined roles that will be installed on this VM. Roles must exist on the Ludus server and can be installed with `ludus ansible role add`. Roles on a VM run in the order they are listed
       - geerlingguy.docker  # Arbitrary role name, as it appears in `ludus ansible roles list`
-      - name: badsectorlabs.ludus_elastic_agent # You can also specify a role with a an array of dependencies that have to run first
+      - name: badsectorlabs.ludus_elastic_agent # You can also specify a role with a an array of dependencies that have to run first. If a role is run early because something depends on it, the roles listed above it on its VM run before it. A depends_on that requires a role listed later on the same VM overrides the list order
         depends_on:
           - vm_name: "{{ range_id }}-elastic"  # In this case, we have to set up the elastic container (server) before the agent
             role: badsectorlabs.ludus_elastic_container
@@ -137,8 +137,8 @@ router:
   ram_gb: 2
   ram_min_gb: 1
   cpus: 2
-  roles: # Enterprise only
-    - ludus_guacamole_server # You can add roles to the router VM just like any other VM
+  roles: # Enterprise/Pro only; Router roles run with the other user-defined roles (`user-defined-roles` tag), not the `network` tag
+    - ludus_guacamole_server # You can add roles to the router VM just like any other VM, as names or as `name`/`depends_on` objects
   role_vars: # Enterprise only
     somevar: value
   outbound_wireguard_config: |- # Enterprise only; Note: this config must have AllowedIPs set to 0.0.0.0/0, split tunnels are not supported (yet)
