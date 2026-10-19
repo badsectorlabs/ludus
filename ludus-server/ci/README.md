@@ -79,6 +79,11 @@ For non-cluster tests, `prepare.sh` calls `base.sh:resolve_vm()`. That function:
 
 Sequential jobs in the same series use the same clone, so state carries through
 the series. Independent series get independent clones and can run in parallel.
+The post-deploy series chain their jobs with optional `needs`, which drop out
+when `changes:` rules filter a job from the pipeline, so they also share a
+per-pipeline `resource_group` (`post-deploy-admin-<pipeline-id>`,
+`post-deploy-user-<pipeline-id>`). Only one job of a series runs on its clone
+at a time, whichever subset of the series a pipeline includes.
 
 Current series:
 

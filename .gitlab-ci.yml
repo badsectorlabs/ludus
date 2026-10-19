@@ -33,11 +33,36 @@ stages:
     done
   }
 
+# Polls an HTTPS URL from inside a guest until the response contains HTML. A failed curl in the guest does not
+# fail `qm guest exec`, so qm_guest_exec_retry cannot wait out DNS/HTTPS that is not ready yet after a cold boot
+# or a testing-mode change.
+.wait-for-guest-https: &wait-for-guest-https |
+  wait_for_guest_https() {
+    local vmid="$1" url="$2"
+    local deadline=$((SECONDS + 180)) attempt=0 output
+
+    while true; do
+      attempt=$((attempt + 1))
+      output=$(sudo qm guest exec "$vmid" -- curl --connect-timeout 5 --max-time 10 "$url" 2>&1) || true
+      if grep -q 'HTML' <<<"$output"; then
+        return 0
+      fi
+      if (( SECONDS >= deadline )); then
+        echo "No HTML from ${url} in VM ${vmid} after ${attempt} attempts; last qm guest exec output:" >&2
+        printf '%s\n' "$output" >&2
+        return 1
+      fi
+      echo "No HTML from ${url} in VM ${vmid} on attempt ${attempt}; retrying in 10 seconds..." >&2
+      sleep 10
+    done
+  }
+
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key
 .common-setup: &common-setup # Sync time in the event this test is being run after a snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
   - *qm-guest-exec-retry
+  - *wait-for-guest-https
   # Set the config to use the "user" API by default
   - mkdir -p ~/.config/ludus/
   - 'echo "url: https://127.0.0.1:8080" > ~/.config/ludus/config.yml'
@@ -257,7 +282,7 @@ stages:
   - ludus testing status
   # Validate that WIN10 can reach the internet
   - "qm_guest_exec_retry \"$WIN11VMID\" ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
+  - wait_for_guest_https "$WIN11VMID" https://google.com/
   - ludus testing start
   - ludus testing status
   - ludus range list
@@ -277,8 +302,8 @@ stages:
   - ludus testing status
   # Validate that google.com is in the allowedDomains list
   - 'ludus testing status --json | jq -e ''.allowedDomains | any(startswith("google.com"))'''
-  # This sometimes takes a few seconds - try 3 times 5 seconds apart
-  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
+  # Allowing the domain can take a few seconds to apply
+  - wait_for_guest_https "$WIN11VMID" https://google.com/
   - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://example.com/ | egrep 'Could not resolve host|Failed to connect|[Tt]imed out|Timeout was reached'
   # Deny google.com and 8.8.8.8 and check that they are not reachable
   - ludus testing deny -d google.com
@@ -293,7 +318,7 @@ stages:
   - 'ludus testing status --json | jq -e ''.testingEnabled == false and (.allowedIPs | length == 0) and (.allowedDomains | length == 0)'''
   # Now that testing has stopped, check the VM can reach the internet
   - "qm_guest_exec_retry \"$WIN11VMID\" ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
+  - wait_for_guest_https "$WIN11VMID" https://google.com/
 
 .power-tests: &power-tests # Power on/off tests - single VM
   - ludus power off -n ${LUDUS_USER_ID}-kali
@@ -456,6 +481,12 @@ stages:
     - changes:
         - ludus-server/**/*
         - ludus-client/**/*
+
+# Each post-deploy series runs on one shared CI clone (see get_ci_series in ludus-server/ci/base.sh).
+# Its optional needs drop out when changes-rules filter a predecessor from the pipeline, so the series
+# also shares a resource group scoped to the pipeline: one job at a time per clone, pipelines in parallel.
+.post-deploy-admin-vm: &post-deploy-admin-vm post-deploy-admin-${CI_PIPELINE_ID}
+.post-deploy-user-vm: &post-deploy-user-vm post-deploy-user-${CI_PIPELINE_ID}
 
 .ci-setup-cluster-admin: &ci-setup-cluster-admin
   # Sync time after snapshot rollback
@@ -1062,6 +1093,7 @@ range deploy-admin:
 #######################
 post-deploy testing-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1106,6 +1138,7 @@ post-deploy testing-as-admin:
 
 post-deploy power-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1151,6 +1184,7 @@ post-deploy power-as-admin:
 
 post-deploy ansible-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1200,6 +1234,7 @@ post-deploy ansible-as-admin:
 
 post-deploy user-cmds-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1272,6 +1307,7 @@ post-deploy user-cmds-as-admin:
 
 post-deploy groups-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1408,6 +1444,7 @@ post-deploy groups-as-admin:
 
 post-deploy blueprints-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1521,6 +1558,7 @@ post-deploy blueprints-as-admin:
 
 post-deploy sources-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1803,13 +1841,14 @@ post-deploy sources-as-admin:
 
 post-deploy ranges-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
     - build all
     # Both predecessors stay listed: optional needs drop out of the DAG when
     # changes-rules filter a job from the pipeline, so needing only the
-    # sources job would let this run concurrently with the blueprints job.
+    # sources job would let this run before the blueprints job.
     - job: post-deploy blueprints-as-admin
       optional: true
     - job: post-deploy sources-as-admin
@@ -2002,6 +2041,7 @@ post-deploy ranges-as-admin:
 
 post-deploy templates-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2103,6 +2143,7 @@ range deploy-user:
 #######################
 post-deploy testing-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2144,6 +2185,7 @@ post-deploy testing-as-user:
 
 post-deploy power-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2188,6 +2230,7 @@ post-deploy power-as-user:
 
 post-deploy ansible-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2232,6 +2275,7 @@ post-deploy ansible-as-user:
 
 post-deploy user-cmds-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2299,6 +2343,7 @@ post-deploy user-cmds-as-user:
 
 post-deploy blueprints-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2428,6 +2473,7 @@ post-deploy blueprints-as-user:
 
 post-deploy templates-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2468,6 +2514,7 @@ post-deploy templates-as-user:
 
 post-deploy snapshots-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
