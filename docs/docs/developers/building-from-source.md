@@ -94,23 +94,30 @@ CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags=embeddocs -trimpath \
   -o ludus-server .
 ```
 
-## Enterprise plugins
+## Plugins
 
-Enterprise plugins are standalone RPC executables. They
-are built with normal `go build` commands rather than `-buildmode=plugin`, and
-they do not need CGO or the server's exact `ludus-api` source revision.
+Plugins are standalone Go programs built with the Ludus plugin SDK
+(`ludus-plugin-sdk`). They do not import Ludus server code, need no CGO, and
+are distributed as package ZIPs containing `plugin.json`, the `plugin`
+executable, and an optional `ui/index.html`.
 
-The plugin source directories are available only in an authorized development
-checkout. For example, build the enterprise executable from the workspace root:
+Running the executable with `--ludus-manifest` prints its `plugin.json`. For
+example, build the Enterprise package from an authorized development checkout
+at the workspace root (on a linux/amd64 host):
 
 ```shell
+mkdir -p package
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" \
-  -o ludus-enterprise-plugin/ludus-enterprise.plugin \
-  ./ludus-enterprise-plugin
+  -o package/plugin ./ludus-enterprise-plugin
+./package/plugin --ludus-manifest > package/plugin.json
+(cd package && zip -X ../ludus-enterprise.zip plugin.json plugin)
 ```
 
-See [RPC plugins](./rpc-plugins.md) for installation paths, protocol
-compatibility, route registration, and real-process integration testing.
+Install a server package by extracting it, root-owned, into
+`/opt/ludus/plugins/<id>/` (for example `/opt/ludus/plugins/ludus-enterprise/`),
+or pass the ZIP to `install.sh --enterprise-plugin`. Other packages can be
+uploaded through **Resources → Plugins**. See [Plugins](./rpc-plugins.md) for
+the SDK, package format, levels, and approval.
 
 ## Client
 

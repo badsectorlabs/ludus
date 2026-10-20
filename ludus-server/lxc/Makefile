@@ -19,7 +19,7 @@ install:
 	dab exec useradd -u 1001 -g 1001 -m -s /bin/bash ludus
 	# dirs
 	dab exec mkdir -p /opt/ludus/install /opt/ludus/db /opt/ludus/tls \
-	  /opt/ludus/users /opt/ludus/plugins/enterprise/admin \
+	  /opt/ludus/users /opt/ludus/plugins \
 	  /opt/ludus/resources/blocky /opt/ludus/resources/windows \
 	  /opt/ludus/resources/global-collections /opt/ludus/resources/global-roles \
 	  /opt/ludus/resources/packer/plugins /opt/ludus/resources/sources \
@@ -59,6 +59,9 @@ install:
 	dab exec systemctl disable dnsmasq
 	dab exec systemctl enable ludus.service ludus-admin.service wg-quick@wg0
 	dab exec chown -R ludus:ludus /opt/ludus
+	# Root-run plugins start only from root-owned storage (D8).
+	dab exec chown -R root:root /opt/ludus/plugins
+	dab exec chmod 0755 /opt/ludus/plugins
 
 finalize:
 	dab finalize --compressor zstd-max

@@ -2,6 +2,8 @@ package ludusapi
 
 import (
 	"context"
+
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
 type deploymentVMHookCapabilities struct {
@@ -13,40 +15,19 @@ func (s *Server) deploymentVMHooks(ctx context.Context, rangeID string, names []
 	hooks := make(map[string]deploymentVMHookCapabilities)
 	for _, name := range names {
 		request := VMHookRequest{Source: StartVMSourceDeploymentFirstBoot, RangeID: rangeID, Pool: rangeID, VMName: name}
-		capabilities := deploymentVMHookCapabilities{}
-		for _, plugin := range s.pluginSnapshot() {
-			starts := plugin.metadata.VMHooks.Start
-			addresses := plugin.metadata.VMHooks.Address
-			if !starts && !addresses {
-				continue
-			}
-			selected, err := pluginSelectsVM(ctx, plugin, request)
-			if err != nil {
-				return nil, err
-			}
-			if selected {
-				capabilities.Start = capabilities.Start || starts
-				capabilities.Address = capabilities.Address || addresses
-			}
+		selected, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{Start: true, Address: true})
+		if err != nil {
+			return nil, err
 		}
-		hooks[name] = capabilities
+		hooks[name] = deploymentVMHookCapabilities{Start: selected.Start, Address: selected.Address}
 	}
 	return hooks, nil
 }
 
 func (s *Server) selectsVMForPower(ctx context.Context, request VMHookRequest, action string) (bool, error) {
-	for _, plugin := range s.pluginSnapshot() {
-		start := plugin.metadata.VMHooks.Start
-		stop := plugin.metadata.VMHooks.Stop
-		if (action == "on" && !start) || (action == "off" && !stop) {
-			continue
-		}
-		selected, err := pluginSelectsVM(ctx, plugin, request)
-		if err != nil || selected {
-			return selected, err
-		}
-	}
-	return false, nil
+	want := protocol.VMHookCapabilities{Start: action == "on", Stop: action == "off"}
+	selected, err := s.selectedVMHooks(ctx, request, want)
+	return selected.Any(), err
 }
 
 // Distinguish a provider veto from an ordinary Proxmox deletion failure.
@@ -55,17 +36,9 @@ type vmDeleteHookError struct{ error }
 func (e *vmDeleteHookError) Unwrap() error { return e.error }
 
 func (s *Server) selectsVMForDelete(ctx context.Context, request VMHookRequest) (bool, error) {
-	for _, plugin := range s.pluginSnapshot() {
-		if !plugin.metadata.VMHooks.BeforeDelete {
-			continue
-		}
-		selected, err := pluginSelectsVM(ctx, plugin, request)
-		if err != nil {
-			return false, &vmDeleteHookError{err}
-		}
-		if selected {
-			return true, nil
-		}
+	selected, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{BeforeDelete: true})
+	if err != nil {
+		return false, &vmDeleteHookError{err}
 	}
-	return false, nil
+	return selected.BeforeDelete, nil
 }

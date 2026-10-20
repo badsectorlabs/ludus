@@ -116,15 +116,6 @@ func GetRootPVEClient() (*pveclient.Client, error) {
 	return rootPVEClient, nil
 }
 
-func closeRootPVEClient() {
-	rootPVEClientMu.Lock()
-	defer rootPVEClientMu.Unlock()
-	if rootPVEClient != nil {
-		rootPVEClient.Close()
-		rootPVEClient = nil
-	}
-}
-
 func GetRootGoProxmoxClient() (*goproxmox.Client, error) {
 	pc, err := GetRootPVEClient()
 	if err != nil {

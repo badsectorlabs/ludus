@@ -49,13 +49,6 @@ var embeddedPackerDir embed.FS
 //go:embed all:ci
 var embeddedCIDir embed.FS
 
-func pluginAPIPort(euid int, configuration ludusapi.Configuration) int {
-	if euid == 0 {
-		return configuration.AdminPort
-	}
-	return configuration.Port
-}
-
 func serve() {
 
 	server := &ludusapi.Server{
@@ -75,48 +68,24 @@ func serve() {
 		logger.Error(fmt.Sprintf("Failed to fingerprint server certificate: %v", err))
 		return
 	}
-	server.PluginAPIURL = fmt.Sprintf("https://127.0.0.1:%d", pluginAPIPort(os.Geteuid(), config))
+	// Env.API is how a plugin acts as the caller through the public /api/v2.
+	// The regular service serves it (and proxies admin endpoints), so root-run
+	// plugins in the admin service get the same URL as every other plugin.
+	server.PluginAPIURL = fmt.Sprintf("https://127.0.0.1:%d", config.Port)
 	server.PluginAPICertificateSHA256 = certificateFingerprint
 
 	if len(server.Entitlements) == 0 {
 		logger.Info("LICENSE: Community (no entitlements)")
 	}
 
-	// Load plugins
-	var pluginsDir string
-	if os.Geteuid() == 0 {
-		pluginsDir = fmt.Sprintf("%s/plugins/community/admin", ludusInstallPath)
-	} else {
-		pluginsDir = fmt.Sprintf("%s/plugins/community/", ludusInstallPath)
-	}
-
-	// Check if plugins directory exists and is a directory, if so load the plugins from it
-	if info, err := os.Stat(pluginsDir); err == nil && info.IsDir() {
-		entries, err := os.ReadDir(pluginsDir)
-		if err != nil {
-			logger.Error(fmt.Sprintf("Error reading plugins directory: %v", err))
-		}
-
-		for _, entry := range entries {
-			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".plugin" {
-				path := filepath.Join(pluginsDir, entry.Name())
-				if err := server.LoadPlugin(path); err != nil {
-					logger.Error(fmt.Sprintf("Error loading plugin %s: %v", path, err))
-				}
-			}
-		}
-	}
-
-	// Initialize plugins; failures are soft — keep serving without the broken plugin.
-	if err := server.InitializePlugins(); err != nil {
-		logger.Error(fmt.Sprintf("Error initializing plugins: %v", err))
-	}
+	// Start the plugins this service hosts: packages in <install>/plugins whose
+	// runAs matches this service, and approved uploads. Failures are soft —
+	// keep serving without the broken plugin.
+	server.StartPlugins()
 	if err := server.StartVMHookService(); err != nil {
 		log.Fatalf("Error starting VM hook service: %v", err)
 	}
 
-	// Register plugin routes
-	server.RegisterPluginRoutes(app)
 	// Setup the server to use the certificate/key found above
 	serveConfig := apis.ServeConfig{
 		ShowStartBanner: false,
@@ -135,7 +104,7 @@ func serve() {
 		e.Server.ReadTimeout = 30 * time.Minute
 		e.Server.WriteTimeout = 30 * time.Minute
 		// PocketBase builds the router and binds its listener in e.Next().
-		// Plugin jobs need that listener for their first record queries.
+		// Scheduled jobs start once the service is reachable.
 		if err := e.Next(); err != nil {
 			return err
 		}

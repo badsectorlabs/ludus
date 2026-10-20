@@ -9,7 +9,9 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -297,9 +299,20 @@ func bootstrapLocalState(cfg ludusapi.Configuration) error {
 			return err
 		}
 	}
-	// chown -R ludus:ludus /opt/ludus so the non-root ludus.service can read/write.
-	if err := exec.Command("chown", "-R", "ludus:ludus", "/opt/ludus").Run(); err != nil {
-		return fmt.Errorf("chown /opt/ludus: %w", err)
+	// Give the non-root ludus.service the install tree, except the root-owned
+	// plugin store: root-run plugins start only from root-owned files.
+	uid, gid, err := ludusOwner()
+	if err != nil {
+		return err
+	}
+	pluginStore := filepath.Join(ludusInstallPath, "plugins")
+	if err := ensureRootPluginStore(pluginStore); err != nil {
+		return err
+	}
+	if err := chownTreeExcept(ludusInstallPath, pluginStore, func(path string) error {
+		return os.Lchown(path, uid, gid)
+	}); err != nil {
+		return fmt.Errorf("chown %s: %w", ludusInstallPath, err)
 	}
 	if fileExists("/opt/ludus/install/root-api-key") {
 		if err := os.Chown("/opt/ludus/install/root-api-key", 0, 0); err != nil {
@@ -406,3 +419,53 @@ func loadImportedUsers(dbPath string) ([]importedUser, error) {
 
 // Compile-time assertion that *pveclient.Client satisfies PVEClient.
 var _ PVEClient = (*pveclient.Client)(nil)
+
+// ludusOwner returns the ludus user and group IDs.
+func ludusOwner() (int, int, error) {
+	account, err := user.Lookup("ludus")
+	if err != nil {
+		return 0, 0, fmt.Errorf("lookup ludus user: %w", err)
+	}
+	group, err := user.LookupGroup("ludus")
+	if err != nil {
+		return 0, 0, fmt.Errorf("lookup ludus group: %w", err)
+	}
+	uid, err := strconv.Atoi(account.Uid)
+	if err != nil {
+		return 0, 0, err
+	}
+	gid, err := strconv.Atoi(group.Gid)
+	if err != nil {
+		return 0, 0, err
+	}
+	return uid, gid, nil
+}
+
+// ensureRootPluginStore creates the plugin store as root:root 0755.
+func ensureRootPluginStore(dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	if err := os.Chown(dir, 0, 0); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0755)
+}
+
+// chownTreeExcept applies chown to root and everything below it except the
+// skip subtree, without following symbolic links.
+func chownTreeExcept(root, skip string, chown func(path string) error) error {
+	skip = filepath.Clean(skip)
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if filepath.Clean(path) == skip {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		return chown(path)
+	})
+}

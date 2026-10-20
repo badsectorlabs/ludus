@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"ludusapi/models"
@@ -15,6 +16,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
 // adminEndpointError returns the standard "use the ludus-admin server" message
@@ -201,7 +203,6 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 func limitRootEndpoints(e *core.RequestEvent) error {
 	logger.Debug(fmt.Sprintf("Request: %s %s", e.Request.Method, e.Request.URL.Path))
 	// PocketBase routes enforce their own authentication and collection rules.
-	// Admin plugins use these routes to access their parent's records.
 	if e.Request.URL.Path != APIBasePath && !strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/") {
 		return e.Next()
 	}
@@ -212,9 +213,10 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 	rangeDeleteEndpoint := e.Request.Method == http.MethodDelete &&
 		(e.Request.URL.Path == APIBasePath+"/range" ||
 			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/range/") && strings.HasSuffix(e.Request.URL.Path, "/vms")))
+	adminPlugin := server.adminPluginRequest(e)
 	if os.Geteuid() == 0 &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") &&
-		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") &&
+		!adminPlugin &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") &&
 		!(startVMHookEndpoint && server.hasStartVMHooks()) &&
 		!(stopVMHookEndpoint && server.hasStopVMHooks()) &&
@@ -223,10 +225,16 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 		!(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/diagnostics") &&
 		!strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/migrate/") {
-		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("The :%d endpoint can only be used for user, range creation/deletion, migrations, and anti-sandbox actions. Use the :%d endpoint for all other actions.", ServerConfiguration.AdminPort, ServerConfiguration.Port))
-	} else if os.Geteuid() != 0 &&
+		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("The :%d endpoint can only be used for user, range creation/deletion, migrations, and root-run plugin actions. Use the :%d endpoint for all other actions.", ServerConfiguration.AdminPort, ServerConfiguration.Port))
+	} else if os.Geteuid() != 0 && adminPlugin {
+		err := proxyToAdmin(e)
+		// Activation and removal change the routes the admin service hosts.
+		if !strings.Contains(e.Request.URL.Path, "/rpc/") && strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/plugins/") {
+			server.refreshPluginDeclarations(server.installedPackages())
+		}
+		return err
+	} else if os.Geteuid() != 0 && !server.localPluginAPIRoute(e) &&
 		(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user") ||
-			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/antisandbox/") ||
 			strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/ranges/create") ||
 			rangeDeleteEndpoint ||
 			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/user/credentials") && e.Request.Method == http.MethodPost) ||
@@ -243,6 +251,74 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 
 	return e.Next()
 
+}
+
+// localPluginAPIRoute reports whether the request is an API route of a plugin
+// this service hosts. Such routes stay here even under paths the regular
+// service otherwise proxies to the admin service by prefix.
+func (s *Server) localPluginAPIRoute(e *core.RequestEvent) bool {
+	target, ok := s.pluginAPIRouteFor(e.Request.Method, strings.TrimPrefix(e.Request.URL.Path, APIBasePath))
+	return ok && target.plugin != nil
+}
+
+// adminPluginRequest reports whether a request targets a root-run plugin,
+// which only the admin service hosts: its plugin-scope RPC, its activation,
+// removal, and withdrawal, and its API routes. The regular service proxies
+// these requests; the admin service admits them.
+func (s *Server) adminPluginRequest(e *core.RequestEvent) bool {
+	if s == nil {
+		return false
+	}
+	if rest, ok := strings.CutPrefix(e.Request.URL.Path, APIBasePath+"/plugins/"); ok {
+		pluginID, action, _ := strings.Cut(rest, "/")
+		if action == "withdraw" && e.Request.Method == http.MethodPost {
+			return true
+		}
+		if (action == "" && e.Request.Method == http.MethodDelete) ||
+			(action == "activate" && e.Request.Method == http.MethodPost) ||
+			strings.HasPrefix(action, "rpc/") {
+			return s.PluginResources.rootPluginRecord(e.Auth, pluginID)
+		}
+		return false
+	}
+	target, ok := s.pluginAPIRouteFor(e.Request.Method, strings.TrimPrefix(e.Request.URL.Path, APIBasePath))
+	if !ok {
+		return false
+	}
+	if pluginServiceRunAs() == protocol.RunAsRoot {
+		return target.plugin != nil
+	}
+	return target.plugin == nil
+}
+
+// withdrawRootUpload asks the admin service, with the caller's credentials as
+// proxyToAdmin forwards them, to stop and delete the root-owned copy of an
+// uploaded package whose record is gone.
+func withdrawRootUpload(e *core.RequestEvent, resourceID string) error {
+	if adminProxy == nil || adminServiceURL == nil {
+		return errors.New("the admin service is not configured")
+	}
+	target := adminServiceURL.JoinPath(APIBasePath, "plugins", resourceID, "withdraw")
+	request, err := http.NewRequestWithContext(e.Request.Context(), http.MethodPost, target.String(), nil)
+	if err != nil {
+		return err
+	}
+	for _, header := range []string{"Authorization", "X-API-KEY"} {
+		if value := e.Request.Header.Get(header); value != "" {
+			request.Header.Set(header, value)
+		}
+	}
+	client := &http.Client{Transport: adminProxy.Transport, Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return fmt.Errorf("admin service answered %s: %s", response.Status, strings.TrimSpace(string(body)))
+	}
+	return nil
 }
 
 // Reuse the existing authenticated admin proxy after VM-specific selection.

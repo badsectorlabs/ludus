@@ -35,7 +35,12 @@ func (h *PrettyHandler) Handle(ctx context.Context, r slog.Record) error {
 
 	fields := make(map[string]interface{}, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) bool {
-		fields[a.Key] = a.Value.Any()
+		value := a.Value.Any()
+		// json.Marshal renders most error types as {}; log their message.
+		if err, ok := value.(error); ok {
+			value = err.Error()
+		}
+		fields[a.Key] = value
 
 		return true
 	})

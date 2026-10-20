@@ -4,5 +4,6 @@ use (
 	./dynamic-inventory
 	./ludus-api
 	./ludus-client
+	./ludus-plugin-sdk
 	./ludus-server
 )

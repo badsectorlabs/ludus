@@ -10,7 +10,7 @@ import (
 
 const sqliteBusyTimeout = 10 * time.Second
 
-// connectLudusSQLite applies the SQLite settings used by every host and plugin
+// connectLudusSQLite applies the SQLite settings used by every Ludus
 // PocketBase connection. The busy timeout is encoded in the DSN so the driver
 // applies it to every physical connection opened by database/sql.
 func connectLudusSQLite(dbPath string) (*dbx.DB, error) {

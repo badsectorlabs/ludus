@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"ludusapi"
 	"net/url"
 	"os"
 	"os/exec"
@@ -26,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/pocketbase/pocketbase/tools/security"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v2"
 )
@@ -957,6 +957,7 @@ func migrationCollect(stage string, live bool) (migrationManifest, error) {
 	if m.RouterTemplate == "" {
 		return m, errors.New("cannot determine the original router template; set default_router_template_name in the original ansible/server-config.yml before migrating")
 	}
+	// The legacy host being exported kept Enterprise as Go shared objects.
 	plugins, err := filepath.Glob("/opt/ludus/plugins/enterprise/*.so")
 	if err != nil {
 		return m, err
@@ -1608,30 +1609,27 @@ func migrationMergeResources(stage string) error {
 	})
 }
 
-// Probe the installed runtime, never legacy executable payloads from the archive.
-// Both services must use the same enterprise build before any state is replaced.
+// Validate the installed Enterprise package, never legacy executable payloads
+// from the archive. Declarations are read from plugin.json; nothing runs.
 func migrationValidatePlugins(directory string) error {
-	var version string
-	for _, serviceDir := range []string{directory, filepath.Join(directory, "admin")} {
-		filename := filepath.Join(serviceDir, ludusapi.EnterprisePluginFilename)
-		st, err := os.Lstat(filename)
-		if err != nil {
-			return err
-		}
-		if !st.Mode().IsRegular() || st.Mode().Perm()&0111 != 0111 {
-			return fmt.Errorf("enterprise plugin must be a regular executable readable by both services: %s", filename)
-		}
-		metadata, err := ludusapi.ReadPluginMetadata(filename, nil)
-		if err != nil {
-			return fmt.Errorf("validate enterprise plugin %s: %w", filename, err)
-		}
-		if metadata.Name != ludusapi.EnterprisePluginName || metadata.Version == "" {
-			return fmt.Errorf("unexpected enterprise plugin identity in %s", filename)
-		}
-		if version != "" && metadata.Version != version {
-			return errors.New("public and admin enterprise plugin versions differ")
-		}
-		version = metadata.Version
+	data, err := os.ReadFile(filepath.Join(directory, protocol.ManifestFile))
+	if err != nil {
+		return err
+	}
+	manifest, err := protocol.ParseManifest(data)
+	if err != nil {
+		return fmt.Errorf("validate enterprise package %s: %w", directory, err)
+	}
+	if manifest.ID != "ludus-enterprise" || manifest.Executable == "" {
+		return fmt.Errorf("unexpected enterprise package identity in %s", directory)
+	}
+	filename := filepath.Join(directory, protocol.ExecutableFile)
+	st, err := os.Lstat(filename)
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() || st.Mode().Perm()&0100 == 0 {
+		return fmt.Errorf("enterprise plugin must be a regular executable: %s", filename)
 	}
 	return nil
 }
@@ -1722,8 +1720,8 @@ func importMigrationState(archive string) error {
 		return errors.New("migration requires the LXC Ludus service account home to be /home/ludus")
 	}
 	if m.RequiresPlugin {
-		if err := migrationValidatePlugins("/opt/ludus/plugins/enterprise"); err != nil {
-			return fmt.Errorf("legacy license/plugins require a compatible enterprise plugin for both services; supply it to install.sh before migration: %w", err)
+		if err := migrationValidatePlugins("/opt/ludus/plugins/ludus-enterprise"); err != nil {
+			return fmt.Errorf("legacy license/plugins require the Enterprise package; supply it to install.sh before migration: %w", err)
 		}
 	}
 	merged, err := migrationMergeConfig(old, generated)

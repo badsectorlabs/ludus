@@ -16,7 +16,6 @@ import (
 )
 
 const ludusInstallPath string = "/opt/ludus"
-const LudusInstallPath = ludusInstallPath // Export the path for use in plugins
 
 // Default listen ports used when config.yml omits the corresponding keys
 const (

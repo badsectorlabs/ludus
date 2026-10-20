@@ -54,7 +54,7 @@ class OfflineInstaller(unittest.TestCase):
         self.assertEqual(names.returncode, 0, names.stderr)
         self.isos = [self.root / name for name in names.stdout.split('\0') if name]
         self.image = self.root / 'ludus-2.4.0-debian13-amd64.tar.zst'
-        self.plugin = self.root / 'ludus-enterprise.plugin'
+        self.plugin = self.root / 'ludus-enterprise.zip'
         self.license = self.root / 'license.lic'
         self.state = self.root / 'state.tar.gz'
         self.artifacts = [self.image, self.plugin, self.license, self.state, *self.isos]

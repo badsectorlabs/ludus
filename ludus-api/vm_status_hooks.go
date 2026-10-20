@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 
 	goproxmox "github.com/luthermonson/go-proxmox"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
 type vmStatusBatchResponse struct {
@@ -21,18 +21,12 @@ type vmStatusBatchResponse struct {
 func (s *Server) selectVMStatusRequests(ctx context.Context, requests []VMHookRequest) ([]VMHookRequest, error) {
 	var selected []VMHookRequest
 	for _, request := range requests {
-		for _, plugin := range s.pluginSnapshot() {
-			if !plugin.metadata.VMHooks.Status {
-				continue
-			}
-			applies, err := pluginSelectsVM(ctx, plugin, request)
-			if err != nil {
-				return nil, err
-			}
-			if applies {
-				selected = append(selected, request)
-				break
-			}
+		hooks, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{Status: true})
+		if err != nil {
+			return nil, err
+		}
+		if hooks.Status {
+			selected = append(selected, request)
 		}
 	}
 	return selected, nil
@@ -138,11 +132,8 @@ func callVMHookStatusBatch(ctx context.Context, requests []VMHookRequest) (map[i
 	if err != nil {
 		return nil, err
 	}
-	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", VMHookServiceSocket)
-	}}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport}
+	client, closeIdle := vmHookServiceClient()
+	defer closeIdle()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/statuses", bytes.NewReader(body))
 	if err != nil {
 		return nil, err

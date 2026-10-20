@@ -84,10 +84,11 @@ These jobs are manually triggered (you must click the play button in the pipelin
 
 For non-beta releases, the pipeline also builds licensed plugins using their
 repository tokens. These are
-standalone CGO-free RPC executables. They do not have to be compiled on the
-same machine or against the exact same `ludus-api` package build as the server.
-The release jobs publish versioned `.plugin` executables to their licensed
-packages.
+SDK-based, CGO-free packages: the job builds each executable, generates
+`plugin.json` with `--ludus-manifest`, and zips them as
+`<artifactBase>_<version>.zip`. They build against `ludus-plugin-sdk` only, not
+the server's `ludus-api` package. The release jobs publish these ZIPs to their
+licensed packages.
 
 ## Manual CI VM Setup
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 )
@@ -15,13 +16,18 @@ type Job struct {
 }
 
 type Scheduler struct {
-	jobs    []Job
+	jobs    []*scheduledJob
 	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 	logger  *slog.Logger
 	mu      sync.Mutex
 	started bool
+}
+
+type scheduledJob struct {
+	Job
+	cancel context.CancelFunc
 }
 
 func New(logger *slog.Logger) *Scheduler {
@@ -33,12 +39,28 @@ func New(logger *slog.Logger) *Scheduler {
 func (s *Scheduler) Register(job Job) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.jobs = append(s.jobs, job)
+	entry := &scheduledJob{Job: job}
+	s.jobs = append(s.jobs, entry)
 	if s.started {
 		s.logger.Info(fmt.Sprintf("scheduler: late-registering job %q (interval: %s)", job.Name, job.Interval))
-		s.wg.Add(1)
-		go s.run(s.ctx, job)
+		s.launch(entry)
 	}
+}
+
+// Remove stops and forgets every job registered under name. A run in progress
+// sees its context canceled.
+func (s *Scheduler) Remove(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jobs = slices.DeleteFunc(s.jobs, func(entry *scheduledJob) bool {
+		if entry.Name != name {
+			return false
+		}
+		if entry.cancel != nil {
+			entry.cancel()
+		}
+		return true
+	})
 }
 
 func (s *Scheduler) Start() {
@@ -48,10 +70,17 @@ func (s *Scheduler) Start() {
 
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
-	for _, job := range s.jobs {
-		s.wg.Add(1)
-		go s.run(s.ctx, job)
+	for _, entry := range s.jobs {
+		s.launch(entry)
 	}
+}
+
+// launch must be called with s.mu held.
+func (s *Scheduler) launch(entry *scheduledJob) {
+	var ctx context.Context
+	ctx, entry.cancel = context.WithCancel(s.ctx)
+	s.wg.Add(1)
+	go s.run(ctx, entry.Job)
 }
 
 func (s *Scheduler) run(ctx context.Context, job Job) {

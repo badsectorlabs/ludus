@@ -255,7 +255,7 @@ print_server_help() {
   --iso-storage NAME     Storage for template ISOs (online default: local)
   --ca-certificate PATH  Copy a site-supplied PEM CA certificate into LXC and template trust stores
   --enterprise-plugin PATH
-                         Install a local Enterprise plugin into both services
+                         Install a local Enterprise plugin package ZIP
   --checksum-file PATH   SHA-256 manifest covering supplied release artifacts
   --checksum-signature PATH
                          Detached signature for --checksum-file
@@ -1275,10 +1275,38 @@ EOF
   fi
   pct push "${VMID}" "${CFG}" /opt/ludus/config.yml --perms 0600 --user 1001 --group 1001
   if [[ -n "${ENTERPRISE_PLUGIN:-}" ]]; then
-    pct push "${VMID}" "${ENTERPRISE_PLUGIN}" /opt/ludus/plugins/enterprise/ludus-enterprise.plugin \
-      --perms 0755 --user 1001 --group 1001
-    pct push "${VMID}" "${ENTERPRISE_PLUGIN}" /opt/ludus/plugins/enterprise/admin/ludus-enterprise.plugin \
-      --perms 0755 --user 0 --group 0
+    # The Enterprise package ZIP (plugin.json, plugin, optional ui/index.html)
+    # is extracted into the root-owned plugin store; root-run plugins start
+    # only from root-owned storage.
+    pct push "${VMID}" "${ENTERPRISE_PLUGIN}" /root/ludus-enterprise.zip --perms 0600 --user 0 --group 0
+    pct exec "${VMID}" -- python3 - /root/ludus-enterprise.zip /opt/ludus/plugins/ludus-enterprise <<'PY'
+import os, shutil, sys, tempfile, zipfile
+src, dest = sys.argv[1], sys.argv[2]
+allowed = {"plugin.json": 0o644, "plugin": 0o755, "ui/index.html": 0o644}
+root = os.path.dirname(dest)
+os.makedirs(root, mode=0o755, exist_ok=True)
+os.chown(root, 0, 0)
+os.chmod(root, 0o755)
+stage = tempfile.mkdtemp(dir=root, prefix=".ludus-enterprise.")
+os.chmod(stage, 0o755)
+with zipfile.ZipFile(src) as z:
+    names = z.namelist()
+    if len(set(names)) != len(names) or not set(names) <= set(allowed) or "plugin.json" not in names:
+        sys.exit("invalid Enterprise plugin package entries: %s" % names)
+    for name in names:
+        path = os.path.join(stage, name)
+        os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+        with z.open(name) as r, open(path, "wb") as w:
+            shutil.copyfileobj(r, w)
+        os.chmod(path, allowed[name])
+for d, dirs, files in os.walk(stage):
+    os.chown(d, 0, 0)
+    for f in files:
+        os.chown(os.path.join(d, f), 0, 0)
+shutil.rmtree(dest, ignore_errors=True)
+os.rename(stage, dest)
+os.remove(src)
+PY
   fi
   if [[ -n "${CA_CERTIFICATE:-}" ]]; then
     pct push "${VMID}" "${CA_CERTIFICATE}" /opt/ludus/install/injected-ca-certificate.crt \

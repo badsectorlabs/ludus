@@ -581,34 +581,6 @@ func RunPlaybookWithTag(e *core.RequestEvent, playbook string, tag string, verbo
 	return server.RunAnsiblePlaybookWithVariables(e, playbookPathArray, nil, nil, tag, verbose, "")
 }
 
-// RunAnsiblePlaybookWithVariables archives each plugin playbook run through the host.
-func RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbook string, extraVarsFiles []string, extraVars map[string]interface{}, tags string, verbose bool, limit string) (string, error) {
-	usersRange, err := GetRange(e)
-	if err != nil {
-		return "", err
-	}
-	client, err := PluginPocketBase()
-	if err != nil {
-		return "", err
-	}
-	user := e.Get("user").(*models.User)
-	logID, err := client.startRangeLogHistory(e.Request.Context(), user.Id, usersRange.Id)
-	if err != nil {
-		return "", err
-	}
-
-	playbookPathArray := []string{fmt.Sprintf("%s/ansible/range-management/%s", ludusInstallPath, playbook)}
-	output, runErr := server.RunAnsiblePlaybookWithVariables(e, playbookPathArray, extraVarsFiles, extraVars, tags, verbose, limit)
-	status := "success"
-	if runErr != nil {
-		status = "failure"
-	}
-	// The playbook can outlive the caller's HTTP connection. Still archive it
-	// before another VM in this request overwrites the shared range log.
-	archiveErr := client.finishRangeLogHistory(context.WithoutCancel(e.Request.Context()), logID, status)
-	return output, errors.Join(runErr, archiveErr)
-}
-
 // Return true if the role exists for the user, or false if it doesn't
 func checkRoleExists(e *core.RequestEvent, roleName string) (bool, error) {
 
@@ -819,8 +791,7 @@ func RunLocalAnsiblePlaybookOnTmpRangeConfig(e *core.RequestEvent, playbookPathA
 
 }
 
-func GetErrorsFromAnsiblePlaybook(rangeID string) []string {
-	ansibleLogPath := fmt.Sprintf("%s/ranges/%s/ansible.log", ludusInstallPath, rangeID)
+func ansibleLogErrors(ansibleLogPath string) []string {
 	ansibleLogContents, err := os.ReadFile(ansibleLogPath)
 	if err != nil {
 		return []string{"Could not read ansible log: " + err.Error()}

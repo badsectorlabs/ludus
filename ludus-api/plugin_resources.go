@@ -1,7 +1,6 @@
 package ludusapi
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -14,33 +13,31 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"ludusapi/models"
-	"ludusapi/pluginrpc"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
-type resourceRuntime struct {
-	plugin *managedPlugin
-	cancel context.CancelFunc
-	system bool
-}
-
-// Resource operations are serialized; each request re-reads its access record.
-// These ACLs govern use of trusted plugins, not isolation of server executables.
+// PluginResources manages plugin_resources records: inventory, sharing,
+// approval, and the uploaded-package store. Plugin processes live in the
+// Server registry. Resource operations are serialized; each request re-reads
+// its access record. Host-service handlers never take mu.
 type PluginResources struct {
-	mu       sync.Mutex
-	app      core.App
-	server   *Server
-	root     string
-	runtimes map[string]*resourceRuntime
+	mu     sync.Mutex
+	app    core.App
+	server *Server
+	root   string // <data_directory>/plugin-packages
 }
 
 func newPluginResources(app core.App, server *Server) *PluginResources {
-	return &PluginResources{app: app, server: server, root: filepath.Join(app.DataDir(), "plugin-packages"), runtimes: map[string]*resourceRuntime{}}
+	return &PluginResources{app: app, server: server, root: filepath.Join(app.DataDir(), "plugin-packages")}
+}
+
+func recordSource(r *core.Record) protocol.Source {
+	return protocol.Source(r.GetString("source"))
 }
 
 func pluginAdmin(auth *core.Record) bool {
@@ -68,30 +65,92 @@ func pluginAvailable(record, auth *core.Record) bool {
 }
 
 func pluginManage(record, auth *core.Record) bool {
-	return auth != nil && (pluginAdmin(auth) || (record.GetString("owner") == auth.Id && !record.GetBool("allUsers") && !record.GetBool("system")))
+	return auth != nil && (pluginAdmin(auth) || (record.GetString("owner") == auth.Id && !record.GetBool("allUsers") && recordSource(record) == protocol.SourceUploaded))
 }
 
-func resourceManifest(r *core.Record) PluginManifest {
-	var m PluginManifest
+func resourceManifest(r *core.Record) protocol.Manifest {
+	var m protocol.Manifest
 	_ = r.UnmarshalJSONField("manifest", &m)
+	m.Normalize()
 	return m
+}
+
+// manifestRunsAsRoot reports whether the package has a root-run process, which
+// only the admin service hosts.
+func manifestRunsAsRoot(m protocol.Manifest) bool {
+	return m.Executable != "" && m.RunAs == protocol.RunAsRoot
+}
+
+// sameManifest compares manifests as stored, where empty and missing lists
+// are the same.
+func sameManifest(a, b protocol.Manifest) bool {
+	encodedA, errA := json.Marshal(a)
+	encodedB, errB := json.Marshal(b)
+	return errA == nil && errB == nil && string(encodedA) == string(encodedB)
+}
+
+func vmHookNames(hooks protocol.VMHookCapabilities) []string {
+	names := []string{}
+	for _, hook := range []struct {
+		enabled bool
+		name    string
+	}{{hooks.Select, "select"}, {hooks.Start, "start"}, {hooks.Stop, "stop"}, {hooks.Status, "status"}, {hooks.BeforeDelete, "beforeDelete"}, {hooks.Address, "address"}} {
+		if hook.enabled {
+			names = append(names, hook.name)
+		}
+	}
+	return names
+}
+
+// pluginForRecord returns the running registry entry for a record, if this
+// service hosts it.
+func (p *PluginResources) pluginForRecord(r *core.Record) *managedPlugin {
+	return p.server.pluginByKey(pluginKey(recordSource(r), r.GetString("pluginID"), r.Id))
+}
+
+// runtimeState reports an approved record's state. Plugins hosted by the other
+// service are reported from their package files, which the admin service
+// writes only after approval.
+func (p *PluginResources) runtimeState(r *core.Record, m protocol.Manifest) string {
+	if m.Executable == "" {
+		return "running"
+	}
+	if m.RunAs == pluginServiceRunAs() {
+		if plugin := p.pluginForRecord(r); plugin != nil && !plugin.exited() {
+			return "running"
+		}
+		return "unavailable"
+	}
+	marker := filepath.Join(p.server.pluginsRoot(), r.GetString("pluginID"), protocol.ManifestFile)
+	if recordSource(r) == protocol.SourceUploaded {
+		marker = filepath.Join(p.server.uploadedRootPackageDir(r.Id), pluginApprovalFile)
+	}
+	if FileExists(marker) {
+		return "running"
+	}
+	return "unavailable"
 }
 
 func (p *PluginResources) response(r, auth *core.Record) map[string]any {
 	m := resourceManifest(r)
+	source := recordSource(r)
 	state := r.GetString("state")
 	if state == "approved" {
-		if runtime := p.runtimes[r.Id]; runtime != nil && (runtime.plugin == nil || runtime.plugin.client == nil || !runtime.plugin.client.Exited()) {
-			state = "running"
-		} else {
-			state = "unavailable"
+		state = p.runtimeState(r, m)
+	}
+	apiRoutes := []map[string]string{}
+	for _, route := range m.Routes {
+		if route.EffectiveScope() == protocol.ScopeAPI {
+			apiRoutes = append(apiRoutes, map[string]string{"method": route.Method, "pattern": route.Pattern})
 		}
 	}
 	result := map[string]any{"id": m.ID, "name": m.Name, "version": m.Version, "description": m.Description, "author": m.Author,
 		"resourceID": r.Id, "isOwner": auth != nil && r.GetString("owner") == auth.Id,
 		"owner": r.GetString("owner"), "allUsers": r.GetBool("allUsers"), "state": state, "hasUI": m.UI != "", "rangeScoped": m.RangeScoped,
-		"system": r.GetBool("system"), "canManage": pluginManage(r, auth), "canActivate": pluginManage(r, auth) && !r.GetBool("system"),
-		"canUninstall": pluginManage(r, auth) && !r.GetBool("system"), "sha256": r.GetString("sha256"), "error": r.GetString("error")}
+		"source": source, "level": m.Level, "runAs": m.RunAs, "forwardCallerCredentials": m.ForwardCallerCredentials,
+		"apiRoutes": apiRoutes, "vmHooks": vmHookNames(m.VMHooks),
+		"canManage": pluginManage(r, auth), "canActivate": pluginAdmin(auth) && source == protocol.SourceUploaded,
+		"canUninstall": pluginManage(r, auth) && source == protocol.SourceUploaded, "sha256": r.GetString("sha256"), "error": r.GetString("error")}
 	result["added"] = pluginVisible(r, auth)
 	if owner, err := p.app.FindRecordById("users", r.GetString("owner")); err == nil {
 		result["ownerUserID"] = owner.GetString("userID")
@@ -112,8 +171,8 @@ func (p *PluginResources) record(e *core.RequestEvent) (*core.Record, error) {
 	return p.resolve(e.Auth, e.Request.PathValue("pluginID"), false)
 }
 
-// New clients address a specific installation by resourceID. Legacy slug URLs
-// prefer the caller's personal copy, then a global copy; ambiguity fails closed.
+// Clients address a specific installation by resourceID. Slug URLs prefer the
+// caller's personal copy, then a global copy; ambiguity fails closed.
 func (p *PluginResources) resolve(auth *core.Record, id string, available bool) (*core.Record, error) {
 	if auth == nil {
 		return nil, fmt.Errorf("authentication required")
@@ -125,7 +184,7 @@ func (p *PluginResources) resolve(auth *core.Record, id string, available bool) 
 		}
 		return nil, fmt.Errorf("plugin not found")
 	}
-	if !pluginIDPattern.MatchString(id) {
+	if !protocol.ValidPluginID(id) {
 		return nil, fmt.Errorf("plugin not found")
 	}
 	records, err := p.app.FindAllRecords("plugin_resources", dbx.HashExp{"pluginID": id})
@@ -138,10 +197,11 @@ func (p *PluginResources) resolve(auth *core.Record, id string, available bool) 
 		if !visible(r) {
 			continue
 		}
-		if r.GetString("owner") == auth.Id && !r.GetBool("allUsers") && !r.GetBool("system") {
+		uploaded := recordSource(r) == protocol.SourceUploaded
+		if r.GetString("owner") == auth.Id && !r.GetBool("allUsers") && uploaded {
 			return r, nil
 		}
-		if r.GetBool("allUsers") && !r.GetBool("system") {
+		if r.GetBool("allUsers") && uploaded {
 			global = r
 		}
 		matches = append(matches, r)
@@ -153,6 +213,50 @@ func (p *PluginResources) resolve(auth *core.Record, id string, available bool) 
 		return matches[0], nil
 	}
 	return nil, fmt.Errorf("plugin not found or ambiguous; select an installation from Plugins")
+}
+
+// rootPluginRecord resolves the record a /plugins/{pluginID}/... request
+// addresses and reports whether its process runs as root.
+func (p *PluginResources) rootPluginRecord(auth *core.Record, pluginID string) bool {
+	if p == nil || auth == nil {
+		return false
+	}
+	r, err := p.resolve(auth, pluginID, false)
+	return err == nil && manifestRunsAsRoot(resourceManifest(r))
+}
+
+// installedRecordID returns the record mirroring a server or licensed package.
+func (p *PluginResources) installedRecordID(pluginID string) string {
+	records, err := p.app.FindAllRecords("plugin_resources", dbx.HashExp{"pluginID": pluginID}, dbx.Not(dbx.HashExp{"source": string(protocol.SourceUploaded)}))
+	if err != nil || len(records) == 0 {
+		return ""
+	}
+	return records[0].Id
+}
+
+// approvedUploads lists approved uploaded records with an executable. It does
+// not take p.mu.
+func (p *PluginResources) approvedUploads() []*core.Record {
+	records, err := p.app.FindAllRecords("plugin_resources", dbx.HashExp{"state": "approved", "source": string(protocol.SourceUploaded)})
+	if err != nil {
+		p.server.logger().Error("load approved plugin resources", "error", err)
+		return nil
+	}
+	return slices.DeleteFunc(records, func(r *core.Record) bool { return resourceManifest(r).Executable == "" })
+}
+
+// approvedRootUpload reports whether a root-owned uploaded copy still has an
+// approved, root-run record. Only a missing record or one in another state
+// withdraws the approval; any other lookup failure is returned.
+func (p *PluginResources) approvedRootUpload(resourceID string) (bool, error) {
+	r, err := p.app.FindRecordById("plugin_resources", resourceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return recordSource(r) == protocol.SourceUploaded && r.GetString("state") == "approved" && manifestRunsAsRoot(resourceManifest(r)), nil
 }
 
 func (p *PluginResources) List(e *core.RequestEvent) error {
@@ -213,9 +317,17 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, 400, err.Error())
 	}
+	// Runs after the lock is released: a superseded approved root-run package
+	// is withdrawn from the admin service right away.
+	var superseded *core.Record
+	defer func() {
+		if superseded != nil {
+			p.withdrawSupersededRootUpload(e, superseded)
+		}
+	}()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	filter := dbx.HashExp{"pluginID": pkg.manifest.ID, "allUsers": allUsers, "system": false}
+	filter := dbx.HashExp{"pluginID": pkg.manifest.ID, "allUsers": allUsers, "source": string(protocol.SourceUploaded)}
 	if !allUsers {
 		filter["owner"] = e.Auth.Id
 	}
@@ -243,7 +355,7 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 		return JSONError(e, 500, "could not look up plugin")
 	}
 	if existing != nil {
-		if !pluginManage(existing, e.Auth) || existing.GetBool("system") {
+		if !pluginManage(existing, e.Auth) || recordSource(existing) != protocol.SourceUploaded {
 			return JSONError(e, 403, "only the manager of an uploaded plugin can replace it")
 		}
 		if e.Request.URL.Query().Get("replace") != "true" {
@@ -279,6 +391,7 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 	}
 	r := core.NewRecord(c)
 	r.Set("pluginID", pkg.manifest.ID)
+	r.Set("source", string(protocol.SourceUploaded))
 	r.Set("owner", e.Auth.Id)
 	r.Set("allowedUsers", []string{e.Auth.Id})
 	r.Set("excludedUsers", []string{})
@@ -290,6 +403,8 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 	}
 	r.Set("manifest", pkg.manifest)
 	r.Set("sha256", pkg.digest)
+	// Every upload, including a replacement, waits for an administrator to
+	// review its declarations.
 	r.Set("state", "pending")
 	// Stage into a fresh generated record directory. A rejected or failed upload
 	// leaves both the previous database record and running process intact.
@@ -310,116 +425,65 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 		return JSONError(e, 500, "could not store plugin package: "+err.Error())
 	}
 	if existing != nil {
-		p.stop(existing.Id)
+		if existing.GetString("state") == "approved" && manifestRunsAsRoot(resourceManifest(existing)) {
+			superseded = existing
+		}
+		p.server.stopPluginByKey(pluginKey(protocol.SourceUploaded, "", existing.Id))
 		// This directory belongs only to the superseded generated package record;
 		// plugin-created data is separate and remains available to the new version.
 		if err := os.RemoveAll(filepath.Join(p.root, existing.Id)); err != nil {
-			p.server.Logger.Error("could not remove superseded plugin package", "plugin", pkg.manifest.ID, "error", err)
+			p.server.logger().Error("could not remove superseded plugin package", "plugin", pkg.manifest.ID, "error", err)
 		}
 	}
 	return e.JSON(201, p.response(r, e.Auth))
 }
 
-func validateResourceMetadata(m PluginManifest, metadata pluginrpc.Metadata) error {
-	if metadata.ID != m.ID || metadata.Name != m.Name || metadata.Version != m.Version {
-		return fmt.Errorf("executable identity does not match plugin.json")
+// withdrawSupersededRootUpload asks the admin service to stop the root-run
+// plugin of a replaced record and delete its root-owned copy. The admin
+// service's periodic cleanup is the backstop if the call fails.
+func (p *PluginResources) withdrawSupersededRootUpload(e *core.RequestEvent, r *core.Record) {
+	if err := withdrawRootUpload(e, r.Id); err != nil {
+		p.server.logger().Error("could not withdraw the superseded root-run plugin; the admin service removes it within a minute", "plugin", r.GetString("pluginID"), "resourceID", r.Id, "error", err)
 	}
-	// Lifecycle hooks affect VM operations outside a user request. Until those
-	// hooks carry resource scope, use the existing administrator-installed path.
-	if metadata.VMHooks != (pluginrpc.VMHookCapabilities{}) {
-		return fmt.Errorf("VM lifecycle plugins require server-side installation; resource access cannot scope lifecycle hooks yet")
-	}
-	seen := map[string]bool{}
-	for _, route := range metadata.Routes {
-		if route.Name == "" || route.Pattern == "" || !strings.HasPrefix(route.Pattern, "/") || strings.ContainsAny(route.Pattern, "?#{}\\") || strings.Contains(route.Pattern, "..") {
-			return fmt.Errorf("resource plugin routes must be exact absolute paths")
-		}
-		if !slices.Contains([]string{"GET", "POST", "PUT", "PATCH", "DELETE"}, route.Method) {
-			return fmt.Errorf("unsupported plugin route method")
-		}
-		key := route.Method + " " + route.Pattern
-		if seen[key] {
-			return fmt.Errorf("duplicate plugin route")
-		}
-		seen[key] = true
-	}
-	return nil
+	p.server.refreshPluginDeclarations(p.server.installedPackages())
 }
 
-func (p *PluginResources) start(r *core.Record) error {
-	m := resourceManifest(r)
-	if runtime, exists := p.runtimes[r.Id]; exists {
-		if runtime.plugin == nil || runtime.plugin.client == nil || !runtime.plugin.client.Exited() {
-			return nil
-		}
-		p.stop(r.Id)
+// Withdraw stops and deletes the root-owned copy of an uploaded package whose
+// record is gone or no longer approved. It can only take an approval away.
+func (p *PluginResources) Withdraw(e *core.RequestEvent) error {
+	if e.Auth == nil {
+		return JSONError(e, 401, "authentication required")
 	}
-	if m.Executable == "" {
-		p.runtimes[r.Id] = &resourceRuntime{}
-		return nil
+	resourceID := e.Request.PathValue("pluginID")
+	if !pluginRecordIDPattern.MatchString(resourceID) {
+		return JSONError(e, 404, "plugin not found")
 	}
-	path := filepath.Join(p.root, r.Id, "plugin")
-	if err := os.Chmod(path, 0700); err != nil {
-		return err
+	if pluginServiceRunAs() != protocol.RunAsRoot {
+		return JSONError(e, 409, "root-owned plugin copies are managed by the admin service")
 	}
-	runtime, err := startManagedPlugin(path, p.server.Logger)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	approved, err := p.approvedRootUpload(resourceID)
 	if err != nil {
-		return err
+		p.server.logger().Error("could not check plugin approval", "resourceID", resourceID, "error", err)
+		return JSONError(e, 503, "could not check the plugin approval")
 	}
-	keep := false
-	defer func() {
-		if !keep {
-			runtime.client.Kill()
-		}
-	}()
-	if err := validateResourceMetadata(m, runtime.metadata); err != nil {
-		return err
+	if approved {
+		return JSONError(e, 409, "the plugin is still approved")
 	}
-	ConfigMu.RLock()
-	configuration, err := json.Marshal(ServerConfiguration)
-	ConfigMu.RUnlock()
-	if err != nil {
-		return err
-	}
-	connection, err := p.server.pluginPocketBaseConnection()
-	if err != nil {
-		return err
-	}
-	response, err := runtime.rpc.Initialize(pluginrpc.InitializeRequest{Configuration: configuration, Server: p.server.pluginState(), UseSDN: true, PocketBase: connection})
-	if err != nil {
-		return err
-	}
-	for _, job := range response.Jobs {
-		if job.Name == "" || job.Interval < time.Second {
-			return fmt.Errorf("invalid scheduled job")
-		}
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	p.runtimes[r.Id] = &resourceRuntime{plugin: runtime, cancel: cancel}
-	runtime.initialized = true
-	// Resource plugins never replace host license state or register unscoped
-	// legacy routes. Jobs terminate with their resource runtime.
-	for _, declared := range response.Jobs {
-		job := declared
-		go func() {
-			ticker := time.NewTicker(job.Interval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					if _, err := runtime.rpc.RunJob(job.Name); err != nil {
-						p.server.Logger.Error("plugin job failed", "plugin", m.ID, "job", job.Name, "error", err)
-					}
-				}
-			}
-		}()
-	}
-	keep = true
-	return nil
+	p.server.removeUploadedRootPackage(resourceID)
+	return e.JSON(200, map[string]bool{"withdrawn": true})
 }
 
+// activationRequest echoes what the administrator reviewed.
+type activationRequest struct {
+	SHA256 string         `json:"sha256"`
+	Level  protocol.Level `json:"level"`
+	RunAs  protocol.RunAs `json:"runAs"`
+}
+
+// Activate approves an uploaded package. The regular service proxies root-run
+// packages to the admin service, which copies them into root-owned storage.
 func (p *PluginResources) Activate(e *core.RequestEvent) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -427,13 +491,26 @@ func (p *PluginResources) Activate(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, 404, err.Error())
 	}
-	if !pluginManage(r, e.Auth) {
-		return JSONError(e, 403, "only the owner of a personal plugin or an administrator can activate it")
+	if !pluginAdmin(e.Auth) {
+		return JSONError(e, 403, "only administrators can activate plugins")
 	}
-	if r.GetBool("system") {
-		return JSONError(e, 409, "system plugins are activated by the server installer")
+	if recordSource(r) != protocol.SourceUploaded {
+		return JSONError(e, 409, "installed plugins are approved by their installation")
 	}
-	if err := p.start(r); err != nil {
+	var body activationRequest
+	if err := e.BindBody(&body); err != nil {
+		return JSONError(e, 400, "invalid activation request")
+	}
+	m := resourceManifest(r)
+	if body.SHA256 != r.GetString("sha256") || body.Level != m.Level || body.RunAs != m.RunAs {
+		return JSONError(e, 409, "the package changed after it was reviewed; reload the plugin and review it again")
+	}
+	// 409 is reserved for "the package changed after review", which the GUI
+	// answers by reloading. A route conflict needs a different package.
+	if err := apiRouteConflict(m, pluginKey(protocol.SourceUploaded, "", r.Id), p.server.declaredAPIRoutes()); err != nil {
+		return JSONError(e, http.StatusUnprocessableEntity, err.Error())
+	}
+	if err := p.start(r, m); err != nil {
 		r.Set("error", err.Error())
 		r.Set("state", "error")
 		_ = p.app.Save(r)
@@ -442,23 +519,69 @@ func (p *PluginResources) Activate(e *core.RequestEvent) error {
 	r.Set("state", "approved")
 	r.Set("error", "")
 	if err := p.app.Save(r); err != nil {
-		p.stop(r.Id)
+		p.stop(r)
 		return JSONError(e, 500, err.Error())
 	}
 	return e.JSON(200, p.response(r, e.Auth))
 }
 
-func (p *PluginResources) stop(id string) {
-	if runtime := p.runtimes[id]; runtime != nil {
-		if runtime.cancel != nil {
-			runtime.cancel()
-		}
-		// Killing the process also interrupts RPC requests/jobs that are blocked.
-		if runtime.plugin != nil && !runtime.system {
-			runtime.plugin.client.Kill()
-		}
-		delete(p.runtimes, id)
+// start runs an uploaded package in this service. A root-run package first
+// gets a root-owned copy built from the stored ZIP whose SHA-256 the
+// administrator approved; the uploaded files themselves are never trusted.
+func (p *PluginResources) start(r *core.Record, m protocol.Manifest) error {
+	if m.Executable == "" {
+		return nil
 	}
+	if m.RunAs != pluginServiceRunAs() {
+		return fmt.Errorf("plugin %s runs as %s and is activated through the %s service", m.ID, m.RunAs, m.RunAs)
+	}
+	key := pluginKey(protocol.SourceUploaded, "", r.Id)
+	if plugin := p.server.pluginByKey(key); plugin != nil {
+		if !plugin.exited() {
+			return nil
+		}
+		p.server.stopPlugin(plugin, false)
+	}
+	if m.RunAs == protocol.RunAsLudus {
+		dir := filepath.Join(p.root, r.Id)
+		if err := os.Chmod(filepath.Join(dir, protocol.ExecutableFile), 0700); err != nil {
+			return err
+		}
+		_, err := p.server.startPlugin(dir, m, protocol.SourceUploaded, r.Id)
+		return err
+	}
+	data, err := readStoredPluginArchive(p.root, r.Id)
+	if err != nil {
+		return fmt.Errorf("read stored package: %w", err)
+	}
+	if sha256Hex(data) != r.GetString("sha256") {
+		return errors.New("stored package does not match the reviewed SHA-256")
+	}
+	pkg, err := readPluginPackage(data)
+	if err != nil {
+		return err
+	}
+	if !sameManifest(pkg.manifest, m) {
+		return errors.New("stored package declarations differ from the reviewed plugin.json")
+	}
+	if err := writeRootPackage(p.server.uploadedRootPackageDir(r.Id), pkg, pluginApproval{Source: protocol.SourceUploaded, ResourceID: r.Id}); err != nil {
+		return fmt.Errorf("install root-owned package: %w", err)
+	}
+	if _, err := p.server.startUploadedRootPackage(r.Id); err != nil {
+		p.server.removeUploadedRootPackage(r.Id)
+		return err
+	}
+	return nil
+}
+
+// stop ends an uploaded plugin hosted by this service; the admin service also
+// removes the root-owned copy.
+func (p *PluginResources) stop(r *core.Record) {
+	if pluginServiceRunAs() == protocol.RunAsRoot {
+		p.server.removeUploadedRootPackage(r.Id)
+		return
+	}
+	p.server.stopPluginByKey(pluginKey(protocol.SourceUploaded, "", r.Id))
 }
 
 func (p *PluginResources) Access(e *core.RequestEvent) error {
@@ -481,8 +604,8 @@ func (p *PluginResources) Access(e *core.RequestEvent) error {
 	if body.AllUsers != r.GetBool("allUsers") && !pluginAdmin(e.Auth) {
 		return JSONError(e, 403, "only administrators can change all-users access")
 	}
-	if body.AllUsers != r.GetBool("allUsers") && !r.GetBool("system") {
-		filter := dbx.HashExp{"pluginID": r.GetString("pluginID"), "allUsers": body.AllUsers, "system": false}
+	if body.AllUsers != r.GetBool("allUsers") && recordSource(r) == protocol.SourceUploaded {
+		filter := dbx.HashExp{"pluginID": r.GetString("pluginID"), "allUsers": body.AllUsers, "source": string(protocol.SourceUploaded)}
 		if !body.AllUsers {
 			filter["owner"] = r.GetString("owner")
 		}
@@ -532,12 +655,16 @@ func (p *PluginResources) Remove(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, 404, err.Error())
 	}
-	if e.Request.URL.Query().Get("uninstall") == "true" || (e.Auth != nil && r.GetString("owner") == e.Auth.Id && !r.GetBool("allUsers") && !r.GetBool("system")) {
+	uploaded := recordSource(r) == protocol.SourceUploaded
+	if e.Request.URL.Query().Get("uninstall") == "true" || (e.Auth != nil && r.GetString("owner") == e.Auth.Id && !r.GetBool("allUsers") && uploaded) {
 		if !pluginManage(r, e.Auth) {
 			return JSONError(e, 403, "only the owner of a personal plugin or an administrator can delete it")
 		}
-		if r.GetBool("system") {
-			return JSONError(e, 409, "remove this system plugin using its server installer")
+		if !uploaded {
+			return JSONError(e, 409, "remove this installed plugin using its server installer")
+		}
+		if manifestRunsAsRoot(resourceManifest(r)) != (pluginServiceRunAs() == protocol.RunAsRoot) {
+			return JSONError(e, 500, "this plugin is managed by the other Ludus service")
 		}
 		// Stage the package so a database failure can put it back. Plugin-created
 		// data and changes inside range machines are outside package ownership.
@@ -557,15 +684,15 @@ func (p *PluginResources) Remove(e *core.RequestEvent) error {
 		if err := p.app.Delete(r); err != nil {
 			if moved {
 				if restoreErr := os.Rename(stagedPackage, packagePath); restoreErr != nil {
-					p.server.Logger.Error("could not restore plugin package after deletion failure", "plugin", r.GetString("pluginID"), "error", restoreErr)
+					p.server.logger().Error("could not restore plugin package after deletion failure", "plugin", r.GetString("pluginID"), "error", restoreErr)
 				}
 			}
 			_ = os.Remove(staging)
 			return JSONError(e, 500, "could not delete plugin record: "+err.Error())
 		}
-		p.stop(r.Id)
+		p.stop(r)
 		if err := os.RemoveAll(staging); err != nil {
-			p.server.Logger.Error("could not remove deleted plugin package", "plugin", r.GetString("pluginID"), "error", err)
+			p.server.logger().Error("could not remove deleted plugin package", "plugin", r.GetString("pluginID"), "error", err)
 			return JSONError(e, 500, "plugin record deleted but package cleanup failed: "+err.Error())
 		}
 	} else {
@@ -587,6 +714,7 @@ func (p *PluginResources) Remove(e *core.RequestEvent) error {
 	return e.JSON(200, map[string]bool{"removed": true})
 }
 
+// UI returns ui/index.html from the package directory.
 func (p *PluginResources) UI(e *core.RequestEvent) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -598,18 +726,11 @@ func (p *PluginResources) UI(e *core.RequestEvent) error {
 	if r.GetString("state") != "approved" || m.UI == "" {
 		return JSONError(e, 409, "plugin frontend is not active")
 	}
-	runtime := p.runtimes[r.Id]
-	if runtime == nil {
-		return JSONError(e, 503, "plugin is unavailable")
+	dir := filepath.Join(p.server.pluginsRoot(), r.GetString("pluginID"))
+	if recordSource(r) == protocol.SourceUploaded {
+		dir = filepath.Join(p.root, r.Id)
 	}
-	var html []byte
-	if runtime.system {
-		if runtime.plugin.metadata.UI != nil {
-			html = []byte(runtime.plugin.metadata.UI.HTML)
-		}
-	} else {
-		html, err = os.ReadFile(filepath.Join(p.root, r.Id, "ui", "index.html"))
-	}
+	html, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(protocol.UIFile)))
 	if err != nil || len(html) == 0 || len(html) > pluginUILimit {
 		return JSONError(e, 500, "plugin frontend unavailable")
 	}
@@ -619,6 +740,7 @@ func (p *PluginResources) UI(e *core.RequestEvent) error {
 	return e.JSON(200, map[string]any{"html": string(html), "bridgeVersion": 1})
 }
 
+// RPC dispatches plugin-scope routes (/plugins/{pluginID}/rpc/<Pattern>).
 func (p *PluginResources) RPC(e *core.RequestEvent) error {
 	p.mu.Lock()
 	r, err := p.record(e)
@@ -626,14 +748,15 @@ func (p *PluginResources) RPC(e *core.RequestEvent) error {
 		p.mu.Unlock()
 		return JSONError(e, 404, err.Error())
 	}
-	runtime := p.runtimes[r.Id]
-	if r.GetString("state") != "approved" || runtime == nil || runtime.plugin == nil {
-		p.mu.Unlock()
+	m := resourceManifest(r)
+	var plugin *managedPlugin
+	if r.GetString("state") == "approved" {
+		plugin = p.pluginForRecord(r)
+	}
+	p.mu.Unlock()
+	if plugin == nil {
 		return JSONError(e, 503, "plugin is unavailable")
 	}
-	m := resourceManifest(r)
-	plugin := runtime.plugin
-	p.mu.Unlock()
 	if m.RangeScoped {
 		if e.Request.URL.Query().Get("rangeID") == "" {
 			return JSONError(e, 400, "select a range")
@@ -643,25 +766,10 @@ func (p *PluginResources) RPC(e *core.RequestEvent) error {
 		}
 	}
 	path := "/" + e.Request.PathValue("pluginPath")
-	for _, route := range plugin.metadata.Routes {
-		if route.Pattern != path || route.Method != e.Request.Method {
-			continue
+	for _, route := range plugin.manifest.Routes {
+		if route.EffectiveScope() == protocol.ScopePlugin && route.Pattern == path && route.Method == e.Request.Method {
+			return p.server.handlePluginRoute(e, plugin, route, true)
 		}
-		e.Request.Body = http.MaxBytesReader(e.Response, e.Request.Body, 8<<20)
-		request, err := PluginRequestFromEvent(e)
-		if err != nil {
-			return JSONError(e, 400, "invalid plugin request")
-		}
-		request.Route = route.Name
-		request.Path = APIBasePath + route.Pattern
-		response, err := plugin.rpc.Handle(request)
-		if err != nil {
-			return JSONError(e, 502, "plugin request failed: "+err.Error())
-		}
-		// Do not allow plugin responses to set host cookies or inject active HTML
-		// into the authenticated Ludus origin through a direct navigation.
-		response.Header = filterPluginResponseHeaders(response.Header)
-		return WritePluginResponse(e, response)
 	}
 	return JSONError(e, 404, "plugin route not declared")
 }
@@ -676,53 +784,111 @@ func filterPluginResponseHeaders(headers map[string][]string) map[string][]strin
 	return filtered
 }
 
-func (p *PluginResources) startup() {
+// mirrorInstalled keeps one record per server or licensed package so they
+// share the inventory, sharing, and visibility rules of uploads. Installed
+// packages are administrator-visible until deliberately shared; an owner is
+// never inferred.
+func (p *PluginResources) mirrorInstalled(packages []installedPackage, rejected map[string]error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	// System-installed plugins are administrator-visible until deliberately
-	// shared. Never infer an owner or silently publish them to all users.
-	for _, plugin := range p.server.pluginSnapshot() {
-		meta := plugin.metadata
-		if !pluginIDPattern.MatchString(meta.ID) {
-			continue
-		}
-		records, err := p.app.FindAllRecords("plugin_resources", dbx.HashExp{"pluginID": meta.ID, "system": true})
-		if err != nil {
-			p.server.Logger.Error("load system plugin resource", "error", err)
-			continue
-		}
-		var r *core.Record
-		if len(records) > 0 {
-			r = records[0]
-		}
-		if r == nil {
-			c, err := p.app.FindCollectionByNameOrId("plugin_resources")
-			if err != nil {
-				continue
+	collection, err := p.app.FindCollectionByNameOrId("plugin_resources")
+	if err != nil {
+		p.server.logger().Error("load plugin resources collection", "error", err)
+		return
+	}
+	installed := map[string]bool{}
+	for _, pkg := range packages {
+		installed[pkg.manifest.ID] = true
+		r := core.NewRecord(collection)
+		if id := p.installedRecordID(pkg.manifest.ID); id != "" {
+			if existing, err := p.app.FindRecordById("plugin_resources", id); err == nil {
+				r = existing
 			}
-			r = core.NewRecord(c)
-			r.Set("pluginID", meta.ID)
-			r.Set("system", true)
+		}
+		if r.IsNew() {
+			r.Set("pluginID", pkg.manifest.ID)
 			r.Set("allUsers", false)
+			r.Set("allowedUsers", []string{})
+			r.Set("excludedUsers", []string{})
 		}
-		m := PluginManifest{SchemaVersion: 1, ID: meta.ID, Name: meta.Name, Version: meta.Version, Description: meta.Description, Author: meta.Author, Protocol: pluginrpc.ProtocolVersion}
-		if meta.UI != nil && meta.UI.HTML != "" {
-			m.UI = "ui/index.html"
-			m.RangeScoped = meta.UI.RangeScoped
+		sum := pkg.sha256
+		if sum == "" && pkg.manifest.Executable != "" {
+			previous := resourceManifest(r)
+			sum = r.GetString("sha256")
+			if r.IsNew() || sum == "" || previous.Version != pkg.manifest.Version || recordSource(r) != pkg.source {
+				if sum, err = fileSHA256(filepath.Join(pkg.dir, protocol.ExecutableFile)); err != nil {
+					p.server.logger().Error("hash installed plugin", "plugin", pkg.manifest.ID, "error", err)
+				}
+			}
 		}
-		r.Set("manifest", m)
-		r.Set("state", "approved")
-		if err := p.app.Save(r); err == nil {
-			p.runtimes[r.Id] = &resourceRuntime{plugin: plugin, system: true}
+		state, message := "approved", ""
+		if err := rejected[pluginKey(pkg.source, pkg.manifest.ID, "")]; err != nil {
+			state, message = "error", err.Error()
+		}
+		if !r.IsNew() && sameManifest(resourceManifest(r), pkg.manifest) && recordSource(r) == pkg.source &&
+			r.GetString("sha256") == sum && r.GetString("state") == state && r.GetString("error") == message {
+			continue
+		}
+		r.Set("source", string(pkg.source))
+		r.Set("manifest", pkg.manifest)
+		r.Set("sha256", sum)
+		r.Set("state", state)
+		r.Set("error", message)
+		if err := p.app.Save(r); err != nil {
+			p.server.logger().Error("mirror installed plugin", "plugin", pkg.manifest.ID, "error", err)
 		}
 	}
-	records, err := p.app.FindAllRecords("plugin_resources", dbx.HashExp{"state": "approved", "system": false})
+	records, err := p.app.FindAllRecords("plugin_resources", dbx.Not(dbx.HashExp{"source": string(protocol.SourceUploaded)}))
 	if err != nil {
-		p.server.Logger.Error("load plugin resources", "error", err)
+		p.server.logger().Error("load installed plugin resources", "error", err)
 		return
 	}
 	for _, r := range records {
-		if err := p.start(r); err != nil {
+		if installed[r.GetString("pluginID")] || r.GetString("state") == "error" {
+			continue
+		}
+		r.Set("state", "error")
+		r.Set("error", "the package is no longer installed")
+		if err := p.app.Save(r); err != nil {
+			p.server.logger().Error("mark removed plugin", "plugin", r.GetString("pluginID"), "error", err)
+		}
+	}
+}
+
+// flagRejectedUploads records why approved uploads were refused for a
+// conflicting API route; they leave the approved state and stop.
+func (p *PluginResources) flagRejectedUploads(rejected map[string]error) {
+	if len(rejected) == 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, r := range p.approvedUploads() {
+		err := rejected[pluginKey(protocol.SourceUploaded, "", r.Id)]
+		if err == nil {
+			continue
+		}
+		r.Set("state", "error")
+		r.Set("error", err.Error())
+		if saveErr := p.app.Save(r); saveErr != nil {
+			p.server.logger().Error("flag refused plugin", "plugin", r.GetString("pluginID"), "error", saveErr)
+			continue
+		}
+		p.server.stopPluginByKey(pluginKey(protocol.SourceUploaded, "", r.Id))
+	}
+}
+
+// startUploaded starts approved uploads this (regular) service hosts.
+// Root-run uploads start only from the admin service's root-owned copies.
+func (p *PluginResources) startUploaded() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, r := range p.approvedUploads() {
+		m := resourceManifest(r)
+		if m.RunAs != pluginServiceRunAs() {
+			continue
+		}
+		if err := p.start(r, m); err != nil {
 			r.Set("state", "error")
 			r.Set("error", err.Error())
 			_ = p.app.Save(r)
@@ -730,24 +896,19 @@ func (p *PluginResources) startup() {
 	}
 }
 
-func (p *PluginResources) Close() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for id := range p.runtimes {
-		p.stop(id)
+func pluginResourceRoutes(p *PluginResources) PocketBaseRoutes {
+	routes := PocketBaseRoutes{
+		{"ListPlugins", http.MethodGet, "/plugins", p.List},
+		{"InstallPlugin", http.MethodPost, "/plugins/install", p.Upload},
+		{"AddPlugin", http.MethodPost, "/plugins/{pluginID}/add", p.Add},
+		{"ActivatePlugin", http.MethodPost, "/plugins/{pluginID}/activate", p.Activate},
+		{"WithdrawRootPlugin", http.MethodPost, "/plugins/{pluginID}/withdraw", p.Withdraw},
+		{"SetPluginAccess", http.MethodPut, "/plugins/{pluginID}/access", p.Access},
+		{"RemovePlugin", http.MethodDelete, "/plugins/{pluginID}", p.Remove},
+		{"GetPluginUI", http.MethodGet, "/plugins/{pluginID}/ui", p.UI},
 	}
-}
-
-func registerPluginResourceRoutes(se *core.ServeEvent, p *PluginResources) {
-	base := APIBasePath + "/plugins"
-	se.Router.GET(base, p.List)
-	se.Router.POST(base+"/install", p.Upload)
-	se.Router.POST(base+"/{pluginID}/add", p.Add)
-	se.Router.POST(base+"/{pluginID}/activate", p.Activate)
-	se.Router.PUT(base+"/{pluginID}/access", p.Access)
-	se.Router.DELETE(base+"/{pluginID}", p.Remove)
-	se.Router.GET(base+"/{pluginID}/ui", p.UI)
-	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
-		se.Router.Route(method, base+"/{pluginID}/rpc/{pluginPath...}", p.RPC)
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		routes = append(routes, PocketBaseRoute{"PluginRPC", method, "/plugins/{pluginID}/rpc/{pluginPath...}", p.RPC})
 	}
+	return routes
 }
