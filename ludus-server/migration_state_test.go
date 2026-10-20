@@ -9,8 +9,6 @@ import (
 	"io"
 	"log"
 	"ludus-server/localgen"
-	"ludusapi"
-	"ludusapi/pluginrpc"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,84 +251,50 @@ func TestMigrationAddsReleaseVariablesWithoutReplacingAdministratorValues(t *tes
 	}
 }
 
-// The helper is a real RPC subprocess, exercising the same handshake and metadata
-// validation used by production, without compiling a fixture during tests.
-type migrationProcessPlugin struct{ pluginrpc.Plugin }
-
-func (p *migrationProcessPlugin) Metadata() (pluginrpc.Metadata, error) {
-	return pluginrpc.Metadata{Name: os.Getenv("LUDUS_MIGRATION_PLUGIN_NAME"), Version: os.Getenv("LUDUS_MIGRATION_PLUGIN_VERSION")}, nil
-}
-func (p *migrationProcessPlugin) Shutdown() error { return nil }
-
-func TestMigrationPluginProcessHelper(t *testing.T) {
-	if os.Getenv("LUDUS_MIGRATION_PLUGIN_HELPER") != "1" {
-		return
-	}
-	pluginrpc.Serve(&migrationProcessPlugin{})
-	os.Exit(0)
-}
-
-func migrationTestPlugin(t *testing.T, filename, name, version string) {
-	t.Helper()
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
-	content := "#!/bin/sh\nexport LUDUS_MIGRATION_PLUGIN_HELPER=1\nexport LUDUS_MIGRATION_PLUGIN_NAME=" + quote(name) + "\nexport LUDUS_MIGRATION_PLUGIN_VERSION=" + quote(version) + "\nexec " + quote(executable) + " -test.run='^TestMigrationPluginProcessHelper$'\n"
-	migrationTestWrite(t, filepath.Dir(filename), filepath.Base(filename), content)
-	if err := os.Chmod(filename, 0755); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestMigrationRequiresCompatibleEnterpriseRuntimeForBothServices(t *testing.T) {
+func TestMigrationRequiresEnterprisePackage(t *testing.T) {
 	directory := t.TempDir()
-	public := filepath.Join(directory, ludusapi.EnterprisePluginFilename)
-	admin := filepath.Join(directory, "admin", ludusapi.EnterprisePluginFilename)
-	migrationTestWrite(t, directory, "legacy.so", "not an RPC runtime")
-	if err := migrationValidatePlugins(directory); err == nil {
-		t.Fatal("legacy shared object satisfied RPC runtime requirement")
+	executable := filepath.Join(directory, "plugin")
+	manifest := func(id string) string {
+		return `{"schemaVersion":1,"protocolVersion":1,"id":"` + id + `","name":"Ludus Enterprise","version":"1.2.3","level":"system","runAs":"root","executable":"plugin","vmHooks":{}}`
 	}
-	migrationTestPlugin(t, public, ludusapi.EnterprisePluginName, "1.2.3")
+	migrationTestWrite(t, directory, "ludus-enterprise.so", "not a package")
 	if err := migrationValidatePlugins(directory); err == nil {
-		t.Fatal("accepted missing admin runtime")
+		t.Fatal("legacy shared object satisfied the package requirement")
 	}
-	migrationTestPlugin(t, admin, ludusapi.EnterprisePluginName, "1.2.3")
+	migrationTestWrite(t, directory, "plugin.json", manifest("ludus-enterprise"))
+	if err := migrationValidatePlugins(directory); err == nil {
+		t.Fatal("accepted a package without its executable")
+	}
+	migrationTestWrite(t, directory, "plugin", "#!/bin/sh\nexit 0\n")
+	if err := migrationValidatePlugins(directory); err == nil {
+		t.Fatal("accepted a non-executable plugin")
+	}
+	if err := os.Chmod(executable, 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := migrationValidatePlugins(directory); err != nil {
 		t.Fatal(err)
 	}
-	for _, identity := range [][2]string{{"Unrelated Plugin", "1.2.3"}, {ludusapi.EnterprisePluginName, "1.2.4"}, {ludusapi.EnterprisePluginName, ""}} {
-		migrationTestPlugin(t, admin, identity[0], identity[1])
+	for _, invalid := range []string{manifest("ludus-other"), `{"id":"ludus-enterprise"}`, manifest("ludus-enterprise") + "{}"} {
+		migrationTestWrite(t, directory, "plugin.json", invalid)
 		if err := migrationValidatePlugins(directory); err == nil {
-			t.Fatalf("accepted inconsistent enterprise runtime: %v", identity)
+			t.Fatalf("accepted invalid manifest %s", invalid)
 		}
 	}
-	migrationTestPlugin(t, admin, ludusapi.EnterprisePluginName, "1.2.3")
-	if err := os.Chmod(admin, 0644); err != nil {
+	migrationTestWrite(t, directory, "plugin.json", manifest("ludus-enterprise"))
+	if err := os.Remove(executable); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "plugin")
+	migrationTestWrite(t, filepath.Dir(target), "plugin", "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, executable); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrationValidatePlugins(directory); err == nil {
-		t.Fatal("accepted non-executable runtime")
-	}
-	if err := os.Remove(admin); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(public, admin); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrationValidatePlugins(directory); err == nil {
-		t.Fatal("accepted linked runtime")
-	}
-	if err := os.Remove(admin); err != nil {
-		t.Fatal(err)
-	}
-	migrationTestWrite(t, filepath.Dir(admin), filepath.Base(admin), "#!/bin/sh\nexit 0\n")
-	if err := os.Chmod(admin, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrationValidatePlugins(directory); err == nil {
-		t.Fatal("accepted executable without compatible RPC handshake")
+		t.Fatal("accepted a linked executable")
 	}
 }
 

@@ -10,14 +10,14 @@ import (
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
-	"ludusapi/pluginrpc"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
-func configurePluginWebApplication(plugin *managedPlugin, app *pluginrpc.WebApplication) error {
+func configurePluginWebApplication(plugin *managedPlugin, app *protocol.WebApplication) error {
 	if app == nil {
 		return nil
 	}
-	if plugin.metadata.ID != "ludus-guacamole" {
+	if plugin.manifest.ID != "ludus-guacamole" {
 		return errors.New("web application is only supported for Guacamole")
 	}
 	target, err := url.Parse(app.URL)
@@ -39,8 +39,12 @@ func trustedGuacamoleResource(app core.App, record *core.Record) bool {
 	if record == nil || record.GetString("pluginID") != "ludus-guacamole" {
 		return false
 	}
-	if record.GetBool("system") {
+	switch recordSource(record) {
+	case protocol.SourceServer, protocol.SourceLicensed:
 		return true
+	case protocol.SourceUploaded:
+	default:
+		return false
 	}
 	ownerID := record.GetString("owner")
 	if ownerID == "" {
@@ -58,12 +62,20 @@ func (p *PluginResources) GuacamoleWebApplication(e *core.RequestEvent) error {
 	p.mu.Lock()
 	id := e.Request.PathValue("pluginID")
 	record, err := p.app.FindRecordById("plugin_resources", id)
-	runtime := p.runtimes[id]
-	if err != nil || !trustedGuacamoleResource(p.app, record) || record.GetString("state") != "approved" || runtime == nil || runtime.plugin == nil || runtime.plugin.webApplication == nil {
+	if err != nil || !trustedGuacamoleResource(p.app, record) || record.GetString("state") != "approved" {
 		p.mu.Unlock()
 		return e.NotFoundError("Guacamole is unavailable", nil)
 	}
-	app := *runtime.plugin.webApplication
+	if manifestRunsAsRoot(resourceManifest(record)) && pluginServiceRunAs() != protocol.RunAsRoot {
+		p.mu.Unlock()
+		return proxyToAdmin(e)
+	}
+	plugin := p.pluginForRecord(record)
+	if plugin == nil || plugin.exited() || plugin.webApplication == nil {
+		p.mu.Unlock()
+		return e.NotFoundError("Guacamole is unavailable", nil)
+	}
+	app := *plugin.webApplication
 	p.mu.Unlock()
 	target, _ := url.Parse(app.URL)
 	proxy := httputil.NewSingleHostReverseProxy(target)
@@ -83,4 +95,8 @@ func (p *PluginResources) GuacamoleWebApplication(e *core.RequestEvent) error {
 	e.Response.Header().Set("Cache-Control", "no-store")
 	proxy.ServeHTTP(e.Response, e.Request)
 	return nil
+}
+
+func registerPluginWebApplicationRoutes(se *core.ServeEvent, p *PluginResources) {
+	se.Router.Any("/guacamole/{pluginID}/{appPath...}", p.GuacamoleWebApplication)
 }

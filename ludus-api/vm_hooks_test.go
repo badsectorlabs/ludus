@@ -11,39 +11,43 @@ import (
 	"testing"
 	"time"
 
-	"ludusapi/pluginrpc"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
 type vmHookTestRPC struct {
-	hook func(pluginrpc.VMHookRequest) (pluginrpc.VMHookResponse, error)
+	hook func(protocol.VMHookRequest) (protocol.VMHookResponse, error)
 }
 
-func (*vmHookTestRPC) Metadata() (pluginrpc.Metadata, error) {
-	return pluginrpc.Metadata{Name: "test"}, nil
+func (*vmHookTestRPC) Metadata() (protocol.Metadata, error) {
+	return protocol.Metadata{Name: "test"}, nil
 }
-func (*vmHookTestRPC) Initialize(pluginrpc.InitializeRequest) (pluginrpc.InitializeResponse, error) {
-	return pluginrpc.InitializeResponse{}, nil
+func (*vmHookTestRPC) Initialize(protocol.InitializeRequest) (protocol.InitializeResponse, error) {
+	return protocol.InitializeResponse{}, nil
 }
-func (*vmHookTestRPC) Handle(pluginrpc.Request) (pluginrpc.Response, error) {
-	return pluginrpc.Response{}, nil
+func (*vmHookTestRPC) Handle(protocol.Request) (protocol.Response, error) {
+	return protocol.Response{}, nil
 }
-func (*vmHookTestRPC) RunJob(string) (pluginrpc.JobResponse, error) {
-	return pluginrpc.JobResponse{}, nil
-}
-func (*vmHookTestRPC) Shutdown() error { return nil }
-func (p *vmHookTestRPC) VMHook(request pluginrpc.VMHookRequest) (pluginrpc.VMHookResponse, error) {
+func (*vmHookTestRPC) RunJob(protocol.JobRequest) error { return nil }
+func (*vmHookTestRPC) Shutdown() error                  { return nil }
+func (p *vmHookTestRPC) VMHook(request protocol.VMHookRequest) (protocol.VMHookResponse, error) {
+	if request.Call == "" {
+		return protocol.VMHookResponse{}, errors.New("VM hook dispatched without a CallID")
+	}
 	if p.hook == nil {
-		return pluginrpc.VMHookResponse{}, nil
+		return protocol.VMHookResponse{}, nil
 	}
 	return p.hook(request)
 }
 
-func testManagedVMHookPlugin(capabilities pluginrpc.VMHookCapabilities, initialized bool, hook func(pluginrpc.VMHookRequest) (pluginrpc.VMHookResponse, error)) *managedPlugin {
-	return &managedPlugin{
+func testManagedVMHookPlugin(capabilities protocol.VMHookCapabilities, initialized bool, hook func(protocol.VMHookRequest) (protocol.VMHookResponse, error)) *managedPlugin {
+	plugin := &managedPlugin{
 		rpc:         &vmHookTestRPC{hook: hook},
-		metadata:    pluginrpc.Metadata{Name: "test", VMHooks: capabilities},
+		manifest:    protocol.Manifest{ID: "test-plugin", Name: "test", Level: protocol.LevelSystem, VMHooks: capabilities},
+		source:      protocol.SourceUploaded,
 		initialized: initialized,
 	}
+	plugin.host = newHostService(&Server{}, plugin)
+	return plugin
 }
 
 func TestVMLifecycleHookDispatch(t *testing.T) {
@@ -51,14 +55,14 @@ func TestVMLifecycleHookDispatch(t *testing.T) {
 	logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	t.Cleanup(func() { logger = previousLogger })
 
-	var operations []pluginrpc.VMHookOperation
-	plugin := testManagedVMHookPlugin(pluginrpc.VMHookCapabilities{Start: true, Stop: true, Status: true, BeforeDelete: true}, true,
-		func(request pluginrpc.VMHookRequest) (pluginrpc.VMHookResponse, error) {
+	var operations []protocol.VMHookOperation
+	plugin := testManagedVMHookPlugin(protocol.VMHookCapabilities{Start: true, Stop: true, Status: true, BeforeDelete: true}, true,
+		func(request protocol.VMHookRequest) (protocol.VMHookResponse, error) {
 			operations = append(operations, request.Operation)
-			if request.Operation == pluginrpc.VMHookStatus {
-				return pluginrpc.VMHookResponse{Decision: StartVMHandled, Status: VMStatusRunning}, nil
+			if request.Operation == protocol.VMHookStatus {
+				return protocol.VMHookResponse{Decision: StartVMHandled, Status: VMStatusRunning}, nil
 			}
-			return pluginrpc.VMHookResponse{Decision: StartVMHandled}, nil
+			return protocol.VMHookResponse{Decision: StartVMHandled}, nil
 		})
 	server := &Server{plugins: []*managedPlugin{plugin}}
 	request := VMHookRequest{RangeID: "range", VMID: 126, VMName: "range-vm"}
@@ -76,7 +80,7 @@ func TestVMLifecycleHookDispatch(t *testing.T) {
 	if err := server.runBeforeDeleteVMHooks(context.Background(), request); err != nil {
 		t.Fatalf("delete hook: %v", err)
 	}
-	want := []pluginrpc.VMHookOperation{pluginrpc.VMHookStart, pluginrpc.VMHookStop, pluginrpc.VMHookStatus, pluginrpc.VMHookBeforeDelete}
+	want := []protocol.VMHookOperation{protocol.VMHookStart, protocol.VMHookStop, protocol.VMHookStatus, protocol.VMHookBeforeDelete}
 	if len(operations) != len(want) {
 		t.Fatalf("operations = %v, want %v", operations, want)
 	}
@@ -88,7 +92,7 @@ func TestVMLifecycleHookDispatch(t *testing.T) {
 }
 
 func TestVMLifecycleHookFailsClosedWhenUninitialized(t *testing.T) {
-	plugin := testManagedVMHookPlugin(pluginrpc.VMHookCapabilities{Start: true}, false, nil)
+	plugin := testManagedVMHookPlugin(protocol.VMHookCapabilities{Start: true}, false, nil)
 	server := &Server{plugins: []*managedPlugin{plugin}}
 	if _, err := server.runStartVMHooks(context.Background(), VMHookRequest{VMID: 126}); err == nil {
 		t.Fatal("uninitialized lifecycle plugin was skipped")

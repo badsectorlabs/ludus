@@ -44,10 +44,9 @@ live ARP ownership on every participating node, including peers without an IPv4
 address on the NAT bridge. Stale neighbor-cache entries from a rolled-back
 attempt do not prevent a safe retry.
 
-If Enterprise is installed, supply the matching target-release executable RPC
-plugin with `--enterprise-plugin`. It is installed as `ludus-enterprise.plugin`
-with executable permissions in both public and admin plugin directories. State
-import verifies both artifacts through the RPC metadata protocol. The legacy
+If Enterprise is installed, supply the matching target-release Enterprise
+package ZIP (`ludus-enterprise_<version>.zip`) with `--enterprise-plugin`. It is
+extracted root-owned into `/opt/ludus/plugins/ludus-enterprise/`. The legacy
 host's shared library is not copied into the new runtime.
 
 ## Migrate on the existing Proxmox host

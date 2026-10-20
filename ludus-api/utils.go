@@ -482,76 +482,50 @@ func getUIDandGIDFromUsername(username string) (int, int, error) {
 // HasRangeAccess checks if a user has access to a range through direct assignment or group membership
 func HasRangeAccess(e *core.RequestEvent, userID string, rangeNumber int) bool {
 
-	// Check if we have done this lookup before for this request, and if so, use the cached result
-	cachedRangesUserHasAccessTo := e.Get("rangesUserHasAccessTo")
-	if cachedRangesUserHasAccessTo != nil {
-		accessibleRangesIntArray := cachedRangesUserHasAccessTo.([]int)
-		if slices.Contains(accessibleRangesIntArray, rangeNumber) {
-			return true
-		}
-		return false
+	// The request caches every range the user can access, so later checks for
+	// other ranges in the same request (host-service calls) stay correct.
+	cacheKey := "rangesUserHasAccessTo:" + userID
+	if cached, ok := e.Get(cacheKey).([]int); ok {
+		return slices.Contains(cached, rangeNumber)
 	}
 
 	rangesUserHasAccessTo := make([]int, 0)
 
-	// Check direct user-to-range assignment. Plugin processes have no PocketBase
-	// app and must query the host Web API instead.
-	client, _ := PluginPocketBase()
-	var userRecord *core.Record
-	var err error
-	if client != nil {
-		userRecord, err = client.FindFirstRecordByData(context.Background(), "users", "userID", userID, "ranges")
-	} else {
-		userRecord, err = app.FindFirstRecordByData("users", "userID", userID)
-	}
+	// Check direct user-to-range assignment
+	userRecord, err := app.FindFirstRecordByData("users", "userID", userID)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error finding user: %s", err.Error()))
 		return false
 	}
-	if client == nil {
-		app.ExpandRecord(userRecord, []string{"ranges"}, nil)
-	}
-	userRanges := userRecord.ExpandedAll("ranges")
-	for _, rangeRecord := range userRanges {
-		if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
-			rangesUserHasAccessTo = append(rangesUserHasAccessTo, rangeRecord.GetInt("rangeNumber"))
-		}
+	app.ExpandRecord(userRecord, []string{"ranges"}, nil)
+	for _, rangeRecord := range userRecord.ExpandedAll("ranges") {
+		rangesUserHasAccessTo = append(rangesUserHasAccessTo, rangeRecord.GetInt("rangeNumber"))
 	}
 
 	// Check group-based access
-	var groupRecords []*core.Record
-	if client != nil {
-		groupRecords, err = client.ListRecords(context.Background(), "groups",
-			fmt.Sprintf("members.id ?= %q || managers.id ?= %q", userRecord.Id, userRecord.Id), "ranges")
-	} else {
-		groupRecords, err = app.FindRecordsByFilter(
-			"groups", // collection name
-			"members.id ?= {:user_id} || managers.id ?= {:user_id}", // filter
-			"-created", // sort
-			0,          // limit
-			0,          // offset
-			dbx.Params{
-				"user_id": userRecord.Id,
-			},
-		)
-	}
+	groupRecords, err := app.FindRecordsByFilter(
+		"groups", // collection name
+		"members.id ?= {:user_id} || managers.id ?= {:user_id}", // filter
+		"-created", // sort
+		0,          // limit
+		0,          // offset
+		dbx.Params{
+			"user_id": userRecord.Id,
+		},
+	)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error finding groups: %s", err.Error()))
 		return false
 	}
 	//logger.Debug(fmt.Sprintf("Found %d groups for user %s", len(groupRecords), userRecord.GetString("userID")))
 	for _, groupRecord := range groupRecords {
-		if client == nil {
-			app.ExpandRecord(groupRecord, []string{"ranges"}, nil)
-		}
+		app.ExpandRecord(groupRecord, []string{"ranges"}, nil)
 		for _, rangeRecord := range groupRecord.ExpandedAll("ranges") {
-			if rangeRecord.GetInt("rangeNumber") == int(rangeNumber) {
-				rangesUserHasAccessTo = append(rangesUserHasAccessTo, rangeRecord.GetInt("rangeNumber"))
-			}
+			rangesUserHasAccessTo = append(rangesUserHasAccessTo, rangeRecord.GetInt("rangeNumber"))
 		}
 	}
 
-	e.Set("rangesUserHasAccessTo", rangesUserHasAccessTo)
+	e.Set(cacheKey, rangesUserHasAccessTo)
 	return slices.Contains(rangesUserHasAccessTo, rangeNumber)
 }
 
@@ -710,13 +684,7 @@ func CreateDefaultUserRangeForBootstrap(txApp core.App, user *models.User) error
 
 // GetRangeObjectByNumber gets a range object by range number (for multi-range support)
 func GetRangeObjectByNumber(rangeNumber int) (*models.Range, error) {
-	var rawRangeRecord *core.Record
-	var err error
-	if client, clientErr := PluginPocketBase(); clientErr == nil {
-		rawRangeRecord, err = client.FindFirstRecordByData(context.Background(), "ranges", "rangeNumber", rangeNumber)
-	} else {
-		rawRangeRecord, err = app.FindFirstRecordByData("ranges", "rangeNumber", rangeNumber)
-	}
+	rawRangeRecord, err := app.FindFirstRecordByData("ranges", "rangeNumber", rangeNumber)
 	if err != nil {
 		return nil, fmt.Errorf("error finding range: %w", err)
 	}

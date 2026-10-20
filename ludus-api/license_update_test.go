@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/keygen-sh/keygen-go/v3"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
 func TestLookupLicensedPluginRelease(t *testing.T) {
@@ -193,104 +193,62 @@ func newPluginReleaseTestClient(t *testing.T, handler http.HandlerFunc) *keygen.
 	return client
 }
 
-func TestActivatePluginUpdateValidatesMetadata(t *testing.T) {
-	tests := []struct {
-		name            string
-		pathEnvironment string
-		pluginName      string
-	}{
-		{
-			name:            "enterprise",
-			pathEnvironment: "LUDUS_ENTERPRISE_PLUGIN",
-			pluginName:      EnterprisePluginName,
-		},
-		{
-			name:            "external plugin",
-			pathEnvironment: "LUDUS_PLUGIN_PATH",
-		},
+func TestInstallLicensedPackageValidatesManifest(t *testing.T) {
+	s := &Server{LudusInstallPath: t.TempDir()}
+	dir := s.licensedPackageDir(enterprisePluginID)
+	manifest := testExecutableManifest(enterprisePluginID)
+	manifest.Name, manifest.Version = "Ludus Enterprise", "1.2.3"
+	manifest.Level, manifest.RunAs = protocol.LevelSystem, protocol.RunAsRoot
+	release := func(m protocol.Manifest) []byte {
+		return testPackage(t, m, map[string]string{protocol.ExecutableFile: "enterprise " + m.Version})
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			sourcePath := os.Getenv(test.pathEnvironment)
-			if sourcePath == "" {
-				t.Skipf("%s is not set", test.pathEnvironment)
-			}
-			sourceMetadata, err := ReadPluginMetadata(sourcePath, nil)
-			if err != nil {
-				t.Fatalf("read source plugin metadata: %v", err)
-			}
-			if sourceMetadata.Version == "" {
-				t.Fatal("source plugin has no version")
-			}
-			if test.pluginName == "" {
-				test.pluginName = sourceMetadata.Name
-			}
-
-			targetDir := t.TempDir()
-			candidatePath := filepath.Join(targetDir, ".candidate.plugin")
-			targetPath := filepath.Join(targetDir, "installed.plugin")
-			if err := copyPluginExecutable(sourcePath, candidatePath); err != nil {
-				t.Fatalf("copy plugin candidate: %v", err)
-			}
-			if err := os.WriteFile(targetPath, []byte("old plugin"), 0755); err != nil {
-				t.Fatalf("write old plugin: %v", err)
-			}
-
-			server := &Server{}
-			if err := server.activatePluginUpdate(candidatePath, targetPath, sourceMetadata.Version, test.pluginName); err != nil {
-				t.Fatalf("activatePluginUpdate() error = %v", err)
-			}
-			installedMetadata, err := ReadPluginMetadata(targetPath, nil)
-			if err != nil {
-				t.Fatalf("read activated plugin metadata: %v", err)
-			}
-			if installedMetadata.Name != test.pluginName || installedMetadata.Version != sourceMetadata.Version {
-				t.Fatalf("activated plugin metadata = %#v, want name %q and version %q", installedMetadata, test.pluginName, sourceMetadata.Version)
-			}
-
-			if err := copyPluginExecutable(sourcePath, candidatePath); err != nil {
-				t.Fatalf("copy mismatched plugin candidate: %v", err)
-			}
-			protectedPath := filepath.Join(targetDir, "known-good.plugin")
-			if err := os.WriteFile(protectedPath, []byte("known good plugin"), 0755); err != nil {
-				t.Fatalf("write known-good plugin: %v", err)
-			}
-			if err := server.activatePluginUpdate(candidatePath, protectedPath, sourceMetadata.Version+".1", test.pluginName); err == nil {
-				t.Fatal("activatePluginUpdate() returned nil for a mismatched plugin version")
-			}
-			got, err := os.ReadFile(protectedPath)
-			if err != nil {
-				t.Fatalf("read plugin after rejected activation: %v", err)
-			}
-			if string(got) != "known good plugin" {
-				t.Fatalf("plugin after rejected activation = %q, want existing plugin", got)
-			}
-		})
+	other := manifest
+	other.ID = "ludus-other"
+	if err := s.installLicensedPackage(release(other), enterprisePluginSpec, "1.2.3"); err == nil {
+		t.Fatal("installed a release declaring another package ID")
 	}
-}
+	if err := s.installLicensedPackage(release(manifest), enterprisePluginSpec, "1.2.4"); err == nil {
+		t.Fatal("installed a release whose version differs from the release")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatal("rejected releases left an installed package")
+	}
 
-func copyPluginExecutable(sourcePath, targetPath string) error {
-	source, err := os.Open(sourcePath)
-	if err != nil {
-		return err
+	if err := s.installLicensedPackage(release(manifest), enterprisePluginSpec, "v1.2.3"); err != nil {
+		t.Fatal(err)
 	}
-	defer source.Close()
+	installed, err := readPackageManifest(dir)
+	if err != nil || installed.Version != "1.2.3" {
+		t.Fatalf("installed manifest = %+v, %v", installed, err)
+	}
+	approval, approved, err := readPluginApproval(dir)
+	if err != nil || !approved || approval.Source != protocol.SourceLicensed || approval.SHA256 != sha256Hex([]byte("enterprise 1.2.3")) ||
+		approval.Level != protocol.LevelSystem || approval.RunAs != protocol.RunAsRoot {
+		t.Fatalf("approval = %+v, %v, %v", approval, approved, err)
+	}
+	info, err := os.Stat(filepath.Join(dir, protocol.ExecutableFile))
+	if err != nil || info.Mode().Perm() != 0555 {
+		t.Fatalf("executable mode = %v, %v", info, err)
+	}
 
-	sourceInfo, err := source.Stat()
-	if err != nil {
-		return err
+	update := manifest
+	update.Version = "1.3.0"
+	if err := s.installLicensedPackage(release(update), enterprisePluginSpec, "1.3.1"); err == nil {
+		t.Fatal("installed a mismatched update")
 	}
-	target, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, sourceInfo.Mode().Perm())
-	if err != nil {
-		return err
+	if installed, err := readPackageManifest(dir); err != nil || installed.Version != "1.2.3" {
+		t.Fatalf("rejected update replaced the installed package: %+v, %v", installed, err)
 	}
-	_, copyErr := io.Copy(target, source)
-	closeErr := target.Close()
-	if copyErr != nil {
-		return copyErr
+	if err := s.installLicensedPackage(release(update), enterprisePluginSpec, "1.3.0"); err != nil {
+		t.Fatal(err)
 	}
-	return closeErr
+	if installed, err := readPackageManifest(dir); err != nil || installed.Version != "1.3.0" {
+		t.Fatalf("update not installed: %+v, %v", installed, err)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(s.pluginsRoot(), ".staging-*")); len(leftovers) != 0 {
+		t.Fatalf("staging directories left behind: %v", leftovers)
+	}
 }
 
 func TestInstallDownloadedArtifactReplacesOnlyVerifiedFile(t *testing.T) {
@@ -313,7 +271,7 @@ func TestInstallDownloadedArtifactReplacesOnlyVerifiedFile(t *testing.T) {
 	}))
 	defer download.Close()
 
-	targetPath := filepath.Join(t.TempDir(), EnterprisePluginFilename)
+	targetPath := filepath.Join(t.TempDir(), "ludus-enterprise_1.0.0.zip")
 	if err := os.WriteFile(targetPath, []byte("old plugin"), 0755); err != nil {
 		t.Fatalf("write existing plugin: %v", err)
 	}

@@ -6,21 +6,14 @@ import (
 	"net"
 	"net/http"
 
-	"ludusapi/pluginrpc"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
-func (s *Server) hasVMAddressHooks() bool {
-	for _, plugin := range s.pluginSnapshot() {
-		if plugin.metadata.VMHooks.Address {
-			return true
-		}
-	}
-	return false
-}
+func (s *Server) hasVMAddressHooks() bool { return s.declaredVMHooks().Address }
 
 func (s *Server) runVMAddressHooks(ctx context.Context, request VMHookRequest) (VMAddressHookResult, error) {
 	for _, plugin := range s.pluginSnapshot() {
-		if !plugin.metadata.VMHooks.Address {
+		if !plugin.manifest.VMHooks.Address {
 			continue
 		}
 		selected, err := pluginSelectsVM(ctx, plugin, request)
@@ -31,11 +24,11 @@ func (s *Server) runVMAddressHooks(ctx context.Context, request VMHookRequest) (
 			continue
 		}
 		if !pluginIsInitialized(plugin) {
-			return VMAddressHookResult{}, fmt.Errorf("plugin %s registered an address hook but is not initialized", plugin.metadata.Name)
+			return VMAddressHookResult{}, fmt.Errorf("plugin %s registered an address hook but is not initialized", plugin.manifest.Name)
 		}
-		result, err := pluginVMHook(ctx, plugin, pluginrpc.VMHookAddress, request)
+		result, err := pluginVMHook(ctx, plugin, protocol.VMHookAddress, request)
 		if err != nil {
-			return VMAddressHookResult{}, fmt.Errorf("plugin %s failed address discovery for VMID %d: %w", plugin.metadata.Name, request.VMID, err)
+			return VMAddressHookResult{}, fmt.Errorf("plugin %s failed address discovery for VMID %d: %w", plugin.manifest.Name, request.VMID, err)
 		}
 		switch result.Decision {
 		case StartVMContinue:
@@ -43,14 +36,14 @@ func (s *Server) runVMAddressHooks(ctx context.Context, request VMHookRequest) (
 		case StartVMHandled:
 			ip := net.ParseIP(result.Address)
 			if result.Ready && (ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast()) {
-				return VMAddressHookResult{}, fmt.Errorf("plugin %s returned an invalid bootstrap IPv4 address", plugin.metadata.Name)
+				return VMAddressHookResult{}, fmt.Errorf("plugin %s returned an invalid bootstrap IPv4 address", plugin.manifest.Name)
 			}
 			if !result.Ready && result.Address != "" {
-				return VMAddressHookResult{}, fmt.Errorf("plugin %s returned an address before it was ready", plugin.metadata.Name)
+				return VMAddressHookResult{}, fmt.Errorf("plugin %s returned an address before it was ready", plugin.manifest.Name)
 			}
 			return result, nil
 		default:
-			return VMAddressHookResult{}, fmt.Errorf("plugin %s returned an invalid address hook decision", plugin.metadata.Name)
+			return VMAddressHookResult{}, fmt.Errorf("plugin %s returned an invalid address hook decision", plugin.manifest.Name)
 		}
 	}
 	return VMAddressHookResult{Decision: StartVMContinue}, nil

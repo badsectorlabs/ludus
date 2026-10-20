@@ -60,6 +60,12 @@ Move the updated binary to a different location and run it with --update to comp
 	os.Chmod(ludusServerBinaryPath, 0711)
 
 	ensurePocketBaseStoragePermissions()
+	// Installs created before plugins moved to root-owned storage have a
+	// ludus-owned plugin store, which makes the admin service refuse every
+	// root-run plugin. Bootstrap only fixes it on first boot.
+	if err := ensureRootPluginStore(filepath.Join(ludusInstallPath, "plugins")); err != nil {
+		log.Printf("WARNING: could not make %s/plugins root-owned; root-run plugins will not start: %v", ludusInstallPath, err)
+	}
 
 	if !noAnsibleUpdate {
 		err := migratePermissions() // Required for direct PVE downloads via packer

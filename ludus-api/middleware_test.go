@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"testing"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
 func TestAdminRoutingPreservesPocketBaseAuthorization(t *testing.T) {
@@ -31,7 +34,7 @@ func TestAdminRoutingPreservesPocketBaseAuthorization(t *testing.T) {
 		auth   *core.Record
 		status int
 	}{
-		{"plugin superuser reaches PocketBase", "/api/collections/users/records", superuser, http.StatusOK},
+		{"superuser reaches PocketBase", "/api/collections/users/records", superuser, http.StatusOK},
 		{"missing native API authentication", "/api/collections/users/records", nil, http.StatusUnauthorized},
 		{"ordinary user lacks superuser access", "/api/collections/users/records", user, http.StatusForbidden},
 		{"Ludus route remains on regular service", APIBasePath + "/kms/status", superuser, http.StatusInternalServerError},
@@ -94,5 +97,51 @@ func TestRangeRevocationStaysOnRegularService(t *testing.T) {
 				t.Fatalf("status=%d want=%d body=%s", response.Code, want, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestLocalPluginAPIRoutesStayOnRegularService(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("prefix proxying happens in the regular service")
+	}
+	previousLogger := logger
+	logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	t.Cleanup(func() { logger = previousLogger })
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	t.Cleanup(admin.Close)
+	adminURL, _ := url.Parse(admin.URL)
+	previousProxy := adminProxy
+	adminProxy = httputil.NewSingleHostReverseProxy(adminURL)
+	t.Cleanup(func() { adminProxy = previousProxy })
+
+	m := testExecutableManifest("user-tools")
+	m.Level = protocol.LevelSystem
+	m.Routes = []protocol.Route{{Name: "profile", Method: "GET", Pattern: "/user/tools/profile", Scope: protocol.ScopeAPI}}
+	previousServer := server
+	server = &Server{plugins: []*managedPlugin{{manifest: m, source: protocol.SourceServer}}}
+	t.Cleanup(func() { server = previousServer })
+
+	for _, test := range []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/user/tools/profile", http.StatusOK},
+		{http.MethodPost, "/user/tools/profile", http.StatusTeapot},
+		{http.MethodGet, "/user/other", http.StatusTeapot},
+	} {
+		response := httptest.NewRecorder()
+		event := &core.RequestEvent{Event: router.Event{Request: httptest.NewRequest(test.method, APIBasePath+test.path, nil), Response: response}}
+		chain := hook.Hook[*core.RequestEvent]{}
+		chain.BindFunc(limitRootEndpoints)
+		if err := chain.Trigger(event, func(e *core.RequestEvent) error {
+			return e.JSON(http.StatusOK, map[string]bool{"local": true})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != test.want {
+			t.Errorf("%s %s: status %d, want %d", test.method, test.path, response.Code, test.want)
+		}
 	}
 }

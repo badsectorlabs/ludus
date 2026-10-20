@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"ludusapi/pluginrpc"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 	"testing"
 )
 
@@ -28,8 +28,8 @@ func TestGuacamoleWebApplicationEndpointBoundary(t *testing.T) {
 		{"ludus-guacamole", "http://user@127.0.0.1:80", "01234567890123456789012345678901", false},
 		{"ludus-guacamole", "http://127.0.0.1:80", "short", false},
 	} {
-		p := &managedPlugin{metadata: pluginrpc.Metadata{ID: test.id}}
-		err := configurePluginWebApplication(p, &pluginrpc.WebApplication{URL: test.url, Token: test.token})
+		p := &managedPlugin{manifest: protocol.Manifest{ID: test.id}}
+		err := configurePluginWebApplication(p, &protocol.WebApplication{URL: test.url, Token: test.token})
 		if (err == nil) != test.valid {
 			t.Errorf("%s %s: %v", test.id, test.url, err)
 		}
@@ -45,14 +45,14 @@ func TestGuacamoleProxyPreservesWebSocketAndPrivateHeaders(t *testing.T) {
 	}
 	defer pb.ResetBootstrapState()
 	collection := core.NewBaseCollection("plugin_resources")
-	collection.Fields.Add(&core.TextField{Name: "pluginID"}, &core.TextField{Name: "state"}, &core.BoolField{Name: "system"})
+	collection.Fields.Add(&core.TextField{Name: "pluginID"}, &core.TextField{Name: "state"}, &core.TextField{Name: "source"})
 	if err := pb.Save(collection); err != nil {
 		t.Fatal(err)
 	}
 	record := core.NewRecord(collection)
 	record.Set("pluginID", "ludus-guacamole")
 	record.Set("state", "approved")
-	record.Set("system", true)
+	record.Set("source", string(protocol.SourceServer))
 	if err := pb.Save(record); err != nil {
 		t.Fatal(err)
 	}
@@ -75,12 +75,15 @@ func TestGuacamoleProxyPreservesWebSocketAndPrivateHeaders(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	p := &PluginResources{app: pb, runtimes: map[string]*resourceRuntime{record.Id: {plugin: &managedPlugin{metadata: pluginrpc.Metadata{ID: "ludus-guacamole"}, webApplication: &pluginrpc.WebApplication{URL: upstream.URL, Token: secret}}}}}
+	server := &Server{}
+	server.plugins = []*managedPlugin{{manifest: protocol.Manifest{ID: "ludus-guacamole"}, source: protocol.SourceServer, resourceID: record.Id, webApplication: &protocol.WebApplication{URL: upstream.URL, Token: secret}}}
+	p := &PluginResources{app: pb, server: server}
+
 	router, err := apis.NewRouter(pb)
 	if err != nil {
 		t.Fatal(err)
 	}
-	registerPluginResourceRoutes(&core.ServeEvent{App: pb, Router: router}, p)
+	registerPluginWebApplicationRoutes(&core.ServeEvent{App: pb, Router: router}, p)
 	mux, err := router.BuildMux()
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +109,7 @@ func TestGuacamoleProxyPreservesWebSocketAndPrivateHeaders(t *testing.T) {
 	if err != nil || string(data) != message {
 		t.Fatalf("upgrade or payload failed: %q %v", data, err)
 	}
-	record.Set("system", false)
+	record.Set("source", string(protocol.SourceUploaded))
 	if err := pb.Save(record); err != nil {
 		t.Fatal(err)
 	}

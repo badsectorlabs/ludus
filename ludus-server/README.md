@@ -25,41 +25,33 @@ cd ../ludus-server
 GOOS=linux GOARCH=amd64 go build -tags=embeddocs -trimpath -ldflags "-s -w -X main.GitCommitHash=${GIT_COMMIT_SHORT_HASH}-manual-with-docs" -o ludus-server
 ```
 
-## Building the RPC plugins
+## Plugins
 
-Run these commands from the workspace root:
+Plugins are SDK-based packages built against `ludus-plugin-sdk`; see
+`docs/docs/developers/rpc-plugins.md` for authoring and the package format.
+Build a plugin's executable and generate its manifest from the workspace root:
 
 ```sh
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o ludus-enterprise-plugin/ludus-enterprise.plugin ./ludus-enterprise-plugin
+mkdir -p /tmp/ludus-enterprise
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o /tmp/ludus-enterprise/plugin ./ludus-enterprise-plugin
+/tmp/ludus-enterprise/plugin --ludus-manifest > /tmp/ludus-enterprise/plugin.json
 ```
 
-The plugins are standalone executables served through `hashicorp/go-plugin`.
-They do not need CGO and do not need to use the server's exact `ludus-api`
-source revision, build tags, or Go toolchain patch release. The host and plugin
-must support the same Ludus RPC protocol version.
+Server-installed packages live in a root-owned directory per plugin ID:
 
-Install the enterprise executable as
-`/opt/ludus/plugins/enterprise/ludus-enterprise.plugin` for the `ludus` service
-or under `/opt/ludus/plugins/enterprise/admin/` for the root service. Plugin
-files must be executable (`chmod 0755`).
+```text
+/opt/ludus/plugins/<id>/plugin.json
+/opt/ludus/plugins/<id>/plugin          # 0755
+/opt/ludus/plugins/<id>/ui/index.html   # optional
+/opt/ludus/plugins/uploaded/<resourceID>/  # admin-approved uploaded root-run packages
+```
 
-Community RPC plugins use the `.plugin` suffix and belong in the matching
-`/opt/ludus/plugins/community/` or `/opt/ludus/plugins/community/admin/`
-directory.
+`/opt/ludus/plugins` and everything under it must be `root:root` and not
+group- or world-writable. Both services scan `/opt/ludus/plugins/*/plugin.json`;
+`ludus.service` starts packages declaring `runAs: ludus`, and
+`ludus-admin.service` starts packages declaring `runAs: root`.
 
-## Plugin playbook log history
-
-Plugin playbooks can archive each VM's run in the standard range log history,
-including failed runs. Use
+Plugin playbooks run through the host service's `RunPlaybook`, which archives
+each run (including failures) in the range log history. Use
 `ludus range -r <range> logs --history` to list runs and
 `ludus range -r <range> logs --id <log-id>` to read one.
-
-Plugins create and finalize history through authenticated, loopback-only
-host endpoints under `/api/plugins/range-logs`. They send record IDs and
-completion status; the host resolves the log path, stores the file in
-PocketBase, and applies `max_log_history` retention. Plugin subprocesses
-do not open the database or manage PocketBase files.
-
-Upgrade the host before installing plugins that use these endpoints.
-The RPC wire protocol is unchanged; older plugins can still load, but
-must be rebuilt with the log-history support to archive their playbooks.

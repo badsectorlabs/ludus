@@ -38,15 +38,13 @@ type Routes []PocketBaseRoute
 var server *Server
 var logger *slog.Logger
 var adminProxy *httputil.ReverseProxy
+var adminServiceURL *url.URL
 var PB *pocketbase.PocketBase
 var app core.App
-var LudusPluginHandlerManager *HandlerManager
 var DebugProxmox bool
 
 // NewRouter returns a new router.
 func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
-
-	LudusPluginHandlerManager = NewHandlerManager()
 
 	server = ludusServer
 
@@ -95,9 +93,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	}
 
 	InitDb()
-	if os.Geteuid() != 0 {
-		server.PluginResources = newPluginResources(app, server)
-	}
+	server.PluginResources = newPluginResources(app, server)
 	preserveConcurrentUserCredentials(app)
 	if os.Geteuid() != 0 {
 		app.Cron().MustAdd("recover-password-rotations", "* * * * *", func() { recoverPendingPasswords(app) })
@@ -123,8 +119,8 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	webUIAvailable := checkEmbeddedWebUI()
 
 	// Setup a reverse proxy for the admin API
-	adminURL, _ := url.Parse(fmt.Sprintf("https://127.0.0.1:%d", ServerConfiguration.AdminPort))
-	adminProxy = httputil.NewSingleHostReverseProxy(adminURL)
+	adminServiceURL, _ = url.Parse(fmt.Sprintf("https://127.0.0.1:%d", ServerConfiguration.AdminPort))
+	adminProxy = httputil.NewSingleHostReverseProxy(adminServiceURL)
 	customTransport := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true, // Allow self-signed certificate
@@ -237,24 +233,6 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		return se.Next()
 	})
 
-	// Simple whoami to test authentication
-	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		se.Router.GET(APIBasePath+"/whoami", func(e *core.RequestEvent) error {
-			if e.Auth == nil {
-				return e.UnauthorizedError("Authentication failed", "You are not authenticated")
-			}
-			var usersRange *models.Range
-			usersRangeFromContext := e.Get("range")
-			if usersRangeFromContext != nil {
-				usersRange = usersRangeFromContext.(*models.Range)
-			}
-			rangeString := godump.DumpJSONStr(usersRange)
-			userString := godump.DumpJSONStr(e.Auth)
-			return e.String(http.StatusOK, "{\"user\": "+userString+", \"range\": "+rangeString+"}")
-		})
-		return se.Next()
-	})
-
 	if os.Getenv("LUDUS_DEBUG") == "1" {
 		// Serve the console test from the embedded filesystem
 		app.OnServe().BindFunc(func(se *core.ServeEvent) error {
@@ -269,39 +247,13 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 		})
 	}
 
-	// Serve the OpenAPI spec
-	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		se.Router.GET(APIBasePath+"/openapi", func(e *core.RequestEvent) error {
-			spec := EmbeddedOpenAPISpec()
-			if spec == nil {
-				return e.JSON(http.StatusNotFound, map[string]string{
-					"error": "OpenAPI spec not available",
-				})
-			}
-			e.Response.Header().Set("Content-Type", "text/yaml")
-			e.Response.WriteHeader(http.StatusOK)
-			e.Response.Write(spec)
-			return nil
-		})
-		return se.Next()
-	})
-
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		RegisterRoutesWithPocketBase(se, routes)
-		RegisterPluginPlaceholderRoutes(se)
-		if server.PluginResources != nil {
-			registerPluginResourceRoutes(se, server.PluginResources)
-		}
-		registerPluginLogHistoryRoutes(se, ludusInstallPath)
-		if err := se.Next(); err != nil {
-			return err
-		}
-		// Resource initialization and jobs may use the parent's API. Wait until
-		// PocketBase has bound its listener before starting these subprocesses.
-		if server.PluginResources != nil {
-			server.PluginResources.startup()
-		}
-		return nil
+		RegisterRoutesWithPocketBase(se, pluginResourceRoutes(server.PluginResources))
+		registerPluginWebApplicationRoutes(se, server.PluginResources)
+		// Registered last: core routes are more specific and take precedence.
+		registerPluginAPIRoutes(se, server)
+		return se.Next()
 	})
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
@@ -337,15 +289,6 @@ func RegisterRoutesWithPocketBase(se *core.ServeEvent, routes PocketBaseRoutes) 
 }
 
 func Version(e *core.RequestEvent) error {
-	// The "/" pattern is a subtree match in the router, so this handler also
-	// receives every GET under the API base that matched no real route. Those
-	// are 404s, not version probes — answering them with the version document
-	// masks client bugs (e.g. a mangled path that survives redirect cleaning).
-	// TODO: find a new home for this handler and create a dedicated "/" route for path mismatches.
-	if p := e.Request.URL.Path; p != APIBasePath+"/" && p != APIBasePath && p != "/" {
-		return JSONError(e, http.StatusNotFound, "not found")
-	}
-
 	response := dto.VersionResponse{
 		Version: LudusVersion,
 		Result:  "Ludus Server " + LudusVersion + " - " + server.LicenseMessage,
@@ -353,12 +296,55 @@ func Version(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, response)
 }
 
+// WhoAmI is a simple authentication test.
+func WhoAmI(e *core.RequestEvent) error {
+	if e.Auth == nil {
+		return e.UnauthorizedError("Authentication failed", "You are not authenticated")
+	}
+	var usersRange *models.Range
+	usersRangeFromContext := e.Get("range")
+	if usersRangeFromContext != nil {
+		usersRange = usersRangeFromContext.(*models.Range)
+	}
+	rangeString := godump.DumpJSONStr(usersRange)
+	userString := godump.DumpJSONStr(e.Auth)
+	return e.String(http.StatusOK, "{\"user\": "+userString+", \"range\": "+rangeString+"}")
+}
+
+// GetOpenAPISpec serves the embedded OpenAPI spec.
+func GetOpenAPISpec(e *core.RequestEvent) error {
+	spec := EmbeddedOpenAPISpec()
+	if spec == nil {
+		return e.JSON(http.StatusNotFound, map[string]string{
+			"error": "OpenAPI spec not available",
+		})
+	}
+	e.Response.Header().Set("Content-Type", "text/yaml")
+	e.Response.WriteHeader(http.StatusOK)
+	e.Response.Write(spec)
+	return nil
+}
+
 var routes = PocketBaseRoutes{
 	{
 		"Version",
 		http.MethodGet,
-		"/",
+		"/{$}",
 		Version,
+	},
+
+	{
+		"WhoAmI",
+		http.MethodGet,
+		"/whoami",
+		WhoAmI,
+	},
+
+	{
+		"GetOpenAPISpec",
+		http.MethodGet,
+		"/openapi",
+		GetOpenAPISpec,
 	},
 
 	{

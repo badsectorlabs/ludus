@@ -11,16 +11,16 @@ import (
 	"strings"
 	"testing"
 
-	"ludusapi/pluginrpc"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 
 	goproxmox "github.com/luthermonson/go-proxmox"
 	"github.com/pocketbase/pocketbase/core"
 )
 
 func TestPluginsWithoutVMHookMetadataAreNeverCalled(t *testing.T) {
-	legacy := testManagedVMHookPlugin(pluginrpc.VMHookCapabilities{}, true, func(pluginrpc.VMHookRequest) (pluginrpc.VMHookResponse, error) {
+	legacy := testManagedVMHookPlugin(protocol.VMHookCapabilities{}, true, func(protocol.VMHookRequest) (protocol.VMHookResponse, error) {
 		t.Fatal("plugin without VM hook metadata was called")
-		return pluginrpc.VMHookResponse{}, nil
+		return protocol.VMHookResponse{}, nil
 	})
 	for _, plugins := range [][]*managedPlugin{nil, {legacy}} {
 		s := &Server{plugins: plugins}
@@ -49,20 +49,20 @@ func TestVMLifecycleProxmoxFallbackCompatibility(t *testing.T) {
 	defer func() { logger = previousLogger }()
 
 	legacy := func() *managedPlugin {
-		return testManagedVMHookPlugin(pluginrpc.VMHookCapabilities{}, true, nil)
+		return testManagedVMHookPlugin(protocol.VMHookCapabilities{}, true, nil)
 	}
 	statusOnly := func() *managedPlugin {
-		return testManagedVMHookPlugin(pluginrpc.VMHookCapabilities{Status: true}, true, func(pluginrpc.VMHookRequest) (pluginrpc.VMHookResponse, error) {
-			return pluginrpc.VMHookResponse{Decision: StartVMContinue}, nil
+		return testManagedVMHookPlugin(protocol.VMHookCapabilities{Status: true}, true, func(protocol.VMHookRequest) (protocol.VMHookResponse, error) {
+			return protocol.VMHookResponse{Decision: StartVMContinue}, nil
 		})
 	}
 	continuing := func() *managedPlugin {
-		return testManagedVMHookPlugin(pluginrpc.VMHookCapabilities{Start: true, Stop: true, BeforeDelete: true}, true, func(pluginrpc.VMHookRequest) (pluginrpc.VMHookResponse, error) {
-			return pluginrpc.VMHookResponse{Decision: StartVMContinue}, nil
+		return testManagedVMHookPlugin(protocol.VMHookCapabilities{Start: true, Stop: true, BeforeDelete: true}, true, func(protocol.VMHookRequest) (protocol.VMHookResponse, error) {
+			return protocol.VMHookResponse{Decision: StartVMContinue}, nil
 		})
 	}
 	unselected := func() *managedPlugin {
-		return scopedVMTestPlugin(&scopedVMTestState{}, pluginrpc.VMHookCapabilities{Select: true, Start: true, Stop: true, BeforeDelete: true})
+		return scopedVMTestPlugin(&scopedVMTestState{}, protocol.VMHookCapabilities{Select: true, Start: true, Stop: true, BeforeDelete: true})
 	}
 
 	cases := []struct {
@@ -176,9 +176,17 @@ func TestVMLifecycleProxmoxFallbackCompatibility(t *testing.T) {
 
 func TestPoolResourceMembershipReachesLifecycleHooks(t *testing.T) {
 	previousConfiguration := ServerConfiguration
-	closeRootPVEClient()
+	resetRootPVEClient := func() {
+		rootPVEClientMu.Lock()
+		defer rootPVEClientMu.Unlock()
+		if rootPVEClient != nil {
+			rootPVEClient.Close()
+			rootPVEClient = nil
+		}
+	}
+	resetRootPVEClient()
 	t.Cleanup(func() {
-		closeRootPVEClient()
+		resetRootPVEClient()
 		ServerConfiguration = previousConfiguration
 	})
 

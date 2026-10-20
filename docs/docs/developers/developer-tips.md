@@ -35,11 +35,12 @@ Examples:
 ```
 The script copies the current checkout to `~/ludus-dev` on the target machine, then runs the relevant component `dev.sh` scripts. If a supported plugin source directory is present and `-s` is not set, it builds that plugin before building the server.
 
-Plugins are standalone RPC executables with a `.plugin` suffix. Their development
-scripts use normal CGO-free `go build` commands and copy the results into the
-appropriate `/opt/ludus/plugins/enterprise` directory. The plugin build no
-longer has to match the server's exact `ludus-api` build. See
-[RPC plugins](./rpc-plugins.md) for the protocol and testing workflow.
+Plugins are SDK-based packages (`plugin.json`, `plugin`, optional
+`ui/index.html`). Their development scripts build the executable with a normal
+CGO-free `go build`, generate `plugin.json` with `--ludus-manifest`, and install
+the package root-owned into `/opt/ludus/plugins/<id>/`. Plugins depend only on
+`ludus-plugin-sdk`, not on the server's `ludus-api` build. See
+[Plugins](./rpc-plugins.md) for the SDK and package format.
 
 The script **always** sets the `LUDUS_ENABLE_SUPERADMIN` variable to enable the [PocketBase web interface](../administration/pocketbase.md).
 

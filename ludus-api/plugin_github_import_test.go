@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 	"io"
 	"net/http"
 	"strings"
@@ -73,7 +74,7 @@ func TestGitHubReleaseURLBoundaries(t *testing.T) {
 }
 
 func TestGitHubReleaseImportAndRedirectBoundary(t *testing.T) {
-	pkg := testPackage(t, PluginManifest{SchemaVersion: 1, ID: "github-plugin", Name: "GitHub Plugin", Version: "1", UI: "ui/index.html"}, map[string]string{"ui/index.html": "<h1>GitHub</h1>"})
+	pkg := testPackage(t, protocol.Manifest{SchemaVersion: 1, ID: "github-plugin", Name: "GitHub Plugin", Version: "1", UI: "ui/index.html"}, map[string]string{"ui/index.html": "<h1>GitHub</h1>"})
 	for _, raw := range []string{
 		"https://github.com/example/plugin",
 		"https://github.com/example/plugin/releases/tag/v1.0.0",

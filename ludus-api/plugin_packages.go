@@ -6,40 +6,34 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 
-	"ludusapi/pluginrpc"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
-const pluginUploadLimit = 128 << 20
-const pluginUILimit = 2 << 20
+const (
+	pluginUploadLimit    = 128 << 20
+	pluginUILimit        = 2 << 20
+	pluginManifestLimit  = 64 << 10
+	pluginPackageArchive = "package.zip"
+	pluginApprovalFile   = "approval.json"
+)
 
-var pluginIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,63}$`)
+var pluginRecordIDPattern = regexp.MustCompile(`^[a-zA-Z0-9]{15}$`)
 
-// A package is a ZIP with an inert manifest, optional plugin executable, and
-// optional self-contained HTML document. Reading a package never executes code.
-type PluginManifest struct {
-	SchemaVersion int    `json:"schemaVersion"`
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Version       string `json:"version"`
-	Description   string `json:"description"`
-	Author        string `json:"author"`
-	Executable    string `json:"executable,omitempty"`
-	UI            string `json:"ui,omitempty"`
-	RangeScoped   bool   `json:"rangeScoped"`
-	Protocol      int    `json:"protocolVersion,omitempty"`
-}
-
+// A package is a ZIP with an inert plugin.json, an optional plugin executable,
+// and an optional self-contained ui/index.html. Reading a package never
+// executes code.
 type pluginPackage struct {
-	manifest PluginManifest
+	manifest protocol.Manifest
 	files    map[string][]byte
-	digest   string
+	archive  []byte
+	digest   string // SHA-256 of the ZIP archive
 }
 
 func readPluginPackage(data []byte) (*pluginPackage, error) {
@@ -51,16 +45,16 @@ func readPluginPackage(data []byte) (*pluginPackage, error) {
 		return nil, fmt.Errorf("expected a ZIP plugin package: %w", err)
 	}
 	if len(z.File) > 3 {
-		return nil, fmt.Errorf("package must contain only plugin.json, plugin, and ui/index.html")
+		return nil, fmt.Errorf("package must contain only %s, %s, and %s", protocol.ManifestFile, protocol.ExecutableFile, protocol.UIFile)
 	}
-	result := &pluginPackage{files: make(map[string][]byte)}
+	result := &pluginPackage{files: make(map[string][]byte), archive: data}
 	for _, f := range z.File {
 		limit := int64(pluginUploadLimit)
 		switch f.Name {
-		case "plugin.json":
-			limit = 65536
-		case "plugin":
-		case "ui/index.html":
+		case protocol.ManifestFile:
+			limit = pluginManifestLimit
+		case protocol.ExecutableFile:
+		case protocol.UIFile:
 			limit = pluginUILimit
 		default:
 			return nil, fmt.Errorf("unsupported package entry %q", f.Name)
@@ -85,43 +79,60 @@ func readPluginPackage(data []byte) (*pluginPackage, error) {
 		}
 		result.files[f.Name] = body
 	}
-	decoder := json.NewDecoder(bytes.NewReader(result.files["plugin.json"]))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&result.manifest); err != nil {
-		return nil, fmt.Errorf("invalid plugin.json: %w", err)
+	result.manifest, err = protocol.ParseManifest(result.files[protocol.ManifestFile])
+	if err != nil {
+		return nil, err
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return nil, fmt.Errorf("unexpected trailing manifest data")
+	if err := checkHostDeclarations(result.manifest); err != nil {
+		return nil, err
 	}
 	m := result.manifest
-	if m.SchemaVersion != 1 || !pluginIDPattern.MatchString(m.ID) || strings.TrimSpace(m.Name) == "" || strings.TrimSpace(m.Version) == "" || len(m.Name) > 120 || len(m.Version) > 64 || len(m.Description) > 2000 || len(m.Author) > 200 {
-		return nil, fmt.Errorf("invalid plugin manifest identity or schema version")
-	}
-	if m.Executable != "" && (m.Executable != "plugin" || m.Protocol != pluginrpc.ProtocolVersion) {
-		return nil, fmt.Errorf("executable must be plugin and protocolVersion must be %d", pluginrpc.ProtocolVersion)
-	}
-	if m.UI != "" && m.UI != "ui/index.html" {
-		return nil, fmt.Errorf("ui must be ui/index.html")
-	}
-	if m.UI == "" && m.Executable == "" {
-		return nil, fmt.Errorf("package needs an executable or UI")
-	}
 	for _, name := range []string{m.Executable, m.UI} {
 		if name != "" && len(result.files[name]) == 0 {
 			return nil, fmt.Errorf("missing %s", name)
 		}
 	}
-	if (m.UI == "" && result.files["ui/index.html"] != nil) || (m.Executable == "" && result.files["plugin"] != nil) {
+	if (m.UI == "" && result.files[protocol.UIFile] != nil) || (m.Executable == "" && result.files[protocol.ExecutableFile] != nil) {
 		return nil, fmt.Errorf("undeclared package entry")
 	}
-	sum := sha256.Sum256(data)
-	result.digest = hex.EncodeToString(sum[:])
+	result.digest = sha256Hex(data)
 	return result, nil
 }
 
+// checkHostDeclarations applies host rules beyond protocol validation. VM
+// lifecycle hooks require runAs root: the VM hook service and hook-driven
+// power and delete operations run in the admin service.
+func checkHostDeclarations(m protocol.Manifest) error {
+	if m.VMHooks.Any() && m.RunAs != protocol.RunAsRoot {
+		return fmt.Errorf("plugin %s declares VM lifecycle hooks, which require runAs %q: hooks run in the admin service", m.ID, protocol.RunAsRoot)
+	}
+	return nil
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func fileSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// storePluginPackage writes an uploaded package, including its original ZIP,
+// into <root>/<record ID>. The executable stays non-executable until an
+// administrator activates it.
 func storePluginPackage(root, id string, pkg *pluginPackage) error {
 	// Record IDs are generated by PocketBase, never supplied as filesystem paths.
-	if !regexp.MustCompile(`^[a-zA-Z0-9]{15}$`).MatchString(id) {
+	if !pluginRecordIDPattern.MatchString(id) {
 		return fmt.Errorf("invalid package record ID")
 	}
 	if err := os.MkdirAll(root, 0700); err != nil {
@@ -132,15 +143,173 @@ func storePluginPackage(root, id string, pkg *pluginPackage) error {
 		return err
 	}
 	defer os.RemoveAll(tmp)
+	files := map[string][]byte{pluginPackageArchive: pkg.archive}
 	for name, body := range pkg.files {
+		files[name] = body
+	}
+	for name, body := range files {
 		destination := filepath.Join(tmp, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
 			return err
 		}
-		// The executable stays non-executable until its manager activates it.
 		if err := os.WriteFile(destination, body, 0600); err != nil {
 			return err
 		}
 	}
 	return os.Rename(tmp, filepath.Join(root, id))
+}
+
+// readStoredPluginArchive reads the ZIP an uploaded package was stored from.
+func readStoredPluginArchive(root, id string) ([]byte, error) {
+	if !pluginRecordIDPattern.MatchString(id) {
+		return nil, fmt.Errorf("invalid package record ID")
+	}
+	file, err := os.Open(filepath.Join(root, id, pluginPackageArchive))
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, pluginUploadLimit+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > pluginUploadLimit {
+		return nil, fmt.Errorf("plugin package exceeds 128 MiB")
+	}
+	return data, nil
+}
+
+// readPackageManifest reads and validates the plugin.json of an installed
+// package directory and checks that the files it declares exist.
+func readPackageManifest(dir string) (protocol.Manifest, error) {
+	file, err := os.Open(filepath.Join(dir, protocol.ManifestFile))
+	if err != nil {
+		return protocol.Manifest{}, err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, pluginManifestLimit+1))
+	file.Close()
+	if err != nil {
+		return protocol.Manifest{}, err
+	}
+	if len(data) > pluginManifestLimit {
+		return protocol.Manifest{}, fmt.Errorf("%s exceeds 64 KiB", protocol.ManifestFile)
+	}
+	manifest, err := protocol.ParseManifest(data)
+	if err != nil {
+		return protocol.Manifest{}, err
+	}
+	if err := checkHostDeclarations(manifest); err != nil {
+		return protocol.Manifest{}, err
+	}
+	for _, name := range []string{manifest.Executable, manifest.UI} {
+		if name == "" {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(name)))
+		if err != nil {
+			return protocol.Manifest{}, fmt.Errorf("missing %s: %w", name, err)
+		}
+		if !info.Mode().IsRegular() {
+			return protocol.Manifest{}, fmt.Errorf("%s is not a regular file", name)
+		}
+	}
+	return manifest, nil
+}
+
+// pluginApproval is approval.json in a root-managed package directory. Only
+// the admin service writes it. A package without one was placed by root and
+// has source server.
+type pluginApproval struct {
+	Source     protocol.Source `json:"source"`
+	ResourceID string          `json:"resourceID,omitempty"`
+	SHA256     string          `json:"sha256"`
+	Level      protocol.Level  `json:"level"`
+	RunAs      protocol.RunAs  `json:"runAs"`
+}
+
+func readPluginApproval(dir string) (pluginApproval, bool, error) {
+	data, err := os.ReadFile(filepath.Join(dir, pluginApprovalFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return pluginApproval{}, false, nil
+	}
+	if err != nil {
+		return pluginApproval{}, false, err
+	}
+	var approval pluginApproval
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&approval); err != nil {
+		return pluginApproval{}, false, fmt.Errorf("invalid %s: %w", pluginApprovalFile, err)
+	}
+	return approval, true, nil
+}
+
+// writeRootPackage replaces dir with pkg's files and an approval.json that
+// records the executable's SHA-256. Directories are 0755, the executable 0555,
+// and other files 0644, all owned by the calling (root) user.
+func writeRootPackage(dir string, pkg *pluginPackage, approval pluginApproval) error {
+	parent := filepath.Dir(dir)
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return err
+	}
+	staging, err := os.MkdirTemp(parent, ".staging-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(staging)
+	write := func(name string, body []byte, mode os.FileMode) error {
+		destination := filepath.Join(staging, filepath.FromSlash(name))
+		if directory := filepath.Dir(destination); directory != staging {
+			if err := os.MkdirAll(directory, 0755); err != nil {
+				return err
+			}
+			if err := os.Chmod(directory, 0755); err != nil {
+				return err
+			}
+		}
+		if err := os.WriteFile(destination, body, mode); err != nil {
+			return err
+		}
+		// WriteFile is subject to the umask.
+		return os.Chmod(destination, mode)
+	}
+	for name, body := range pkg.files {
+		mode := os.FileMode(0644)
+		if name == protocol.ExecutableFile {
+			mode = 0555
+			approval.SHA256 = sha256Hex(body)
+		}
+		if err := write(name, body, mode); err != nil {
+			return err
+		}
+	}
+	approval.Level, approval.RunAs = pkg.manifest.Level, pkg.manifest.RunAs
+	encoded, err := json.MarshalIndent(approval, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := write(pluginApprovalFile, append(encoded, '\n'), 0644); err != nil {
+		return err
+	}
+	if err := os.Chmod(staging, 0755); err != nil {
+		return err
+	}
+	previous := staging + ".previous"
+	replacing := false
+	if _, err := os.Lstat(dir); err == nil {
+		if err := os.Rename(dir, previous); err != nil {
+			return fmt.Errorf("move previous package aside: %w", err)
+		}
+		replacing = true
+	}
+	if err := os.Rename(staging, dir); err != nil {
+		if replacing {
+			_ = os.Rename(previous, dir)
+		}
+		return fmt.Errorf("install package: %w", err)
+	}
+	if replacing {
+		return os.RemoveAll(previous)
+	}
+	return nil
 }

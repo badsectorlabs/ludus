@@ -8,11 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"ludusapi/pluginrpc"
-
 	"github.com/keygen-sh/keygen-go/v3"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
 type invalidLicenseTransport struct{}
@@ -82,7 +81,7 @@ func TestGetLicenseReportsEmptyPluginEntitlements(t *testing.T) {
 	originalServer := server
 	t.Cleanup(func() { server = originalServer })
 	server = &Server{}
-	server.applyPluginState(pluginrpc.ServerState{})
+	server.applyLicense(protocol.License{})
 
 	response := httptest.NewRecorder()
 	event := &core.RequestEvent{Event: router.Event{

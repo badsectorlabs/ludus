@@ -24,13 +24,17 @@ func init() {
 			&core.TextField{Name: "state"},
 			&core.TextField{Name: "error"},
 			&core.TextField{Name: "sha256"},
-			&core.BoolField{Name: "system"},
+			// uploaded: approved by an administrator; server: placed by root;
+			// licensed: installed by the license flow.
+			&core.SelectField{Name: "source", Required: true, MaxSelect: 1, Values: []string{"uploaded", "server", "licensed"}},
 			&core.AutodateField{Name: "created", OnCreate: true},
 			&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 		)
-		c.AddIndex("idx_plugin_resources_personal", true, "pluginID, owner", "allUsers = FALSE AND system = FALSE")
-		c.AddIndex("idx_plugin_resources_global", true, "pluginID", "allUsers = TRUE AND system = FALSE")
-		c.AddIndex("idx_plugin_resources_system", true, "pluginID", "system = TRUE")
+		// Uploads are unique per owner (personal) or globally (all users);
+		// installed packages are unique by plugin ID.
+		c.AddIndex("idx_plugin_resources_personal", true, "pluginID, owner", "allUsers = FALSE AND source = 'uploaded'")
+		c.AddIndex("idx_plugin_resources_global", true, "pluginID", "allUsers = TRUE AND source = 'uploaded'")
+		c.AddIndex("idx_plugin_resources_installed", true, "pluginID", "source != 'uploaded'")
 		return app.Save(c)
 	}, func(app core.App) error {
 		c, err := app.FindCollectionByNameOrId("plugin_resources")

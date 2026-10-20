@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -235,5 +237,35 @@ func TestReadDNSUpstreamsRequiresNameserver(t *testing.T) {
 	}
 	if _, err := readDNSUpstreams(resolvConf); err == nil {
 		t.Fatal("expected an error when resolv.conf has no nameserver")
+	}
+}
+
+func TestBootstrapOwnershipSkipsRootPluginStore(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"users/alice", "plugins/ludus-enterprise/ui", "plugins-backup"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{"config.yml", "plugins/ludus-enterprise/plugin", "plugins-backup/file"} {
+		if err := os.WriteFile(filepath.Join(root, file), nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(root, "plugins"), filepath.Join(root, "users", "link")); err != nil {
+		t.Fatal(err)
+	}
+	var changed []string
+	err := chownTreeExcept(root, filepath.Join(root, "plugins"), func(path string) error {
+		rel, _ := filepath.Rel(root, path)
+		changed = append(changed, rel)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{".", "config.yml", "plugins-backup", "plugins-backup/file", "users", "users/alice", "users/link"}
+	if !slices.Equal(changed, want) {
+		t.Fatalf("changed owners of %v, want %v", changed, want)
 	}
 }

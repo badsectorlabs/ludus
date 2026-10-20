@@ -3,7 +3,8 @@ ansible_connection: "{{ 'ssh' if defaults.use_cert_auth | default(false) else 'w
 # connection plugins for meta: reset_connection, so the integer port option
 # rejects the Jinja string. The WinRM (5986) and SSH (22) defaults match.
 ludus_windows_control_port: "{{ 22 if defaults.use_cert_auth | default(false) else 5986 }}"
-ansible_shell_type: powershell
+# WinRM in ansible-core 2.21 requires cmd; powershell breaks -EncodedCommand.
+ansible_shell_type: "{{ 'powershell' if defaults.use_cert_auth | default(false) else 'cmd' }}"
 ansible_become_method: runas
 ludus_template_user: localuser
 ludus_template_password: password

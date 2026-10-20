@@ -5,21 +5,21 @@ import (
 	"errors"
 	"testing"
 
-	"ludusapi/pluginrpc"
+	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
 func addressTestPlugin(result VMAddressHookResult, hookErr error, calls *int) *managedPlugin {
-	return testManagedVMHookPlugin(pluginrpc.VMHookCapabilities{Address: true}, true,
-		func(request pluginrpc.VMHookRequest) (pluginrpc.VMHookResponse, error) {
+	return testManagedVMHookPlugin(protocol.VMHookCapabilities{Address: true}, true,
+		func(request protocol.VMHookRequest) (protocol.VMHookResponse, error) {
 			*calls++
 			return result, hookErr
 		})
 }
 
 func TestVMAddressOptionalCompatibility(t *testing.T) {
-	legacy := testManagedVMHookPlugin(pluginrpc.VMHookCapabilities{}, true, func(pluginrpc.VMHookRequest) (pluginrpc.VMHookResponse, error) {
+	legacy := testManagedVMHookPlugin(protocol.VMHookCapabilities{}, true, func(protocol.VMHookRequest) (protocol.VMHookResponse, error) {
 		t.Fatal("plugin without address capability was called")
-		return pluginrpc.VMHookResponse{}, nil
+		return protocol.VMHookResponse{}, nil
 	})
 	for _, plugins := range [][]*managedPlugin{nil, {legacy}} {
 		s := &Server{plugins: plugins}
