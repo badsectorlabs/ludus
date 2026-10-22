@@ -21,15 +21,16 @@ import (
 
 // managedPlugin is one plugin process hosted by this service.
 type managedPlugin struct {
-	rpc            protocol.Plugin
-	client         *hcplugin.Client
-	manifest       protocol.Manifest // approved declarations
-	metadata       protocol.Metadata
-	source         protocol.Source
-	resourceID     string // plugin_resources record ID ("" until mirrored)
-	dir            string // package directory the executable runs from
-	host           *HostService
-	webApplication *protocol.WebApplication
+	rpc        protocol.Plugin
+	client     *hcplugin.Client
+	manifest   protocol.Manifest // approved declarations
+	metadata   protocol.Metadata
+	source     protocol.Source
+	resourceID string // plugin_resources record ID ("" until mirrored)
+	dir        string // package directory the executable runs from
+	host       *HostService
+	// app reaches the plugin's browser application; nil without one.
+	app *pluginAppTransport
 
 	mu          sync.Mutex
 	initialized bool
@@ -56,6 +57,8 @@ type Server struct {
 	pluginTasks         chan func()
 	licensedRefreshMu   sync.Mutex
 	lastLicensedRefresh time.Time
+	appsOnce            sync.Once
+	apps                *pluginAppRegistry // plugin app sessions this service hosts
 
 	licenseMu                  sync.RWMutex
 	Version                    string
@@ -133,15 +136,6 @@ func (p *managedPlugin) exited() bool {
 // manifest is the approved declaration; the process must report matching
 // metadata.
 func (s *Server) startPlugin(dir string, manifest protocol.Manifest, source protocol.Source, resourceID string) (*managedPlugin, error) {
-	if manifest.ID == "ludus-guacamole" && source == protocol.SourceUploaded {
-		if s.PluginResources == nil {
-			return nil, errors.New("Guacamole resource approval is unavailable")
-		}
-		record, err := s.PluginResources.app.FindRecordById("plugin_resources", resourceID)
-		if err != nil || !trustedGuacamoleResource(s.PluginResources.app, record) {
-			return nil, errors.New("only administrator-owned Guacamole plugins may be started")
-		}
-	}
 	if manifest.Executable == "" {
 		return nil, fmt.Errorf("plugin %s has no executable", manifest.ID)
 	}
@@ -258,7 +252,7 @@ func (s *Server) initializePlugin(plugin *managedPlugin, broker *hcplugin.MuxBro
 	if err != nil {
 		return nil, fmt.Errorf("initialize plugin %s: %w", plugin.manifest.ID, err)
 	}
-	if err := configurePluginWebApplication(plugin, response.WebApplication); err != nil {
+	if err := connectPluginApp(plugin, response.AppStream); err != nil {
 		return nil, err
 	}
 	names := map[string]bool{}
@@ -340,10 +334,14 @@ func (s *Server) stopPlugin(plugin *managedPlugin, graceful bool) {
 	s.plugins = slices.DeleteFunc(s.plugins, func(existing *managedPlugin) bool { return existing == plugin })
 	s.pluginMu.Unlock()
 	s.removePluginJobs(plugin)
+	s.pluginApps().endPlugin(plugin)
 	if graceful {
 		if err := plugin.rpc.Shutdown(); err != nil {
 			s.logger().Info("Error shutting down plugin", "plugin", plugin.manifest.ID, "error", err)
 		}
+	}
+	if plugin.app != nil {
+		plugin.app.close()
 	}
 	if plugin.client != nil {
 		plugin.client.Kill()

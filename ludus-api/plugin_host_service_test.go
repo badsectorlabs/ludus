@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
@@ -575,7 +576,7 @@ func TestHostServiceSetRangeInactivityTimeout(t *testing.T) {
 
 func TestTouchRangeRequiresLiveCallerAndAuthorizedRange(t *testing.T) {
 	f := newHostFixture(t)
-	h := newHostService(f.server, testPlugin("guacamole", protocol.LevelSystem, protocol.SourceUploaded))
+	h := newHostService(f.server, testPlugin("console-plugin", protocol.LevelSystem, protocol.SourceUploaded))
 	check := func(call protocol.CallID, number int, want protocol.ErrorCode) {
 		t.Helper()
 		var reply protocol.EmptyReply
@@ -599,4 +600,127 @@ func TestTouchRangeRequiresLiveCallerAndAuthorizedRange(t *testing.T) {
 	call, end = h.beginRequest(f.event(t, f.admin, f.other, 0))
 	check(call, 10, protocol.CodeForbidden)
 	end()
+}
+
+// RangeVMs describes each VM from the deployed range configuration and its
+// template record; VMs outside the configuration stay undescribed.
+func TestHostServiceRangeVMsDescribeConfiguredVMs(t *testing.T) {
+	f := newHostFixture(t)
+	h := newHostService(f.server, testPlugin("standard-plugin", protocol.LevelStandard, protocol.SourceUploaded))
+	dir := filepath.Join(f.server.LudusInstallPath, "ranges", "OWNER")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	config := "ludus:\n  - vm_name: \"{{ range_id }}-vm\"\n    hostname: dc\n    template: win2022-server-x64-template\n    vlan: 10\n    ip_last_octet: 11\n"
+	if err := os.WriteFile(filepath.Join(dir, "range-config.yml"), []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.save(t, "templates", map[string]any{"name": "win2022-server-x64-template", "os": "windows"})
+	f.save(t, "vms", map[string]any{"proxmoxID": 150, "range": f.ranges[10].Id, "name": "unconfigured", "poweredOn": true})
+
+	call, end := h.beginRequest(f.event(t, f.owner, f.owner, 10))
+	defer end()
+	var reply protocol.VMsReply
+	h.RangeVMs(protocol.RangeArgs{Call: call, Number: 10}, &reply)
+	if reply.Err != nil || len(reply.VMs) != 2 {
+		t.Fatalf("RangeVMs = %+v", reply)
+	}
+	configured, unconfigured := reply.VMs[0], reply.VMs[1]
+	if configured.Name != "OWNER-vm" || configured.Template != "win2022-server-x64-template" || configured.OS != "windows" || configured.ConfiguredIP != "10.10.10.11" {
+		t.Fatalf("configured VM = %+v", configured)
+	}
+	if unconfigured.Template != "" || unconfigured.OS != "" || unconfigured.ConfiguredIP != "" {
+		t.Fatalf("unconfigured VM = %+v", unconfigured)
+	}
+}
+
+// TouchRange writes lastActive at most every rangeActivityInterval per range.
+func TestTouchRangeThrottlesWrites(t *testing.T) {
+	f := newHostFixture(t)
+	h := newHostService(f.server, testPlugin("console-plugin", protocol.LevelSystem, protocol.SourceUploaded))
+	call, end := h.beginRequest(f.event(t, f.owner, f.owner, 0))
+	defer end()
+	touch := func() {
+		t.Helper()
+		var reply protocol.EmptyReply
+		h.TouchRange(protocol.RangeArgs{Call: call, Number: 10}, &reply)
+		if reply.Err != nil {
+			t.Fatal(reply.Err)
+		}
+	}
+	lastActive := func() time.Time {
+		r, err := f.pb.FindRecordById("ranges", f.ranges[10].Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.GetDateTime("lastActive").Time()
+	}
+	old := "2000-01-01 00:00:00.000Z"
+	reset := func() {
+		if _, err := f.pb.DB().NewQuery("UPDATE ranges SET lastActive = {:old} WHERE id = {:id}").Bind(dbx.Params{"old": old, "id": f.ranges[10].Id}).Execute(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	touch()
+	if time.Since(lastActive()) > time.Minute {
+		t.Fatal("first touch was not written")
+	}
+	reset()
+	touch()
+	if lastActive().Year() != 2000 {
+		t.Fatal("touch within the interval was written")
+	}
+	rangeTouches.mu.Lock()
+	rangeTouches.last[f.ranges[10].Id] = time.Now().Add(-rangeActivityInterval)
+	rangeTouches.mu.Unlock()
+	touch()
+	if time.Since(lastActive()) > time.Minute {
+		t.Fatal("touch after the interval was not written")
+	}
+}
+
+// RangeVMs re-parses a range configuration only when the file changes.
+func TestHostServiceRangeVMsCachesConfigUntilChanged(t *testing.T) {
+	f := newHostFixture(t)
+	h := newHostService(f.server, testPlugin("standard-plugin", protocol.LevelStandard, protocol.SourceUploaded))
+	dir := filepath.Join(f.server.LudusInstallPath, "ranges", "OWNER")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "range-config.yml")
+	write := func(template string, modTime time.Time) {
+		t.Helper()
+		config := "ludus:\n  - vm_name: \"{{ range_id }}-vm\"\n    template: " + template + "\n    vlan: 10\n    ip_last_octet: 11\n"
+		if err := os.WriteFile(path, []byte(config), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	template := func() string {
+		t.Helper()
+		call, end := h.beginRequest(f.event(t, f.owner, f.owner, 10))
+		defer end()
+		var reply protocol.VMsReply
+		h.RangeVMs(protocol.RangeArgs{Call: call, Number: 10}, &reply)
+		if reply.Err != nil || len(reply.VMs) != 1 {
+			t.Fatalf("RangeVMs = %+v", reply)
+		}
+		return reply.VMs[0].Template
+	}
+	first := time.Now().Add(-time.Hour).Truncate(time.Second)
+	write("template-aaa", first)
+	if got := template(); got != "template-aaa" {
+		t.Fatalf("template = %q", got)
+	}
+	// Same size and modification time: the cached parse is reused.
+	write("template-bbb", first)
+	if got := template(); got != "template-aaa" {
+		t.Fatalf("unchanged file was re-parsed: %q", got)
+	}
+	write("template-bbb", first.Add(time.Second))
+	if got := template(); got != "template-bbb" {
+		t.Fatalf("changed file was not re-parsed: %q", got)
+	}
 }

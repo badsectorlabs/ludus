@@ -214,9 +214,6 @@ func (s *Server) handlePluginRoute(e *core.RequestEvent, plugin *managedPlugin, 
 	if err != nil {
 		return JSONError(e, http.StatusBadRequest, "invalid plugin request: "+err.Error())
 	}
-	if plugin.manifest.ID == "ludus-guacamole" {
-		request.GuacAppBasePath = "/guacamole/" + plugin.resourceID + "/"
-	}
 	response, err := plugin.rpc.Handle(request)
 	if err != nil {
 		return JSONError(e, http.StatusBadGateway, fmt.Sprintf("plugin %s request failed: %v", plugin.manifest.ID, err))

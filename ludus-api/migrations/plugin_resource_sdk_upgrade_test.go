@@ -19,7 +19,7 @@ func TestUpgradeLegacyPluginResourcesPreservesSharingAndRequiresSDKReview(t *tes
 		t.Fatal(err)
 	}
 	r := core.NewRecord(c)
-	r.Set("pluginID", "ludus-guacamole")
+	r.Set("pluginID", "legacy-plugin")
 	r.Set("owner", "administrator")
 	r.Set("allowedUsers", []string{"member"})
 	r.Set("excludedUsers", []string{"hidden"})

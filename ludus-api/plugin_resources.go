@@ -150,6 +150,7 @@ func (p *PluginResources) response(r, auth *core.Record) map[string]any {
 		"resourceID": r.Id, "isOwner": auth != nil && r.GetString("owner") == auth.Id,
 		"owner": r.GetString("owner"), "allUsers": r.GetBool("allUsers"), "state": state, "hasUI": m.UI != "", "rangeScoped": m.RangeScoped,
 		"source": source, "level": m.Level, "runAs": m.RunAs, "forwardCallerCredentials": m.ForwardCallerCredentials,
+		"app": m.App, "vmActions": m.VMActions,
 		"apiRoutes": apiRoutes, "vmHooks": vmHookNames(m.VMHooks),
 		"canManage": pluginManage(r, auth), "canActivate": pluginAdmin(auth) && source == protocol.SourceUploaded,
 		"canUninstall": pluginManage(r, auth) && source == protocol.SourceUploaded, "sha256": r.GetString("sha256"), "error": r.GetString("error")}
@@ -341,9 +342,6 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 	pkg, err := readPluginPackage(data)
 	if err != nil {
 		return JSONError(e, 400, err.Error())
-	}
-	if pkg.manifest.ID == "ludus-guacamole" && !pluginAdmin(e.Auth) {
-		return JSONError(e, 403, "only administrators can install the Guacamole plugin")
 	}
 	// Runs after the lock is released: a superseded approved root-run package
 	// is withdrawn from the admin service right away.
@@ -602,9 +600,6 @@ func (p *PluginResources) Activate(e *core.RequestEvent) error {
 // gets a root-owned copy built from the stored ZIP whose SHA-256 the
 // administrator approved; the uploaded files themselves are never trusted.
 func (p *PluginResources) start(r *core.Record, m protocol.Manifest) error {
-	if m.ID == "ludus-guacamole" && !trustedGuacamoleResource(p.app, r) {
-		return fmt.Errorf("only administrator-owned Guacamole plugins may be activated")
-	}
 	if m.Executable == "" {
 		return nil
 	}
@@ -982,6 +977,7 @@ func pluginResourceRoutes(p *PluginResources) PocketBaseRoutes {
 		{"SetPluginAccess", http.MethodPut, "/plugins/{pluginID}/access", p.Access},
 		{"RemovePlugin", http.MethodDelete, "/plugins/{pluginID}", p.Remove},
 		{"GetPluginUI", http.MethodGet, "/plugins/{pluginID}/ui", p.UI},
+		{"RenewPluginApp", http.MethodPost, "/plugins/{pluginID}/app/renew", p.RenewApp},
 	}
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		routes = append(routes, PocketBaseRoute{"PluginRPC", method, "/plugins/{pluginID}/rpc/{pluginPath...}", p.RPC})

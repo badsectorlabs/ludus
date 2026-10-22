@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/rpc"
+	"time"
 )
 
 // HostServiceName is the net/rpc service name the host registers on the
@@ -126,6 +127,31 @@ type AddOnArgs struct {
 	Name string
 }
 
+// OpenAppArgs starts an app session for the caller, or, with Session set,
+// issues a new launch URL for one of the caller's live sessions.
+type OpenAppArgs struct {
+	Call    CallID
+	Path    string // where the browser lands, relative to the app root; "/" or "/#/fragment"
+	Session string
+}
+
+// App session limits. A plugin's limits apply to its own sessions only.
+const (
+	DefaultAppSessionsPerUser = 16
+	DefaultAppSessions        = 512
+	MaxAppSessions            = 65536
+)
+
+// AppSessionLimitsArgs sets how many live app sessions the plugin allows per
+// authenticated user and in total: 1 <= PerUser <= Total <= MaxAppSessions.
+// Existing sessions are kept when limits are lowered; new ones are refused
+// with CodeUnavailable while a limit is reached.
+type AppSessionLimitsArgs struct {
+	Call    CallID
+	PerUser int
+	Total   int
+}
+
 // Replies.
 
 type EmptyReply struct{ ReplyStatus }
@@ -196,6 +222,20 @@ type GroupQuotasReply struct {
 	Groups []GroupQuota
 }
 
+// AppLaunch is a one-time browser URL for an app session.
+type AppLaunch struct {
+	URL      string // same-origin path; the first browser visit redeems it
+	Session  string
+	Call     CallID // the session's CallID, valid until the session ends
+	BasePath string
+	Expires  time.Time
+}
+
+type OpenAppReply struct {
+	ReplyStatus
+	Launch AppLaunch
+}
+
 // BatchReply reports per-item failures of a batch operation that otherwise
 // succeeded.
 type BatchReply struct {
@@ -207,11 +247,16 @@ type BatchReply struct {
 // method is served under HostServiceName via net/rpc.
 //
 // Principals (see PLUGIN_REDESIGN.md, "Host service"):
-//   - caller: any plugin while handling a request, evaluated as the caller
+//   - caller: any plugin while handling a request, evaluated as the caller.
+//     The CallID of an app session (AppContext.Call, AppLaunch.Call) is a
+//     caller call that stays valid until the session ends.
 //   - caller; system level: system-level plugins only, evaluated as the caller
 //   - system level: the plugin principal of a system-level plugin, or a Handle
 //     call to a system-level plugin whose caller is an admin
 type HostAPI interface {
+	OpenApp(OpenAppArgs, *OpenAppReply) error                              // caller; manifest app
+	EndAppSession(CallArgs, *EmptyReply) error                             // app session call
+	SetAppSessionLimits(AppSessionLimitsArgs, *EmptyReply) error           // any; manifest app
 	TouchRange(RangeArgs, *EmptyReply) error                               // caller
 	AccessibleRanges(CallArgs, *RangesReply) error                         // caller
 	CanAccessRange(RangeArgs, *BoolReply) error                            // caller
@@ -382,4 +427,20 @@ func (h *HostClient) RequestAddOn(call CallID, name string) error {
 func (h *HostClient) TouchRange(call CallID, number int) error {
 	var reply EmptyReply
 	return h.invoke("TouchRange", RangeArgs{Call: call, Number: number}, &reply)
+}
+
+func (h *HostClient) OpenApp(call CallID, path, session string) (AppLaunch, error) {
+	var reply OpenAppReply
+	err := h.invoke("OpenApp", OpenAppArgs{Call: call, Path: path, Session: session}, &reply)
+	return reply.Launch, err
+}
+
+func (h *HostClient) EndAppSession(call CallID) error {
+	var reply EmptyReply
+	return h.invoke("EndAppSession", CallArgs{Call: call}, &reply)
+}
+
+func (h *HostClient) SetAppSessionLimits(call CallID, perUser, total int) error {
+	var reply EmptyReply
+	return h.invoke("SetAppSessionLimits", AppSessionLimitsArgs{Call: call, PerUser: perUser, Total: total}, &reply)
 }

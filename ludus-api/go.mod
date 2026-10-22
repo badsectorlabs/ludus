@@ -36,7 +36,7 @@ require (
 require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
-	github.com/hashicorp/yamux v0.1.2 // indirect
+	github.com/hashicorp/yamux v0.1.2
 	github.com/oklog/run v1.1.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240314234333-6e1732d8331c // indirect
 	google.golang.org/grpc v1.62.1 // indirect

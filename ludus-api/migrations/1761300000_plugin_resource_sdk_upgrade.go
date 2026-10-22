@@ -5,8 +5,9 @@ import (
 	m "github.com/pocketbase/pocketbase/migrations"
 )
 
-// The SDK changed an earlier collection-creation migration. Existing Guacamole
-// installations already ran that migration, so upgrade their schema separately.
+// 2.4.0 replaced the "system" flag of 1761290000_plugin_resources with a
+// "source" field in place. Databases from the 2.4.0 betas, and from earlier
+// plugin development builds, already ran that migration; upgrade them here.
 func init() { m.Register(upgradePluginResourceSources, nil) }
 
 func upgradePluginResourceSources(app core.App) error {

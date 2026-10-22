@@ -11,14 +11,19 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
+	yaml "sigs.k8s.io/yaml"
 )
+
+var rangeIDPlaceholder = regexp.MustCompile(`{{\s*range_id\s*}}`)
 
 const (
 	// defaultHostReadBytes applies when a plugin passes no size for range
@@ -88,7 +93,7 @@ func (h *HostService) RangeVMs(args protocol.RangeArgs, reply *protocol.VMsReply
 		if herr != nil {
 			return herr
 		}
-		vms, herr := rangeVMs(usersRange)
+		vms, herr := rangeVMs(usersRange, c.h.installPath())
 		reply.VMs = vms
 		return herr
 	})
@@ -110,7 +115,7 @@ func (h *HostService) FindVM(args protocol.FindVMArgs, reply *protocol.FindVMRep
 		if !c.canAccessRange(usersRange.RangeNumber()) {
 			return hostErrorf(protocol.CodeForbidden, "VM %d is not part of an accessible range", args.ProxmoxID)
 		}
-		reply.VM = pluginVM(record, usersRange)
+		reply.VM = pluginVM(record, usersRange, loadRangeVMDetails(usersRange, c.h.installPath()))
 		reply.Range = pluginRange(usersRange)
 		return nil
 	})
@@ -195,7 +200,7 @@ func (h *HostService) PowerOffVMs(args protocol.PowerOffArgs, reply *protocol.Ba
 		if herr != nil {
 			return herr
 		}
-		vms, herr := rangeVMs(usersRange)
+		vms, herr := rangeVMs(usersRange, c.h.installPath())
 		if herr != nil {
 			return herr
 		}
@@ -734,24 +739,113 @@ func pluginRanges(records []*core.Record) []protocol.Range {
 	return ranges
 }
 
-func rangeVMs(usersRange *models.Range) ([]protocol.VM, *protocol.HostError) {
+func rangeVMs(usersRange *models.Range, installPath string) ([]protocol.VM, *protocol.HostError) {
 	records, err := app.FindAllRecords("vms", dbx.HashExp{"range": usersRange.Id})
 	if err != nil {
 		return nil, hostErrorf(protocol.CodeUnavailable, "list VMs of range %s: %v", usersRange.RangeId(), err)
 	}
+	details := loadRangeVMDetails(usersRange, installPath)
 	vms := make([]protocol.VM, 0, len(records))
 	for _, record := range records {
-		vms = append(vms, pluginVM(record, usersRange))
+		vms = append(vms, pluginVM(record, usersRange, details))
 	}
 	slices.SortFunc(vms, func(a, b protocol.VM) int { return a.ProxmoxID - b.ProxmoxID })
 	return vms, nil
 }
 
-func pluginVM(record *core.Record, usersRange *models.Range) protocol.VM {
+// rangeVMDetails is what the range configuration and template records say
+// about a range's VMs. configs is shared with rangeConfigs; treat it as
+// read-only. Template OS lookups are memoized per host-service call.
+type rangeVMDetails struct {
+	configs map[string]VM // by VM name with {{ range_id }} substituted
+	os      map[string]string
+}
+
+// rangeConfigCache holds parsed range configurations by resolved path. An
+// entry is reused while the file's size and modification time are unchanged,
+// so plugins polling RangeVMs do not re-read and re-parse YAML.
+type rangeConfigCache struct {
+	mu      sync.Mutex
+	entries map[string]rangeConfigEntry
+}
+
+type rangeConfigEntry struct {
+	modTime time.Time
+	size    int64
+	rangeID string
+	configs map[string]VM
+}
+
+var rangeConfigs = &rangeConfigCache{entries: map[string]rangeConfigEntry{}}
+
+func (c *rangeConfigCache) load(path, rangeID string) map[string]VM {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() > defaultHostReadBytes {
+		c.mu.Lock()
+		delete(c.entries, path)
+		c.mu.Unlock()
+		return nil
+	}
+	c.mu.Lock()
+	entry, ok := c.entries[path]
+	c.mu.Unlock()
+	if ok && entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) && entry.rangeID == rangeID {
+		return entry.configs
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) > defaultHostReadBytes {
+		return nil
+	}
+	configs := map[string]VM{}
+	var config LudusConfig
+	if yaml.Unmarshal(data, &config) == nil {
+		for _, vm := range config.Ludus {
+			configs[rangeIDPlaceholder.ReplaceAllString(vm.VMName, rangeID)] = vm
+		}
+	}
+	// An invalid file is cached as empty until it changes.
+	c.mu.Lock()
+	c.entries[path] = rangeConfigEntry{modTime: info.ModTime(), size: info.Size(), rangeID: rangeID, configs: configs}
+	c.mu.Unlock()
+	return configs
+}
+
+func loadRangeVMDetails(usersRange *models.Range, installPath string) *rangeVMDetails {
+	details := &rangeVMDetails{configs: map[string]VM{}, os: map[string]string{}}
+	name, herr := rangeDirectoryName(usersRange)
+	if herr != nil {
+		return details
+	}
+	path, herr := resolveUnder(filepath.Join(installPath, "ranges", name), "range-config.yml")
+	if herr != nil {
+		return details
+	}
+	if configs := rangeConfigs.load(path, usersRange.RangeId()); configs != nil {
+		details.configs = configs
+	}
+	return details
+}
+
+// templateOS returns the os of the named template record, or "".
+func (d *rangeVMDetails) templateOS(template string) string {
+	if template == "" {
+		return ""
+	}
+	if value, ok := d.os[template]; ok {
+		return value
+	}
+	value := ""
+	if record, err := app.FindFirstRecordByData("templates", "name", template); err == nil {
+		value = record.GetString("os")
+	}
+	d.os[template] = value
+	return value
+}
+
+func pluginVM(record *core.Record, usersRange *models.Range, details *rangeVMDetails) protocol.VM {
 	vm := &models.VM{}
 	vm.SetProxyRecord(record)
-	return protocol.VM{
-		OSType:      record.GetString("osType"),
+	result := protocol.VM{
 		RecordID:    vm.Id,
 		RangeID:     usersRange.RangeId(),
 		RangeNumber: usersRange.RangeNumber(),
@@ -763,6 +857,14 @@ func pluginVM(record *core.Record, usersRange *models.Range) protocol.VM {
 		CPU:         vm.Cpu(),
 		RAM:         vm.Ram(),
 	}
+	if config, ok := details.configs[result.Name]; ok {
+		result.Template = config.Template
+		result.OS = details.templateOS(config.Template)
+		if config.VLAN > 0 && config.VLAN < 255 && config.IPLastOctet > 0 && config.IPLastOctet < 255 {
+			result.ConfiguredIP = fmt.Sprintf("10.%d.%d.%d", usersRange.RangeNumber(), config.VLAN, config.IPLastOctet)
+		}
+	}
+	return result
 }
 
 // rangeDirectoryName returns the range's directory name under <install>/ranges.
@@ -864,17 +966,41 @@ func archivedLogTail(record *core.Record, limit int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(reader, limit))
 }
 
+// rangeActivityInterval matches the request middleware: lastActive is written
+// at most this often per range, since the inactivity shutdown only needs
+// minute resolution.
+const rangeActivityInterval = 30 * time.Second
+
+// rangeTouches remembers when TouchRange last wrote each range's lastActive.
+var rangeTouches = struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}{last: map[string]time.Time{}}
+
 // TouchRange keeps active plugin sessions from being shut down for inactivity.
 // The caller can only touch an accessible range, never supply its timestamp.
+// Touches within rangeActivityInterval of the last write are not written.
 func (h *HostService) TouchRange(args protocol.RangeArgs, reply *protocol.EmptyReply) error {
 	reply.Err = h.run(args.Call, accessCaller, "TouchRange", func(c *hostScope) *protocol.HostError {
 		usersRange, herr := c.accessibleRange(args.Number)
 		if herr != nil {
 			return herr
 		}
-		if _, err := app.DB().NewQuery("UPDATE ranges SET lastActive = {:now} WHERE id = {:id}").Bind(dbx.Params{
-			"now": time.Now().UTC().Format("2006-01-02 15:04:05.000Z"), "id": usersRange.Id,
-		}).Execute(); err != nil {
+		now := time.Now()
+		rangeTouches.mu.Lock()
+		recent := now.Sub(rangeTouches.last[usersRange.Id]) < rangeActivityInterval
+		if !recent {
+			// Claim the write so concurrent touches of this range skip it.
+			rangeTouches.last[usersRange.Id] = now
+		}
+		rangeTouches.mu.Unlock()
+		if recent {
+			return nil
+		}
+		if err := recordRangeActivity(app, usersRange.Id); err != nil {
+			rangeTouches.mu.Lock()
+			delete(rangeTouches.last, usersRange.Id)
+			rangeTouches.mu.Unlock()
 			return hostErrorf(protocol.CodeUnavailable, "record range activity: %v", err)
 		}
 		return nil

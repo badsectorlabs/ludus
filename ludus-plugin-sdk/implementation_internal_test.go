@@ -1,11 +1,15 @@
 package ludus
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
 
+	hcplugin "github.com/hashicorp/go-plugin"
 	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
@@ -38,26 +42,71 @@ func TestHandleRejectsOversizedResponseInsteadOfTruncating(t *testing.T) {
 	}
 }
 
-func TestGuacamoleEndpointAndBasePathPassThroughSDK(t *testing.T) {
-	initialized := false
-	p := &Plugin{Init: func(*Call, Env) error { initialized = true; return nil }, WebApplication: func() *protocol.WebApplication {
-		if !initialized {
-			t.Fatal("endpoint requested before initialization")
+// The application is served over the real go-plugin broker and yamux stream:
+// only requests carrying the host's AppContext reach it, with that session's
+// identity, and the private header never reaches the handler.
+func TestAppServedOverBrokerStreamWithSessionContext(t *testing.T) {
+	p := &Plugin{ID: "app-test", Name: "App", Version: "1", App: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c := CallFrom(r)
+		if r.Header.Get(protocol.AppContextHeader) != "" {
+			t.Error("app context header reached the handler")
 		}
-		return &protocol.WebApplication{URL: "http://127.0.0.1:12345", Token: strings.Repeat("a", 32)}
-	}, Routes: []Route{{Name: "launch", Method: "POST", Pattern: "/launch", Handler: func(w http.ResponseWriter, r *http.Request) {
-		if CallFrom(r).GuacAppBasePath != "/guacamole/resource/" {
-			t.Fatal("lost host-assigned application path")
-		}
-		w.WriteHeader(204)
-	}}}}
-	impl := NewImplementation(p)
-	reply, err := impl.Initialize(protocol.InitializeRequest{}, nil)
-	if err != nil || reply.WebApplication == nil || reply.WebApplication.URL != "http://127.0.0.1:12345" {
-		t.Fatalf("Initialize: %v %v", reply, err)
+		_ = json.NewEncoder(w).Encode(map[string]string{"path": r.URL.Path, "user": c.Auth.UserID, "session": c.AppSession, "base": c.AppBasePath, "call": string(c.ID)})
+	})}
+	client, _ := hcplugin.TestPluginRPCConn(t, protocol.PluginMap(NewImplementation(p)), nil)
+	t.Cleanup(func() { client.Close() })
+	raw, err := client.Dispense(protocol.PluginName)
+	if err != nil {
+		t.Fatal(err)
 	}
-	response, err := impl.Handle(protocol.Request{Route: "launch", Method: "POST", Path: "/launch", GuacAppBasePath: "/guacamole/resource/"})
-	if err != nil || response.Status != 204 {
-		t.Fatalf("Handle: %v %v", response, err)
+	rpcClient := raw.(*protocol.RPCClient)
+	response, err := rpcClient.Initialize(protocol.InitializeRequest{Call: "init"})
+	if err != nil || response.AppStream == 0 {
+		t.Fatalf("Initialize = %+v, %v; want an app stream", response, err)
+	}
+	session, err := rpcClient.DialApp(response.AppStream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	httpClient := &http.Client{Transport: &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return session.Open() }}}
+	get := func(header string) (int, string) {
+		request, _ := http.NewRequest(http.MethodGet, "http://app/terminal", nil)
+		if header != "" {
+			request.Header.Set(protocol.AppContextHeader, header)
+		}
+		result, err := httpClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer result.Body.Close()
+		body, _ := io.ReadAll(result.Body)
+		return result.StatusCode, string(body)
+	}
+	if status, _ := get(""); status != http.StatusForbidden {
+		t.Fatalf("request without app context = %d, want 403", status)
+	}
+	encoded, _ := protocol.EncodeAppContext(protocol.AppContext{Session: "s1", Call: "session-call", BasePath: "/plugin-apps/r1/s1/", Auth: protocol.Principal{UserID: "ALICE"}})
+	status, body := get(encoded)
+	var seen map[string]string
+	if status != http.StatusOK || json.Unmarshal([]byte(body), &seen) != nil {
+		t.Fatalf("app request = %d %q", status, body)
+	}
+	if seen["path"] != "/terminal" || seen["user"] != "ALICE" || seen["session"] != "s1" || seen["base"] != "/plugin-apps/r1/s1/" || seen["call"] != "session-call" {
+		t.Fatalf("app handler saw %v", seen)
+	}
+}
+
+func TestAppDeclarationReachesManifest(t *testing.T) {
+	data, err := ManifestJSON(&Plugin{ID: "app-test", Name: "App", Version: "1", App: http.NotFoundHandler()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := protocol.ParseManifest(data)
+	if err != nil || !m.App {
+		t.Fatalf("manifest app = %v (%v), want true", m.App, err)
+	}
+	if _, err := ManifestJSON(&Plugin{ID: "app-test", Name: "App", Version: "1", AppSessionClosed: func(string) {}}); err == nil {
+		t.Fatal("AppSessionClosed without App was accepted")
 	}
 }

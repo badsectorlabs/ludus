@@ -175,6 +175,7 @@ func newPluginTestEnv(t *testing.T) *pluginTestEnv {
 	serveEvent := &core.ServeEvent{App: pb, Router: router}
 	RegisterRoutesWithPocketBase(serveEvent, pluginResourceRoutes(env.resources))
 	registerPluginAPIRoutes(serveEvent, env.server)
+	registerPluginAppRoutes(serveEvent, env.server)
 	if env.mux, err = router.BuildMux(); err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +247,8 @@ func (f *resourceFakeRPC) RunJob(protocol.JobRequest) error { return nil }
 func (f *resourceFakeRPC) VMHook(protocol.VMHookRequest) (protocol.VMHookResponse, error) {
 	return protocol.VMHookResponse{}, nil
 }
-func (f *resourceFakeRPC) Shutdown() error { return nil }
+func (f *resourceFakeRPC) Shutdown() error                                   { return nil }
+func (f *resourceFakeRPC) AppSessionClosed(protocol.AppSessionRequest) error { return nil }
 
 // registerFakePlugin puts a fake process for a record into the registry.
 func (env *pluginTestEnv) registerFakePlugin(resourceID string, manifest protocol.Manifest) *resourceFakeRPC {
@@ -581,18 +583,9 @@ func TestRootRunPluginRequestsGoToTheAdminService(t *testing.T) {
 	}
 }
 
-func TestGuacamoleSDKUploadOwnershipAndGitHubImport(t *testing.T) {
+func TestGitHubImportEntersApprovalFlow(t *testing.T) {
 	env := newPluginTestEnv(t)
-	m := protocol.Manifest{SchemaVersion: 1, ID: "ludus-guacamole", Name: "Guacamole", Version: "1", UI: protocol.UIFile}
-	pkg := testPackage(t, m, map[string]string{protocol.UIFile: "Guacamole"})
-	env.call(env.ownerToken, "POST", APIBasePath+"/plugins/install", pkg, 403)
-	id := env.upload(env.adminToken, "", pkg)
-	r, _ := env.pb.FindRecordById("plugin_resources", id)
-	r.Set("owner", env.owner.Id)
-	if err := env.resources.start(r, resourceManifest(r)); err == nil {
-		t.Fatal("accepted non-administrator Guacamole owner")
-	}
-	m.ID = "github-plugin"
+	m := protocol.Manifest{SchemaVersion: 1, ID: "github-plugin", Name: "Imported", Version: "1", UI: protocol.UIFile}
 	env.resources.githubTransport = githubFixtureTransport(t, testPackage(t, m, map[string]string{protocol.UIFile: "Imported"}), "plugin.zip")
 	env.call(env.ownerToken, "POST", APIBasePath+"/plugins/install", []byte(`{"githubURL":"https://github.com/example/plugin"}`), 201)
 	imported, err := env.pb.FindFirstRecordByData("plugin_resources", "pluginID", m.ID)

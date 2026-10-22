@@ -28,21 +28,26 @@ func ValidPluginID(id string) bool { return pluginIDPattern.MatchString(id) }
 // Manifest is plugin.json: an inert declaration the host reads without
 // running anything. A running plugin's Metadata must match it.
 type Manifest struct {
-	SchemaVersion            int                `json:"schemaVersion"`
-	ProtocolVersion          int                `json:"protocolVersion,omitempty"`
-	ID                       string             `json:"id"`
-	Name                     string             `json:"name"`
-	Version                  string             `json:"version"`
-	Description              string             `json:"description"`
-	Author                   string             `json:"author"`
-	Level                    Level              `json:"level,omitempty"`
-	RunAs                    RunAs              `json:"runAs,omitempty"`
-	Executable               string             `json:"executable,omitempty"`
-	UI                       string             `json:"ui,omitempty"`
-	RangeScoped              bool               `json:"rangeScoped,omitempty"`
-	ForwardCallerCredentials bool               `json:"forwardCallerCredentials,omitempty"`
-	Routes                   []Route            `json:"routes,omitempty"`
-	VMHooks                  VMHookCapabilities `json:"vmHooks"`
+	SchemaVersion            int    `json:"schemaVersion"`
+	ProtocolVersion          int    `json:"protocolVersion,omitempty"`
+	ID                       string `json:"id"`
+	Name                     string `json:"name"`
+	Version                  string `json:"version"`
+	Description              string `json:"description"`
+	Author                   string `json:"author"`
+	Level                    Level  `json:"level,omitempty"`
+	RunAs                    RunAs  `json:"runAs,omitempty"`
+	Executable               string `json:"executable,omitempty"`
+	UI                       string `json:"ui,omitempty"`
+	RangeScoped              bool   `json:"rangeScoped,omitempty"`
+	ForwardCallerCredentials bool   `json:"forwardCallerCredentials,omitempty"`
+	// App: the executable serves a browser application on the Ludus origin
+	// under /plugin-apps/{resourceID}/ (see Metadata.App).
+	App bool `json:"app,omitempty"`
+	// VMActions: the GUI range editor offers the plugin's per-VM app launches.
+	VMActions bool               `json:"vmActions,omitempty"`
+	Routes    []Route            `json:"routes,omitempty"`
+	VMHooks   VMHookCapabilities `json:"vmHooks"`
 }
 
 // ParseManifest strictly decodes, normalizes, and validates plugin.json.
@@ -98,13 +103,22 @@ func (m Manifest) Validate() error {
 	if m.UI == "" && m.Executable == "" {
 		return errors.New("package needs an executable or UI")
 	}
-	if m.Executable == "" && (len(m.Routes) > 0 || m.VMHooks.Any() || m.ForwardCallerCredentials) {
-		return errors.New("routes, VM hooks, and forwardCallerCredentials require an executable")
+	if m.Executable == "" && (len(m.Routes) > 0 || m.VMHooks.Any() || m.ForwardCallerCredentials || m.App) {
+		return errors.New("routes, VM hooks, apps, and forwardCallerCredentials require an executable")
 	}
 	if m.VMHooks.Any() && m.Level != LevelSystem {
 		return errors.New("VM hooks require level system")
 	}
+	if m.VMActions && (!m.App || !hasPluginRoute(m.Routes, "GET", VMActionsPattern) || !hasPluginRoute(m.Routes, "POST", VMActionLaunchPattern)) {
+		return fmt.Errorf("vmActions requires app and the routes GET %s and POST %s", VMActionsPattern, VMActionLaunchPattern)
+	}
 	return validateRoutes(m.Routes, m.Level)
+}
+
+func hasPluginRoute(routes []Route, method, pattern string) bool {
+	return slices.ContainsFunc(routes, func(r Route) bool {
+		return r.Method == method && r.Pattern == pattern && r.EffectiveScope() == ScopePlugin
+	})
 }
 
 func validateRoutes(routes []Route, level Level) error {
@@ -167,6 +181,12 @@ func (m Manifest) CheckMetadata(md Metadata) error {
 	if md.ForwardCallerCredentials != m.ForwardCallerCredentials {
 		mismatches = append(mismatches, "forwardCallerCredentials")
 	}
+	if md.App != m.App {
+		mismatches = append(mismatches, "app")
+	}
+	if md.VMActions != m.VMActions {
+		mismatches = append(mismatches, "vmActions")
+	}
 	if md.VMHooks != m.VMHooks {
 		mismatches = append(mismatches, "vmHooks")
 	}
@@ -215,6 +235,8 @@ func ManifestFromMetadata(md Metadata, ui, rangeScoped bool) Manifest {
 		RunAs:                    md.RunAs,
 		Executable:               ExecutableFile,
 		ForwardCallerCredentials: md.ForwardCallerCredentials,
+		App:                      md.App,
+		VMActions:                md.VMActions,
 		Routes:                   append([]Route(nil), md.Routes...),
 		VMHooks:                  md.VMHooks,
 	}

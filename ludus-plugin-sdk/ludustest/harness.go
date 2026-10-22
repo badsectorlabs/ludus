@@ -144,10 +144,15 @@ func WithQuery(query url.Values) RequestOption {
 // route exists or the call fails.
 func (h *Harness) Do(method, pattern string, opts ...RequestOption) protocol.Response {
 	h.t.Helper()
-	var route *ludus.Route
-	for i := range h.plugin.Routes {
-		if h.plugin.Routes[i].Method == method && h.plugin.Routes[i].Pattern == pattern {
-			route = &h.plugin.Routes[i]
+	metadata, err := h.impl.Metadata()
+	if err != nil {
+		h.t.Fatalf("plugin Metadata: %v", err)
+	}
+	// Metadata lists every served route, including the SDK's VMActions routes.
+	var route *protocol.Route
+	for i := range metadata.Routes {
+		if metadata.Routes[i].Method == method && metadata.Routes[i].Pattern == pattern {
+			route = &metadata.Routes[i]
 			break
 		}
 	}
@@ -155,7 +160,7 @@ func (h *Harness) Do(method, pattern string, opts ...RequestOption) protocol.Res
 		h.t.Fatalf("plugin declares no route %s %s", method, pattern)
 	}
 	path := "/api/v2/plugins/" + h.env.ResourceID + "/rpc" + pattern
-	if route.Scope == ludus.APIScope {
+	if route.EffectiveScope() == protocol.ScopeAPI {
 		path = "/api/v2" + pattern
 	}
 	request := protocol.Request{
@@ -187,4 +192,30 @@ func (h *Harness) RunJob(name string) error {
 func (h *Harness) VMHook(request protocol.VMHookRequest) (protocol.VMHookResponse, error) {
 	request.Call = h.newCall()
 	return h.impl.VMHook(request)
+}
+
+// App returns the plugin's App as the host proxies it: each request carries
+// session's AppContext, with paths relative to the app root. Wrap it in
+// httptest.NewServer to exercise streaming and WebSocket upgrades. It fails
+// the test when the plugin has no App.
+func (h *Harness) App(session protocol.AppContext) http.Handler {
+	h.t.Helper()
+	handler := h.impl.App()
+	if handler == nil {
+		h.t.Fatal("plugin declares no App")
+	}
+	encoded, err := protocol.EncodeAppContext(session)
+	if err != nil {
+		h.t.Fatalf("encode app context: %v", err)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.Clone(r.Context())
+		r.Header.Set(protocol.AppContextHeader, encoded)
+		handler.ServeHTTP(w, r)
+	})
+}
+
+// CloseAppSession tells the plugin that the host ended an app session.
+func (h *Harness) CloseAppSession(session string) error {
+	return h.impl.AppSessionClosed(protocol.AppSessionRequest{Session: session})
 }

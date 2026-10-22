@@ -24,7 +24,7 @@ func NewImplementation(p *Plugin) protocol.Implementation {
 		logger:  Logger(),
 		env:     &Env{},
 	}
-	for _, route := range p.Routes {
+	for _, route := range allRoutes(p) {
 		impl.routes[route.Name] = route
 	}
 	for _, job := range p.Jobs {
@@ -68,10 +68,36 @@ func (i *implementation) Initialize(request protocol.InitializeRequest, host *pr
 	for _, job := range i.plugin.Jobs {
 		response.Jobs = append(response.Jobs, protocol.ScheduledJob{Name: job.Name, Interval: job.Interval})
 	}
-	if i.plugin.WebApplication != nil {
-		response.WebApplication = i.plugin.WebApplication()
-	}
 	return response, nil
+}
+
+// App wraps Plugin.App: it decodes the host's AppContext into the request's
+// Call and removes the header. Requests without a valid context are refused.
+func (i *implementation) App() http.Handler {
+	if i.plugin.App == nil {
+		return nil
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		app, err := protocol.DecodeAppContext(r.Header.Get(protocol.AppContextHeader))
+		r.Header.Del(protocol.AppContextHeader)
+		if err != nil {
+			http.Error(w, "missing app session", http.StatusForbidden)
+			return
+		}
+		c := i.call(app.Call)
+		c.Auth, c.User, c.AppSession, c.AppBasePath = app.Auth, app.User, app.Session, app.BasePath
+		i.plugin.App.ServeHTTP(w, r.WithContext(withCall(r.Context(), c)))
+	})
+}
+
+func (i *implementation) AppSessionClosed(request protocol.AppSessionRequest) error {
+	if i.plugin.AppSessionClosed == nil {
+		return nil
+	}
+	return i.protect("AppSessionClosed", func() error {
+		i.plugin.AppSessionClosed(request.Session)
+		return nil
+	})
 }
 
 func (i *implementation) Handle(request protocol.Request) (protocol.Response, error) {
@@ -81,7 +107,6 @@ func (i *implementation) Handle(request protocol.Request) (protocol.Response, er
 	}
 
 	c := i.call(request.Call)
-	c.GuacAppBasePath = request.GuacAppBasePath
 	c.Auth = request.Auth
 	c.User = request.User
 	c.Range = request.Range

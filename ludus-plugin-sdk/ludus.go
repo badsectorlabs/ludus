@@ -66,9 +66,18 @@ type Plugin struct {
 
 	// Init runs when the host initializes the plugin. c.Host acts as the plugin principal.
 	Init func(c *Call, env Env) error
-	// WebApplication returns Guacamole's private endpoint after Init succeeds.
-	// Only the administrator-approved ludus-guacamole plugin may provide it.
-	WebApplication func() *protocol.WebApplication
+	// App is the plugin's browser application. The host serves it at
+	// /plugin-apps/{resourceID}/{sessionID}/ for sessions opened with
+	// Call.OpenApp, including streaming responses and WebSocket upgrades, and
+	// strips that prefix: App sees paths relative to "/". CallFrom returns the
+	// session's caller; Call.AppBasePath is the prefix for absolute links.
+	// Administrators see the declaration before activation.
+	App http.Handler
+	// AppSessionClosed runs when the host ends an app session: expiry,
+	// revoked access, EndAppSession, or plugin shutdown.
+	AppSessionClosed func(session string)
+	// VMActions adds per-VM app launches to the GUI range editor. Requires App.
+	VMActions *VMActions
 	// Jobs are run by the host scheduler at their Interval.
 	Jobs []Job
 	// Shutdown runs before the host stops the plugin process.
@@ -100,16 +109,53 @@ type Env = protocol.Environment
 
 // Call is the context of one host → plugin call.
 type Call struct {
-	GuacAppBasePath string
-	ID              protocol.CallID
-	Auth            protocol.Principal // zero outside request handlers
-	User            *protocol.User     // effective user; nil for superusers and outside request handlers
-	Range           *protocol.Range    // range resolved by the host; nil when none
+	ID    protocol.CallID
+	Auth  protocol.Principal // zero outside request handlers
+	User  *protocol.User     // effective user; nil for superusers and outside request handlers
+	Range *protocol.Range    // range resolved by the host; nil when none
+	// AppSession is set on App requests and on AppLaunch.Session.
+	AppSession string
+	// AppBasePath is the session's absolute app prefix,
+	// /plugin-apps/{resourceID}/{sessionID}/; "" outside app sessions.
+	AppBasePath string
 	// Host is the host service bound to this call. It is valid until the
-	// handler, job, or hook returns.
+	// handler, job, or hook returns; for an app session it is valid until the
+	// session ends, from any goroutine.
 	Host *Host
 	// Env is the environment received at Initialize. Treat it as read-only.
 	Env *Env
+}
+
+// AppLaunch is a one-time browser URL for an app session.
+type AppLaunch struct {
+	// URL is a same-origin path. The first browser visit redeems it, sets the
+	// session cookie, and redirects to the requested path.
+	URL     string
+	Expires time.Time
+	// Session is bound to the app session and stays valid, from any
+	// goroutine, until the session ends.
+	Session *Call
+}
+
+// OpenApp opens a browser session of the plugin's App for the caller of a
+// request handler. path is where the browser lands, relative to the app root
+// ("/" or "/#/fragment"). With session set to one of the caller's live
+// sessions, it renews that session and issues a new launch URL for it instead.
+// The host ends sessions after an hour without renewal, when the caller's
+// login expires, or when the caller loses access to the plugin.
+func (c *Call) OpenApp(path, session string) (*AppLaunch, error) {
+	client, err := c.Host.hostClient()
+	if err != nil {
+		return nil, err
+	}
+	launch, err := client.OpenApp(c.ID, path, session)
+	if err != nil {
+		return nil, err
+	}
+	return &AppLaunch{URL: launch.URL, Expires: launch.Expires, Session: &Call{
+		ID: launch.Call, Auth: c.Auth, User: c.User, AppSession: launch.Session, AppBasePath: launch.BasePath,
+		Host: &Host{client: client, call: launch.Call}, Env: c.Env,
+	}}, nil
 }
 
 // IsAdmin reports whether the caller is a Ludus admin or a PocketBase superuser.
@@ -177,6 +223,8 @@ func metadata(p *Plugin) protocol.Metadata {
 		RunAs:                    p.RunAs,
 		VMHooks:                  p.VMHooks,
 		ForwardCallerCredentials: p.ForwardCallerCredentials,
+		App:                      p.App != nil,
+		VMActions:                p.VMActions != nil,
 	}
 	if md.Level == "" {
 		md.Level = Standard
@@ -184,12 +232,21 @@ func metadata(p *Plugin) protocol.Metadata {
 	if md.RunAs == "" {
 		md.RunAs = RunAsLudus
 	}
-	for _, route := range p.Routes {
+	for _, route := range allRoutes(p) {
 		r := protocol.Route{Name: route.Name, Method: route.Method, Pattern: route.Pattern, Scope: route.Scope}
 		r.Scope = r.EffectiveScope()
 		md.Routes = append(md.Routes, r)
 	}
 	return md
+}
+
+// allRoutes is p.Routes plus the routes the SDK serves for VMActions.
+func allRoutes(p *Plugin) []Route {
+	routes := slices.Clone(p.Routes)
+	if p.VMActions != nil {
+		routes = append(routes, p.VMActions.routes()...)
+	}
+	return routes
 }
 
 // validate checks the declaration against the manifest rules plus the parts
@@ -205,6 +262,12 @@ func validate(p *Plugin) error {
 		if route.Handler == nil {
 			return fmt.Errorf("route %q has no handler", route.Name)
 		}
+	}
+	if p.AppSessionClosed != nil && p.App == nil {
+		return errors.New("AppSessionClosed requires App")
+	}
+	if p.VMActions != nil && (p.VMActions.List == nil || p.VMActions.Launch == nil) {
+		return errors.New("VMActions needs List and Launch")
 	}
 	jobs := map[string]bool{}
 	for _, job := range p.Jobs {
