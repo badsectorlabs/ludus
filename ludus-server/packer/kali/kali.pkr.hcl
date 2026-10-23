@@ -1,17 +1,19 @@
-variable "iso_checksum" {
-  type    = string
-  default = "file:https://kali.download/base-images/kali-2026.3/SHA256SUMS"
+data "http" "kali_checksums" {
+  url = "https://cdimage.kali.org/current/SHA256SUMS"
+}
+
+locals {
+  # Capture the checksum and filename for the AMD64 installer ISO.
+  kali_iso = regex(
+    "(?m)^([0-9a-fA-F]{64})[ \\t]+\\*?(kali-linux-[^\\s]+-installer-netinst-amd64\\.iso)\\r?$",
+    data.http.kali_checksums.body
+  )
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
 variable "os" {
   type    = string
   default = "l26"
-}
-
-variable "iso_url" {
-  type    = string
-  default = "https://ludus.cloud/this-is-just-a-redirect-to-the-latest-kali-since-offsec-refuses-to-have-a-latest-link/kali.iso"
 }
 
 variable "vm_cpu_cores" {
@@ -101,8 +103,8 @@ source "proxmox-iso" "kali" {
 
   boot_iso {
     type              = "ide"
-    iso_checksum      = "${var.iso_checksum}"
-    iso_url           = "${var.iso_url}"
+    iso_checksum      = "sha256:${local.kali_iso[0]}"
+    iso_url           = "https://cdimage.kali.org/current/${local.kali_iso[1]}"
     iso_storage_pool  = "${var.iso_storage_pool}"
     iso_download_pve  = true
     unmount           = true
