@@ -598,7 +598,7 @@
         },
         "Roles": {
             "type": "array",
-            "description": "User defined Ansible roles to apply to this VM. Roles must be installed on the Ludus host with `ludus ansible role add`.",
+            "description": "User defined Ansible roles to apply to this VM. Roles must be installed on the Ludus host with `ludus ansible role add`. Roles run in the order they are listed.",
             "items": {
                 "oneOf": [
                     {
@@ -613,6 +613,7 @@
                             },
                             "depends_on": {
                                 "type": "array",
+                                "description": "Roles (on any VM) that must run before this role. Roles listed above a role on its VM still run before it, unless a depends_on requires a role listed later on the same VM to run first.",
                                 "items": {
                                     "type": "object",
                                     "required": ["vm_name", "role"],

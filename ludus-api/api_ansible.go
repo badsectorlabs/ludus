@@ -145,7 +145,7 @@ func ActionRoleFromInternet(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to %s the ansible role %s: %s; Output was: %s", roleBody.Action, roleString, err.Error(), string(cmdOutput)))
 	}
-	if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), roleBody.Role+" was installed successfully") {
+	if galaxyRoleInstallSkipped(string(cmdOutput)) {
 		return JSONError(e, http.StatusInternalServerError, string(cmdOutput))
 	}
 	if strings.Contains(string(cmdOutput), "is not installed, skipping.") {
@@ -275,7 +275,7 @@ func InstallRoleFromTar(e *core.RequestEvent) error {
 	if err != nil {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("Unable to install the ansible role %s: %s; Output was: %s", roleTarPath, err.Error(), string(cmdOutput)))
 	}
-	if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), fileHeader.Filename+" was installed successfully") {
+	if galaxyRoleInstallSkipped(string(cmdOutput)) {
 		return JSONError(e, http.StatusInternalServerError, string(cmdOutput))
 	}
 	_, err = parseRoleVersion(roleName, user, global)
@@ -531,8 +531,8 @@ func InstallSubscriptionRoles(e *core.RequestEvent) error {
 			continue
 		}
 
-		// Check for warnings that indicate failure
-		if strings.Contains(string(cmdOutput), "[WARNING]") && !strings.Contains(string(cmdOutput), roleFileName+" was installed successfully") {
+		// A warning without a success line means galaxy skipped the install (e.g. already installed).
+		if galaxyRoleInstallSkipped(string(cmdOutput)) {
 			logger.Warn("Installation warning for role %s: %s", roleName, string(cmdOutput))
 		}
 

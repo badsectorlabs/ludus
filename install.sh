@@ -32,7 +32,7 @@ set -o nounset                              # Treat unset variables as an error
 # DEFAULTS
 #-------------------------------------------------------------------------------
 PROJECT_ID=54052321
-# Sourceable installer interface used by the separately distributed offline entry point.
+# Sourceable installer interface used by the Ludus Enterprise offline installer.
 LUDUS_INSTALLER_API=1
 PREFIX="${PREFIX:-}"
 
@@ -841,7 +841,7 @@ PY
   print_message "[+] Signed release artifact manifest verified" "ok"
 }
 
-# The offline entry point replaces these preparation phases while retaining the
+# The Enterprise offline installer replaces these preparation phases while retaining the
 # shared verifier and the entire provisioning/migration implementation.
 prepare_install_inputs() {
   verify_local_inputs
@@ -1798,7 +1798,7 @@ parse_installer_args() {
       --version      ) LUDUS_VERSION="$2"; shift 2;;
       --template-file) TEMPLATE_FILE="$2"; SERVER_ONLY=1; shift 2;;
       --airgapped|--iso-directory|--license-file)
-        print_message "[!] $1 is not supported by this installer; use the separately supplied install-offline.sh" "error"
+        print_message "[!] $1 is not supported by this installer; offline installation requires the Ludus Enterprise install-offline.sh" "error"
         exit 1;;
       --vm-storage  ) VM_STORAGE="$2"; shift 2;;
       --vm-storage-format) VM_STORAGE_FORMAT="$2"; shift 2;;

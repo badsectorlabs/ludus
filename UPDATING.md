@@ -24,7 +24,7 @@ branch. In a source checkout it uses the adjacent `install.sh`.
 
 Existing-LXC beta updates are online operations and reject `--template-file`.
 Fresh installs and migrations retain local-template support for CI/development,
-but full air-gap installation now requires the separate `install-offline.sh`.
+but full air-gap installation requires the Ludus Enterprise offline installer.
 Both public entry points reject `--airgapped`, `--iso-directory`, and
 `--license-file`. Wait for deployments and template builds to finish, take
 backups, and allow a maintenance window before updating. Running the standard
@@ -37,15 +37,16 @@ published at <https://beta.ludus.cloud/docs/intro>.
 
 # Offline installation
 
-Transfer `install-offline.sh` together with the **same release's `install.sh`**
-and the signed local media. Run `install-offline.sh` directly; there is no
+Offline installation is a Ludus Enterprise feature. `install-offline.sh` is
+distributed with Ludus Enterprise, not with the public installers or this
+repository. Transfer it together with the **same release's `install.sh`** and
+the signed local media. Run `install-offline.sh` directly; there is no
 `--airgapped` switch. The wrapper reuses the shared LXC installation/migration
 engine without downloading its companion script, discovering a public release,
-or installing a client. It requires a local LXC archive, all pinned ISOs, and an
-explicit shared ISO storage pool. Existing-LXC updates are not supported.
+or installing a client. It requires a local LXC archive, all pinned ISOs,
+`bginfo.exe`, and an explicit shared ISO storage pool. Existing-LXC updates are
+not supported.
 
-The public installer downloads do not include the offline entry point. This is
-a distribution split, not a new license check or a restriction on source access.
 See [the offline procedure](docs/docs/deployment-options/proxmox-lxc.md#install-on-an-offline-proxmox-cluster)
 for signed-media, license, CA, and internal-mirror requirements.
 
