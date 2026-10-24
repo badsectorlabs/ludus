@@ -14,12 +14,15 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/security"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 
 	goproxmox "github.com/luthermonson/go-proxmox"
 )
@@ -119,6 +122,16 @@ func containsSubstring(slice []string, target string) bool {
 	return false
 }
 
+// rangeRefreshes lets concurrent requests for one range share a single
+// refresh instead of each querying Proxmox and replacing the VM rows.
+var rangeRefreshes singleflight.Group
+
+// rangeRefresh is what a shared refresh hands every request waiting on it.
+type rangeRefresh struct {
+	pool  []goproxmox.ClusterResource
+	count int
+}
+
 // updates the VM and range data for the provided range using the provided proxmox client
 func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxClient *goproxmox.Client) error {
 
@@ -127,19 +140,50 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 		return nil
 	}
 
-	// If the range has already been updated this request, return early, no need to do it again.
-	rangeHasBeenUpdatedThisRequest := e.Get("rangeHasBeenUpdatedThisRequest")
-	if rangeHasBeenUpdatedThisRequest != nil && rangeHasBeenUpdatedThisRequest.(bool) {
+	// Refresh each range at most once per request.
+	updated := "rangeVMDataUpdated_" + targetRange.Id
+	if e.Get(updated) != nil {
 		return nil
 	}
 
+	// The refresh uses its own timeouts, so it completes for the other waiters
+	// even if the request that started it goes away.
+	result := rangeRefreshes.DoChan(targetRange.Id, func() (any, error) {
+		return refreshRangeVMData(e, targetRange, proxmoxClient)
+	})
+	var cancelled <-chan struct{}
+	if e.Request != nil {
+		cancelled = e.Request.Context().Done()
+	}
+	select {
+	case shared := <-result:
+		if shared.Err != nil {
+			return shared.Err
+		}
+		refresh := shared.Val.(rangeRefresh)
+		// fetchVMDetails reads the pool membership from the request.
+		e.Set("getVMsForPool_"+targetRange.RangeId(), refresh.pool)
+		targetRange.SetNumberOfVms(refresh.count)
+		e.Set(updated, true)
+		return nil
+	case <-cancelled:
+		return e.Request.Context().Err()
+	}
+}
+
+// guestAgentConcurrency bounds the guest-agent lookups one refresh runs at once.
+const guestAgentConcurrency = 8
+
+// refreshRangeVMData reads targetRange's VMs from Proxmox and atomically
+// replaces its VM rows. Run it through rangeRefreshes.
+func refreshRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxClient *goproxmox.Client) (rangeRefresh, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Get all resources of type "vm" (which includes 'qemu' and 'lxc' types)
 	allVMs, err := getVMsForPool(e, ctx, targetRange.RangeId(), proxmoxClient)
 	if err != nil {
-		return err
+		return rangeRefresh{}, err
 	}
 
 	poweredOnByVMID := make(map[int]bool, len(allVMs))
@@ -165,23 +209,13 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 		statuses, statusErr := server.resolveVMStatuses(hookContext, requests)
 		cancelHooks()
 		if statusErr != nil {
-			return fmt.Errorf("resolve lifecycle status: %w", statusErr)
+			return rangeRefresh{}, fmt.Errorf("resolve lifecycle status: %w", statusErr)
 		}
 		for vmID, status := range statuses {
 			poweredOnByVMID[vmID] = status == VMStatusRunning || status == VMStatusStarting
 		}
 		ctx, cancel = context.WithTimeout(context.Background(), remainingProxmoxTime)
 		defer cancel()
-	}
-
-	// Clear the DB of any previous VMs for this range
-	logger.Debug(fmt.Sprintf("Clearing VMs for range %s with range number %d", targetRange.RangeId(), targetRange.RangeNumber()))
-	_, err = app.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").
-		Bind(dbx.Params{
-			"range_id": targetRange.Id,
-		}).Execute()
-	if err != nil {
-		return errors.New("unable to clear VMs for range: " + err.Error())
 	}
 
 	// Get the router VM name for this range
@@ -195,92 +229,188 @@ func updateRangeVMData(e *core.RequestEvent, targetRange *models.Range, proxmoxC
 	// Create a network object from the range's CIDR to check if a VM's IP belongs to it
 	_, network, _ := net.ParseCIDR(fmt.Sprintf("10.%d.0.0/16", targetRange.RangeNumber()))
 
-	var rangeVMCount = 0
-	vmCollection, err := app.FindCollectionByNameOrId("vms")
+	vmCollection, err := e.App.FindCollectionByNameOrId("vms")
 	if err != nil {
-		return errors.New("unable to find vms collection: " + err.Error())
+		return rangeRefresh{}, errors.New("unable to find vms collection: " + err.Error())
 	}
 
-	for _, vmResource := range allVMs {
-		vmName := vmResource.Name
-		if vmName == "" && vmResource.VMID != 0 {
-			vmName = lookupProxmoxVMName(ctx, vmResource.Node, vmResource.VMID)
-		}
-		if vmName == "" {
-			logger.Error(fmt.Sprintf("Unable to add VMID %d to database: name is blank after Proxmox lookup", vmResource.VMID))
-			continue
-		}
+	// Build every row before touching the database: the guest-agent lookups
+	// are network calls and must not run inside the write transaction. They
+	// run in parallel, so a refresh takes about as long as its slowest VM.
+	records := make([]*core.Record, len(allVMs))
+	var lookups errgroup.Group
+	lookups.SetLimit(guestAgentConcurrency)
+	for i, vmResource := range allVMs {
+		lookups.Go(func() error {
+			vmName := vmResource.Name
+			if vmName == "" && vmResource.VMID != 0 {
+				vmName = lookupProxmoxVMName(ctx, vmResource.Node, vmResource.VMID)
+			}
+			if vmName == "" {
+				logger.Error(fmt.Sprintf("Unable to add VMID %d to database: name is blank after Proxmox lookup", vmResource.VMID))
+				return nil
+			}
+			poweredOn := poweredOnByVMID[int(vmResource.VMID)]
 
-		rawVM := core.NewRecord(vmCollection)
-		rawVM.Set("proxmoxID", int(vmResource.VMID))
+			// A stopped VM has no running guest agent to ask.
+			vmIP := ""
+			if poweredOn {
+				key := guestAgentIPKey{vmid: vmResource.VMID, name: vmName, rangeNumber: int(targetRange.RangeNumber())}
+				vmIP = guestAgentIPs.get(key, func() string {
+					return lookupGuestAgentIP(ctx, proxmoxClient, vmResource, vmName, network)
+				})
+			}
+			if vmIP == "" {
+				// Fallback: Fetch the IP address from the user's range config if the VM is set to use force_ip
+				vmIP = GetIPForVMFromConfig(targetRange, vmName)
+			}
 
-		// Get IP from guest agent if possible
-		vmIP := "null"
-		node, err := proxmoxClient.Node(ctx, vmResource.Node)
-		if err != nil {
-			logger.Warn(fmt.Sprintf("Could not get node object for %s to fetch IP for VM %s: %s", vmResource.Node, vmResource.Name, err.Error()))
-		} else {
-			vm, err := node.VirtualMachine(ctx, int(vmResource.VMID))
-			if err != nil {
-				logger.Warn(fmt.Sprintf("Could not get VM object for %s to fetch IP: %s", vmResource.Name, err.Error()))
-			} else {
-				interfaces, err := vm.AgentGetNetworkIFaces(ctx)
-				if err == nil {
-				interfaceLoop:
-					for _, thisInterface := range interfaces {
-						for _, ipInfo := range thisInterface.IPAddresses {
-							ipAddr := net.ParseIP(ipInfo.IPAddress)
-							if ipAddr != nil && network.Contains(ipAddr) {
-								vmIP = ipAddr.String()
-								break interfaceLoop // IP found, no need to check other interfaces/addresses
-							}
-						}
-					}
-				} else {
-					logger.Debug(fmt.Sprintf("Could not get agent network interfaces for VM %s: %s", vmResource.Name, err.Error()))
-				}
+			rawVM := core.NewRecord(vmCollection)
+			rawVM.Set("proxmoxID", int(vmResource.VMID))
+			rawVM.Set("range", targetRange.Id)
+			rawVM.Set("name", vmName)
+			rawVM.Set("poweredOn", poweredOn)
+			rawVM.Set("ip", vmIP)
+			rawVM.Set("isRouter", vmName == routerVMName)
+			rawVM.Set("cpu", int(vmResource.MaxCPU))
+			rawVM.Set("ram", int(vmResource.MaxMem/1024/1024/1024)) // Convert bytes to GB
+
+			logger.Debug(fmt.Sprintf("Adding VM %s to range %s with range number %d", vmName, targetRange.RangeId(), targetRange.RangeNumber()))
+			records[i] = rawVM
+			return nil
+		})
+	}
+	_ = lookups.Wait() // the lookups log their failures and never return errors
+	records = slices.DeleteFunc(records, func(record *core.Record) bool { return record == nil })
+
+	rangeVMCount, err := replaceRangeVMs(e.App, targetRange.Id, records)
+	if err != nil {
+		return rangeRefresh{}, err
+	}
+	logger.Debug(fmt.Sprintf("Updated range %s with %d VMs", targetRange.RangeId(), rangeVMCount))
+	return rangeRefresh{pool: allVMs, count: rangeVMCount}, nil
+}
+
+// lookupGuestAgentIP asks vmResource's guest agent for its address in
+// network, or returns "" if the agent cannot be reached or reports none.
+func lookupGuestAgentIP(ctx context.Context, proxmoxClient *goproxmox.Client, vmResource goproxmox.ClusterResource, vmName string, network *net.IPNet) string {
+	node, err := proxmoxClient.Node(ctx, vmResource.Node)
+	if err != nil {
+		logger.Warn(fmt.Sprintf("Could not get node object for %s to fetch IP for VM %s: %s", vmResource.Node, vmName, err.Error()))
+		return ""
+	}
+	vm, err := node.VirtualMachine(ctx, int(vmResource.VMID))
+	if err != nil {
+		logger.Warn(fmt.Sprintf("Could not get VM object for %s to fetch IP: %s", vmName, err.Error()))
+		return ""
+	}
+	interfaces, err := vm.AgentGetNetworkIFaces(ctx)
+	if err != nil {
+		logger.Debug(fmt.Sprintf("Could not get agent network interfaces for VM %s: %s", vmName, err.Error()))
+		return ""
+	}
+	for _, thisInterface := range interfaces {
+		for _, ipInfo := range thisInterface.IPAddresses {
+			if ipAddr := net.ParseIP(ipInfo.IPAddress); ipAddr != nil && network.Contains(ipAddr) {
+				return ipAddr.String()
 			}
 		}
+	}
+	return ""
+}
 
-		if vmIP == "null" {
-			// Fallback: Fetch the IP address from the user's range config if the VM is set to use force_ip
-			vmIP = GetIPForVMFromConfig(targetRange, vmName)
-		}
+const (
+	// Guest addresses rarely change, so a found address is reused briefly.
+	guestAgentIPTTL = time.Minute
+	// A missing agent can take seconds to time out; while it is down or a VM
+	// is still booting, it is asked again at most this often.
+	guestAgentFailureTTL = 15 * time.Second
+)
 
-		rawVM.Set("range", targetRange.Id)
-		rawVM.Set("name", vmName)
-		rawVM.Set("poweredOn", poweredOnByVMID[int(vmResource.VMID)])
-		rawVM.Set("ip", vmIP)
-		rawVM.Set("isRouter", vmName == routerVMName)
-		rawVM.Set("cpu", int(vmResource.MaxCPU))
-		rawVM.Set("ram", int(vmResource.MaxMem/1024/1024/1024)) // Convert bytes to GB
+// guestAgentIPKey identifies a VM. The name is included because Proxmox
+// reuses VMIDs once a VM is destroyed.
+type guestAgentIPKey struct {
+	vmid        uint64
+	name        string
+	rangeNumber int
+}
 
-		logger.Debug(fmt.Sprintf("Adding VM %s to range %s with range number %d", vmName, targetRange.RangeId(), targetRange.RangeNumber()))
-		err = app.Save(rawVM)
-		if err == nil {
-			rangeVMCount++
-		} else {
-			logger.Error(fmt.Sprintf("Unable to add VM %s to database: %s", vmName, err.Error()))
+type guestAgentIPEntry struct {
+	ip      string // "" when the lookup failed
+	expires time.Time
+}
+
+// guestAgentIPCache remembers guest-agent address lookups across refreshes.
+type guestAgentIPCache struct {
+	mu      sync.Mutex
+	entries map[guestAgentIPKey]guestAgentIPEntry
+	now     func() time.Time
+}
+
+var guestAgentIPs = newGuestAgentIPCache(time.Now)
+
+func newGuestAgentIPCache(now func() time.Time) *guestAgentIPCache {
+	return &guestAgentIPCache{entries: map[guestAgentIPKey]guestAgentIPEntry{}, now: now}
+}
+
+// get returns key's cached address, or calls lookup and caches its result.
+func (c *guestAgentIPCache) get(key guestAgentIPKey, lookup func() string) string {
+	c.mu.Lock()
+	entry, ok := c.entries[key]
+	c.mu.Unlock()
+	if ok && c.now().Before(entry.expires) {
+		return entry.ip
+	}
+	ip := lookup()
+	ttl := guestAgentIPTTL
+	if ip == "" {
+		ttl = guestAgentFailureTTL
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	// Drop expired entries so removed VMs do not accumulate.
+	for stale, old := range c.entries {
+		if !now.Before(old.expires) {
+			delete(c.entries, stale)
 		}
 	}
+	c.entries[key] = guestAgentIPEntry{ip: ip, expires: now.Add(ttl)}
+	return ip
+}
 
-	// Only update the VM count here. Polling endpoints call this while deploys
-	// are running; saving the whole range record can overwrite a concurrent
-	// state transition such as DEPLOYING -> SUCCESS with a stale value.
-	_, err = e.App.DB().NewQuery("UPDATE ranges SET numberOfVMs = {:number_of_vms} WHERE id = {:range_id}").
-		Bind(dbx.Params{
-			"number_of_vms": rangeVMCount,
-			"range_id":      targetRange.Id,
-		}).Execute()
-	if err != nil {
-		return errors.New("unable to update range VM count: " + err.Error())
-	}
-
-	targetRange.SetNumberOfVms(rangeVMCount)
-	logger.Debug(fmt.Sprintf("Updated range %s with %d VMs", targetRange.RangeId(), rangeVMCount))
-	e.Set("rangeHasBeenUpdatedThisRequest", true)
-
-	return nil
+// replaceRangeVMs replaces the VM rows and VM count of the range with record
+// ID rangeRecordID in one transaction, and returns how many rows it saved.
+// Refreshes run concurrently (polling requests, deploys). SQLite serializes
+// write transactions, so readers see either the previous or the new rows, and
+// two refreshes can no longer both insert after each other's delete.
+func replaceRangeVMs(pbApp core.App, rangeRecordID string, records []*core.Record) (int, error) {
+	count := 0
+	err := pbApp.RunInTransaction(func(tx core.App) error {
+		count = 0
+		_, err := tx.DB().NewQuery("DELETE FROM vms WHERE range = {:range_id}").
+			Bind(dbx.Params{"range_id": rangeRecordID}).Execute()
+		if err != nil {
+			return errors.New("unable to clear VMs for range: " + err.Error())
+		}
+		for _, record := range records {
+			if err := tx.Save(record); err != nil {
+				logger.Error(fmt.Sprintf("Unable to add VM %s to database: %s", record.GetString("name"), err.Error()))
+				continue
+			}
+			count++
+		}
+		// Only update the VM count here. Polling endpoints call this while deploys
+		// are running; saving the whole range record can overwrite a concurrent
+		// state transition such as DEPLOYING -> SUCCESS with a stale value.
+		_, err = tx.DB().NewQuery("UPDATE ranges SET numberOfVMs = {:number_of_vms} WHERE id = {:range_id}").
+			Bind(dbx.Params{"number_of_vms": count, "range_id": rangeRecordID}).Execute()
+		if err != nil {
+			return errors.New("unable to update range VM count: " + err.Error())
+		}
+		return nil
+	})
+	return count, err
 }
 
 // VMDetails holds per-VM information fetched on demand via the QEMU guest agent.

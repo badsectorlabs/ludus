@@ -6,7 +6,11 @@ package protocol
 import (
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
+	"io"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -94,16 +98,70 @@ type Metadata struct {
 }
 
 // VM action routes (plugin scope). GET VMActionsPattern?rangeID= answers
-// {"actions":[{"id","proxmoxID","label","icon"}]}; POST VMActionLaunchPattern
-// with {"id"} answers {"url","expires"} where url is an app launch URL.
+// {"actions":[{"id","proxmoxID","label","icon","iconSVG","color"}]}; POST
+// VMActionLaunchPattern with {"id"} answers {"url","expires"} where url is an
+// app launch URL.
 const (
 	VMActionsPattern      = "/vm-actions"
 	VMActionLaunchPattern = "/vm-actions/launch"
 
-	VMActionIconTerminal = "terminal"
-	VMActionIconDesktop  = "desktop"
-	VMActionIconApp      = "app"
+	// MaxVMActionIconSVG bounds a VM action's IconSVG in bytes.
+	MaxVMActionIconSVG = 16 << 10
 )
+
+var (
+	vmActionIconName = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+	vmActionColor    = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
+)
+
+// ValidVMActionIconName reports whether name has the form of an IBM Carbon
+// icon module name, such as "Terminal", "Terminal_3270" or "4K"
+// (https://carbondesignsystem.com/elements/icons/library/): letters, digits
+// and underscores only. The GUI draws a generic launch icon for names Carbon
+// does not have.
+func ValidVMActionIconName(name string) bool { return vmActionIconName.MatchString(name) }
+
+// ValidVMActionColor reports whether color is a #rgb or #rrggbb hex color.
+func ValidVMActionColor(color string) bool { return vmActionColor.MatchString(color) }
+
+// ValidVMActionIconSVG reports whether icon is a well-formed XML document of
+// at most MaxVMActionIconSVG bytes whose single root element is <svg>. An XML
+// declaration, comments and whitespace may surround it; a DOCTYPE may not.
+// The GUI uses it only as a CSS mask image, so its shapes' alpha defines the
+// icon and their colors are ignored.
+func ValidVMActionIconSVG(icon string) bool {
+	if len(icon) == 0 || len(icon) > MaxVMActionIconSVG {
+		return false
+	}
+	decoder := xml.NewDecoder(strings.NewReader(icon))
+	depth, roots := 0, 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return roots == 1 && depth == 0
+		}
+		if err != nil {
+			return false
+		}
+		switch t := token.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				if roots++; roots > 1 || t.Name.Local != "svg" {
+					return false
+				}
+			}
+			depth++
+		case xml.EndElement:
+			depth--
+		case xml.CharData:
+			if depth == 0 && strings.TrimSpace(string(t)) != "" {
+				return false
+			}
+		case xml.Directive:
+			return false
+		}
+	}
+}
 
 // VMHookCapabilities advertises VM lifecycle operations. System level only.
 type VMHookCapabilities struct {

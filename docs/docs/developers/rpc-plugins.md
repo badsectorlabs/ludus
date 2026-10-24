@@ -197,6 +197,24 @@ A reverse proxy in front of Ludus must forward `/plugin-apps/` as well as `/api/
 
 With `VMActions` set (requires `App`), the range editor shows a button per action on each VM. The SDK serves the plugin-scoped routes `GET /vm-actions` and `POST /vm-actions/launch` for it: `List(c)` returns the actions for `c.Range`, and `Launch(c, id)` normally returns `c.OpenApp(...)`. The web UI opens the returned app URL in a new tab.
 
+The plugin owns each action's icon; the web UI needs no change for new ones:
+
+- `Icon` names any [IBM Carbon icon](https://carbondesignsystem.com/elements/icons/library/) by its `@carbon/icons-react` component name, such as `Terminal`, `Terminal_3270` or `4K`. Names Carbon does not have draw a generic launch icon.
+- `IconSVG` supplies the plugin's own icon instead and takes precedence over `Icon`. It must be a well-formed XML document of at most 16 KiB (`protocol.MaxVMActionIconSVG`) whose single root element is `<svg>`, without a DOCTYPE. The web UI draws it only as a CSS mask image, so the alpha of its shapes defines the icon and their colors are ignored; draw it in one solid color.
+- `Color` tints the icon with a `#rgb` or `#rrggbb` hex color. Without it, the icon takes the button's theme color.
+
+`List` fails with 500 when an action has an invalid icon name, SVG or color, and the web UI drops such actions.
+
+```go
+//go:embed icons/remote-desktop.svg
+var remoteDesktopIcon string
+
+actions = append(actions,
+    ludus.VMAction{ID: "ssh-102", ProxmoxID: 102, Label: "SSH console", Icon: "Terminal", Color: "#c6a153"},
+    ludus.VMAction{ID: "rdp-103", ProxmoxID: 103, Label: "Remote desktop", IconSVG: remoteDesktopIcon, Color: "#c6a153"},
+)
+```
+
 ### Building a package
 
 Running the executable with `--ludus-manifest` prints its `plugin.json` and exits, so the manifest always matches the code:
