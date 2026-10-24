@@ -1968,8 +1968,10 @@ paths:
       summary: Stop the range deployment ansible process
       deprecated: false
       description: |
-        Stops the range deployment by finding the pid of the ansible
-        process for the user and killing it.
+        Stops the range deployment by terminating every ansible process for
+        the range (SIGTERM, then SIGKILL after 10 seconds). Responds only
+        after the processes have exited, or with a 500 error if any are still
+        running 5 seconds after SIGKILL.
 
         Use rangeID to specify which range to abort. If rangeID is not provided,
         the user's default range will be used. Use userID to abort a different

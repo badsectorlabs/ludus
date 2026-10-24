@@ -63,15 +63,21 @@ func writeRangeConfig(e *core.RequestEvent, targetRange *models.Range, configByt
 }
 
 // hasUserDefinedRoles returns true when the range config declares at least
-// one role on any VM. Existence of the role on disk is not checked.
+// one role on any VM or the router. Existence of the role on disk is not checked.
 func hasUserDefinedRoles(configBytes []byte) bool {
 	var doc struct {
 		Ludus []struct {
 			Roles []any `yaml:"roles"`
 		} `yaml:"ludus"`
+		Router struct {
+			Roles []any `yaml:"roles"`
+		} `yaml:"router"`
 	}
 	if err := yaml.Unmarshal(configBytes, &doc); err != nil {
 		return false
+	}
+	if len(doc.Router.Roles) > 0 {
+		return true
 	}
 	for _, vm := range doc.Ludus {
 		if len(vm.Roles) > 0 {

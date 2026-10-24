@@ -36,11 +36,36 @@ stages:
     done
   }
 
+# Polls an HTTPS URL from inside a guest until the response contains HTML. A failed curl in the guest does not
+# fail `qm guest exec`, so qm_guest_exec_retry cannot wait out DNS/HTTPS that is not ready yet after a cold boot
+# or a testing-mode change.
+.wait-for-guest-https: &wait-for-guest-https |
+  wait_for_guest_https() {
+    local vmid="$1" url="$2"
+    local deadline=$((SECONDS + 180)) attempt=0 output
+
+    while true; do
+      attempt=$((attempt + 1))
+      output=$(sudo qm guest exec "$vmid" -- curl --connect-timeout 5 --max-time 10 "$url" 2>&1) || true
+      if grep -q 'HTML' <<<"$output"; then
+        return 0
+      fi
+      if (( SECONDS >= deadline )); then
+        echo "No HTML from ${url} in VM ${vmid} after ${attempt} attempts; last qm guest exec output:" >&2
+        printf '%s\n' "$output" >&2
+        return 1
+      fi
+      echo "No HTML from ${url} in VM ${vmid} on attempt ${attempt}; retrying in 10 seconds..." >&2
+      sleep 10
+    done
+  }
+
 # This is a Yaml script anchor to do all the standard setup to prepare fo CI tasks - update the server and load the CI user API key
 .common-setup: &common-setup # Sync time in the event this test is being run after a snapshot rollback
   - sudo /usr/sbin/chronyd -q 'pool pool.ntp.org iburst' || sudo /usr/bin/chronyc -m 'burst 3/3' 'makestep 0.5 -1'
   - date
   - *qm-guest-exec-retry
+  - *wait-for-guest-https
   - source "${CI_PROJECT_DIR}/ludus-server/ci/job-server.sh"
   - ci_job_setup
 
@@ -129,6 +154,33 @@ stages:
   - ludus ansible role add geerlingguy.docker --force
   - ludus ansible role list | grep geerlingguy.docker
   - "! ludus ansible role list | grep geerlingguy.docker | grep 7.0.1"
+  # Regression: a role install that succeeds with an ansible-galaxy warning is a success.
+  # dependency_warning lists geerlingguy.docker unpinned, so galaxy warns that it differs
+  # from the version installed above and still installs the role.
+  - |
+    (
+      set -euo pipefail
+      work=$(mktemp -d)
+      tar -czf "$work/dependency_warning.tar.gz" -C /opt/ludus/ci/roles dependency_warning
+      # Serve the archive on the API host, as the collection archive test below does.
+      ci_server_exec mkdir -p /tmp/ludus-ci-roles
+      ci_server_push "$work/dependency_warning.tar.gz" /tmp/ludus-ci-roles/dependency_warning.tar.gz 0644
+      ci_server_exec systemd-run --unit=ludus-ci-role-archive --collect python3 -m http.server 18080 --bind "$CI_SERVER_IP" --directory /tmp/ludus-ci-roles
+      trap 'ci_server_exec systemctl stop ludus-ci-role-archive; rm -rf "$work"' EXIT
+      # Upload under the archive's filename, as REST clients do; the CLI sends the bare directory name.
+      curl --fail-with-body --silent --show-error --insecure --request PUT \
+        --header "X-API-KEY: ${LUDUS_API_KEY}" \
+        --form "file=@${work}/dependency_warning.tar.gz;filename=dependency_warning.tar.gz" \
+        --form force=true \
+        "${CI_SERVER_URL}/api/v2/ansible/role/fromtar"
+      ludus ansible role list --json | jq -e 'any(.[]; .name == "dependency_warning" and .version == "1.0.0")'
+      ludus ansible role rm dependency_warning
+      archive_url="http://${CI_SERVER_IP}:18080/dependency_warning.tar.gz"
+      curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 "$archive_url" --output /dev/null
+      ludus ansible role add "$archive_url" --force
+      ludus ansible role list --json | jq -e 'any(.[]; .name == "dependency_warning")'
+      ludus ansible role rm dependency_warning
+    )
   # Test collections
   - ludus ansible collection list
   - ludus ansible collection add maxhoesel.smallstep || true
@@ -176,6 +228,10 @@ stages:
   - ludus range config set -f /opt/ludus/ci/configs/depends-on.yml
   - ludus range deploy -t user-defined-roles
   - *wait-for-range-success
+  # Depends on - a role pulled forward by depends_on brings the roles listed above it on its VM
+  - ludus range config set -f /opt/ludus/ci/configs/depends-on-list-order.yml
+  - ludus range deploy -t user-defined-roles
+  - *wait-for-range-success
   # Depends on - dependency that doesn't exist test
   - set +o pipefail # We expect the first command in the next line to fail, so allow it so long as the grep succeeds
   - 'ludus range config set -f /opt/ludus/ci/configs/depends-on-not-found.yml 2>&1 | egrep "ERROR: Dependency not found \w+-ad-dc-win2022-server-x64-1:geerlingguy.docker"'
@@ -191,7 +247,7 @@ stages:
   - ludus testing status
   # Validate that WIN10 can reach the internet
   - "qm_guest_exec_retry \"$WIN11VMID\" ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
+  - wait_for_guest_https "$WIN11VMID" https://google.com/
   - ludus testing start
   - ludus testing status
   - ludus range list
@@ -215,7 +271,8 @@ stages:
   - DC_VMID=$(ludus range list --json | jq -er '.VMs[] | select(.name | endswith("-ad-dc-win2022-server-x64-1")) | .proxmoxID')
   - qm_guest_exec_retry "$DC_VMID" powershell.exe -NoProfile -NonInteractive -Command 'Clear-DnsServerCache -Force -ErrorAction Stop' | jq -e '.exited == 1 and .exitcode == 0'
   - qm_guest_exec_retry "$WIN11VMID" ipconfig /flushdns | jq -e '.exited == 1 and .exitcode == 0'
-  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
+  # Allowing the domain can take a few seconds to apply
+  - wait_for_guest_https "$WIN11VMID" https://google.com/
   - qm_guest_exec_retry "$WIN11VMID" curl --connect-timeout 5 --max-time 10 https://example.com/ | jq -e '.exited == 1 and (.exitcode | IN(6, 7, 28))'
   # Deny google.com and 8.8.8.8 and check that they are not reachable
   - ludus testing deny -d google.com
@@ -230,7 +287,7 @@ stages:
   - 'ludus testing status --json | jq -e ''.testingEnabled == false and (.allowedIPs | length == 0) and (.allowedDomains | length == 0)'''
   # Now that testing has stopped, check the VM can reach the internet
   - "qm_guest_exec_retry \"$WIN11VMID\" ping -n 1 8.8.8.8 | grep 'Reply from 8.8.8.8: bytes=32'"
-  - qm_guest_exec_retry "$WIN11VMID" curl https://google.com/ | grep 'HTML'
+  - wait_for_guest_https "$WIN11VMID" https://google.com/
 
 .power-tests: &power-tests # Power on/off tests - single VM
   - ludus power off -n ${LUDUS_USER_ID}-kali
@@ -451,6 +508,12 @@ stages:
         - ludus-api/**/*
         - ludus-server/**/*
         - ludus-client/**/*
+
+# Each post-deploy series runs on one shared CI clone (see get_ci_series in ludus-server/ci/base.sh).
+# Its optional needs drop out when changes-rules filter a predecessor from the pipeline, so the series
+# also shares a resource group scoped to the pipeline: one job at a time per clone, pipelines in parallel.
+.post-deploy-admin-vm: &post-deploy-admin-vm post-deploy-admin-${CI_PIPELINE_ID}
+.post-deploy-user-vm: &post-deploy-user-vm post-deploy-user-${CI_PIPELINE_ID}
 
 .ci-setup-cluster-admin: &ci-setup-cluster-admin
   # Sync time after snapshot rollback
@@ -1182,6 +1245,7 @@ range deploy-admin:
 #######################
 post-deploy testing-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1227,6 +1291,7 @@ post-deploy testing-as-admin:
 
 post-deploy power-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1272,6 +1337,7 @@ post-deploy power-as-admin:
 
 post-deploy ansible-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1303,6 +1369,7 @@ post-deploy ansible-as-admin:
         - ludus-api/ansible.go
         - ludus-api/api_ansible*.go
         - ludus-server/ci/fixtures/ludus_ci-http_archive-*.tar.gz
+        - ludus-server/ci/roles/dependency_warning/**
         - .gitlab-ci.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
@@ -1320,6 +1387,7 @@ post-deploy ansible-as-admin:
 
 post-deploy user-cmds-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1397,6 +1465,7 @@ post-deploy user-cmds-as-admin:
 
 post-deploy groups-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1534,6 +1603,7 @@ post-deploy groups-as-admin:
 
 post-deploy blueprints-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1648,6 +1718,7 @@ post-deploy blueprints-as-admin:
 
 post-deploy sources-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -1931,13 +2002,14 @@ post-deploy sources-as-admin:
 
 post-deploy ranges-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
     - build all
     # Both predecessors stay listed: optional needs drop out of the DAG when
     # changes-rules filter a job from the pipeline, so needing only the
-    # sources job would let this run concurrently with the blueprints job.
+    # sources job would let this run before the blueprints job.
     - job: post-deploy blueprints-as-admin
       optional: true
     - job: post-deploy sources-as-admin
@@ -2014,11 +2086,17 @@ post-deploy ranges-as-admin:
     - ludus range create -n "CIU Abort Test" -r CIU-abort-test --user CIU
     - ludus range config set -f /opt/ludus/ci/configs/small-range.yml -r CIU-abort-test --user CIU
     - ludus range deploy -r CIU-abort-test --user CIU
-    - sleep 5 # Wait for ansible process to start
+    # Abort as soon as ansible starts: an abort before its first worker fork used to leave ansible-playbook running (BSL-580)
+    # Range processes run on the Ludus server, so scan its /proc (the LXC under lxc-2.4).
+    - ci_server_exec timeout 60 bash -c 'until grep -qzxF LUDUS_RANGE_ID=CIU-abort-test /proc/[0-9]*/environ 2>/dev/null; do sleep 0.1; done'
     - ludus range list --json -r CIU-abort-test --user CIU | jq -e '.rangeState == "DEPLOYING"'
     # Abort using only -r (no --user) — previously failed with "no ansible process found for user CIA"
     - ludus range abort -r CIU-abort-test
     - ludus range list --json -r CIU-abort-test --user CIU | jq -e '.rangeState == "ABORTED"'
+    # Abort returns only after every process of the run (ansible-playbook, workers, module processes) has exited.
+    # Decide on grep's output, not its status: unreadable /proc entries make it exit 2 even when it matched.
+    - survivors=$(ci_server_exec bash -c 'grep -lzxF LUDUS_RANGE_ID=CIU-abort-test /proc/[0-9]*/environ 2>/dev/null || true'); if [ -n "$survivors" ]; then echo "Survived the abort:" $survivors; exit 1; fi
+    - ludus range logs --history --json -r CIU-abort-test --user CIU | jq -e '.[0].status == "aborted"'
     - ludus range rm-range -r CIU-abort-test --no-prompt --force
     # Clean up potential leftovers (ignore errors)
     - ludus range rm-range -r CIA-extra-1 --no-prompt --force || true
@@ -2125,6 +2203,7 @@ post-deploy ranges-as-admin:
 
 post-deploy templates-as-admin:
   stage: test
+  resource_group: *post-deploy-admin-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2227,6 +2306,7 @@ range deploy-user:
 #######################
 post-deploy testing-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2269,6 +2349,7 @@ post-deploy testing-as-user:
 
 post-deploy power-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2313,6 +2394,7 @@ post-deploy power-as-user:
 
 post-deploy ansible-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2342,6 +2424,7 @@ post-deploy ansible-as-user:
         - ludus-api/ansible.go
         - ludus-api/api_ansible*.go
         - ludus-server/ci/fixtures/ludus_ci-http_archive-*.tar.gz
+        - ludus-server/ci/roles/dependency_warning/**
         - .gitlab-ci.yml
   variables:
     LUDUS_BUILD_TYPE: from-snapshot
@@ -2356,6 +2439,7 @@ post-deploy ansible-as-user:
 
 post-deploy user-cmds-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2428,6 +2512,7 @@ post-deploy user-cmds-as-user:
 
 post-deploy blueprints-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2557,6 +2642,7 @@ post-deploy blueprints-as-user:
 
 post-deploy templates-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:
@@ -2597,6 +2683,7 @@ post-deploy templates-as-user:
 
 post-deploy snapshots-as-user:
   stage: test
+  resource_group: *post-deploy-user-vm
   tags:
     - ludus-proxmox-runner-parallel
   needs:

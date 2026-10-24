@@ -1005,3 +1005,15 @@ func galaxyInstallCmd(artifact galaxyArtifact, base, target []string, force bool
 	}
 	return cmd
 }
+
+// galaxyRoleInstallSkipped reports whether a single-role `ansible-galaxy` install
+// that exited 0 warned without installing anything, e.g. "already installed - use
+// --force". A successful install can also warn (a dependency that differs from the
+// installed version, for example), so only output without a success line counts.
+// The success line names the role as galaxy resolved it ("name (version)" for Galaxy,
+// the archive name for tarballs and URLs), so match the marker rather than a name.
+// Galaxy installs dependencies only after the requested role, so any success line
+// means the requested role was installed.
+func galaxyRoleInstallSkipped(output string) bool {
+	return strings.Contains(output, "[WARNING]") && !strings.Contains(output, " was installed successfully")
+}
