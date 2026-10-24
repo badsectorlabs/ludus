@@ -191,6 +191,13 @@ If importing an existing installation, follow
 
 ## Install on an offline Proxmox cluster
 
+:::note
+
+Offline installation is a Ludus Enterprise feature. The offline installer,
+`install-offline.sh`, is distributed with Ludus Enterprise.
+
+:::
+
 An offline install needs more than the LXC archive. The archive contains the
 Ludus server runtime, bundled Ansible content, Packer plugins, Python wheels, and
 the Blocky binary used by range routers. It does not contain operating system
@@ -199,7 +206,7 @@ installers, or files downloaded by user-supplied Ansible roles.
 
 The simplest reliable process is:
 
-1. Stage the separate offline installer, its matching shared installer, and signed media before disconnecting the cluster.
+1. Stage the Enterprise offline installer, the same release's `install.sh`, and signed media before disconnecting the cluster.
 2. Build every required Proxmox VM template while the cluster still has access
    to its package and artifact sources.
 3. Preload any package caches using the same range configuration that will be
@@ -212,12 +219,9 @@ every required URL or import VM templates prepared elsewhere.
 
 ### Stage the offline distribution
 
-Use `install-offline.sh`, not the public installer URL or `install.sh --airgapped`.
-The offline entry point must be supplied alongside the **same release's
-`install.sh`**. It sources the shared provisioning code locally and never
-downloads a replacement. Public installer uploads do not include
-`install-offline.sh`; obtain the two-script distribution through your approved
-offline delivery channel.
+Use the Ludus Enterprise `install-offline.sh`, not the public installer URL or
+`install.sh --airgapped`. Place it beside the **same release's `install.sh`**: it
+sources the shared provisioning code locally and never downloads a replacement.
 
 Stage the following on a connected preparation system:
 
@@ -225,9 +229,11 @@ Stage the following on a connected preparation system:
 - The versioned `ludus-<version>-debian13-amd64.tar.zst` appliance.
 - Every pinned ISO listed by `AIRGAPPED_ISO_FILENAMES` in `install-offline.sh`,
   including both VirtIO images, in one local ISO directory.
+- `bginfo.exe` from `https://live.sysinternals.com/bginfo.exe`. The appliance
+  does not include BgInfo; Ludus copies it to Windows range VMs.
 - A SHA-256 manifest, its detached signature, and a trusted release-signing
-  public key. The manifest must cover the appliance, all ISOs, and any plugin,
-  offline license, or state archive supplied to the installer.
+  public key. The manifest must cover the appliance, all ISOs, `bginfo.exe`,
+  and any plugin, offline license, or state archive supplied to the installer.
 - Any site-specific CA certificate required by the environment.
 
 Verify the distribution before executing either script. On the disconnected
@@ -243,6 +249,7 @@ sudo bash "${MEDIA}/install-offline.sh" \
   --version "${VERSION}" \
   --iso-directory "${MEDIA}/isos" \
   --iso-storage shared-isos \
+  --bginfo-file "${MEDIA}/bginfo.exe" \
   --checksum-file "${MEDIA}/checksums.txt" \
   --checksum-signature "${MEDIA}/checksums.txt.sig" \
   --checksum-public-key "${MEDIA}/release-signing.pub" \
@@ -264,8 +271,7 @@ never installs missing host dependencies. It does not support updates of an
 existing LXC.
 
 The shared installer retains `--template-file` for CI and development, but that
-option alone does not enable the supported air-gap workflow. The distribution
-split does not change runtime licensing or restrict access to repository source.
+option alone does not enable the supported air-gap workflow.
 
 ### Offline infrastructure requirements
 
@@ -290,7 +296,8 @@ For a licensed offline installation, also pass `--enterprise-plugin`,
 `--license-file`, and `--license` to `install-offline.sh`. Include the plugin and
 license in the signed artifact manifest. The wrapper installs the license at
 `/opt/ludus/license.lic` before services restart; the configured license key
-decrypts it. Community installations can omit those three options.
+decrypts it. Without these three options, the Enterprise plugin and license are
+not installed.
 
 ### ISOs and template builds
 
@@ -427,7 +434,8 @@ router:
 Before removing egress, verify all of the following:
 
 - `install-offline.sh`, its matching `install.sh`, the LXC archive, all pinned
-  ISOs, and the signed manifest/signature/trusted key are stored locally.
+  ISOs, `bginfo.exe`, and the signed manifest/signature/trusted key are stored
+  locally.
 - The Proxmox cluster is quorate and all configured API endpoints answer.
 - DNS and NTP work without Internet access.
 - `ludus templates list` reports `BUILT` for every template in the range.

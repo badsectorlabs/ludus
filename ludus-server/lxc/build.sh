@@ -8,7 +8,6 @@ cd "$(dirname "$0")"
 : "${PACKER_ANSIBLE_VERSION:=1.1.1}"
 : "${BLOCKY_VERSION:=0.30.0}"
 : "${BLOCKY_LINUX_X86_64_SHA256:=1641ec6821abd39ff61cf47f343f518c33a1973c64ad6c0deb030b0f02d9ef30}"
-: "${BGINFO_SHA256:=599b391980a5c9cbadd6c70ba3d5a5258db8b9d87c68b3fe587d9dc84effdf63}"
 : "${LUDUS_SOURCE_BSL_URL:=https://github.com/badsectorlabs/ludus-source-bsl.git}"
 : "${LUDUS_SOURCE_BSL_REF:=main}"
 : "${LUDUS_SOURCE_BSL_ARCHIVE:=}"
@@ -79,11 +78,6 @@ if [[ ! -x "${BLOCKY_DEPS_DIR}/blocky" ]]; then
   printf '%s  %s\n' "${BLOCKY_LINUX_X86_64_SHA256}" "/tmp/${BLOCKY_ARCHIVE}" | sha256sum --check --status
   tar -xzf "/tmp/${BLOCKY_ARCHIVE}" -C "${BLOCKY_DEPS_DIR}" blocky
 fi
-
-if [[ ! -f deps/bginfo.exe ]]; then
-  curl -fsSL "https://live.sysinternals.com/bginfo.exe" -o deps/bginfo.exe
-fi
-printf '%s  %s\n' "${BGINFO_SHA256}" "deps/bginfo.exe" | sha256sum --check --status
 
 # The appliance runs Debian 13's CPython 3.13 on amd64, regardless of the
 # builder's interpreter. Never package wheels selected for the build host.

@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
     --version) version="${2:?--version requires a tag}"; shift 2 ;;
     --template-file) template="${2:?--template-file requires a path}"; shift 2 ;;
     --airgapped|--iso-directory|--license-file)
-      echo "Error: $1 requires the separately supplied install-offline.sh." >&2
+      echo "Error: $1 requires the Ludus Enterprise install-offline.sh." >&2
       exit 1 ;;
     *) shift ;;
   esac
