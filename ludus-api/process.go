@@ -7,51 +7,76 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
-// findAnsiblePidForRange returns the PID of the ansible process deploying the
-// given range, identified by the LUDUS_RANGE_ID environment variable that
-// ansible.go injects into every range-management ansible run.
-func findAnsiblePidForRange(rangeID string) (string, error) {
-	out, err := exec.Command("bash", "-c", "ps aux | egrep 'ansibl[e]'").Output()
+// rangeProcessPIDs returns every live process carrying LUDUS_RANGE_ID=rangeID.
+// ansible.go injects the variable into each range-management ansible run and
+// descendants inherit it, so the result covers ansible-playbook, its workers,
+// and their module processes, including those re-parented after their worker
+// died. Zombies expose an empty environ and are skipped.
+func rangeProcessPIDs(rangeID string) ([]int, error) {
+	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		if err.Error() == "exit status 1" {
-			return "", errors.New("no ansible processes are running")
-		}
-		logger.Error(fmt.Sprintf("Error executing command: %v\n", err))
-		return "", err
+		return nil, err
 	}
 
-	target := fmt.Sprintf("LUDUS_RANGE_ID=%s", rangeID)
-	processes := strings.Split(string(out), "\n")
-
-	for _, process := range processes {
-		if !strings.Contains(process, "ansible") {
+	// An exact entry match avoids LUDUS_RANGE_ID=AB matching LUDUS_RANGE_ID=ABC.
+	target := []byte("LUDUS_RANGE_ID=" + rangeID)
+	self := os.Getpid()
+	var pids []int
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid == self {
 			continue
 		}
-		fields := strings.Fields(process)
-		if len(fields) < 2 {
-			continue
-		}
-		pid := fields[1]
-
-		envBytes, err := os.ReadFile(fmt.Sprintf("/proc/%s/environ", pid))
+		// Unreadable entries belong to exited processes or other users.
+		environ, err := os.ReadFile("/proc/" + entry.Name() + "/environ")
 		if err != nil {
-			logger.Debug(fmt.Sprintf("Error reading /proc/%s/environ: %v\n", pid, err))
 			continue
 		}
-
-		// /proc/PID/environ separates entries with NUL bytes; an exact match
-		// on the entry avoids LUDUS_RANGE_ID=AB matching LUDUS_RANGE_ID=ABC.
-		for _, envVar := range strings.Split(string(envBytes), "\x00") {
-			if envVar == target {
-				logger.Debug(fmt.Sprintf("Process %s is deploying range %s\n", pid, rangeID))
-				return pid, nil
+		for _, envVar := range bytes.Split(environ, []byte{0}) {
+			if bytes.Equal(envVar, target) {
+				pids = append(pids, pid)
+				break
 			}
 		}
 	}
-	return "", fmt.Errorf("no ansible process found for range %s", rangeID)
+	return pids, nil
+}
+
+// terminateRangeProcesses sends SIGTERM to every process of the range, then
+// SIGKILL to those still running after grace. Each pass rescans, so workers
+// forked during the abort are signaled too. It returns nil once none remain,
+// or an error if any survive SIGKILL for killWait.
+func terminateRangeProcesses(rangeID string, grace, killWait time.Duration) error {
+	sig := syscall.SIGTERM
+	killAt := time.Now().Add(grace)
+	giveUpAt := killAt.Add(killWait)
+	for {
+		pids, err := rangeProcessPIDs(rangeID)
+		if err != nil {
+			return err
+		}
+		if len(pids) == 0 {
+			return nil
+		}
+		now := time.Now()
+		if now.After(giveUpAt) {
+			return fmt.Errorf("ansible processes for range %s still running after SIGKILL: %v", rangeID, pids)
+		}
+		if now.After(killAt) {
+			sig = syscall.SIGKILL
+		}
+		for _, pid := range pids {
+			// ESRCH only means the process exited after the scan.
+			_ = syscall.Kill(pid, sig)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 func RunWithOutput(command string) (string, error) {

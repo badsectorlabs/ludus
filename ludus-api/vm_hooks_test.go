@@ -27,8 +27,9 @@ func (*vmHookTestRPC) Initialize(protocol.InitializeRequest) (protocol.Initializ
 func (*vmHookTestRPC) Handle(protocol.Request) (protocol.Response, error) {
 	return protocol.Response{}, nil
 }
-func (*vmHookTestRPC) RunJob(protocol.JobRequest) error { return nil }
-func (*vmHookTestRPC) Shutdown() error                  { return nil }
+func (*vmHookTestRPC) RunJob(protocol.JobRequest) error                  { return nil }
+func (*vmHookTestRPC) Shutdown() error                                   { return nil }
+func (*vmHookTestRPC) AppSessionClosed(protocol.AppSessionRequest) error { return nil }
 func (p *vmHookTestRPC) VMHook(request protocol.VMHookRequest) (protocol.VMHookResponse, error) {
 	if request.Call == "" {
 		return protocol.VMHookResponse{}, errors.New("VM hook dispatched without a CallID")

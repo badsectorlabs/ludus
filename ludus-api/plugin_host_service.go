@@ -33,12 +33,15 @@ var _ protocol.HostAPI = (*HostService)(nil)
 
 // hostCall is one live host → plugin call. event is the live request for
 // Handle calls and nil for plugin-principal calls (Initialize, RunJob, VMHook).
+// session is set for an app session's call, which lives until the session
+// ends; its request context is rebuilt from current records on every use.
 // mu serializes host-service calls sharing the CallID because the event store
 // holds per-request state.
 type hostCall struct {
-	mu    sync.Mutex
-	ctx   context.Context
-	event *core.RequestEvent
+	mu      sync.Mutex
+	ctx     context.Context
+	event   *core.RequestEvent
+	session *appSession
 }
 
 func newHostService(s *Server, plugin *managedPlugin) *HostService {
@@ -79,6 +82,12 @@ func (h *HostService) beginRequest(e *core.RequestEvent) (protocol.CallID, func(
 // beginPluginCall registers a plugin-principal call; the returned func expires it.
 func (h *HostService) beginPluginCall(ctx context.Context) (protocol.CallID, func()) {
 	return h.register(&hostCall{ctx: ctx})
+}
+
+// registerAppSession registers the caller call of an app session; the
+// returned func expires it.
+func (h *HostService) registerAppSession(session *appSession) (protocol.CallID, func()) {
+	return h.register(&hostCall{ctx: session.ctx, session: session})
 }
 
 func (h *HostService) register(call *hostCall) (protocol.CallID, func()) {
@@ -138,6 +147,8 @@ type hostScope struct {
 	h     *HostService
 	ctx   context.Context
 	event *core.RequestEvent // nil for plugin-principal calls
+	// session is the app session of an app-session call.
+	session *appSession
 	// user is the effective user of a Handle call; nil for superusers.
 	user      *models.User
 	superuser bool
@@ -235,12 +246,20 @@ func (h *HostService) run(id protocol.CallID, access hostAccess, method string, 
 	}()
 
 	scope := &hostScope{
-		h:      h,
-		ctx:    call.ctx,
-		event:  call.event,
-		system: h.plugin.manifest.Level == protocol.LevelSystem,
+		h:       h,
+		ctx:     call.ctx,
+		event:   call.event,
+		session: call.session,
+		system:  h.plugin.manifest.Level == protocol.LevelSystem,
 	}
-	if e := call.event; e != nil {
+	if call.session != nil {
+		event, herr := call.session.requestEvent(call.ctx)
+		if herr != nil {
+			return herr
+		}
+		scope.event = event
+	}
+	if e := scope.event; e != nil {
 		scope.superuser = e.Auth != nil && e.Auth.IsSuperuser()
 		if user, ok := e.Get("user").(*models.User); ok && user != nil && user.Record != nil {
 			scope.user = user

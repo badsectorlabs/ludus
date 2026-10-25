@@ -339,3 +339,34 @@ func TestServeManifestFlag(t *testing.T) {
 		t.Fatalf("invalid declaration: err=%v stdout=%q stderr=%q; want exit 1 with the reason on stderr", err, stdout, stderr)
 	}
 }
+
+// The SDK refuses to send VM actions the GUI would reject, so the plugin
+// author sees the declaration error instead of silently missing buttons.
+func TestVMActionsRejectInvalidIcons(t *testing.T) {
+	var actions []ludus.VMAction
+	p := &ludus.Plugin{ID: "vm-actions", Name: "VM actions", Version: "1", App: http.NotFoundHandler(), VMActions: &ludus.VMActions{
+		List:   func(*ludus.Call) ([]ludus.VMAction, error) { return actions, nil },
+		Launch: func(*ludus.Call, string) (*ludus.AppLaunch, error) { return nil, ludus.ErrNotFound },
+	}}
+	h := ludustest.Start(t, p, nil, protocol.Environment{})
+	list := func() protocol.Response {
+		return h.Do(http.MethodGet, protocol.VMActionsPattern, ludustest.WithRange(&protocol.Range{RecordID: "r1", Number: 1}))
+	}
+	actions = []ludus.VMAction{
+		{ID: "ssh", ProxmoxID: 1, Label: "SSH", Icon: "Terminal", Color: "#c6a153"},
+		{ID: "rdp", ProxmoxID: 1, Label: "RDP", IconSVG: `<svg viewBox="0 0 1 1"><path d="M0 0h1v1H0z"/></svg>`},
+	}
+	if response := list(); response.Status != http.StatusOK || !strings.Contains(string(response.Body), `"iconSVG":"\u003csvg`) {
+		t.Fatalf("valid actions = %d %s", response.Status, response.Body)
+	}
+	for _, invalid := range []ludus.VMAction{
+		{ID: "a", Icon: "../index"},
+		{ID: "b", IconSVG: "<img src=x>"},
+		{ID: "c", Color: "red"},
+	} {
+		actions = []ludus.VMAction{invalid}
+		if response := list(); response.Status != http.StatusInternalServerError {
+			t.Errorf("invalid action %+v = %d, want 500", invalid, response.Status)
+		}
+	}
+}

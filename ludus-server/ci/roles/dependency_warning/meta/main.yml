@@ -1,0 +1,20 @@
+---
+# Unpinned on purpose: when geerlingguy.docker is already installed, ansible-galaxy
+# warns that this dependency differs from the installed version but still exits 0.
+# CI installs this role to assert such warnings are not reported as failures.
+dependencies:
+  - role: geerlingguy.docker
+
+galaxy_info:
+  role_name: dependency_warning
+  author: badsectorlabs
+  description: Declares an unpinned Galaxy dependency - for use in CI testing
+  company: Bad Sector Labs
+  license: GPLv3
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+
+collections: []

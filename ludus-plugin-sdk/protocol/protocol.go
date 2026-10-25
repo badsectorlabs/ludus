@@ -1,9 +1,18 @@
 // Package protocol is the wire contract between the Ludus host and plugin
 // processes. The host and the plugin SDK both import it. It depends only on
-// hashicorp/go-plugin and the standard library.
+// hashicorp/go-plugin, its yamux transport, and the standard library.
 package protocol
 
-import "time"
+import (
+	"encoding/base64"
+	"encoding/json"
+	"encoding/xml"
+	"errors"
+	"io"
+	"regexp"
+	"strings"
+	"time"
+)
 
 const (
 	// PluginName is the go-plugin dispense name.
@@ -81,6 +90,77 @@ type Metadata struct {
 	Routes                   []Route
 	VMHooks                  VMHookCapabilities
 	ForwardCallerCredentials bool
+	// App reports that the plugin serves a browser application (see AppContext).
+	App bool
+	// VMActions reports that the plugin serves VMActionsPattern and
+	// VMActionLaunchPattern for the GUI range editor. Requires App.
+	VMActions bool
+}
+
+// VM action routes (plugin scope). GET VMActionsPattern?rangeID= answers
+// {"actions":[{"id","proxmoxID","label","icon","iconSVG","color"}]}; POST
+// VMActionLaunchPattern with {"id"} answers {"url","expires"} where url is an
+// app launch URL.
+const (
+	VMActionsPattern      = "/vm-actions"
+	VMActionLaunchPattern = "/vm-actions/launch"
+
+	// MaxVMActionIconSVG bounds a VM action's IconSVG in bytes.
+	MaxVMActionIconSVG = 16 << 10
+)
+
+var (
+	vmActionIconName = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+	vmActionColor    = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
+)
+
+// ValidVMActionIconName reports whether name has the form of an IBM Carbon
+// icon module name, such as "Terminal", "Terminal_3270" or "4K"
+// (https://carbondesignsystem.com/elements/icons/library/): letters, digits
+// and underscores only. The GUI draws a generic launch icon for names Carbon
+// does not have.
+func ValidVMActionIconName(name string) bool { return vmActionIconName.MatchString(name) }
+
+// ValidVMActionColor reports whether color is a #rgb or #rrggbb hex color.
+func ValidVMActionColor(color string) bool { return vmActionColor.MatchString(color) }
+
+// ValidVMActionIconSVG reports whether icon is a well-formed XML document of
+// at most MaxVMActionIconSVG bytes whose single root element is <svg>. An XML
+// declaration, comments and whitespace may surround it; a DOCTYPE may not.
+// The GUI uses it only as a CSS mask image, so its shapes' alpha defines the
+// icon and their colors are ignored.
+func ValidVMActionIconSVG(icon string) bool {
+	if len(icon) == 0 || len(icon) > MaxVMActionIconSVG {
+		return false
+	}
+	decoder := xml.NewDecoder(strings.NewReader(icon))
+	depth, roots := 0, 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return roots == 1 && depth == 0
+		}
+		if err != nil {
+			return false
+		}
+		switch t := token.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				if roots++; roots > 1 || t.Name.Local != "svg" {
+					return false
+				}
+			}
+			depth++
+		case xml.EndElement:
+			depth--
+		case xml.CharData:
+			if depth == 0 && strings.TrimSpace(string(t)) != "" {
+				return false
+			}
+		case xml.Directive:
+			return false
+		}
+	}
 }
 
 // VMHookCapabilities advertises VM lifecycle operations. System level only.
@@ -156,6 +236,55 @@ type InitializeRequest struct {
 
 type InitializeResponse struct {
 	Jobs []ScheduledJob
+	// AppStream is the MuxBroker stream ID on which the plugin serves its
+	// browser application as HTTP over yamux. Zero means no application. The
+	// host must dial it within the broker's accept window.
+	AppStream uint32
+}
+
+// AppSessionPrefix is where the host mounts plugin applications:
+// /plugin-apps/{resourceID}/{sessionID}/.
+const AppSessionPrefix = "/plugin-apps/"
+
+// AppContextHeader carries the encoded AppContext on requests the host proxies
+// to a plugin application over its private stream. The SDK removes it before
+// the application handler runs.
+const AppContextHeader = "Ludus-App-Context"
+
+// AppContext identifies the app session of one proxied application request.
+// Call is the session's CallID: host-service calls made with it are evaluated
+// as the session's caller until the session ends.
+type AppContext struct {
+	Session  string
+	Call     CallID
+	BasePath string // /plugin-apps/{resourceID}/{sessionID}/; the plugin sees paths relative to it
+	Auth     Principal
+	User     *User // effective user; nil for superusers
+}
+
+// EncodeAppContext encodes c for AppContextHeader.
+func EncodeAppContext(c AppContext) (string, error) {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+// DecodeAppContext decodes an AppContextHeader value.
+func DecodeAppContext(value string) (AppContext, error) {
+	var c AppContext
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || json.Unmarshal(data, &c) != nil || c.Session == "" || c.Call == "" || c.BasePath == "" {
+		return AppContext{}, errors.New("invalid app context")
+	}
+	return c, nil
+}
+
+// AppSessionRequest tells the plugin that the host ended an app session:
+// expiry, revoked access, an explicit end, or plugin shutdown.
+type AppSessionRequest struct {
+	Session string
 }
 
 // MinJobInterval is the shortest scheduled-job interval the host accepts.
@@ -204,6 +333,13 @@ type License struct {
 // Settings are explicit, non-secret server settings. Add a field when a plugin
 // needs one.
 type Settings struct {
+	ProxmoxVMStoragePool  string
+	ProxmoxISOStoragePool string
+	LudusNATInterface     string
+	LudusNATGateway       string
+	LudusDNSServer        string
+	LudusNATIP            string
+
 	ProxmoxNode               string
 	WireguardEndpoint         string
 	InactivityShutdownTimeout time.Duration
@@ -288,6 +424,15 @@ type VM struct {
 	IsRouter    bool
 	CPU         int
 	RAM         int
+	// Template is the template named for this VM in the range configuration;
+	// "" when the VM is not in the configuration.
+	Template string
+	// OS is the template's operating system: "linux", "windows", "macos",
+	// "other", or "" when unknown.
+	OS string
+	// ConfiguredIP is the address the range configuration assigns
+	// (10.<range>.<vlan>.<ip_last_octet>); "" when not configured.
+	ConfiguredIP string
 }
 
 type LogEntry struct {

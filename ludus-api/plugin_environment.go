@@ -76,6 +76,13 @@ func (s *Server) pluginEnvironment(plugin *managedPlugin) (protocol.Environment,
 
 	ConfigMu.RLock()
 	settings := protocol.Settings{
+		ProxmoxVMStoragePool:  ServerConfiguration.ProxmoxVMStoragePool,
+		ProxmoxISOStoragePool: ServerConfiguration.ProxmoxISOStoragePool,
+		LudusNATInterface:     ServerConfiguration.LudusNATInterface,
+		LudusNATGateway:       ServerConfiguration.LudusNATGateway,
+		LudusDNSServer:        ServerConfiguration.LudusDNSServer,
+		LudusNATIP:            ServerConfiguration.LudusNATIP,
+
 		ProxmoxNode:               ServerConfiguration.ProxmoxNode,
 		WireguardEndpoint:         ServerConfiguration.WireguardEndpoint,
 		InactivityShutdownTimeout: ServerConfiguration.InactivityShutdownTimeout,

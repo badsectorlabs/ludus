@@ -1,17 +1,19 @@
-variable "iso_checksum" {
-  type    = string
-  default = "sha256:caf5ff7d7a4f73c85a6f1688300b936d3d7fd6965c52d80632e36709a09255a7"
+data "http" "kali_checksums" {
+  url = "https://cdimage.kali.org/current/SHA256SUMS"
+}
+
+locals {
+  # Capture the checksum and filename for the AMD64 installer ISO.
+  kali_iso = regex(
+    "(?m)^([0-9a-fA-F]{64})[ \\t]+\\*?(kali-linux-[^\\s]+-installer-netinst-amd64\\.iso)\\r?$",
+    data.http.kali_checksums.body
+  )
 }
 
 # The operating system. Can be wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, l24 (Linux 2.4), l26 (Linux 2.6+), solaris or other. Defaults to other.
 variable "os" {
   type    = string
   default = "l26"
-}
-
-variable "iso_url" {
-  type    = string
-  default = "https://cdimage.kali.org/kali-2026.1/kali-linux-2026.1-installer-netinst-amd64.iso"
 }
 
 variable "vm_cpu_cores" {
@@ -66,6 +68,7 @@ variable "proxmox_pool" {
 variable "iso_storage_pool" {
   type = string
 }
+# Passed by the Ludus API but unused here since the 2.3.10 merge; see the MERGE NOTE in boot_iso.
 variable "airgapped_install" {
   type    = bool
   default = false
@@ -83,6 +86,7 @@ variable "packer_http_bind_address" {
 
 locals {
   template_description = "Kali Linux template built ${legacy_isotime("2006-01-02 03:04:05")} username:password => kali:kali"
+  # Unused since the 2.3.10 merge; kept for restoring air-gapped builds (see the MERGE NOTE in boot_iso).
   airgapped_iso_file = "${var.iso_storage_pool}:iso/kali-linux-2026.1-installer-netinst-amd64.iso"
 }
 
@@ -111,11 +115,18 @@ source "proxmox-iso" "kali" {
 
   boot_iso {
     type              = "ide"
-    iso_checksum      = var.iso_checksum
-    iso_file          = var.airgapped_install ? local.airgapped_iso_file : null
-    iso_url           = var.airgapped_install ? null : var.iso_url
-    iso_storage_pool  = var.iso_storage_pool
-    iso_download_pve  = var.airgapped_install ? null : true
+    # MERGE NOTE (2.3.10 into 2.4.0): main's runtime Kali ISO lookup replaced the 2.4.0
+    # air-gapped ISO selection. data.http.kali_checksums always fetches cdimage.kali.org and
+    # Packer cannot make a data source conditional, so air-gapped Kali builds fail until this
+    # is reworked. Removed 2.4.0 lines (var.iso_checksum/var.iso_url were also removed by main):
+    #   iso_checksum      = var.iso_checksum
+    #   iso_file          = var.airgapped_install ? local.airgapped_iso_file : null
+    #   iso_url           = var.airgapped_install ? null : var.iso_url
+    #   iso_download_pve  = var.airgapped_install ? null : true
+    iso_checksum      = "sha256:${local.kali_iso[0]}"
+    iso_url           = "https://cdimage.kali.org/current/${local.kali_iso[1]}"
+    iso_storage_pool  = "${var.iso_storage_pool}"
+    iso_download_pve  = true
     unmount           = true
     keep_cdrom_device = false
   }

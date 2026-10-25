@@ -11,6 +11,11 @@ import (
 // An unset field answers CodeUnavailable. A returned *protocol.HostError is
 // sent as the host decision; any other error becomes CodeInvalid.
 type Host struct {
+	OpenAppFunc             func(protocol.OpenAppArgs) (protocol.AppLaunch, error)
+	EndAppSessionFunc       func(protocol.CallArgs) error
+	SetAppSessionLimitsFunc func(protocol.AppSessionLimitsArgs) error
+	TouchRangeFunc          func(protocol.RangeArgs) error
+
 	AccessibleRangesFunc          func(protocol.CallArgs) ([]protocol.Range, error)
 	CanAccessRangeFunc            func(protocol.RangeArgs) (bool, error)
 	RangeVMsFunc                  func(protocol.RangeArgs) ([]protocol.VM, error)
@@ -255,5 +260,42 @@ func (h *Host) RequestAddOn(args protocol.AddOnArgs, reply *protocol.EmptyReply)
 		return nil
 	}
 	reply.Err = hostError(h.RequestAddOnFunc(args))
+	return nil
+}
+
+func (h *Host) TouchRange(args protocol.RangeArgs, reply *protocol.EmptyReply) error {
+	if h.TouchRangeFunc == nil {
+		reply.Err = unset("TouchRange")
+		return nil
+	}
+	reply.Err = hostError(h.TouchRangeFunc(args))
+	return nil
+}
+
+func (h *Host) OpenApp(args protocol.OpenAppArgs, reply *protocol.OpenAppReply) error {
+	if h.OpenAppFunc == nil {
+		reply.Err = unset("OpenApp")
+		return nil
+	}
+	launch, err := h.OpenAppFunc(args)
+	reply.Launch, reply.Err = launch, hostError(err)
+	return nil
+}
+
+func (h *Host) EndAppSession(args protocol.CallArgs, reply *protocol.EmptyReply) error {
+	if h.EndAppSessionFunc == nil {
+		reply.Err = unset("EndAppSession")
+		return nil
+	}
+	reply.Err = hostError(h.EndAppSessionFunc(args))
+	return nil
+}
+
+func (h *Host) SetAppSessionLimits(args protocol.AppSessionLimitsArgs, reply *protocol.EmptyReply) error {
+	if h.SetAppSessionLimitsFunc == nil {
+		reply.Err = unset("SetAppSessionLimits")
+		return nil
+	}
+	reply.Err = hostError(h.SetAppSessionLimitsFunc(args))
 	return nil
 }

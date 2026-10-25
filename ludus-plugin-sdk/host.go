@@ -247,3 +247,34 @@ func (h *Host) RequestAddOn(name string) error {
 	}
 	return c.RequestAddOn(h.call, name)
 }
+
+// TouchRange records activity on an accessible range using the host's clock.
+func (h *Host) TouchRange(number int) error {
+	c, err := h.hostClient()
+	if err != nil {
+		return err
+	}
+	return c.TouchRange(h.call, number)
+}
+
+// EndAppSession ends the app session this Host is bound to (Call.AppSession).
+// The host closes the session's connections and calls AppSessionClosed.
+func (h *Host) EndAppSession() error {
+	c, err := h.hostClient()
+	if err != nil {
+		return err
+	}
+	return c.EndAppSession(h.call)
+}
+
+// SetAppSessionLimits sets how many live app sessions of this plugin the host
+// allows per authenticated user and in total (protocol.DefaultAppSessionsPerUser
+// and protocol.DefaultAppSessions until set). Callable from Init, jobs, and
+// request handlers; it takes effect for the next OpenApp.
+func (h *Host) SetAppSessionLimits(perUser, total int) error {
+	c, err := h.hostClient()
+	if err != nil {
+		return err
+	}
+	return c.SetAppSessionLimits(h.call, perUser, total)
+}

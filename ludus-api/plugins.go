@@ -29,6 +29,8 @@ type managedPlugin struct {
 	resourceID string // plugin_resources record ID ("" until mirrored)
 	dir        string // package directory the executable runs from
 	host       *HostService
+	// app reaches the plugin's browser application; nil without one.
+	app *pluginAppTransport
 
 	mu          sync.Mutex
 	initialized bool
@@ -55,6 +57,8 @@ type Server struct {
 	pluginTasks         chan func()
 	licensedRefreshMu   sync.Mutex
 	lastLicensedRefresh time.Time
+	appsOnce            sync.Once
+	apps                *pluginAppRegistry // plugin app sessions this service hosts
 
 	licenseMu                  sync.RWMutex
 	Version                    string
@@ -248,6 +252,9 @@ func (s *Server) initializePlugin(plugin *managedPlugin, broker *hcplugin.MuxBro
 	if err != nil {
 		return nil, fmt.Errorf("initialize plugin %s: %w", plugin.manifest.ID, err)
 	}
+	if err := connectPluginApp(plugin, response.AppStream); err != nil {
+		return nil, err
+	}
 	names := map[string]bool{}
 	for _, job := range response.Jobs {
 		if job.Name == "" || names[job.Name] || job.Interval < protocol.MinJobInterval {
@@ -327,10 +334,14 @@ func (s *Server) stopPlugin(plugin *managedPlugin, graceful bool) {
 	s.plugins = slices.DeleteFunc(s.plugins, func(existing *managedPlugin) bool { return existing == plugin })
 	s.pluginMu.Unlock()
 	s.removePluginJobs(plugin)
+	s.pluginApps().endPlugin(plugin)
 	if graceful {
 		if err := plugin.rpc.Shutdown(); err != nil {
 			s.logger().Info("Error shutting down plugin", "plugin", plugin.manifest.ID, "error", err)
 		}
+	}
+	if plugin.app != nil {
+		plugin.app.close()
 	}
 	if plugin.client != nil {
 		plugin.client.Kill()

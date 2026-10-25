@@ -50,8 +50,6 @@ install:
 	cp -r deps/packer-plugins/. $(BASEDIR)/opt/ludus/resources/packer/plugins/
 	# Blocky DNS binary staged for offline router deployment
 	install -m 0755 deps/blocky/$(BLOCKY_VERSION)/blocky $(BASEDIR)/opt/ludus/resources/blocky/blocky
-	# BGInfo payload staged for offline Windows configuration
-	install -m 0644 deps/bginfo.exe $(BASEDIR)/opt/ludus/resources/windows/bginfo.exe
 	# systemd + sysctl
 	install -m 0644 files/ludus.service $(BASEDIR)/etc/systemd/system/ludus.service
 	install -m 0644 files/ludus-admin.service $(BASEDIR)/etc/systemd/system/ludus-admin.service

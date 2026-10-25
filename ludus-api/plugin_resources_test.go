@@ -175,6 +175,7 @@ func newPluginTestEnv(t *testing.T) *pluginTestEnv {
 	serveEvent := &core.ServeEvent{App: pb, Router: router}
 	RegisterRoutesWithPocketBase(serveEvent, pluginResourceRoutes(env.resources))
 	registerPluginAPIRoutes(serveEvent, env.server)
+	registerPluginAppRoutes(serveEvent, env.server)
 	if env.mux, err = router.BuildMux(); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +188,11 @@ func (env *pluginTestEnv) call(token, method, path string, body []byte, want int
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
-	r.Header.Set("Content-Type", "application/json")
+	if bytes.HasPrefix(body, []byte("PK")) {
+		r.Header.Set("Content-Type", "application/zip")
+	} else {
+		r.Header.Set("Content-Type", "application/json")
+	}
 	response := httptest.NewRecorder()
 	env.mux.ServeHTTP(response, r)
 	if response.Code != want {
@@ -242,7 +247,8 @@ func (f *resourceFakeRPC) RunJob(protocol.JobRequest) error { return nil }
 func (f *resourceFakeRPC) VMHook(protocol.VMHookRequest) (protocol.VMHookResponse, error) {
 	return protocol.VMHookResponse{}, nil
 }
-func (f *resourceFakeRPC) Shutdown() error { return nil }
+func (f *resourceFakeRPC) Shutdown() error                                   { return nil }
+func (f *resourceFakeRPC) AppSessionClosed(protocol.AppSessionRequest) error { return nil }
 
 // registerFakePlugin puts a fake process for a record into the registry.
 func (env *pluginTestEnv) registerFakePlugin(resourceID string, manifest protocol.Manifest) *resourceFakeRPC {
@@ -415,8 +421,11 @@ func TestPluginResourcesAccessAndLifecycle(t *testing.T) {
 	if !strings.Contains(call(peerToken, "GET", base+"/global-plugin/ui", nil, 200).Body.String(), "new version") {
 		t.Fatal("replacement served old UI")
 	}
-	if _, err := os.Stat(filepath.Join(root, globalID)); !os.IsNotExist(err) {
-		t.Fatal("replacement left superseded package files")
+	if updatedID != globalID {
+		t.Fatal("replacement changed the resource ID")
+	}
+	if data, err := os.ReadFile(filepath.Join(root, globalID, protocol.UIFile)); err != nil || string(data) != "new version" {
+		t.Fatal("replacement package was not stored under the stable resource ID")
 	}
 	m.Version = "1"
 
@@ -571,5 +580,16 @@ func TestRootRunPluginRequestsGoToTheAdminService(t *testing.T) {
 	if !decide(env.peer, "GET", "/local/status") || !decide(env.admin, "POST", "/plugins/"+rootID+"/activate") ||
 		decide(env.admin, "POST", "/plugins/"+ludusID+"/activate") || decide(env.peer, "POST", "/remote/run") {
 		t.Error("admin service admitted the wrong plugin requests")
+	}
+}
+
+func TestGitHubImportEntersApprovalFlow(t *testing.T) {
+	env := newPluginTestEnv(t)
+	m := protocol.Manifest{SchemaVersion: 1, ID: "github-plugin", Name: "Imported", Version: "1", UI: protocol.UIFile}
+	env.resources.githubTransport = githubFixtureTransport(t, testPackage(t, m, map[string]string{protocol.UIFile: "Imported"}), "plugin.zip")
+	env.call(env.ownerToken, "POST", APIBasePath+"/plugins/install", []byte(`{"githubURL":"https://github.com/example/plugin"}`), 201)
+	imported, err := env.pb.FindFirstRecordByData("plugin_resources", "pluginID", m.ID)
+	if err != nil || imported.GetString("owner") != env.owner.Id || imported.GetBool("allUsers") || imported.GetString("state") != "pending" {
+		t.Fatal("GitHub import lost SDK approval/ownership")
 	}
 }

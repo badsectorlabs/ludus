@@ -62,13 +62,17 @@ flowchart TB
 ## Installing a plugin
 
 1. Open **Resources → Plugins** in the web UI.
-2. Upload the plugin's ZIP package. Any user can upload.
+2. Upload the plugin's ZIP package or import a public GitHub release. Any user can upload.
 3. An administrator reviews the declarations and selects **Activate**.
+
+For GitHub import, paste a repository URL, release-tag URL, or release ZIP asset URL. A repository URL selects the latest published release. If it has multiple ZIP assets, select the specific asset URL. Private releases and GitHub source archives are not supported. Imported packages follow the same validation and administrator approval flow as uploads.
 
 Before activation, the plugins page shows what the administrator is approving, read from `plugin.json` without running anything:
 
 - level and run-as user
 - `forwardCallerCredentials`
+- `app`: the plugin serves a browser app on the Ludus origin (see [Apps](#apps))
+- `vmActions`: the plugin adds VM buttons to the range editor
 - top-level API routes
 - VM hook capabilities
 - author, version, and package SHA-256
@@ -161,17 +165,55 @@ func main() {
 }
 ```
 
-`ludus.Plugin` declares everything that ends up in `plugin.json`: identity, `Level` (`ludus.Standard` by default, or `ludus.System`), `RunAs` (`ludus.RunAsLudus` by default, or `ludus.RunAsRoot`), `ForwardCallerCredentials`, `UI`, `Routes`, and `VMHooks`. It also holds the optional `Init`, `Jobs`, `VMHook`, and `Shutdown` callbacks.
+`ludus.Plugin` declares everything that ends up in `plugin.json`: identity, `Level` (`ludus.Standard` by default, or `ludus.System`), `RunAs` (`ludus.RunAsLudus` by default, or `ludus.RunAsRoot`), `ForwardCallerCredentials`, `UI`, `Routes`, `App`, `VMActions`, and `VMHooks`. It also holds the optional `Init`, `Jobs`, `VMHook`, `AppSessionClosed`, and `Shutdown` callbacks.
 
 - **Routes** are exact paths. The default scope serves them under `/api/v2/plugins/{id}/rpc/<pattern>`; `Scope: ludus.APIScope` (system level only) serves them under `/api/v2/<pattern>`. API-scoped routes must not start with `/plugins` and are rejected if a core route or another active plugin already uses the method and path. Like core routes, API-scoped routes are open to every authenticated user, so the handler must authorize the caller; plugin sharing settings apply only to plugin-scoped routes and the UI.
 - **`ludus.CallFrom(r)`** returns the call: the authenticated principal (`Auth`), the effective user, the selected range, the plugin environment, and a `Host` client bound to this request. `c.IsAdmin()` reports whether the caller is an administrator.
-- **Host methods** return `ludus.ErrNotFound`, `ErrForbidden`, `ErrInvalid`, `ErrExpired`, or `ErrUnavailable` (use `errors.Is`). `ludus.HostError` maps them to HTTP status codes.
+- **Host methods** return `ludus.ErrNotFound`, `ErrForbidden`, `ErrInvalid`, `ErrExpired`, or `ErrUnavailable` (use `errors.Is`). `ludus.HostError` maps them to HTTP status codes. `ErrUnavailable` is temporary (for example a busy database) and worth retrying; the others are decisions. `c.Host.RangeVMs` and `FindVM` describe each VM with its configured `Template`, the template's `OS`, and its `ConfiguredIP` from the range configuration; Ludus re-parses a range configuration only when the file changes, so polling is cheap. `c.Host.TouchRange` records activity on an accessible range, so long-lived sessions do not trigger its inactivity shutdown; like requests, it writes at most once every 30 seconds per range.
 - **`Init(c, env)`** runs once at start with the plugin principal. `env.StateDir` is a private directory for the plugin's data and playbooks.
 - **Jobs** run on the Ludus scheduler at their `Interval` (at least one second), with the plugin principal.
 - **`c.Host.RunPlaybook`** runs a playbook as the caller against the selected range, from the plugin's state directory or (system level) `ansible/range-management`. Ludus archives every run, including failures, in the range log history.
 - Helpers: `ludus.JSON`, `ludus.Error`, `ludus.Result`, `ludus.DecodeJSON`, `ludus.InstallFiles` (system level), `ludus.APIClient`, and `ludus.Logger`.
 
-The `ludustest` package provides a fake host and a harness that runs a plugin in-process over a real RPC connection, for unit tests of handlers, jobs, and `Init`.
+The `ludustest` package provides a fake host and a harness that runs a plugin in-process over a real RPC connection, for unit tests of handlers, jobs, `Init`, and apps (`Harness.App`, `Harness.CloseAppSession`).
+
+### Apps
+
+A plugin can serve a full browser application, such as a remote console, that does not fit the sandboxed plugin iframe. Set `App` to an `http.Handler`; `plugin.json` then declares `"app": true`, which administrators see before activation. The application is served on the Ludus origin, so only activate apps you trust as much as the Ludus web UI.
+
+1. A plugin route handler calls `c.OpenApp(path, "")` for its caller. Ludus creates an app session and returns a one-time launch URL. Passing an existing session ID instead of `""` renews that session and issues a new URL for it.
+2. The plugin UI opens the URL with `window.ludus.openApplication(url)`. The first visit redeems the ticket, sets an HttpOnly, Secure, SameSite=Strict cookie for `/plugin-apps/{resourceID}/{sessionID}/`, and redirects to `path`.
+3. Ludus proxies every later request under that prefix to `App` over the plugin's private RPC connection, including streaming responses and WebSocket upgrades. It removes Ludus credentials and its session cookie, rejects cross-origin requests, and strips the prefix: `App` sees paths relative to `/`. Absolute redirects and cookie paths from the app are rewritten into the session prefix. `ludus.CallFrom(r)` returns the session's caller, `c.AppSession`, `c.AppBasePath`, and a `Host` evaluated as that caller.
+
+Ludus owns the session lifetime. A session lasts one hour, capped by the caller's login. The web UI renews the apps it opened while the user is signed in (`POST /api/v2/plugins/{id}/app/renew`). Ludus ends a session when it expires, when the caller loses access to the plugin (checked every 15 seconds), when the plugin stops, or when the plugin calls `Host.EndAppSession()`. If a check cannot read the session's records, for example because the database is busy, the session is kept for up to a minute of failed checks. Ending a session closes its open connections, expires its Host, and calls `AppSessionClosed(sessionID)`.
+
+Each plugin allows 16 live sessions per user and 512 in total by default. A plugin changes its limits at any time with `Host.SetAppSessionLimits(perUser, total)` (up to 65,536 in total), for example from an administrator setting sized to the resources its app needs. `OpenApp` answers `ErrUnavailable` while a limit is reached; lowering a limit keeps existing sessions.
+
+`AppLaunch.Session` is a `*ludus.Call` bound to the session. Its `Host` stays valid from any goroutine until the session ends, so a plugin can recheck range and VM access in the background as the session's user, without storing credentials.
+
+A reverse proxy in front of Ludus must forward `/plugin-apps/` as well as `/api/`, including WebSocket upgrades.
+
+### VM actions
+
+With `VMActions` set (requires `App`), the range editor shows a button per action on each VM. The SDK serves the plugin-scoped routes `GET /vm-actions` and `POST /vm-actions/launch` for it: `List(c)` returns the actions for `c.Range`, and `Launch(c, id)` normally returns `c.OpenApp(...)`. The web UI opens the returned app URL in a new tab.
+
+The plugin owns each action's icon; the web UI needs no change for new ones:
+
+- `Icon` names any [IBM Carbon icon](https://carbondesignsystem.com/elements/icons/library/) by its `@carbon/icons-react` component name, such as `Terminal`, `Terminal_3270` or `4K`. Names Carbon does not have draw a generic launch icon.
+- `IconSVG` supplies the plugin's own icon instead and takes precedence over `Icon`. It must be a well-formed XML document of at most 16 KiB (`protocol.MaxVMActionIconSVG`) whose single root element is `<svg>`, without a DOCTYPE. The web UI draws it only as a CSS mask image, so the alpha of its shapes defines the icon and their colors are ignored; draw it in one solid color.
+- `Color` tints the icon with a `#rgb` or `#rrggbb` hex color. Without it, the icon takes the button's theme color.
+
+`List` fails with 500 when an action has an invalid icon name, SVG or color, and the web UI drops such actions.
+
+```go
+//go:embed icons/remote-desktop.svg
+var remoteDesktopIcon string
+
+actions = append(actions,
+    ludus.VMAction{ID: "ssh-102", ProxmoxID: 102, Label: "SSH console", Icon: "Terminal", Color: "#c6a153"},
+    ludus.VMAction{ID: "rdp-103", ProxmoxID: 103, Label: "Remote desktop", IconSVG: remoteDesktopIcon, Color: "#c6a153"},
+)
+```
 
 ### Building a package
 
@@ -212,6 +254,8 @@ The ZIP contains exactly the files declared in `plugin.json`, at its root. Do no
 | `ui` | `ui/index.html` if the package has a web interface. |
 | `rangeScoped` | The web interface works on the selected range. |
 | `forwardCallerCredentials` | Keep `Authorization`, `X-API-KEY`, and `Cookie` on forwarded requests. |
+| `app` | The executable serves a browser app under `/plugin-apps/{resourceID}/`. |
+| `vmActions` | The range editor offers the plugin's VM actions; requires `app` and the `/vm-actions` routes. |
 | `routes` | `[{"name", "method", "pattern", "scope"}]`; `scope` is `plugin` (default) or `api` (system level only). |
 | `vmHooks` | VM hook capabilities: `select`, `start`, `stop`, `status`, `beforeDelete`, `address` (system level only). |
 
@@ -229,7 +273,7 @@ Sharing a plugin does not grant access to your ranges. Each user still needs acc
 
 ## Updating and deleting plugins
 
-To update an uploaded plugin, upload the new package and select **Replace existing version**. This keeps its owner and sharing settings. An administrator must activate the new version before it runs.
+To update an uploaded plugin, upload the new package and select **Replace existing version**. This keeps its installation ID, owner, and sharing settings. An administrator must activate the new version before it runs.
 
 **Remove** hides a shared plugin from your list without affecting other users. Use **Show plugins available to add back** to restore it to your list.
 

@@ -5,19 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
 
 // testProcessPlugin is served by the re-executed test binary. It calls the host
 // service from Initialize, Handle, and RunJob, and reports whether the CallIDs
-// of earlier calls still work.
+// of earlier calls still work. With metadata.App it also serves an app.
 type testProcessPlugin struct {
 	metadata protocol.Metadata
 
@@ -26,6 +29,8 @@ type testProcessPlugin struct {
 	initCall protocol.CallID
 	jobCall  protocol.CallID
 	jobErr   string
+	closed   []string
+	sessions map[string]protocol.CallID // app session → its CallID
 }
 
 func hostErrorCode(err error) string {
@@ -56,6 +61,9 @@ func (p *testProcessPlugin) Initialize(request protocol.InitializeRequest, host 
 }
 
 func (p *testProcessPlugin) Handle(request protocol.Request) (protocol.Response, error) {
+	if request.Route == "open" || request.Route == "closed" {
+		return p.handleApp(request)
+	}
 	p.mu.Lock()
 	host, initCall, jobCall, jobErr := p.host, p.initCall, p.jobCall, p.jobErr
 	p.mu.Unlock()
@@ -91,6 +99,93 @@ func (p *testProcessPlugin) VMHook(protocol.VMHookRequest) (protocol.VMHookRespo
 
 func (p *testProcessPlugin) Shutdown() error { return nil }
 
+func (p *testProcessPlugin) AppSessionClosed(request protocol.AppSessionRequest) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.closed = append(p.closed, request.Session)
+	return nil
+}
+
+func jsonResponse(value any) (protocol.Response, error) {
+	body, err := json.Marshal(value)
+	return protocol.Response{Status: http.StatusOK, Header: map[string][]string{"Content-Type": {"application/json"}}, Body: body}, err
+}
+
+// handleApp serves the "open" route (Host.OpenApp with ?path= and ?session=)
+// and the "closed" route, which reports ended sessions and whether their
+// CallIDs still work.
+func (p *testProcessPlugin) handleApp(request protocol.Request) (protocol.Response, error) {
+	p.mu.Lock()
+	host := p.host
+	p.mu.Unlock()
+	if request.Route == "open" {
+		query, _ := url.ParseQuery(request.RawQuery)
+		launch, err := host.OpenApp(request.Call, query.Get("path"), query.Get("session"))
+		if err == nil {
+			p.mu.Lock()
+			if p.sessions == nil {
+				p.sessions = map[string]protocol.CallID{}
+			}
+			p.sessions[launch.Session] = launch.Call
+			p.mu.Unlock()
+		}
+		return jsonResponse(map[string]any{"launch": launch, "error": hostErrorCode(err)})
+	}
+	p.mu.Lock()
+	closed := slices.Clone(p.closed)
+	calls := map[string]string{}
+	for session, call := range p.sessions {
+		calls[session] = hostErrorCode(func() error { _, err := host.License(call); return err }())
+	}
+	p.mu.Unlock()
+	return jsonResponse(map[string]any{"closed": closed, "calls": calls})
+}
+
+// App reports what it received, echoes WebSocket messages, redirects, sets a
+// cookie, and can end its own session.
+func (p *testProcessPlugin) App() http.Handler {
+	if !p.metadata.App {
+		return nil
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		appContext, err := protocol.DecodeAppContext(r.Header.Get(protocol.AppContextHeader))
+		if err != nil {
+			http.Error(w, "no app context", http.StatusForbidden)
+			return
+		}
+		p.mu.Lock()
+		host := p.host
+		p.mu.Unlock()
+		switch r.URL.Path {
+		case "/echo":
+			conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			for {
+				kind, data, err := conn.ReadMessage()
+				if err != nil || conn.WriteMessage(kind, data) != nil {
+					return
+				}
+			}
+		case "/redirect":
+			http.Redirect(w, r, "/landing", http.StatusFound)
+		case "/end":
+			w.Header().Set("X-End", hostErrorCode(host.EndAppSession(appContext.Call)))
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.SetCookie(w, &http.Cookie{Name: "app", Value: "1", Path: "/"})
+			w.Header().Set("Referrer-Policy", "origin")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"path": r.URL.Path, "session": appContext.Session, "base": appContext.BasePath, "user": appContext.Auth.UserID,
+				"call":          hostErrorCode(func() error { _, err := host.License(appContext.Call); return err }()),
+				"authorization": r.Header.Get("Authorization"), "apiKey": r.Header.Get("X-API-KEY"), "cookie": r.Header.Get("Cookie"),
+			})
+		}
+	})
+}
+
 // TestPluginProcessHelper is the plugin process: the test binary re-executed
 // through a package's plugin script, without a compiler or fixture binary.
 func TestPluginProcessHelper(t *testing.T) {
@@ -107,7 +202,8 @@ func TestPluginProcessHelper(t *testing.T) {
 
 func metadataFor(m protocol.Manifest) protocol.Metadata {
 	return protocol.Metadata{ID: m.ID, Name: m.Name, Version: m.Version, Description: m.Description, Author: m.Author,
-		Level: m.Level, RunAs: m.RunAs, Routes: m.Routes, VMHooks: m.VMHooks, ForwardCallerCredentials: m.ForwardCallerCredentials}
+		Level: m.Level, RunAs: m.RunAs, Routes: m.Routes, VMHooks: m.VMHooks, ForwardCallerCredentials: m.ForwardCallerCredentials,
+		App: m.App, VMActions: m.VMActions}
 }
 
 // testPluginScript is a plugin executable that serves metadata.
@@ -194,6 +290,7 @@ func TestPluginMetadataMustMatchManifest(t *testing.T) {
 			md.Routes = []protocol.Route{{Name: "extra", Method: "GET", Pattern: "/extra"}}
 		},
 		"forwardCallerCredentials": func(md *protocol.Metadata) { md.ForwardCallerCredentials = true },
+		"app":                      func(md *protocol.Metadata) { md.App = true },
 		"identity":                 func(md *protocol.Metadata) { md.Version = "2" },
 	} {
 		t.Run(name, func(t *testing.T) {

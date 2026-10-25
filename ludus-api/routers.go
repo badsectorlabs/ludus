@@ -250,6 +250,7 @@ func NewRouter(ludusVersion string, ludusServer *Server) *core.App {
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		RegisterRoutesWithPocketBase(se, routes)
 		RegisterRoutesWithPocketBase(se, pluginResourceRoutes(server.PluginResources))
+		registerPluginAppRoutes(se, server)
 		// Registered last: core routes are more specific and take precedence.
 		registerPluginAPIRoutes(se, server)
 		return se.Next()

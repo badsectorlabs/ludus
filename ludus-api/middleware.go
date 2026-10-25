@@ -178,18 +178,12 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 
 		// Bump the range's lastActive timestamp for the inactivity shutdown feature.
 		// ROOT requests are admin/plumbing, not user interaction, so excluded.
-		// Use a raw UPDATE so this narrow write can't clobber other fields
-		// being written by concurrent request handlers (e.g. the deploy pipeline).
 		// Throttle to at most once every 30s to avoid write amplification from
 		// polling clients (the scheduler only runs every 5min).
 		if e.Auth.GetString("userID") != "ROOT" {
 			lastActive := rangeRecord.LastActive().Time()
 			if time.Since(lastActive) > 30*time.Second {
-				nowUTC := time.Now().UTC().Format("2006-01-02 15:04:05.000Z")
-				_, updateErr := e.App.DB().NewQuery("UPDATE ranges SET lastActive = {:now} WHERE id = {:id}").
-					Bind(dbx.Params{"now": nowUTC, "id": rawRangeRecord.Id}).
-					Execute()
-				if updateErr != nil {
+				if updateErr := recordRangeActivity(e.App, rawRangeRecord.Id); updateErr != nil {
 					logger.Debug(fmt.Sprintf("Error updating range lastActive: %v", updateErr))
 				}
 			}
@@ -197,6 +191,16 @@ func userAndRangesLookupMiddleware(e *core.RequestEvent) error {
 	}
 
 	return e.Next()
+}
+
+// recordRangeActivity sets a range's lastActive to now for the inactivity
+// shutdown feature. A raw UPDATE cannot clobber fields that concurrent request
+// handlers (e.g. the deploy pipeline) are writing.
+func recordRangeActivity(app core.App, rangeRecordID string) error {
+	_, err := app.DB().NewQuery("UPDATE ranges SET lastActive = {:now} WHERE id = {:id}").
+		Bind(dbx.Params{"now": time.Now().UTC().Format("2006-01-02 15:04:05.000Z"), "id": rangeRecordID}).
+		Execute()
+	return err
 }
 
 // Route Ludus API requests between the regular and admin services.
@@ -276,7 +280,7 @@ func (s *Server) adminPluginRequest(e *core.RequestEvent) bool {
 		}
 		if (action == "" && e.Request.Method == http.MethodDelete) ||
 			(action == "activate" && e.Request.Method == http.MethodPost) ||
-			strings.HasPrefix(action, "rpc/") {
+			strings.HasPrefix(action, "rpc/") || strings.HasPrefix(action, "app/") {
 			return s.PluginResources.rootPluginRecord(e.Auth, pluginID)
 		}
 		return false
