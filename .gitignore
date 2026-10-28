@@ -1,3 +1,5 @@
+ludus-installer
+ludus-client_*
 ludus-source-bsl/
 plugins/
 offline-*
@@ -75,3 +77,5 @@ output-*/
 .ludus-testing-tunnel.json
 .ludus-dev-env
 .ludus-testing-license
+
+.gograph/

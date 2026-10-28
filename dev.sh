@@ -17,7 +17,7 @@ while getopts "hBlap:t:n:cdwsSDCPLv:" opt; do
     h)
       echo "Usage: $0 [-h] [-B] [-l] [-a] [-t target] [-n lines] [-c] [-d] [-p port] [-w] [-s] [-D] [-C] [-v version]"
       echo "  -h  Show this help message"
-      echo "  -B  Sync/build server artifacts only; skip plugin installation, service changes, and API/env setup"
+      echo "  -B  Sync/build server and installer artifacts only; skip plugin installation, service changes, and API/env setup"
       echo "  -l  Show Ludus service logs (default 100 lines)"
       echo "  -a  Show Ludus admin service logs (requires -l)"
       echo "  -n  Number of log lines to show (default 100)"
@@ -301,6 +301,7 @@ rsync -av --progress \
     --exclude='ludus-gui/node_modules/' \
     --exclude='ludus-gui/.next/' \
     --exclude='/ludus-server/ludus-server' \
+    --exclude='/binaries/' \
     --exclude='/ludus-server/ansible/range-management/dynamic-inventory' \
     --exclude='/ludus-server/lxc/rootfs/' \
     --exclude='/ludus-server/lxc/deps/' \
@@ -379,6 +380,7 @@ fi
 
 if [ "$BUILD_ONLY" = true ]; then
     echo "[=] Build-only complete: $DEVELOPMENT_HOSTNAME:~/ludus-dev/ludus-server/ludus-server"
+    echo "    Installer: $DEVELOPMENT_HOSTNAME:~/ludus-dev/binaries/ludus-installer"
     echo "    Installed Ludus, service environments, development API user, and local env file were not changed."
     exit 0
 fi

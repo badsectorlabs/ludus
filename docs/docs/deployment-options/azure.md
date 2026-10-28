@@ -19,21 +19,14 @@ In order to select the NVMe disk controller, the `Security type` must be set to 
 
 ## Install
 
-1. Copy the `ludus-server` binary to the VM once it has deployed (scp or other method).
-2. Make the `ludus-server` binary executable with `chmod +x ludus-server`.
-3. Run the `ludus-server` binary: `./ludus-server` but do not agree to the prompt - the public IP is likely wrong.
-4. Edit the config file at `/opt/ludus/config.yml` and update the public IP to the public IP of the Azure instance.
-5. Run `/opt/ludus/ludus-server` and agree to the prompt to start the install.
-6. When the VM reboots, SSH back in and run `ludus-install-status` as root to monitor the install.
-7. Once the install succeeds, follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user).
-8. Make sure port 51820 UDP is open on the Azure firewall for the Ludus instance in order to use WireGuard.
+Ludus requires Proxmox VE, so install Proxmox VE on the Azure VM first.
 
-
-## Troubleshooting
-
-If the task `TASK [lae.proxmox : Perform system upgrades]` fails with the error: `Another instance of this program is already running.` manually reboot the machine by running `reboot` as root. On next boot, the install with continue automatically and should succeed.
-
-As of v1.1.3 this error should automatically be handled.
+1. Deploy the VM. The template below uses Debian 12, which supports Proxmox VE 8. Use a Debian 13 image for Proxmox VE 9.
+2. Install Proxmox VE by following [Proxmox VE 8 on Debian 12 (Bookworm)](https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_12_Bookworm) or [Proxmox VE 9 on Debian 13 (Trixie)](https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_13_Trixie). Leave the VM's network interface as Azure configured it; do not move its address onto a bridge.
+3. Create a private NAT bridge for the Ludus container as described in [Hosts with a single public address](./proxmox-lxc.md#hosts-with-a-single-public-address).
+4. Follow [Install Ludus](../quick-start/install-ludus) on the Proxmox host. Set the WireGuard endpoint to the Azure instance's public IP.
+5. Allow UDP 51820 in the Azure network security group for the Ludus instance in order to use WireGuard. The parameters below only allow SSH.
+6. Once the install succeeds, follow the Quick start guide as normal starting at [Create a User](../quick-start/create-a-user).
 
 ## Azure Templates and Parameters
 

@@ -11,7 +11,7 @@ This workflow uses a shared Ludus test VM on a Proxmox host. A VM is checked out
 - Local `bash`, `curl`, `git`, `jq`, `nc`, `rsync`, and `ssh` commands.
 - An available test VM cloned from `ci-seed-integration`, or an administrator-prepared installer test VM with a named baseline snapshot.
 - Without `--baseline`, a clean `ludus-v*` release snapshot on the selected VM. Verify it exists before checkout; `release` cannot restore a VM without this baseline and leaves it checked out on failure.
-- On the build target: Linux amd64, Go 1.25 or newer (matching `go.work` and the modules), a C compiler and libc development headers for CGO, `git`, `rsync`, and CA certificates. On Debian/Proxmox, install `build-essential git rsync ca-certificates` and a suitable Go toolchain. Go must be on root's login-shell `PATH`; the distribution's default Go package may be too old. Dependency downloads require network access or a populated Go module/toolchain cache.
+- On the build target: Linux amd64, Go 1.25.8 or newer (matching `go.work` and the modules), a C compiler and libc development headers for CGO, `git`, `rsync`, and CA certificates. On Debian/Proxmox, install `build-essential git rsync ca-certificates` and a suitable Go toolchain. Go must be on root's login-shell `PATH`; the distribution's default Go package may be too old. Dependency downloads require network access or a populated Go module/toolchain cache.
 - Optional UI builds (`-w`) also require Bun on the build target. Optional plugins need their own build prerequisites; build-only mode skips plugin installation scripts.
 
 ## One-time Proxmox administrator setup
@@ -240,7 +240,7 @@ Use an explicit baseline for bare Proxmox fresh-install tests and legacy host mi
 
 `--baseline SNAPSHOT` (also `--baseline=SNAPSHOT`) validates that the named snapshot exists and is not Proxmox's synthetic `current` entry, then stores `baseline_snapshot` in `.ludus-testing-vm.json`. Checkout reserves the VM; it does not roll back or create the snapshot. Start from an administrator-restored baseline for the first test.
 
-Build-only mode produces the actual Linux server binary at `~/ludus-dev/ludus-server/ludus-server` on the SSH target. It builds the dynamic-inventory binary first and embeds it in the server. It does not install Ludus, run `--update`, set/unset systemd environments, create a development API user, or write `.ludus-dev-env`. Existing API keys and environment files are left unchanged. Optional plugin installation scripts are skipped even if their source is present. `-B` cannot be combined with `-S`, `-c`, `-C`, or `-l`; `-v VERSION` and optional UI building with `-w` remain available.
+Build-only mode produces the Linux server at `~/ludus-dev/ludus-server/ludus-server` and the native installer at `~/ludus-dev/binaries/ludus-installer` on the SSH target. It builds dynamic-inventory first and embeds it in the server. It does not install Ludus, run `--update`, set/unset systemd environments, create a development API user, or write `.ludus-dev-env`. Existing API keys and environment files are left unchanged. Optional plugin installation scripts are skipped even if their source is present. `-B` cannot be combined with `-S`, `-c`, `-C`, or `-l`; `-v VERSION` and optional UI building with `-w` remain available.
 
 For a build target outside the checkout flow, or a source tree already on a Linux build host:
 
@@ -252,7 +252,7 @@ For a build target outside the checkout flow, or a source tree already on a Linu
 ./ludus-server/dev.sh -B -v installer-candidate
 ```
 
-Both build scripts exit nonzero on server build failures, and the top-level script stops on failed source sync or remote build rather than reporting successful installation. Neither command packages the binary as an LXC template.
+Both build scripts exit nonzero on server or installer build failures, and the top-level script stops on failed source sync or remote build rather than reporting successful installation. Neither command packages the binaries as an LXC template.
 
 Build installation media on the checked-out nested host as root. In addition to the Go build prerequisites, appliance packaging needs Proxmox Debian Appliance Builder (`dab`), `make`, `curl`, `unzip`, Python 3, `ansible-galaxy`, `git`, `tar`, `sha256sum`, and the usual coreutils. Its pinned dependency downloads and Debian package installation need network access. Prepare these dependencies before taking the baseline snapshot.
 
@@ -268,7 +268,8 @@ LUDUS_VERSION="$CANDIDATE" ./build.sh
 For a fresh installation, run the branch's installer on that same host. Replace the example bridge, management IP/gateway, VMID, storage, and DNS server with values reserved for your test:
 
 ```bash
-bash ~/ludus-dev/install.sh --no-prompt \
+LUDUS_INSTALLER_BINARY=~/ludus-dev/binaries/ludus-installer \
+  bash ~/ludus-dev/install.sh --no-prompt \
   --template-file ~/ludus-dev/ludus-installer-candidate-debian13-amd64.tar.zst \
   --skip-verification \
   --bridge vmbr0 --ip 10.0.0.50/24 --gw 10.0.0.1 \
@@ -278,12 +279,15 @@ bash ~/ludus-dev/install.sh --no-prompt \
 For same-host migration, begin with the `legacy-host` baseline instead, build the same candidate, then invoke:
 
 ```bash
-bash ~/ludus-dev/install.sh --no-prompt --migrate-host \
+LUDUS_INSTALLER_BINARY=~/ludus-dev/binaries/ludus-installer \
+  bash ~/ludus-dev/install.sh --no-prompt --migrate-host \
   --template-file ~/ludus-dev/ludus-installer-candidate-debian13-amd64.tar.zst \
   --skip-verification
 ```
 
-Omitting `--bridge` and `--ip` on the migration path lets the installer provide private management networking and endpoint forwarding. `--skip-verification` is only for this locally built development archive; production installations should use signed installation media. Use the checked-out branch's `install.sh`, not a separately downloaded installer.
+Omitting `--bridge` and `--ip` on the migration path lets the installer provide private management networking and endpoint forwarding. `--skip-verification` is only for this locally built development archive; production installations should use signed installation media. Use the checked-out branch's bootstrap and matching native binary. `LUDUS_INSTALLER_BINARY` explicitly trusts that local executable instead of downloading a release installer.
+
+Unattended fresh installations require `--ip` with a static CIDR and `--gw`; DHCP is not supported. The interactive form starts suggesting an IPv4 address as soon as the bridge is confirmed (restarting if a different VLAN is then confirmed), starting at network+2 and checking scoped ping and ARP responses. It preserves explicit/manual values and never treats silence as proof that an address is free. Host WireGuard UDP forwarding is enabled by default; its rules are merged into `/etc/iptables/rules.v4` (or `rules.v6`) and restored by `iptables-persistent` after reboot. Disable it in the form or with `--no-wg-forward` (`NO_WG_FORWARD=1`) when managing forwarding separately. Migration uses its existing forwarding service; this opt-out leaves API forwarding enabled.
 
 After installing or migrating, start the tunnel using the actual container IP. Fresh installations normally use `192.0.2.253`; same-host migration preserves the legacy service address `192.0.2.254`:
 
@@ -322,39 +326,72 @@ ludus user list
 ./testing.sh release 1008
 ```
 
-## Installer interface for the Enterprise offline installer
+## Native installer and the Enterprise offline installer
 
-`install.sh` is both the public online entry point and a sourceable interface.
-When sourced, it defines its functions without parsing arguments or installing
-anything. Ludus Enterprise's offline installer, `install-offline.sh`, is
-maintained in the private `ludus-enterprise-plugin` repository. It sources the
-same release's `install.sh`, requires `LUDUS_INSTALLER_API=1`, and depends on:
+The root `ludus-installer/` Go module owns provisioning, migration, state
+export/import, artifact verification, offline preparation, and native status.
+`ludus-server` still owns runtime bootstrap and updates. `install.sh` is a thin
+online client bootstrap that hands server operations to the verified native
+installer only on supported Proxmox hosts. It consumes `--server-only` rather
+than passing that flag to the engine. It is not sourceable and exposes no
+shell-function interface.
 
-- `parse_installer_args`, `main`, `verify_local_inputs`,
-  `infer_ludus_version_from_template`, `lxc_host_install_exists`,
-  `print_server_help`, `print_message`, and `command_exists`.
-- The overridable phases `prepare_install_inputs` and
-  `prepare_migration_dependencies`, and the optional
-  `customize_guest_config CONFIG` hook. The hook runs after the LXC starts,
-  while both services are stopped and before `/opt/ludus/config.yml` is pushed.
+The native Bubble Tea/Lip Gloss/Huh UI shows the license before the settings
+form. `--no-prompt` bypasses both. `--build-version` prints the executable's
+build version; `--version TAG` selects the release to install.
 
-Keep these functions and their behavior compatible. For an incompatible
-change, increment `LUDUS_INSTALLER_API` and update the Enterprise installer in
-the same release. The Enterprise `build` CI job runs the offline installer
-tests against the selected public ref.
+Ludus Enterprise's offline installer, `install-offline.sh`, is maintained in the
+private `ludus-enterprise-plugin` repository. It must verify and execute the
+same release's `ludus-installer --offline`; it never sources or downloads
+`install.sh`. The native engine handles pinned ISO upload/reuse, BgInfo
+staging (`--bginfo-file`; the appliance does not ship BgInfo), offline-license
+and Enterprise package staging, CA inputs, migration, and health checks.
+Supplied license keys are retained rather than replaced by the interactive
+community default. Keep the native offline flags compatible; for an
+incompatible change, update the Enterprise installer in the same release.
 
-Public `install.sh` and `install-beta.sh` reject `--airgapped`,
-`--iso-directory`, and `--license-file`. `--template-file` remains available for
-CI/development and does not enable the air-gap workflow. See
-[the offline installation procedure](docs/docs/deployment-options/proxmox-lxc.md#install-on-an-offline-proxmox-cluster)
+Public `install.sh` and `install-beta.sh` reject `--airgapped`, `--offline`,
+`--iso-directory`, `--license-file`, and `--bginfo-file`. `--template-file`
+remains available for CI/development and does not enable the air-gap
+workflow. Offline installation supports fresh installs and host migrations,
+not updates of an existing LXC. Use `--version` or a correctly named local
+archive; missing versions never fall back to public discovery.
+
+An approved offline distribution must contain `install-offline.sh`, the
+matching `ludus-installer`, the LXC archive, every pinned ISO, `bginfo.exe`, a
+signed checksum manifest and its detached signature, and a trusted
+verification public key. The manifest must cover the native installer and all
+supplied media, including `bginfo.exe`, the optional Enterprise package ZIP,
+offline licenses, and imported state archives. Site-specific CA certificates
+remain separate inputs. Do not add `install-offline.sh` to public installer
+uploads or the appliance image.
+
+Run the native Go suite and non-provisioning CLI checks from the repository root:
+
+```bash
+(cd ludus-installer && go test ./...)
+(cd ludus-installer && go run . --help)
+(cd ludus-installer && go run . --build-version)
+```
+
+The Go tests cover options, artifact integrity, provisioning command construction,
+migration/state handling, status, and the license/form models. Model tests do
+not prove terminal restoration or live Proxmox behavior. On a reserved nested
+VM, omit `--no-prompt` from the candidate commands above to exercise the license
+and form; decline or cancel before confirmation for a non-provisioning check.
+Confirming the form starts installation. Record PTY and live integration
+evidence separately from unit-test results.
+
+See [the offline installation procedure](docs/docs/deployment-options/proxmox-lxc.md#install-on-an-offline-proxmox-cluster)
 for operator commands and infrastructure requirements.
 
 ## Beta releases and documentation
 
 A tag containing lowercase `-beta`, such as `2.4.0-beta.1`, selects the beta
 release jobs. Beta binaries remain in the `ludus-beta` R2 bucket; LXC templates
-remain in `ludus-lxc`. The versioned beta directory includes both installers and
-their checksum manifest. `beta-release` waits for the LXC upload, publishes all
+remain in `ludus-lxc`. The versioned beta directory includes the online
+bootstraps, `ludus-installer`, and `ludus_<version>_checksums.txt`.
+`beta-release` waits for the LXC upload, publishes all
 versioned files, then the root `install-beta.sh`, and updates `latest.txt` last.
 Failed artifact uploads must not advance that pointer. Enterprise/Anti-Sandbox
 plugins and stable release publishing remain excluded from beta tags.
@@ -409,10 +446,9 @@ and emits no-index metadata and `robots.txt`. The Worker also sends
 `/api/index.html` and `/api/ludus.openapi.yaml`. Production Pages and embedded
 documentation retain their own origin/base-path settings.
 
-Local checks (installer channel tests require a non-Proxmox client host):
+Local documentation checks:
 
 ```bash
-python3 ludus-server/lxc/test_installer_channels.py
 npm ci --prefix docs/r2-worker
 npm test --prefix docs/r2-worker
 npm run deploy --prefix docs/r2-worker -- --dry-run

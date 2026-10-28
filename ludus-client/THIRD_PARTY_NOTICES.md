@@ -351,8 +351,8 @@ SOFTWARE.
 
 ## github.com/charmbracelet/colorprofile
 
-* Version: v0.4.1
-* License: [MIT](https://github.com/charmbracelet/colorprofile/blob/v0.4.1/LICENSE)
+* Version: v0.4.3
+* License: [MIT](https://github.com/charmbracelet/colorprofile/blob/v0.4.3/LICENSE)
 
 ```
 MIT License
@@ -413,8 +413,8 @@ SOFTWARE.
 
 ## github.com/charmbracelet/x/ansi
 
-* Version: v0.11.6
-* License: [MIT](https://github.com/charmbracelet/x/blob/ansi/v0.11.6/ansi/LICENSE)
+* Version: v0.11.9
+* License: [MIT](https://github.com/charmbracelet/x/blob/ansi/v0.11.9/ansi/LICENSE)
 
 ```
 MIT License
@@ -506,39 +506,8 @@ SOFTWARE.
 
 ## github.com/clipperhouse/displaywidth
 
-* Version: v0.9.0
-* License: [MIT](https://github.com/clipperhouse/displaywidth/blob/v0.9.0/LICENSE)
-
-```
-MIT License
-
-Copyright (c) 2025 Matt Sherman
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-```
-
-
-## github.com/clipperhouse/stringish
-
-* Version: v0.1.1
-* License: [MIT](https://github.com/clipperhouse/stringish/blob/v0.1.1/LICENSE)
+* Version: v0.11.0
+* License: [MIT](https://github.com/clipperhouse/displaywidth/blob/v0.11.0/LICENSE)
 
 ```
 MIT License
@@ -568,8 +537,8 @@ SOFTWARE.
 
 ## github.com/clipperhouse/uax29/v2/graphemes
 
-* Version: v2.5.0
-* License: [MIT](https://github.com/clipperhouse/uax29/blob/v2.5.0/LICENSE)
+* Version: v2.7.0
+* License: [MIT](https://github.com/clipperhouse/uax29/blob/v2.7.0/LICENSE)
 
 ```
 MIT License
@@ -2046,8 +2015,8 @@ SOFTWARE.
 
 ## github.com/lucasb-eyer/go-colorful
 
-* Version: v1.3.0
-* License: [MIT](https://github.com/lucasb-eyer/go-colorful/blob/v1.3.0/LICENSE)
+* Version: v1.4.1
+* License: [MIT](https://github.com/lucasb-eyer/go-colorful/blob/v1.4.1/LICENSE)
 
 ```
 Copyright (c) 2013 Lucas Beyer
@@ -2147,8 +2116,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## github.com/mattn/go-runewidth
 
-* Version: v0.0.19
-* License: [MIT](https://github.com/mattn/go-runewidth/blob/v0.0.19/LICENSE)
+* Version: v0.0.30
+* License: [MIT](https://github.com/mattn/go-runewidth/blob/v0.0.30/LICENSE)
 
 ```
 The MIT License (MIT)
@@ -3032,8 +3001,8 @@ THE SOFTWARE.
 
 ## github.com/xo/terminfo
 
-* Version: v0.0.0-20220910002029-abceb7e1c41e
-* License: [MIT](https://github.com/xo/terminfo/blob/abceb7e1c41e/LICENSE)
+* Version: v1.0.0
+* License: [MIT](https://github.com/xo/terminfo/blob/v1.0.0/LICENSE)
 
 ```
 The MIT License (MIT)
@@ -3168,8 +3137,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## golang.org/x/sys/unix
 
-* Version: v0.43.0
-* License: [BSD-3-Clause](https://cs.opensource.google/go/x/sys/+/v0.43.0:LICENSE)
+* Version: v0.47.0
+* License: [BSD-3-Clause](https://cs.opensource.google/go/x/sys/+/v0.47.0:LICENSE)
 
 ```
 Copyright 2009 The Go Authors.

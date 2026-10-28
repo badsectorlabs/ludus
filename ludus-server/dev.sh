@@ -8,7 +8,7 @@ while getopts "hBDdPLv:" opt; do
   case $opt in
     h)
       echo "Usage: $0 [-h] [-B] [-d] [-D] [-P] [-L] [-v version]"
-      echo "  -B  Build server and embedded inventory only; do not install or change services"
+      echo "  -B  Build server, installer and embedded inventory only; do not install or change services"
       echo "  -d  Enable debug logging for Ludus"
       echo "  -D  Enable debug logging for the database"
       echo "  -P  Enable debug logging for proxmox"
@@ -100,8 +100,14 @@ if ! CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X
     exit 1
 fi
 
+echo "[+] Building the Go installer"
+mkdir -p ../binaries
+(cd ../ludus-installer && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.Version=${VERSION_STRING}" -o ../binaries/ludus-installer)
+install -m 0755 ludus-server ../binaries/ludus-server
+
 if [ "$BUILD_ONLY" = true ]; then
     echo "[=] Ludus server built at $PWD/ludus-server (not installed)"
+    echo "[=] Ludus installer built at $PWD/../binaries/ludus-installer (not installed)"
     popd >/dev/null
     exit 0
 fi

@@ -8,15 +8,11 @@ import (
 )
 
 var (
-	updateFlag        bool
-	versionFlag       bool
-	helpFlag          bool
-	noAnsibleUpdate   bool
-	debugFlag         bool
-	migrationInfoFlag bool
-	exportStatePath   string
-	exportLivePath    string
-	importStatePath   string
+	updateFlag      bool
+	versionFlag     bool
+	helpFlag        bool
+	noAnsibleUpdate bool
+	debugFlag       bool
 )
 
 func init() {
@@ -27,10 +23,6 @@ func init() {
 	flag.BoolVar(&helpFlag, "help", false, "display help information")
 	flag.BoolVar(&noAnsibleUpdate, "no-dep-update", false, "skip the dependency update check")
 	flag.BoolVar(&debugFlag, "debug", false, "enable debug mode (can also be set with the LUDUS_DEBUG environment variable)")
-	flag.BoolVar(&migrationInfoFlag, "migration-info", false, "print nonsecret legacy migration metadata without bootstrapping")
-	flag.StringVar(&exportStatePath, "export-state", "", "export stopped legacy services' durable state to a new tar.gz archive")
-	flag.StringVar(&exportLivePath, "export-state-live", "", "export a consistent staging snapshot while legacy services remain online")
-	flag.StringVar(&importStatePath, "import-state", "", "import a migration archive into a stopped, unbootstrapped appliance")
 	flag.Usage = printHelp
 }
 
@@ -44,34 +36,6 @@ func checkArgs() {
 
 	if versionFlag {
 		fmt.Println(LudusVersion)
-		os.Exit(0)
-	}
-	migrationModes := 0
-	for _, enabled := range []bool{migrationInfoFlag, exportStatePath != "", exportLivePath != "", importStatePath != "", updateFlag} {
-		if enabled {
-			migrationModes++
-		}
-	}
-	if migrationModes > 1 {
-		fmt.Fprintln(os.Stderr, "choose only one of --migration-info, --export-state, --export-state-live, --import-state, or --update")
-		os.Exit(1)
-	}
-	if migrationInfoFlag || exportStatePath != "" || exportLivePath != "" || importStatePath != "" {
-		checkRoot()
-		var err error
-		if importStatePath != "" {
-			err = importMigrationState(importStatePath)
-		} else {
-			destination := exportStatePath
-			if exportLivePath != "" {
-				destination = exportLivePath
-			}
-			err = exportMigrationState(destination, migrationInfoFlag, exportLivePath != "")
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "migration failed: %v\n", err)
-			os.Exit(1)
-		}
 		os.Exit(0)
 	}
 

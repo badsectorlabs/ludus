@@ -351,7 +351,7 @@ fi
         ct = self.args.lxc_vmid
         endpoints = [f"https://{self.args.lxc_gateway}:8006"] if migrate else [
             f"https://{self.inventory[role]['net']['ip']}:8006" for role in ("cluster-node1", "cluster-node2")]
-        flags = ["--no-prompt", "--server-only", "--version", self.args.version,
+        flags = ["--no-prompt", "--version", self.args.version,
                  "--template-file", media["template"], "--vmid", str(ct), "--storage", self.args.lxc_storage,
                  "--bridge", self.args.lxc_bridge, "--ip", self.args.lxc_ip,
                  "--gw", self.args.lxc_gateway, "--nameserver", self.dns,
@@ -391,7 +391,8 @@ p.write_text(yaml.safe_dump(c,sort_keys=False))
         normalize_command = shlex.join(["pct", "exec", str(ct), "--", "/opt/ludus/venv/bin/python3",
                                         "-c", normalize, json.dumps(endpoints), proxmox_host])
         self.ssh(vm, f'''if ! pct status {ct} >/dev/null 2>&1; then
-    LUDUS_API_PORT={port} LUDUS_NAT_GATEWAY={CLUSTER_NAT_GATEWAY} bash {shlex.quote(media["installer"])} {shlex.join(flags)}
+    chmod 0700 {shlex.quote(media["installer"])}
+    LUDUS_INSTALLER_BINARY={shlex.quote(media["installer"])} LUDUS_API_PORT={port} LUDUS_NAT_GATEWAY={CLUSTER_NAT_GATEWAY} {shlex.quote(media["installer"])} {shlex.join(flags)}
 else
     pct exec {ct} -- test -f /opt/ludus/install/.bootstrap-complete
     {resume_check}
@@ -559,7 +560,8 @@ def main():
     parser.add_argument("--lxc-gateway", default="172.31.24.1")
     parser.add_argument("--osd-size", default="100G")
     parser.add_argument("--ceph-pgs", type=int, default=32)
-    for option in ("installer", "template", "server", "client", "version", "checksum-file", "checksum-signature", "checksum-public-key", "enterprise-plugin"):
+    parser.add_argument("--installer", help="Trusted local ludus-installer Linux/amd64 executable")
+    for option in ("template", "server", "client", "version", "checksum-file", "checksum-signature", "checksum-public-key", "enterprise-plugin"):
         parser.add_argument("--" + option)
     parser.add_argument("--skip-verification", action="store_true", help="Explicitly trust locally built CI artifacts")
     args = parser.parse_args()

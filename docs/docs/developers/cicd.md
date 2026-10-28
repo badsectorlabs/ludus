@@ -148,6 +148,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
   -o ../ludus-server/ansible/range-management/dynamic-inventory .
 cd ../ludus-server
 CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w"
+cd ../ludus-installer
+mkdir -p ../binaries
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+  -ldflags "-s -w -X main.Version=ci-candidate" -o ../binaries/ludus-installer .
 cd ../ludus-client
 git clone https://github.com/zimeg/spinner
 cd spinner && git checkout unhide-interrupts && cd .. && go mod edit -replace github.com/briandowns/spinner=./spinner
@@ -165,3 +169,33 @@ cd ../docs
 yarn install
 yarn build
 ```
+
+## Native installer artifacts and checks
+
+The root `ludus-installer/` Go module owns the installer engine, including the
+Bubble Tea/Lip Gloss/Huh license and settings UI, migration, offline media, and
+status. Runtime bootstrap and updates remain in `ludus-server`.
+The `go-unit-tests` job runs `go test ./... -v -race` in `ludus-installer`.
+For local CLI checks, run `go run . --help` and `go run . --build-version` from
+that module. `--build-version` prints the build identity; `--version TAG`
+selects installation media. These checks do not establish live Proxmox coverage.
+
+CI builds `binaries/ludus-installer` for Linux/amd64 with `main.Version` set to
+the release version. Stable LXC hosting publishes it as
+`<version>/ludus-installer` alongside `checksums.txt`. Beta hosting publishes
+the same executable name with `ludus_<version>_checksums.txt`. The package
+registry upload is named `ludus-installer-<tag>`; the release checksum manifest
+records the local artifact name `ludus-installer`.
+
+Candidate-template jobs pass
+`LUDUS_INSTALLER_BINARY="$PWD/binaries/ludus-installer"` to the thin online
+bootstrap. This explicitly trusts the local executable; use only a binary built
+from the candidate being tested. The bootstrap consumes `--server-only` and
+hands server operations to the native engine only on supported Proxmox hosts.
+`--no-prompt` bypasses both native dialogs.
+
+`install-offline.sh` is not a public installer upload. Approved offline media
+must pair it with the matching native executable, covered by the signed media
+manifest, and a trusted public verification key. It does not depend on
+`install.sh`, and this repository does not define a private-media publisher.
+

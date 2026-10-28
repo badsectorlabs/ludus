@@ -691,6 +691,9 @@ go-unit-tests:
     - if: $CI_COMMIT_BRANCH
     - if: $CI_COMMIT_TAG
   script:
+    - python3 -B ludus-server/lxc/test_installer_channels.py
+    - cd ludus-installer && go test ./... -v -race
+    - cd ..
     - cd ludus-api && go test ./... -v -race -coverprofile=coverage.out
     - cd ../dynamic-inventory && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o ../ludus-server/ansible/range-management/dynamic-inventory
     - cd ../ludus-server && go test ./... -v -race
@@ -789,6 +792,10 @@ build all:
       fi
     - CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.GitCommitHash=$GIT_COMMIT_SHORT_HASH -X main.VersionString=$VERSION" -tags="${TAGS}" -o ../binaries/ludus-server
     - cd ..
+    - echo "Compiling the Go installer..."
+    - cd ludus-installer
+    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" -o ../binaries/ludus-installer
+    - cd ..
     - echo "Compiling the client code..."
     - cd ludus-client
     # Use the fork that doesn't break the terminal on control+c for Linux and macOS.
@@ -863,6 +870,7 @@ build-lxc-template:
     - changes:
         - install.sh
         - install-beta.sh
+        - ludus-installer/**/*
         - .gitlab-ci.yml
         - ludus-server/ci/job-server.sh
         - ludus-server/ci/test-lxc*.sh
@@ -3143,7 +3151,7 @@ test-install-sh:
     - |
       INSTALLER=./install.sh
       if [[ "${LUDUS_VERSION}" == *-beta* ]]; then INSTALLER=./install-beta.sh; fi
-      sudo -E bash "${INSTALLER}" --no-prompt --template-file "ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst" --vmid 9999 --storage local --bridge ci24mgmt --ip 172.31.24.2/24 --gw 172.31.24.1 --nameserver 1.1.1.1
+      sudo -E env LUDUS_INSTALLER_BINARY="$PWD/binaries/ludus-installer" bash "${INSTALLER}" --no-prompt --template-file "ludus-${LUDUS_VERSION}-debian13-amd64.tar.zst" --vmid 9999 --storage local --bridge ci24mgmt --ip 172.31.24.2/24 --gw 172.31.24.1 --nameserver 1.1.1.1
     - sudo pct exec 9999 -- curl -fsk https://127.0.0.1:8080/api/health | jq -e '.code == 200'
     - source ludus-server/ci/job-server.sh
     - ci_job_setup
@@ -3457,6 +3465,7 @@ beta-release:
     - |
       release_files=(
         ludus-server
+        ludus-installer
         ludus-client_linux-amd64 ludus-client_linux-arm64 ludus-client_linux-arm
         ludus-client_macOS-amd64 ludus-client_macOS-arm64
         ludus-client_windows-amd64.exe ludus-client_windows-386.exe ludus-client_windows-arm64.exe
@@ -3485,6 +3494,8 @@ upload-lxc-r2:
   tags:
     - ludus-proxmox-runner-parallel
   needs:
+    - job: "build all"
+      artifacts: true
     - job: build-lxc-template
       artifacts: true
     - job: go-unit-tests
@@ -3503,8 +3514,10 @@ upload-lxc-r2:
     - export VER="${CI_COMMIT_TAG}"
     - TMPL="ludus-${VER}-debian13-amd64.tar.zst"
     - sha256sum "${TMPL}" > checksums.txt
+    - (cd binaries && sha256sum ludus-installer) >> checksums.txt
     - echo "Uploading LXC template ${TMPL} to Cloudflare R2..."
     - rclone copy "${TMPL}" "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
+    - rclone copy binaries/ludus-installer "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
     - rclone copy "${TMPL}.sha256" "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
     - rclone copy checksums.txt "r2:ludus-lxc/${VER}/" --s3-no-check-bucket
     # Use a local file + copyto (known size) instead of rcat; R2 returns NotImplemented for rcat's streaming upload.
@@ -3531,6 +3544,7 @@ gitlab-upload:
     - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /-beta/
   script:
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-server ${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}'
+    - 'curl --fail --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-installer ${PACKAGE_REGISTRY_URL}/ludus-installer-${CI_COMMIT_TAG}'
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-amd64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}'
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-arm64 ${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm64-${CI_COMMIT_TAG}'
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_linux-arm ${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm-${CI_COMMIT_TAG}'
@@ -3539,9 +3553,10 @@ gitlab-upload:
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-amd64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-amd64-${CI_COMMIT_TAG}.exe'
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-386.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-386-${CI_COMMIT_TAG}.exe'
     - 'curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file binaries/ludus-client_windows-arm64.exe ${PACKAGE_REGISTRY_URL}/ludus-client_windows-arm64-${CI_COMMIT_TAG}.exe'
-    - touch ludus_${CI_COMMIT_TAG}_checksums.txt
+    - printf '' > ludus_${CI_COMMIT_TAG}_checksums.txt
     - cd binaries
     - sha256sum ludus-server >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
+    - sha256sum ludus-installer >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
     - sha256sum ludus-client_linux-amd64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
     - sha256sum ludus-client_linux-arm64 >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
     - sha256sum ludus-client_linux-arm >> ../ludus_${CI_COMMIT_TAG}_checksums.txt
@@ -3662,6 +3677,7 @@ release:
     - sudo chmod +x /usr/local/bin/release-cli
     - 'release-cli create --name "ludus $CI_COMMIT_TAG" --description CHANGELOG.txt --tag-name $CI_COMMIT_TAG --assets-link
       "[{\"name\":\"ludus-server-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-server-${CI_COMMIT_TAG}\"},
+      {\"name\":\"ludus-installer-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-installer-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus_${CI_COMMIT_TAG}_checksums.txt\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus_${CI_COMMIT_TAG}_checksums.txt\"},
       {\"name\":\"ludus-client_linux-amd64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-amd64-${CI_COMMIT_TAG}\"},
       {\"name\":\"ludus-client_linux-arm64-${CI_COMMIT_TAG}\", \"url\":\"${PACKAGE_REGISTRY_URL}/ludus-client_linux-arm64-${CI_COMMIT_TAG}\"},

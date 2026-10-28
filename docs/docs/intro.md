@@ -26,16 +26,17 @@ Ludus is an automation overlay on top of Proxmox, not a 100% replacement for man
 
 ## Getting Started
 
-Ludus is *only* compatible with virtualization capable Debian 12/13 or Proxmox 8/9 (on-prem or in the cloud). No other environments or hosting solutions will be supported.
+Ludus is *only* compatible with virtualization capable Proxmox VE 8/9 hosts (on-prem or in the cloud). If you are starting from bare metal, a cloud VM, or another hypervisor, [install Proxmox VE first](./deployment-options/bare-metal.mdx#install-proxmox-ve). No other environments or hosting solutions will be supported.
 
 ### Requirements
 - x86_64 (aka amd64 aka 64-bit "Intel") CPU with a [Passmark](https://www.cpubenchmark.net/cpu_list.php) score > 6,000
-- A host capable of virtualization running Debian 12/13 or Proxmox 8/9 (e.g. "bare metal", Azure Dv3 and Ev3, AWS *.metal, [supported Google Cloud VMs](https://cloud.google.com/compute/docs/instances/nested-virtualization/managing-constraint) see [Deployment Options](./category/deployment-options))
+- A host capable of virtualization running Proxmox VE 8/9 (e.g. "bare metal", Azure Dv3 and Ev3, AWS *.metal, [supported Google Cloud VMs](https://cloud.google.com/compute/docs/instances/nested-virtualization/managing-constraint) see [Deployment Options](./category/deployment-options))
 - at least 32GB RAM per range that will be deployed
 - at least 200GB storage for initial templates and at least 50GB per range that will be deployed (large, fast NVMe drives recommended)
 - no more than 150 ranges per Ludus instance
 - Internet connected (not via WiFi)
 - Root shell access
+- An unused static IP address for the Ludus container, or a private NAT bridge on hosts with a single address (see [Hosts with a single public address](./deployment-options/proxmox-lxc.md#hosts-with-a-single-public-address))
 - If you want to access Ludus across the internet
     - 1 public IP address
     - the ability to allow in arbitrary ports (i.e. port forwarding or control of the cloud firewall)

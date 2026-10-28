@@ -220,11 +220,17 @@ For `migrate` (roles `clean-install,templates-built,range-admin,range-user,integ
 and `cluster-install` (roles `cluster-node1,cluster-node2`), supply:
 
 ```sh
---version "$VERSION" --installer "$MEDIA/install.sh" \
+--version "$VERSION" --installer "$MEDIA/binaries/ludus-installer" \
 --template "$MEDIA/ludus-$VERSION-debian13-amd64.tar.zst" \
 --server "$MEDIA/binaries/ludus-server" \
 --client "$MEDIA/binaries/ludus-client_linux-amd64"
 ```
+
+`--installer` takes a trusted Linux/amd64 native executable, not `install.sh`.
+Build it from the root `ludus-installer/` module for the same candidate version.
+When exercising the thin online bootstrap instead, set
+`LUDUS_INSTALLER_BINARY="$MEDIA/binaries/ludus-installer"` to explicitly trust
+that local candidate rather than downloading the release engine.
 
 Supply signed checksum inputs (`--checksum-file`, `--checksum-signature`,
 `--checksum-public-key`), or explicitly use `--skip-verification` only for
@@ -283,7 +289,7 @@ Useful options:
 |---------------------|---------|-----------------------------------------------------|
 | `CI_RECREATE`       | `0`     | Destroy VMIDs 1000-1007 and 1012 before setup       |
 | `CI_RECREATE_TEMPLATE` | `0`  | Also destroy the CI base template when recreating    |
-| `CI_BUILD_BINARIES` | `1`     | Build `ludus-server` and Linux client seed binaries |
+| `CI_BUILD_BINARIES` | `1`     | Build server, native installer, and Linux client seed binaries |
 | `CI_TEMPLATE_PARALLEL` | `2`  | Per-seed template build parallelism                  |
 | `CI_VM_DISK_SIZE`   | `250G`  | Root disk size for CI template, seeds, and runtime VMs |
 | `CI_SETUP_TEMPLATE` | `auto`  | Create the CI base template if it does not exist    |

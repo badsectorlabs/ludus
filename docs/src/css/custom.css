@@ -74,6 +74,12 @@
   color: rgb(202, 168, 71);
 }
 
+.code-block-terminal-command-root-at-proxmox:before {
+  content: 'root@proxmox:~$';
+  margin-right: 10px;
+  color: rgb(202, 168, 71);
+}
+
 .code-block-terminal-command-powershell:before {
   content: 'PS C:\>';
   margin-right: 10px;

@@ -5944,8 +5944,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## golang.org/x/sync
 
-* Version: v0.20.0
-* License: [BSD-3-Clause](https://cs.opensource.google/go/x/sync/+/v0.20.0:LICENSE)
+* Version: v0.22.0
+* License: [BSD-3-Clause](https://cs.opensource.google/go/x/sync/+/v0.22.0:LICENSE)
 
 ```
 Copyright 2009 The Go Authors.
@@ -5981,8 +5981,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## golang.org/x/sys/unix
 
-* Version: v0.43.0
-* License: [BSD-3-Clause](https://cs.opensource.google/go/x/sys/+/v0.43.0:LICENSE)
+* Version: v0.47.0
+* License: [BSD-3-Clause](https://cs.opensource.google/go/x/sys/+/v0.47.0:LICENSE)
 
 ```
 Copyright 2009 The Go Authors.

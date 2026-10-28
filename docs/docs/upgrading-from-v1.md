@@ -32,20 +32,18 @@ Your existing Proxmox VMs, templates, and network configuration are not modified
 
 ## How to Upgrade
 
-1. Update Ludus as you normally would:
+A 1.x server runs directly on its Proxmox host. Upgrade it in place to the latest Ludus 2.3.x release first, then move it into the LXC runtime.
+
+1. Download the latest 2.3.x `ludus-server` [release binary](https://gitlab.com/badsectorlabs/ludus/-/releases) to the Ludus host and run it as root with `--update`:
 
 ```shell
 # terminal-command-ludus-root
-curl -s https://ludus.cloud/install | bash
-# Answer 'y' when prompted to update the server
-```
-
-Or manually:
-
-```shell
+chmod +x ludus-server
 # terminal-command-ludus-root
 ./ludus-server --update
 ```
+
+Do not use the current install script for this step. On a Proxmox host it migrates the server into an LXC, and that migration requires the PocketBase database created by this upgrade.
 
 2. The database migration runs automatically the next time the `ludus-admin` service starts. Monitor its progress with:
 
@@ -68,7 +66,9 @@ You will see log lines like:
 [INFO] Migration from SQLite to PocketBase completed successfully
 ```
 
-3. Once the migration completes, Ludus 2.x is fully operational. Existing API keys continue to work.
+3. Once the migration completes, Ludus 2.x is fully operational on the host. Existing API keys continue to work.
+
+4. Move the server into the LXC runtime by running the install script on the Proxmox host, as described in [Migrate to LXC](./infrastructure-operations/migrate-to-lxc.md).
 
 ## What the Migration Does
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Beta entry point: all client, LXC, migration and update logic lives in install.sh.
+# Beta client bootstrap; all server operations are handed to ludus-installer.
 set -eu
 export LUDUS_RELEASE_CHANNEL=beta
 export R2_BUCKET_BASE_URL="${R2_BUCKET_BASE_URL:-https://beta-files.ludus.cloud}"
@@ -30,13 +30,13 @@ beta_fetch() {
 
 # Resolve once so a concurrent release cannot give client and server different tags.
 version="${LUDUS_VERSION:-}"
-template=''
+template="${TEMPLATE_FILE:-}"
 args=("$@")
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) version="${2:?--version requires a tag}"; shift 2 ;;
     --template-file) template="${2:?--template-file requires a path}"; shift 2 ;;
-    --airgapped|--iso-directory|--license-file)
+    --airgapped|--offline|--iso-directory|--license-file|--bginfo-file)
       echo "Error: $1 requires the Ludus Enterprise install-offline.sh." >&2
       exit 1 ;;
     *) shift ;;
@@ -55,11 +55,14 @@ if [[ -z "${version}" ]]; then
   version=$(beta_fetch "${R2_BUCKET_BASE_URL%/}/latest.txt")
   version=$(printf '%s' "${version}" | tr -d '\r\n ')
 fi
-if [[ "${version}" != *-beta* || "${version}" == */* ]]; then
+case "${version}" in
+  ''|*[!A-Za-z0-9._+-]*) echo 'Error: Invalid beta release version.' >&2; exit 1 ;;
+esac
+if [[ "${version}" != *-beta* ]]; then
   echo 'Error: The beta channel requires a version containing -beta.' >&2
   exit 1
 fi
 installer_tmp=$(mktemp -d -t ludus-beta.XXXXXX)
 trap 'rm -rf "${installer_tmp}"' EXIT
 beta_fetch "${R2_BUCKET_BASE_URL%/}/${version}/install.sh" > "${installer_tmp}/install.sh"
-bash "${installer_tmp}/install.sh" "${args[@]}" --version "${version}"
+bash "${installer_tmp}/install.sh" ${args[@]+"${args[@]}"} --version "${version}"

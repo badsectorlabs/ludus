@@ -1,9 +1,10 @@
-go 1.25.0
+go 1.25.8
 
 use (
 	./dynamic-inventory
 	./ludus-api
 	./ludus-client
+	./ludus-installer
 	./ludus-plugin-sdk
 	./ludus-server
 )

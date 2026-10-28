@@ -45,7 +45,7 @@ before_vms=$(sudo pvesh get /cluster/resources --type vm --output-format json | 
 
 installer="$ROOT/../install.sh"
 if [[ "${LUDUS_VERSION:-}" == *-beta* ]]; then installer="$ROOT/../install-beta.sh"; fi
-sudo -E bash "$installer" --no-prompt --migrate-host --template-file "$TEMPLATE" --storage local
+sudo -E env LUDUS_INSTALLER_BINARY="$ROOT/../binaries/ludus-installer" bash "$installer" --no-prompt --migrate-host --template-file "$TEMPLATE" --storage local
 ci_server_init
 ci_server_wait
 ci_client_config

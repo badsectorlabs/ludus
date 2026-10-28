@@ -26,9 +26,8 @@ install:
 	  /usr/local/share/ca-certificates
 	# binary + embedded trees
 	install -m 0755 ../../binaries/ludus-server $(BASEDIR)/opt/ludus/ludus-server
-	install -m 0700 migrate-host.sh $(BASEDIR)/opt/ludus/install/migrate-host.sh
-	install -m 0700 migrate-cluster.py $(BASEDIR)/opt/ludus/install/migrate-cluster.py
-	install -m 0755 files/ludus-install-status $(BASEDIR)/usr/local/bin/ludus-install-status
+	install -m 0755 ../../binaries/ludus-installer $(BASEDIR)/opt/ludus/install/ludus-installer
+	dab exec ln -s /opt/ludus/install/ludus-installer /usr/local/bin/ludus-install-status
 	cp -r ../ansible $(BASEDIR)/opt/ludus/ansible
 	cp -r ../packer $(BASEDIR)/opt/ludus/packer
 	# python venv (air-gap)
