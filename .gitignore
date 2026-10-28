@@ -1,5 +1,4 @@
-ludus-installer
-ludus-client_*
+/binaries/
 ludus-source-bsl/
 plugins/
 offline-*
