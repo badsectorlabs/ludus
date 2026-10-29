@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -147,6 +148,23 @@ func discoverInventory(ctx context.Context) (*Inventory, error) {
 			inv.Bridges = append(inv.Bridges, network.Name)
 		}
 	}
+	// Proxmox only reports bridges defined in /etc/network/interfaces itself, but
+	// the container is created on this node and can use any bridge that exists
+	// here, including ones from sourced files such as /etc/network/interfaces.d/.
+	var vnets []struct {
+		Name string `json:"vnet"`
+	}
+	sdnVNets := map[string]bool{"ludusnat": true}
+	if readPVEJSON(ctx, "/cluster/sdn/vnets", &vnets) == nil {
+		for _, vnet := range vnets {
+			sdnVNets[vnet.Name] = true
+		}
+	}
+	for _, bridge := range localKernelBridges("/sys/class/net", sdnVNets) {
+		if !slices.Contains(inv.Bridges, bridge) {
+			inv.Bridges = append(inv.Bridges, bridge)
+		}
+	}
 	sort.Strings(inv.Bridges)
 	var users []struct {
 		UserID string `json:"userid"`
@@ -169,6 +187,26 @@ func discoverInventory(ctx context.Context) (*Inventory, error) {
 		inv.Pools[pool.PoolID] = true
 	}
 	return inv, nil
+}
+
+// localKernelBridges lists Linux bridges under the sysfs root, excluding SDN
+// VNets and the per-guest firewall bridges Proxmox creates (fwbr<vmid>i<n>).
+func localKernelBridges(root string, sdnVNets map[string]bool) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var bridges []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if sdnVNets[name] || strings.HasPrefix(name, "fwbr") {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(root, name, "bridge")); err == nil && info.IsDir() {
+			bridges = append(bridges, name)
+		}
+	}
+	return bridges
 }
 
 func hasStorageContent(content, wanted string) bool {

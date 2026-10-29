@@ -98,7 +98,7 @@ The form collects:
 | Proxmox API endpoints | Space-separated `https://node:8006` URLs. Include every node that Ludus may manage. |
 | LXC VMID | VMID for the Ludus container. The default is the next free cluster VMID. |
 | LXC rootfs storage and size | Storage used for the container root filesystem. The minimum supported size is 20 GiB. |
-| LXC bridge and VLAN | Management bridge available on every potential LXC node, plus an optional VLAN tag. |
+| LXC bridge and VLAN | Management bridge available on every potential LXC node, plus an optional VLAN tag. The choices include bridges defined in files sourced by `/etc/network/interfaces` (such as `/etc/network/interfaces.d/`), but not SDN VNets or Proxmox firewall bridges. |
 | LXC IP, gateway, and DNS | Required static address with CIDR prefix and gateway. An explicit internal resolver is recommended offline. |
 | WireGuard endpoint and port | Address and UDP port that Ludus clients use. The endpoint defaults to the local Proxmox node's IP; the port defaults to 51820. The installer creates the host-to-container forward unless disabled. |
 | WireGuard forwarding | Enabled by default. Disable to manage forwarding yourself or use a directly reachable container endpoint. |
