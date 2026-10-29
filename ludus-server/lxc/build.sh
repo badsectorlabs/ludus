@@ -112,10 +112,12 @@ else
     --format=ustar -czf deps/ludus-source-bsl.tar.gz -C deps ludus-source-bsl
 fi
 
-if [[ ! -f ../../binaries/ludus-server ]]; then
-  echo "ERROR: binaries/ludus-server not found (run 'build all' first)" >&2
-  exit 1
-fi
+for binary in ludus-server ludus-installer; do
+  if [[ ! -x "../../binaries/$binary" ]]; then
+    echo "ERROR: binaries/$binary not found or not executable (run 'build all' first)" >&2
+    exit 1
+  fi
+done
 
 # Substitute version into dab.conf before make parses BASEDIR.
 sed -i "s/^Version: .*/Version: ${LUDUS_VERSION}/" dab.conf

@@ -1,8 +1,6 @@
 ---
 title: Bare Metal (recommended)
 ---
-import ReactPlayer from 'react-player'
-
 
 # Bare Metal (recommended)
 
@@ -70,13 +68,17 @@ NVMe Heatsinks:
 - [Low profile copper heatsink](https://amzn.to/3WbxGhS)
 
 
-## Install
+## Install Proxmox VE
 
-1. Install Debian 13 - make note of the root and user passwords set during install. Set up RAID0 as shown below if you have multiple drives for greater speed.
+Ludus requires Proxmox VE 8 or 9. Install Proxmox VE on the machine first, then install Ludus on it.
 
-<ReactPlayer playing controls url='/img/hardware/Debian_12_RAID0.mp4' width='100%' height='100%' />
+1. Install Proxmox VE using one of these methods:
+   - **Proxmox VE ISO (recommended):** download the [Proxmox VE ISO](https://www.proxmox.com/en/downloads/proxmox-virtual-environment/iso), write it to a USB drive, and follow the [Proxmox VE installation guide](https://pve.proxmox.com/wiki/Installation). If you have multiple drives, open **Options** on the target disk screen and select ZFS RAID0 across them for greater speed. RAID0 has no redundancy: losing one drive loses the pool.
+   - **On top of Debian:** if your provider only offers Debian images, install Debian and then follow the Proxmox guide for your Debian release: [Proxmox VE 9 on Debian 13 (Trixie)](https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_13_Trixie) or [Proxmox VE 8 on Debian 12 (Bookworm)](https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_12_Bookworm).
+2. Give the Proxmox host a static IP address, and set aside a second unused static IP address on the same network for the Ludus container. If the host has only one public address, see [Hosts with a single public address](./proxmox-lxc.md#hosts-with-a-single-public-address).
+3. Confirm you can sign in to the Proxmox web interface at `https://<proxmox-host>:8006`.
 
+## Install Ludus
 
-2. Follow [Install Ludus](../quick-start/install-ludus)
-
+Follow [Install Ludus](../quick-start/install-ludus) on the Proxmox host.
 

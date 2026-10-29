@@ -39,11 +39,11 @@ published at <https://beta.ludus.cloud/docs/intro>.
 
 Offline installation is a Ludus Enterprise feature. `install-offline.sh` is
 distributed with Ludus Enterprise, not with the public installers or this
-repository. Transfer it together with the **same release's `install.sh`** and
-the signed local media. Run `install-offline.sh` directly; there is no
-`--airgapped` switch. The wrapper reuses the shared LXC installation/migration
-engine without downloading its companion script, discovering a public release,
-or installing a client. It requires a local LXC archive, all pinned ISOs,
+repository. Transfer it together with the **same release's `ludus-installer`**
+and the signed local media. Run `install-offline.sh` directly; there is no
+`--airgapped` switch. The wrapper verifies and runs `ludus-installer --offline`
+without downloading anything, discovering a public release, or installing a
+client. It requires a local LXC archive, all pinned ISOs,
 `bginfo.exe`, and an explicit shared ISO storage pool. Existing-LXC updates are
 not supported.
 

@@ -18,7 +18,7 @@ Apple Silicon macs (M1, M2, M3, etc.) are not supported!
 
 ## VM Setup
 
-Create a Debian 12/13 VM with the following settings (disk can be larger than 250GB as available):
+Create a VM for Proxmox VE with the following settings (disk can be larger than 250GB as available). Choose Debian 12 or 13 64-bit as the guest operating system type:
 
 ![VMWare Fusion CPU/RAM Options](/img/deployment/vmware-fusion-procram.png)
 
@@ -28,4 +28,4 @@ Create a Debian 12/13 VM with the following settings (disk can be larger than 25
 
 ## Install
 
-Once Debian 12/13 is installed and running, follow [Install Ludus](../quick-start/install-ludus).
+Install Proxmox VE 8 or 9 in the VM from the [Proxmox VE ISO](https://www.proxmox.com/en/downloads/proxmox-virtual-environment/iso). Once it is running, follow [Install Ludus](../quick-start/install-ludus) on the Proxmox VE VM.

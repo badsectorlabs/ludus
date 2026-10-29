@@ -197,6 +197,41 @@ func TestMigrationConfigPreservesSecretsAndUnknownSettings(t *testing.T) {
 	}
 }
 
+func TestMigrationConfigPreservesOfflineDestinationPolicy(t *testing.T) {
+	for _, source := range []interface{}{nil, false, true} {
+		t.Run(fmt.Sprint(source), func(t *testing.T) {
+			old := map[string]interface{}{"wireguard_endpoint": "original.example"}
+			if source != nil {
+				old["airgapped_install"] = source
+			}
+			generated := map[string]interface{}{
+				"proxmox_endpoints": []interface{}{"https://pve.example:8006"}, "proxmox_node": "node",
+				"proxmox_token_id": "ludus@pve!api", "proxmox_token_secret": "new-token",
+				"tls_cert_file": "/opt/ludus/tls/server.crt", "tls_key_file": "/opt/ludus/tls/server.key",
+				"airgapped_install": true,
+			}
+			merged, err := migrationMergeConfig(old, generated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if merged["airgapped_install"] != true {
+				t.Fatal("archive import disabled the destination offline policy")
+			}
+			if old["airgapped_install"] != source {
+				t.Fatal("merge changed source offline policy")
+			}
+			delete(generated, "airgapped_install")
+			merged, err = migrationMergeConfig(old, generated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if merged["airgapped_install"] != source {
+				t.Fatal("implicit destination policy replaced source offline setting")
+			}
+		})
+	}
+}
+
 func TestMigrationPinsExistingRouterIdentity(t *testing.T) {
 	stage := t.TempDir()
 	config := filepath.Join(stage, "opt/ludus/ranges/LAB/range-config.yml")

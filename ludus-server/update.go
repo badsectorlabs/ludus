@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -339,4 +341,61 @@ func backupDir(srcDir, timestamp, installPath string) {
 			log.Fatal(err)
 		}
 	}
+}
+
+func refuseLegacyHostUpdate() error {
+	if _, err := os.Stat(bootstrapMarker); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if _, err := exec.LookPath("pveversion"); err == nil {
+		return errors.New("this is a legacy host installation; --update cannot replace it with an LXC binary. Run ludus-installer --migrate-host instead (services were not stopped)")
+	}
+	return nil
+}
+
+// The CA is injected outside the embedded packer payload. Re-seed every HTTP
+// seed directory after replacing packer during an ordinary appliance update.
+func preserveInjectedCA() error {
+	const source = "/usr/local/share/ca-certificates/ludus-injected-ca.crt"
+	in, err := os.Open(source)
+	if os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	defer in.Close()
+	return filepath.Walk("/opt/ludus/packer", func(filename string, st os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !st.IsDir() || st.Name() != "http" {
+			return nil
+		}
+		dst := filepath.Join(filename, "ludus-injected-ca.crt")
+		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if _, err := in.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		if err != nil {
+			return err
+		}
+		if err := out.Chmod(0644); err != nil {
+			out.Close()
+			return err
+		}
+		_, copyErr := io.Copy(out, in)
+		if copyErr == nil {
+			copyErr = out.Sync()
+		}
+		closeErr := out.Close()
+		if err := errors.Join(copyErr, closeErr); err != nil {
+			return err
+		}
+		return filepath.SkipDir
+	})
 }

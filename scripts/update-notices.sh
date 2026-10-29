@@ -9,14 +9,14 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 # First-party workspace modules carry the project's own license, not a third-party one.
-ignore=(--ignore ludus --ignore ludusapi --ignore ludus-server --ignore dynamic-inventory --ignore gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk)
+ignore=(--ignore ludus --ignore ludusapi --ignore ludus-server --ignore ludus-installer --ignore dynamic-inventory --ignore gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk)
 
 # Modules whose license file go-licenses cannot classify, verified by hand: "<module> <SPDX id> <license file>".
 overrides=(
 	"github.com/keygen-sh/go-update Apache-2.0 LICENSE" # file holds only the Apache-2.0 header
 )
 
-for project in ludus-server ludus-client ludus-api dynamic-inventory ludus-plugin-sdk; do
+for project in ludus-server ludus-client ludus-api ludus-installer dynamic-inventory ludus-plugin-sdk; do
 	echo "Generating $project/THIRD_PARTY_NOTICES.md" >&2
 	cd "$repo_root/$project"
 	out="$tmp_dir/$project.md"

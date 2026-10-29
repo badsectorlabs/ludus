@@ -252,6 +252,10 @@ const config = {
             line: 'terminal-command-root-at-debian',
           },          
           {
+            className: 'code-block-terminal-command-root-at-proxmox',
+            line: 'terminal-command-root-at-proxmox',
+          },
+          {
             className: 'code-block-terminal-command-powershell',
             line: 'terminal-command-powershell',
           },

@@ -14,20 +14,22 @@ API token that the container uses to manage the cluster.
 
 ## Requirements
 
-Run the installer as `root` on an amd64 Proxmox VE 9 host. The host needs:
+Run the installer as `root` on an amd64 Proxmox VE 8 or 9 host. The host needs:
 
-- `bash`, `curl`, `grep`, and `python3`
-- `openssl` when using `--ca-certificate`
+- `bash`, `curl`, and a SHA-256 checksum utility for the online bootstrap
+- `openssl` for signed offline-media verification
 - a healthy Proxmox cluster with quorum
 - a storage pool that supports LXC root filesystems
 - VM and ISO storage available to every node that will build or run VMs
-- an address on a Proxmox bridge available on every potential LXC node, supplied
-  by DHCP or configured statically
+- an unused static IP address and gateway on a Proxmox bridge available on every
+  potential LXC node (see [Hosts with a single public address](#hosts-with-a-single-public-address)
+  if the host has no spare address)
 - working routing between the container and every Proxmox API endpoint
 
 The installer creates an unprivileged LXC with 4 vCPUs, 4 GiB of memory, and
-512 MiB of swap. The root filesystem defaults to 20 GiB and can be enlarged
-with `--rootfs-size`. The compressed appliance size changes between releases.
+512 MiB of swap. The root filesystem defaults to 250 GiB. Use `--rootfs-size`
+to change it; the minimum is 20 GiB. The compressed appliance size changes
+between releases.
 
 In a multi-node cluster, allow Proxmox SDN traffic, including VXLAN UDP 4789,
 between the nodes. The installer creates a VXLAN zone named `ludus`, a VNet
@@ -46,44 +48,205 @@ less install.sh
 ./install.sh --server-only
 ```
 
-The interactive installer asks for:
+The online script installs the client unless `--server-only` is supplied, then
+hands server operations to the verified `ludus-installer` executable on Proxmox.
+The bootstrap consumes `--server-only`; it is not a native engine flag.
+The root `ludus-installer/` Go module owns the installation engine.
+
+The native Bubble Tea/Lip Gloss/Huh UI shows the license first, followed by a
+grouped settings form with a live sidebar. Scroll to the end of the license
+before accepting it, or decline to exit. Each form option has an inline hint.
+
+The form uses the 2.3.x installer's adaptive gold/green accents and cyan focused
+field titles. It detects the controlling terminal's color profile and background
+before reading input, with indexed-color fallbacks for fixed-palette terminals.
+
+- **Tab / Enter** confirms and advances; the confirmed Live Settings row flashes
+  Ludus gold for 700 ms. **Shift+Tab** goes back without confirming.
+- **Arrow keys** select storage pools, disk formats, and management bridges.
+  Storage choices are filtered by supported content and availability; block
+  storage uses `raw`. Pool labels include the backend and available space.
+- Text fields support cursor movement, Home/End, Backspace/Delete, and
+  **Ctrl+U** to clear. Supplied flags and environment values prefill the form.
+- Invalid values remain editable; both slash borders turn red on an error.
+- Management addressing requires a static IP with CIDR prefix and a gateway.
+  DHCP is not supported.
+- The final review shows every setting. It defaults to **Back**, not
+  **Install**. Select **Install** explicitly to proceed; **Esc / Ctrl+C**
+  cancels without creating an API token or LXC.
+
+The sidebar has 44–50 columns of content and appears at terminal widths of 108
+columns or more, leaving at least 55 columns for the form. Narrower terminals
+hide the sidebar; the minimum size is 54 columns by 20 rows. Review and live
+settings use bold labels with grey values. Fields and hints scroll together
+to keep the focused option visible
+on short terminals. The form reads `/dev/tty`, so piped installer commands still work.
+Without a controlling terminal, use `--no-prompt` and supply the required flags.
+`--no-prompt` bypasses both the license dialog and the settings form.
+No Python/curses UI or separate UI package download is required.
+
+For host migrations, the native installer prepares a read-only migration plan
+before the dialogs. Its management network and preserved WireGuard endpoint/port
+are shown read-only; supply management-network flags before starting migration
+if needed. Declining the license or cancelling the form exits before provisioning.
+Fresh installs also show the dialogs before downloading the appliance.
+
+The form collects:
 
 | Setting | Use |
 | --- | --- |
 | Proxmox API endpoints | Space-separated `https://node:8006` URLs. Include every node that Ludus may manage. |
 | LXC VMID | VMID for the Ludus container. The default is the next free cluster VMID. |
 | LXC rootfs storage and size | Storage used for the container root filesystem. The minimum supported size is 20 GiB. |
-| LXC hostname | Hostname assigned to the Ludus container. |
-| LXC bridge and VLAN | Management bridge available on every potential LXC node, plus an optional VLAN tag. |
-| LXC IP, gateway, and DNS | Static address and gateway, or DHCP with a stable reservation. An explicit internal resolver is recommended offline. |
-| WireGuard endpoint and port | Address and UDP port that Ludus clients use to reach the container. |
+| LXC bridge and VLAN | Management bridge available on every potential LXC node, plus an optional VLAN tag. The choices include bridges defined in files sourced by `/etc/network/interfaces` (such as `/etc/network/interfaces.d/`), but not SDN VNets or Proxmox firewall bridges. |
+| LXC IP, gateway, and DNS | Required static address with CIDR prefix and gateway. An explicit internal resolver is recommended offline. |
+| WireGuard endpoint and port | Address and UDP port that Ludus clients use. The endpoint defaults to the local Proxmox node's IP; the port defaults to 51820. The installer creates the host-to-container forward unless disabled. |
+| WireGuard forwarding | Enabled by default. Disable to manage forwarding yourself or use a directly reachable container endpoint. |
 | VM storage and format | Proxmox storage for range VMs and templates, plus its supported `qcow2` or `raw` disk format. |
 | ISO storage | Shared Proxmox storage used while building VM templates. |
 | License | `community` or a Ludus license key. |
 | CA certificate | Optional site-supplied PEM root CA copied into the LXC and templates built by Ludus. |
+| Initial admin user | Display name, email, user ID, and password (entered twice) for the first Ludus administrator. Fresh installs only; migrations and `--import-db` keep their existing users. |
 
-When run as `root`, the installer creates `root@pam!ludus` if no token was
-provided. If that token already exists, the interactive installer asks whether
-to recreate it or use its existing secret.
+The form does not ask for the container hostname; it defaults to `ludus`. Pass
+`--hostname NAME` (or set `LXC_HOSTNAME`) to choose another name. The name is
+cosmetic and can be changed later with `pct set <vmid> --hostname NAME`.
+
+If you have not supplied or edited the management IP, confirming the bridge
+starts an IPv4 address suggestion for its untagged network in the background;
+confirming a different VLAN restarts it for that VLAN. The installer reads
+the Proxmox interface configuration and checks it against the active host
+interface. On a `/24`, it starts at `.2`; other supported prefixes use the second
+address after the network address.
+
+The search skips host and cluster-node addresses, gateways, and resolved
+neighbors. It sends a ping through the selected interface and checks ARP
+resolution, so a host that blocks ICMP but answers ARP is also skipped. The
+search examines at most 32 candidate addresses within a 15-second deadline.
+A gateway is prefilled only when one is configured for that interface.
+
+**A suggestion is not a reservation or proof that an address is unused.**
+Verify it against your address inventory and DHCP allocation before accepting
+it. Offline hosts may not respond to either check.
+
+Changing the bridge or VLAN clears unedited automatic suggestions; supplied and
+manually edited values are preserved. A tagged VLAN needs a matching active host
+interface; the installer never borrows the untagged bridge's subnet. Missing or
+ambiguous subnet information, probe errors, `/31` or `/32` prefixes, and IPv6
+networks require manual entry. Migration keeps its prepared static addressing.
+
+The installer persists a UDP forward from the Proxmox host's selected WireGuard
+port to the container's static management address. Fresh installations apply
+the rules live and merge them into `/etc/iptables/rules.v4` (`rules.v6` for an
+IPv6 address), which `iptables-persistent` restores at boot. Other rules in those
+files are preserved; rerunning the installer replaces only rules commented
+`ludus-wireguard`. The forwarding sysctl is persisted in
+`/etc/sysctl.d/99-ludus-wireguard-forward.conf`. The online installer installs
+`iptables-persistent` when missing, without saving the current live ruleset.
+
+Forwarding is not needed when the computers that will use WireGuard can already
+reach the container's management address directly. In the interactive form,
+confirming **Enabled** opens a short notice describing these host changes, with
+a choice to keep forwarding or disable it. Select **Disabled**, pass
+`--no-wg-forward`, or set `NO_WG_FORWARD=1` to opt out. Use `--wg-endpoint` to
+select a directly reachable container address or an endpoint whose forwarding
+you manage separately. Upstream routers still need their own UDP forward to the
+Proxmox host. Host migrations use their existing forwarding service; opting out
+skips WireGuard forwarding but preserves API forwarding.
+
+When run as `root`, the installer creates `root@pam!ludus-lxc-<VMID>` if no token
+was provided. Creation happens only after confirmation and validation, using the
+selected VMID. Existing tokens are never rotated; supply an existing token and
+secret together or choose another VMID.
 
 The installer then:
 
-1. Validates the token against the local Proxmox API.
-2. Creates and applies the `ludus` SDN zone and `ludusnat` VNet.
-3. Downloads and verifies the release LXC appliance, unless it is already in
+1. Downloads and verifies the release LXC appliance, unless it is already in
    `/var/lib/vz/template/cache`.
+2. Creates or validates the token against the local Proxmox API.
+3. Creates and applies the `ludus` SDN zone and `ludusnat` VNet.
 4. Creates and starts the container.
-5. Writes `/opt/ludus/config.yml` inside the container.
-6. Waits up to five minutes for the first-boot bootstrap.
+5. Writes `/opt/ludus/config.yml` inside the container, plus the initial admin
+   details from the form.
+6. Waits up to five minutes for the first-boot bootstrap, which creates the
+   initial admin user, its Proxmox account, and its default range.
+7. Creates the persistent WireGuard UDP forward unless disabled.
 
-The final output contains the Ludus API address and the WireGuard endpoint.
+Interactive installs show the current step beside a spinner, with finished
+steps listed above it, and end with a summary framed by rules above and below. Command output is shown only
+when a step fails. `--no-prompt` installs print plain `[+]` step lines and a
+text summary instead, which suits automation logs.
+
+The final output contains the Ludus API and web UI addresses and three
+commands that configure `ludus-client` with the initial admin's API key and
+list all ranges. The summary has no side borders, so the commands can be
+selected and pasted as-is:
+
+```shell
+export LUDUS_URL=https://<container-ip>:8080
+export LUDUS_API_KEY=<initial-admin-api-key>
+ludus range list all
+```
+
+Store the key securely; it is not shown again, but you can create a new one in
+the web UI (`https://<container-ip>:8080/ui`), where you sign in with the admin
+email and password. `--no-prompt` installs do
+not create an admin user; use the root API key inside the container
+(`/opt/ludus/install/root-api-key`) with `ludus user add`.
 Continue with [Create additional users](../quick-start/create-a-user.md) and
 [Build templates](../quick-start/build-templates.md).
 
+## Hosts with a single public address
+
+Cloud VMs and many rented servers have only one public address, so the network
+has no spare address for the Ludus container. Put the container on a private
+NAT bridge instead:
+
+1. On the Proxmox host, create a private bridge with masquerading as described
+   in the Proxmox [Network Configuration](https://pve.proxmox.com/wiki/Network_Configuration)
+   guide ("Masquerading (NAT) with iptables"). Choose a subnet outside
+   `10.0.0.0/8` (range networks), `192.0.2.0/24` (`ludusnat`), and
+   `198.51.100.0/24` (WireGuard clients). For example, in
+   `/etc/network/interfaces`:
+
+   ```
+   auto vmbr1
+   iface vmbr1 inet static
+       address 172.16.100.1/24
+       bridge-ports none
+       bridge-stp off
+       bridge-fd 0
+       post-up   echo 1 > /proc/sys/net/ipv4/ip_forward
+       post-up   iptables -t nat -A POSTROUTING -s '172.16.100.0/24' -o vmbr0 -j MASQUERADE
+       post-down iptables -t nat -D POSTROUTING -s '172.16.100.0/24' -o vmbr0 -j MASQUERADE
+   ```
+
+   Replace `vmbr0` with the interface that carries the host's address. On a
+   cloud VM, leave the provider's network interface unbridged (for example
+   `ens4` or `eth0`) and use it here. Apply the change with `ifreload -a`. If
+   the Proxmox firewall is enabled, also add the conntrack zone rules from that
+   guide.
+2. In the installer, select `vmbr1` as the management bridge, an address such as
+   `172.16.100.2/24`, and gateway `172.16.100.1`.
+3. Set the WireGuard endpoint to the host's public address or DNS name, and keep
+   WireGuard forwarding enabled. The default endpoint is the node's own address,
+   which in a cloud VPC is usually private. Allow the WireGuard UDP port (51820 by
+   default) in the provider's firewall.
+4. The API and web UI listen on the container's private address, which only the
+   Proxmox host can reach. Run the three commands from the installer summary on
+   the Proxmox host (the install script installs the client there), then create
+   users and download WireGuard configurations with `ludus user wireguard`.
+   Connected WireGuard clients reach the API and web UI at
+   `https://198.51.100.1:8080` (set `LUDUS_URL` to that address).
+
 ## Non-interactive install
 
-Use `--no-prompt` for automation. Supply a static LXC address or provide
-`--wg-endpoint` explicitly when using DHCP.
+Use `--no-prompt` for automation and supply `--ip STATIC_CIDR` and `--gw IP`.
+Unattended installs do not probe for or choose a management address. Host
+migrations can instead use the static address allocated by their private
+management-network plan.
+The WireGuard endpoint defaults to the local Proxmox node's IP; override it with
+`--wg-endpoint`. Host UDP forwarding is enabled unless `--no-wg-forward` is set.
 
 ```shell
 VERSION=2.3.0
@@ -115,6 +278,8 @@ Secrets passed on the command line may be visible in the process list and shell
 history.
 
 Run `./install.sh --help` for the complete option list.
+`ludus-installer --build-version` prints the native executable's build version;
+`--version TAG` selects the release to install, rather than printing a version.
 
 ## Use a local appliance archive
 
@@ -177,6 +342,11 @@ both services and API health using the configured ports. `--credentials` display
 initial-admin credentials only when the initial-admin marker exists, and never
 rotates an API key. A migrated installation without that marker retains its
 existing users; the status command does not create an administrator.
+The status helper is the native installer exposed as `ludus-install-status`,
+not a Python script. On the host its executable is
+`/usr/local/libexec/ludus-installer`; inside the LXC it is
+`/opt/ludus/install/ludus-installer`. Either executable also accepts `--status`
+and optional `--credentials`.
 WireGuard listens on UDP 51820.
 
 The server configuration is `/opt/ludus/config.yml` inside the LXC. Restart both
@@ -206,7 +376,7 @@ installers, or files downloaded by user-supplied Ansible roles.
 
 The simplest reliable process is:
 
-1. Stage the Enterprise offline installer, the same release's `install.sh`, and signed media before disconnecting the cluster.
+1. Stage the Ludus Enterprise offline installer, the same release's `ludus-installer`, and signed media before disconnecting the cluster.
 2. Build every required Proxmox VM template while the cluster still has access
    to its package and artifact sources.
 3. Preload any package caches using the same range configuration that will be
@@ -220,25 +390,28 @@ every required URL or import VM templates prepared elsewhere.
 ### Stage the offline distribution
 
 Use the Ludus Enterprise `install-offline.sh`, not the public installer URL or
-`install.sh --airgapped`. Place it beside the **same release's `install.sh`**: it
-sources the shared provisioning code locally and never downloads a replacement.
+`install.sh --airgapped`. Place it beside the **same release's
+`ludus-installer` executable**. It verifies that binary against the signed
+manifest before running it in offline mode. It does not source or require
+`install.sh` and never downloads a replacement.
 
 Stage the following on a connected preparation system:
 
-- Both installer scripts from the same release.
+- `install-offline.sh` and the matching `ludus-installer` executable.
 - The versioned `ludus-<version>-debian13-amd64.tar.zst` appliance.
-- Every pinned ISO listed by `AIRGAPPED_ISO_FILENAMES` in `install-offline.sh`,
-  including both VirtIO images, in one local ISO directory.
+- Every pinned ISO listed by `airgappedISOFilenames` in the root
+  `ludus-installer/` module, including both VirtIO images, in one local directory.
 - `bginfo.exe` from `https://live.sysinternals.com/bginfo.exe`. The appliance
   does not include BgInfo; Ludus copies it to Windows range VMs.
 - A SHA-256 manifest, its detached signature, and a trusted release-signing
-  public key. The manifest must cover the appliance, all ISOs, `bginfo.exe`,
+  public key. The manifest must cover `ludus-installer`, the appliance, all ISOs,
+  `bginfo.exe`,
   and any plugin, offline license, or state archive supplied to the installer.
 - Any site-specific CA certificate required by the environment.
 
-Verify the distribution before executing either script. On the disconnected
-Proxmox node, run the offline entry point using a shared storage pool that
-supports ISO content:
+Verify the distribution before executing it. Offline `--prefix` is rejected:
+this entry point installs only the server, not the client. On the disconnected
+Proxmox node, run it using a shared storage pool that supports ISO content:
 
 ```shell
 VERSION=2.4.0
@@ -266,9 +439,10 @@ does not waive the requirement for all local files or shared ISO storage.
 
 For a host-to-LXC migration, add `--migrate-host` and follow the
 [migration prerequisites](../infrastructure-operations/migrate-to-lxc.md).
-Install `conntrack` on the host before disconnecting it: the offline entry point
-never installs missing host dependencies. It does not support updates of an
-existing LXC.
+Install `conntrack` (migration) or `iptables-persistent` (fresh install) on the
+host before disconnecting it, unless WireGuard forwarding is disabled: the
+offline entry point never installs missing host dependencies. It does not
+support updates of an existing LXC.
 
 The shared installer retains `--template-file` for CI and development, but that
 option alone does not enable the supported air-gap workflow.
@@ -433,9 +607,9 @@ router:
 
 Before removing egress, verify all of the following:
 
-- `install-offline.sh`, its matching `install.sh`, the LXC archive, all pinned
-  ISOs, `bginfo.exe`, and the signed manifest/signature/trusted key are stored
-  locally.
+- `install-offline.sh`, its matching `ludus-installer`, the LXC archive, all
+  pinned ISOs, `bginfo.exe`, and the signed manifest/signature/trusted key are
+  stored locally.
 - The Proxmox cluster is quorate and all configured API endpoints answer.
 - DNS and NTP work without Internet access.
 - `ludus templates list` reports `BUILT` for every template in the range.

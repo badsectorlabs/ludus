@@ -55,12 +55,18 @@ Seven Python installer-status tests passed; three build-isolation tests were ski
 because they require Linux. Shell syntax and touched CI/Ansible YAML parsing passed.
 These checks do not exercise Proxmox, systemd, hotplug, WireGuard, or an actual IdP.
 
+These are historical results from before the native installer cutover, not a
+verification claim for the current engine. Python installer-status coverage
+has been replaced by Go tests in `ludus-installer/`.
+
 Relevant existing coverage:
 
-- `ludus-server/migration_test.go`: live SQLite snapshot, inventory independent of
-  the legacy VM cache, router identity, archive rejection, configuration merge,
-  TLS selection, WireGuard validation, environment parsing, and private Git credentials.
-  It does not exercise a populated installation through the whole shell cutover.
+- `ludus-installer/migration_test.go` and `migration_state_test.go` now own the
+  state coverage previously in `ludus-server/migration_test.go`: live SQLite
+  snapshot, inventory independent of the legacy VM cache, router identity,
+  archive rejection, configuration merge, TLS selection, WireGuard validation,
+  environment parsing, and private Git credentials. Unit coverage does not prove
+  a populated installation through the complete native cutover.
 - `bootstrap_test.go`, `reconcile_test.go`, `localgen/*_test.go`, and
   `ludus-api/pveclient/*_test.go`: mocked Proxmox provisioning and local generation.
 - `ludus-api/sso_test.go`: existing-account policy through PocketBase's OAuth route
@@ -78,8 +84,9 @@ Relevant existing coverage:
   may choose migration depending on that snapshot; the job does not assert preservation
   of existing SSO identities, client credentials, VM state, or failure recovery.
 
-Primary implementation references: `install.sh`, `ludus-server/migration.go`,
-`ludus-server/lxc/migrate-host.sh`, `ludus-server/bootstrap.go`,
+Primary implementation references: the root `ludus-installer/` Go module
+(`migration.go`, `migration_host.go`, `migration_host_runtime.go`, `provision.go`,
+`artifacts.go`, and `status.go`), the thin `install.sh` bootstrap, `ludus-server/bootstrap.go`,
 `ludus-server/reconcile.go`, `ludus-api/database.go`, `ludus-api/plugins.go`,
 `ludus-api/license.go`, and `ludus-api/plugin_resources.go`.
 Read [DEVELOPERS.md](../DEVELOPERS.md) and the
@@ -156,10 +163,12 @@ for newly created users must not rewrite old principals or invalidate their toke
    environment files, or the source database. Package the candidate on the reserved
    nested VM according to DEVELOPERS.md; this is not done by `-B` alone.
 4. Run that branch's installer **inside the reserved nested VM**. For the explicit
-   path, use `bash ~/ludus-dev/install.sh --no-prompt --migrate-host --template-file
+   path, use `LUDUS_INSTALLER_BINARY=~/ludus-dev/binaries/ludus-installer
+   bash ~/ludus-dev/install.sh --no-prompt --migrate-host --template-file
    ~/ludus-dev/ludus-CANDIDATE-debian13-amd64.tar.zst --skip-verification` as one command.
-   The bypass is for local development media only. Separate signed-media cases
-   must omit it. Also test auto-detection without `--migrate-host`.
+   The local binary override explicitly trusts the candidate executable; the
+   verification bypass is for local development media only. Separate signed-media
+   cases must omit the bypass. Also test auto-detection without `--migrate-host`.
 5. Observe the old external endpoint from a client outside the nested VM throughout
    cutover. A tunnel directly into the LXC is useful for diagnosis, but cannot prove
    original-endpoint forwarding or unchanged WireGuard profiles.

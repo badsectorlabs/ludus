@@ -16,61 +16,35 @@ import TabItem from '@theme/TabItem';
 
 ## Updating a Ludus server 
 
-Simply run the install script again. It will detect an existing installation and update the server.
+Run the install script again as root on the Proxmox host and answer `y` when it offers to install or upgrade the server.
 
-When the installer finds a host-installed Ludus 2.x server on Proxmox, it
-offers the one-time migration to the LXC runtime. The existing client address,
-API keys, TLS identity, and WireGuard profiles are preserved. See
-[Migrate to LXC](./migrate-to-lxc.md) for the migration checks and rollback
-procedure.
+- If Ludus already runs in an LXC on the host, the installer updates the Ludus runtime inside that container. The database, `/opt/ludus/config.yml`, users, API keys, and WireGuard configurations are preserved.
+- If the host still runs a host-installed Ludus 2.x server, the installer performs the one-time migration to the LXC runtime instead. The existing client address, API keys, TLS identity, and WireGuard profiles are preserved. See [Migrate to LXC](./migrate-to-lxc.md) for the migration checks and rollback procedure.
 
 ```shell
 # terminal-command-local
-ssh user@ludus
+ssh root@proxmox
 
 # All-in-one command
-curl -s https://ludus.cloud/install | bash
+# terminal-command-root-at-proxmox
+curl --proto '=https' --tlsv1.2 -sSf https://ludus.cloud/install | bash
 
 # If you want to check out the install script
+# terminal-command-root-at-proxmox
 curl https://ludus.cloud/install > install.sh
+# terminal-command-root-at-proxmox
 cat install.sh
+# terminal-command-root-at-proxmox
 chmod +x install.sh
+# terminal-command-root-at-proxmox
 ./install.sh
-
-====================================
- _      _   _  ____   _   _  ____
-| |    | | | ||  _ \ | | | |/ ___\
-| |    | | | || | | || | | |\___ \
-| |___ | |_| || |_| || |_| | ___) |
-|____/  \___/ |____/  \___/  \___/
-
-====================================
-[+] Client install prefix set to /usr/local/bin
-[+] Created temp dir at /tmp/ludus-client.AvRubQ
-[+] Architecture detected as x86_64
-[+] OS detected as Linux
-[+] Downloaded ludus-client_linux-amd64-v1.5.0 into /tmp/ludus-client.AvRubQ
-[+] Downloaded ludus checksums file into /tmp/ludus-client.AvRubQ
-[+] Checksum of /tmp/ludus-client.AvRubQ/ludus-client_linux-amd64-v1.5.0 verified
-[+] Install prefix already exists. No need to create it.
-[+] Asking for sudo password to install file: /tmp/ludus-client.AvRubQ/ludus to directory: /usr/local/bin/
-[sudo] password for debian:
-[+] Installed ludus-client_linux-amd64-v1.5.0 to /usr/local/bin/ as 'ludus'
-[+] Ludus client installation complete
-[+] Shell completions already installed
-[+] Ludus server already installed in /opt/ludus
-[?] Would you like to update the Ludus server on this host?
-[?] (y/n): y
-[+] Updating Ludus server
-[+] Downloaded ludus-server-v1.5.0 into /tmp/ludus-client.AvRubQ
-[+] Checksum of /tmp/ludus-client.AvRubQ/ludus-server-v1.5.0 verified
-Backed up /opt/ludus/ansible to /opt/ludus/previous-versions/1724356681992145034/ansible
-Backed up /opt/ludus/packer to /opt/ludus/previous-versions/1724356681992145034/packer
-Backed up /opt/ludus/ci to /opt/ludus/previous-versions/1724356681992145034/ci
-Extracting ludus to /opt/ludus...
-Ludus files extracted successfully
-Ludus updated to v1.5.0+2d39950
 ```
+
+:::caution
+
+    In-place updates of an existing Ludus LXC currently use the beta release channel (`install-beta.sh`); the stable channel stops with `an existing LXC is only updated by the beta channel`. The installer installs the release you select without comparing it to the running version, so do not select an older release with `--version`.
+
+:::
 
 :::note
 
@@ -80,7 +54,7 @@ Ludus updated to v1.5.0+2d39950
 
 :::warning
 
-    The Ludus server binary will refuse to update if any `ansible` or `packer` processes are active on the machine to prevent possible interruption to active range or template activity.
+    The Ludus server binary will refuse to update if any `ansible` or `packer` processes are active inside the Ludus LXC to prevent possible interruption to active range or template activity.
 
 :::
 
@@ -106,8 +80,8 @@ its old defaults.
 sudo cp -- /opt/ludus/previous-versions/TIMESTAMP/ansible/server-config.yml /opt/ludus/ansible/server-config.yml
 ```
 
-For LXC installations, these paths and the restore command are inside the Ludus
-LXC, not on the Proxmox host. This applies to ordinary updates; the one-time
+These paths and the restore command are inside the Ludus LXC (`pct enter <vmid>`),
+not on the Proxmox host. This applies to ordinary updates; the one-time
 [host-to-LXC migration](./migrate-to-lxc.md) preserves the imported defaults.
 
 ## Updating the Ludus client
@@ -189,21 +163,27 @@ PS C:\> irm https://ludus.cloud/install-client.ps1 | iex
 
 ## Updating a Ludus server manually
 
-Updating a Ludus server manually is easy:
+The server binary runs its update inside the Ludus LXC, never on the Proxmox host.
 
-1. Download the server [release binary](https://gitlab.com/badsectorlabs/ludus/-/releases) (or build from source) of the version you wish to update to.
-1. Copy the Ludus server binary to the Ludus server host
-1. Run the Ludus server binary as root with the `--update` flag.
+1. Download the server [release binary](https://gitlab.com/badsectorlabs/ludus/-/releases) (or build from source) of the version you wish to update to, and verify it against the release checksums.
+1. Copy the Ludus server binary to the Proxmox host.
+1. Push it into the Ludus LXC and run it with the `--update` flag. The installer records the LXC's VMID in `/etc/ludus-lxc.json`.
 
+```shell
+# terminal-command-local
+scp ludus-server root@proxmox:
+# terminal-command-local
+ssh root@proxmox
+# terminal-command-root-at-proxmox
+VMID=$(python3 -c 'import json; print(json.load(open("/etc/ludus-lxc.json"))["vmid"])')
+# terminal-command-root-at-proxmox
+pct push "$VMID" ludus-server /tmp/ludus-server --perms 0700
+# terminal-command-root-at-proxmox
+pct exec "$VMID" -- env HOME=/root TMPDIR=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  PATH=/opt/ludus/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  /tmp/ludus-server --update
+# terminal-command-root-at-proxmox
+pct exec "$VMID" -- rm -f /tmp/ludus-server
 ```
-local:~$ scp ludus-server user@ludus:
-local:~$ ssh user@ludus
-user@ludus:~$ chmod +x ludus-server
-user@ludus:~$ sudo ./ludus-server --update
-Backed up /opt/ludus/ansible to /opt/ludus/previous-versions/1707349133263620491/ansible
-Backed up /opt/ludus/packer to /opt/ludus/previous-versions/1707349133263620491/packer
-Backed up /opt/ludus/ci to /opt/ludus/previous-versions/1707349133263620491/ci
-Extracting ludus to /opt/ludus...
-Ludus files extracted successfully
-Ludus updated to v1.0.2+6a96b3ef
-```
+
+The install script also records the running version in the `version` field of `/etc/ludus-lxc.json`. Update that field to match after a manual update, then run `ludus-install-status` to check the services.

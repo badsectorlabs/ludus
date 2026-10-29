@@ -28,7 +28,10 @@ import (
 	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v2"
+	_ "modernc.org/sqlite"
 )
+
+const migrationBootstrapMarker = "/opt/ludus/install/.bootstrap-complete"
 
 // Version 1 is a state archive, not an installation backup. Runtime payloads
 // are always supplied by the new appliance, never by this archive.
@@ -1261,7 +1264,7 @@ func migrationMergeConfig(old, generated map[string]interface{}) (map[string]int
 	for key, value := range old {
 		merged[key] = value
 	}
-	for _, key := range []string{"proxmox_node", "proxmox_hostname", "proxmox_endpoints", "proxmox_token_id", "proxmox_token_secret", "proxmox_invalid_cert", "proxmox_user_realm", "proxmox_vm_storage_pool", "proxmox_vm_storage_format", "proxmox_iso_storage_pool", "ludus_nat_interface", "ludus_nat_ip", "ludus_nat_gateway", "ludus_dns_server", "sdn_zone", "vxlan_tag_base", "host_managed_network", "tls_cert_file", "tls_key_file"} {
+	for _, key := range []string{"proxmox_node", "proxmox_hostname", "proxmox_endpoints", "proxmox_token_id", "proxmox_token_secret", "proxmox_invalid_cert", "proxmox_user_realm", "proxmox_vm_storage_pool", "proxmox_vm_storage_format", "proxmox_iso_storage_pool", "ludus_nat_interface", "ludus_nat_ip", "ludus_nat_gateway", "ludus_dns_server", "sdn_zone", "vxlan_tag_base", "host_managed_network", "airgapped_install", "tls_cert_file", "tls_key_file"} {
 		if value, ok := generated[key]; ok {
 			merged[key] = value
 		}
@@ -1620,7 +1623,7 @@ func migrationValidatePlugins(directory string) error {
 	if err != nil {
 		return fmt.Errorf("validate enterprise package %s: %w", directory, err)
 	}
-	if manifest.ID != "ludus-enterprise" || manifest.Executable == "" {
+	if manifest.ID != enterprisePluginID || manifest.Executable == "" {
 		return fmt.Errorf("unexpected enterprise package identity in %s", directory)
 	}
 	filename := filepath.Join(directory, protocol.ExecutableFile)
@@ -1656,16 +1659,17 @@ func migrationPreserveRouterDefault(stage, template string) error {
 
 // Migration keeps the administrator's global defaults, but release playbooks can
 // require variables added after the legacy release (e.g. machine credential
-// paths). Add only absent top-level keys; never replace administrator values.
-func migrationAddReleaseVariables(stage string) error {
+// paths). Add only absent top-level keys from the release defaults at bundled;
+// never replace administrator values.
+func migrationAddReleaseVariables(stage, bundledPath string) error {
 	filename := filepath.Join(stage, "opt/ludus/ansible/server-config.yml")
 	values, err := migrationReadYAML(filename)
 	if err != nil {
 		return err
 	}
-	content, err := embeddedAnsbileDir.ReadFile("ansible/server-config.yml")
+	content, err := os.ReadFile(bundledPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("read bundled global Ansible defaults: %w", err)
 	}
 	var bundled map[string]interface{}
 	if err := yaml.Unmarshal(content, &bundled); err != nil {
@@ -1694,7 +1698,7 @@ func importMigrationState(archive string) error {
 	if _, err := exec.LookPath("pveversion"); err == nil {
 		return errors.New("import-state must run inside the new Ludus appliance, not on the Proxmox host")
 	}
-	if _, err := os.Stat(bootstrapMarker); err == nil {
+	if _, err := os.Stat(migrationBootstrapMarker); err == nil {
 		return errors.New("refusing to import over an already bootstrapped appliance")
 	} else if !os.IsNotExist(err) {
 		return err
@@ -1720,8 +1724,8 @@ func importMigrationState(archive string) error {
 		return errors.New("migration requires the LXC Ludus service account home to be /home/ludus")
 	}
 	if m.RequiresPlugin {
-		if err := migrationValidatePlugins("/opt/ludus/plugins/ludus-enterprise"); err != nil {
-			return fmt.Errorf("legacy license/plugins require the Enterprise package; supply it to install.sh before migration: %w", err)
+		if err := migrationValidatePlugins(enterprisePluginDir); err != nil {
+			return fmt.Errorf("legacy license/plugins require the Enterprise package; supply --enterprise-plugin to ludus-installer before migration: %w", err)
 		}
 	}
 	merged, err := migrationMergeConfig(old, generated)
@@ -1741,7 +1745,9 @@ func importMigrationState(archive string) error {
 	if err := migrationPreserveRouterDefault(stage, m.RouterTemplate); err != nil {
 		return err
 	}
-	if err := migrationAddReleaseVariables(stage); err != nil {
+	// The appliance's own defaults are still in place: the staged legacy file
+	// replaces them only after this import completes.
+	if err := migrationAddReleaseVariables(stage, "/opt/ludus/ansible/server-config.yml"); err != nil {
 		return fmt.Errorf("add release Ansible variables: %w", err)
 	}
 	if err := migrationMergeResources(stage); err != nil {
@@ -1828,45 +1834,6 @@ func importMigrationState(archive string) error {
 		}
 	}
 	return err
-}
-
-func refuseLegacyHostUpdate() error {
-	if _, err := os.Stat(bootstrapMarker); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if _, err := exec.LookPath("pveversion"); err == nil {
-		return errors.New("this is a legacy host installation; --update cannot replace it with an LXC binary. Run install.sh --migrate-host instead (services were not stopped)")
-	}
-	return nil
-}
-
-// The CA is injected outside the embedded packer payload. Re-seed every HTTP
-// seed directory after replacing packer during an ordinary appliance update.
-func preserveInjectedCA() error {
-	const source = "/usr/local/share/ca-certificates/ludus-injected-ca.crt"
-	if _, err := os.Stat(source); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	return filepath.Walk("/opt/ludus/packer", func(filename string, st os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !st.IsDir() || st.Name() != "http" {
-			return nil
-		}
-		dst := filepath.Join(filename, "ludus-injected-ca.crt")
-		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		if err := migrationCopyFile(source, dst, 0644); err != nil {
-			return err
-		}
-		return filepath.SkipDir
-	})
 }
 
 func migrationValidateWireguard(dir string, port int) error {

@@ -57,19 +57,30 @@ Run the normal installer on the existing Proxmox host:
 curl --proto '=https' --tlsv1.2 -sSf https://ludus.cloud/install | bash
 ```
 
-After updating the local client, the installer reports the detected 2.x server
-and asks whether to upgrade it. It requests `sudo` once for the server portion.
-For unattended automation, use `--no-prompt`; detection still selects the
-migration path. `--migrate-host` remains available when invoking a downloaded
-installer directly.
+The thin online bootstrap installs the client, then offers the native
+`ludus-installer` on supported Proxmox hosts, requesting `sudo` if needed.
+The native engine detects the legacy server and selects migration. Its
+Bubble Tea/Lip Gloss/Huh UI shows the license followed by the settings form.
+For unattended automation, `--no-prompt` bypasses both dialogs; detection still
+selects migration. `--migrate-host` remains available explicitly. Use
+`--server-only` with the bootstrap to skip client installation; the bootstrap
+consumes that flag before handing off.
 
 Use `--version` to select a release, and the normal installer options to choose
 an unused `--vmid`, container storage, or a local `--template-file`.
+`ludus-installer --build-version` prints the executable's own build version.
+State utilities and migration belong to the root `ludus-installer/` Go module;
+runtime bootstrap and updates remain in `ludus-server`.
 
 Omit `--bridge`, `--ip`, and `--gw` to create a private management bridge
 automatically. Alternatively, supply all three with an unused static address.
 The private management address is separate from the existing client endpoint;
 clients do not need a new server address.
+
+WireGuard UDP forwarding is enabled by default and persists across host reboots.
+Disable it in the form or pass `--no-wg-forward` (`NO_WG_FORWARD=1`) if you manage
+that forwarding separately. Upstream routers still need their
+own forwarding configuration.
 
 The installer:
 
@@ -134,11 +145,12 @@ Check `/opt/ludus/install/install.log` inside the LXC for bootstrap failures.
 Retain the migration directory and backup until validation is complete; the
 committed forwarding service uses the saved network metadata.
 
-If automatic rollback reports an error, the saved helper can be rerun as root:
+If automatic rollback reports an error, rerun the journal-staged native
+executable as root:
 
 ```bash
-bash /var/lib/ludus-migration/upgrade.XXXXXXXX/migrate-host.sh \
-  --rollback /var/lib/ludus-migration/upgrade.XXXXXXXX
+/var/lib/ludus-migration/upgrade.XXXXXXXX/ludus-installer \
+  --migration-rollback /var/lib/ludus-migration/upgrade.XXXXXXXX
 ```
 
 Replace `upgrade.XXXXXXXX` with the directory reported by your migration.
@@ -150,12 +162,18 @@ of restoring competing services. Retry with an unused VMID; existing containers
 and API tokens are not overwritten. Do not roll back a committed migration after
 users have changed data in the LXC without first reconciling those changes.
 
+Rollback requires the candidate's saved ownership marker to match before it
+stops or disables the container. Do not edit that marker or reuse the candidate
+VMID for another workload while recovery metadata is retained.
+
 ## Importing onto another host
 
 `--import-db` accepts the versioned state archive produced by this release's
-`ludus-server --export-state PATH`, with the old Ludus services stopped. A raw
+`ludus-installer --export-state PATH`, with the old Ludus services stopped. A raw
 tarball containing only `db`, `config.yml`, and `/etc/wireguard` is no longer a
 supported migration archive.
+The native installer also owns `--export-state-live`, `--import-state`, and
+`--migration-info`; these are not `ludus-server` flags.
 
 State import does not move VM disks or perform the old host's network cutover.
 Plan those operations and preserve the external WireGuard endpoint separately;
