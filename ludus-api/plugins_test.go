@@ -176,10 +176,9 @@ func TestAPIRouteConflicts(t *testing.T) {
 func TestLicenseStateHandOff(t *testing.T) {
 	install := t.TempDir()
 	setPluginServiceRunAs(t, protocol.RunAsRoot)
-	// A recent refresh keeps the license flow from running in the test.
-	admin := &Server{LudusInstallPath: install, lastLicensedRefresh: time.Now()}
+	admin := &Server{LudusInstallPath: install}
 	expiry := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
-	granted := protocol.License{Valid: true, Message: "License active", Name: "Example Org", Expiry: &expiry, Entitlements: []string{enterpriseEntitlement, antisandboxEntitlement}}
+	granted := protocol.License{Valid: true, Message: "License active", Name: "Example Org", Expiry: &expiry, Entitlements: []string{enterpriseEntitlement, "ANTISANDBOX_PLUGIN"}}
 	admin.setLicenseFromPlugin(granted)
 	info, err := os.Stat(admin.licenseStatePath())
 	if err != nil || info.Mode().Perm() != 0644 {
@@ -212,31 +211,6 @@ func TestLicenseStateHandOff(t *testing.T) {
 	regular.setLicenseFromPlugin(protocol.License{Valid: false, Message: "forged"})
 	if err := admin.loadLicenseState(); err != nil || admin.licenseSnapshot().Message != "License active without add-ons" {
 		t.Fatalf("regular service wrote license-state.json: %+v, %v", admin.licenseSnapshot(), err)
-	}
-}
-
-func TestRequestAddOnRequiresEntitledAdminService(t *testing.T) {
-	setPluginServiceRunAs(t, protocol.RunAsRoot)
-	s := &Server{LudusInstallPath: t.TempDir()}
-	for _, test := range []struct {
-		name    string
-		addOn   string
-		license protocol.License
-		runAs   protocol.RunAs
-		code    protocol.ErrorCode
-	}{
-		{"unknown add-on", "ludus-other", protocol.License{Valid: true, Entitlements: []string{antisandboxEntitlement}}, protocol.RunAsRoot, protocol.CodeInvalid},
-		{"regular service", antisandboxPluginID, protocol.License{Valid: true, Entitlements: []string{antisandboxEntitlement}}, protocol.RunAsLudus, protocol.CodeUnavailable},
-		{"missing entitlement", antisandboxPluginID, protocol.License{Valid: true, Entitlements: []string{enterpriseEntitlement}}, protocol.RunAsRoot, protocol.CodeForbidden},
-		{"invalid license", antisandboxPluginID, protocol.License{Entitlements: []string{antisandboxEntitlement}}, protocol.RunAsRoot, protocol.CodeForbidden},
-	} {
-		setPluginServiceRunAs(t, test.runAs)
-		s.applyLicense(test.license)
-		err := s.requestAddOn(test.addOn)
-		var hostErr *protocol.HostError
-		if !errors.As(err, &hostErr) || hostErr.Code != test.code {
-			t.Errorf("%s: err = %v, want %s", test.name, err, test.code)
-		}
 	}
 }
 
@@ -363,14 +337,16 @@ func TestAPIRouteClaimsSpanBothServices(t *testing.T) {
 	}
 
 	// The license flow does not install a release claiming an active route.
-	licensed := testExecutableManifest(antisandboxPluginID)
+	licensed := testExecutableManifest("ludus-antisandbox")
 	licensed.Level, licensed.RunAs, licensed.Version = protocol.LevelSystem, protocol.RunAsRoot, "1.0.0"
 	licensed.Routes = []protocol.Route{{Name: "other", Method: "GET", Pattern: "/other/status", Scope: protocol.ScopeAPI}}
-	err = env.server.installLicensedPackage(testPackage(t, licensed, map[string]string{protocol.ExecutableFile: "#!/bin/sh\n"}), antisandboxPluginSpec, "1.0.0")
-	if err == nil || !strings.Contains(err.Error(), "other-plugin") {
+	spec := licensedPluginSpec{id: "ludus-antisandbox", productID: LicenseProductLudus, packageUUID: "package-id", entitlements: []string{"ANTISANDBOX_PLUGIN"}}
+	err = env.server.installLicensedPackage(testPackage(t, licensed, map[string]string{protocol.ExecutableFile: "#!/bin/sh\n"}), spec, "1.0.0")
+	var conflict *routeConflictError
+	if !errors.As(err, &conflict) || !strings.Contains(err.Error(), "other-plugin") {
 		t.Fatalf("license install with a conflicting route: %v", err)
 	}
-	if _, err := os.Stat(env.server.licensedPackageDir(antisandboxPluginID)); !os.IsNotExist(err) {
+	if _, err := os.Stat(env.server.licensedPackageDir("ludus-antisandbox")); !os.IsNotExist(err) {
 		t.Fatal("conflicting release was installed")
 	}
 }

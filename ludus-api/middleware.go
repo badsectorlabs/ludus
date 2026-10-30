@@ -232,9 +232,11 @@ func limitRootEndpoints(e *core.RequestEvent) error {
 		return JSONError(e, http.StatusInternalServerError, fmt.Sprintf("The :%d endpoint can only be used for user, range creation/deletion, migrations, and root-run plugin actions. Use the :%d endpoint for all other actions.", ServerConfiguration.AdminPort, ServerConfiguration.Port))
 	} else if os.Geteuid() != 0 && adminPlugin {
 		err := proxyToAdmin(e)
-		// Activation and removal change the routes the admin service hosts.
-		if !strings.Contains(e.Request.URL.Path, "/rpc/") && strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/plugins/") {
-			server.refreshPluginDeclarations(server.installedPackages())
+		// Activation, installation, and removal change the packages and routes
+		// of both services; licensed ludus-run plugins start or stop here.
+		if !strings.Contains(e.Request.URL.Path, "/rpc/") &&
+			(strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/plugins/") || strings.HasPrefix(e.Request.URL.Path, APIBasePath+"/plugin-catalog/")) {
+			server.syncInstalledPackages()
 		}
 		return err
 	} else if os.Geteuid() != 0 && !server.localPluginAPIRoute(e) &&
@@ -267,15 +269,25 @@ func (s *Server) localPluginAPIRoute(e *core.RequestEvent) bool {
 
 // adminPluginRequest reports whether a request targets a root-run plugin,
 // which only the admin service hosts: its plugin-scope RPC, its activation,
-// removal, and withdrawal, and its API routes. The regular service proxies
-// these requests; the admin service admits them.
+// removal, and withdrawal, and its API routes. Official plugin installs and
+// licensed package uninstalls also run there, since it owns the root-owned
+// package files. The regular service proxies these requests; the admin
+// service admits them.
 func (s *Server) adminPluginRequest(e *core.RequestEvent) bool {
 	if s == nil {
 		return false
 	}
+	if rest, ok := strings.CutPrefix(e.Request.URL.Path, APIBasePath+"/plugin-catalog/"); ok {
+		_, action, _ := strings.Cut(rest, "/")
+		return action == "install" && e.Request.Method == http.MethodPost
+	}
 	if rest, ok := strings.CutPrefix(e.Request.URL.Path, APIBasePath+"/plugins/"); ok {
 		pluginID, action, _ := strings.Cut(rest, "/")
 		if action == "withdraw" && e.Request.Method == http.MethodPost {
+			return true
+		}
+		if action == "" && e.Request.Method == http.MethodDelete && e.Request.URL.Query().Get("uninstall") == "true" &&
+			s.PluginResources.licensedUninstallRecord(e.Auth, pluginID) {
 			return true
 		}
 		if (action == "" && e.Request.Method == http.MethodDelete) ||

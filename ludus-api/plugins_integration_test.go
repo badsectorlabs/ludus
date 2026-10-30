@@ -20,12 +20,15 @@ import (
 
 // testProcessPlugin is served by the re-executed test binary. It calls the host
 // service from Initialize, Handle, and RunJob, and reports whether the CallIDs
-// of earlier calls still work. With metadata.App it also serves an app.
+// of earlier calls still work. With metadata.App it also serves an app. With
+// the Enterprise ID its job, like Enterprise's license check, hands the host
+// the license it was initialized with, marked with its version.
 type testProcessPlugin struct {
 	metadata protocol.Metadata
 
 	mu       sync.Mutex
 	host     *protocol.HostClient
+	license  protocol.License
 	initCall protocol.CallID
 	jobCall  protocol.CallID
 	jobErr   string
@@ -55,7 +58,7 @@ func (p *testProcessPlugin) Initialize(request protocol.InitializeRequest, host 
 		return protocol.InitializeResponse{}, fmt.Errorf("host call during Initialize: %w", err)
 	}
 	p.mu.Lock()
-	p.host, p.initCall = host, request.Call
+	p.host, p.initCall, p.license = host, request.Call, request.Env.License
 	p.mu.Unlock()
 	return protocol.InitializeResponse{Jobs: []protocol.ScheduledJob{{Name: "probe", Interval: time.Hour}}}, nil
 }
@@ -84,9 +87,13 @@ func (p *testProcessPlugin) Handle(request protocol.Request) (protocol.Response,
 
 func (p *testProcessPlugin) RunJob(request protocol.JobRequest) error {
 	p.mu.Lock()
-	host := p.host
+	host, license := p.host, p.license
 	p.mu.Unlock()
 	_, err := host.License(request.Call)
+	if err == nil && p.metadata.ID == enterprisePluginID {
+		license.Message = "Enterprise " + p.metadata.Version + ": " + license.Message
+		err = host.SetLicenseState(request.Call, license)
+	}
 	p.mu.Lock()
 	p.jobCall, p.jobErr = request.Call, hostErrorCode(err)
 	p.mu.Unlock()

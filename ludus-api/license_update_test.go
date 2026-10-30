@@ -82,7 +82,7 @@ func TestLookupLicensedPluginRelease(t *testing.T) {
 			client := newPluginReleaseTestClient(t, func(response http.ResponseWriter, request *http.Request) {
 				response.Header().Set("Content-Type", "application/vnd.api+json")
 				query := request.URL.Query()
-				if query.Get("product") != LicenseProductLudus || query.Get("package") != "package-id" || query.Get("channel") != "stable" {
+				if query.Get("product") != "product-id" || query.Get("package") != "package-id" || query.Get("channel") != "stable" {
 					response.WriteHeader(http.StatusBadRequest)
 					fmt.Fprint(response, `{"errors":[{"title":"Invalid scope","code":"BAD_REQUEST"}]}`)
 					return
@@ -112,7 +112,7 @@ func TestLookupLicensedPluginRelease(t *testing.T) {
 				}
 			})
 
-			release, err := lookupLicensedPluginRelease(context.Background(), client, test.currentVersion, "package-id")
+			release, err := lookupLicensedPluginRelease(context.Background(), client, test.currentVersion, "product-id", "package-id")
 			if err != nil {
 				t.Fatalf("lookupLicensedPluginRelease() error = %v", err)
 			}
@@ -157,7 +157,7 @@ func TestLookupLicensedPluginReleasePreservesErrors(t *testing.T) {
 				fmt.Fprintf(response, `{"errors":[{"title":"Request failed","code":%q}]}`, code)
 			})
 
-			release, err := lookupLicensedPluginRelease(context.Background(), client, test.currentVersion, "package-id")
+			release, err := lookupLicensedPluginRelease(context.Background(), client, test.currentVersion, "product-id", "package-id")
 			if err == nil || release != nil {
 				t.Fatalf("lookupLicensedPluginRelease() = (%#v, %v), want nil release and error", release, err)
 			}
@@ -172,7 +172,7 @@ func TestLookupLicensedPluginReleasePreservesCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for _, version := range []string{"", "1.2.3"} {
-		release, err := lookupLicensedPluginRelease(ctx, client, version, "package-id")
+		release, err := lookupLicensedPluginRelease(ctx, client, version, "product-id", "package-id")
 		if !errors.Is(err, context.Canceled) || release != nil {
 			t.Fatalf("lookupLicensedPluginRelease(%q) = (%#v, %v), want nil release and context.Canceled", version, release, err)
 		}

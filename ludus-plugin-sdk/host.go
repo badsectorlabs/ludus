@@ -240,14 +240,6 @@ func (h *Host) SetLicenseState(license protocol.License) error {
 	return c.SetLicenseState(h.call, license)
 }
 
-func (h *Host) RequestAddOn(name string) error {
-	c, err := h.hostClient()
-	if err != nil {
-		return err
-	}
-	return c.RequestAddOn(h.call, name)
-}
-
 // TouchRange records activity on an accessible range using the host's clock.
 func (h *Host) TouchRange(number int) error {
 	c, err := h.hostClient()

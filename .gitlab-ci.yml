@@ -3610,21 +3610,18 @@ keygen-upload:
     - |
       export RELEASE_ID=$(curl -s "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases?package=${LUDUS_ENTERPRISE_PACKAGE_ID}&limit=10" -H "Authorization: Bearer $KEYGEN_TOKEN" -H "Accept: application/vnd.api+json" | jq -r --arg ver "${CI_COMMIT_TAG}" '.data[] | select(.attributes.version == $ver) | .id')
     - echo "Enterprise Release ID for version ${CI_COMMIT_TAG} = $RELEASE_ID"
-    # Add the enterprise plugin entitlement to the release
+    # Add the enterprise plugin entitlement to the release (once; retries keep the existing constraint)
     - |
-      curl -X POST "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases/${RELEASE_ID}/constraints" \
-      -H "Authorization: Bearer $KEYGEN_TOKEN" \
-      -H "Content-Type: application/vnd.api+json" \
-      -d '{
-        "data":[{
-          "type": "constraints",
-          "relationships": {
-            "entitlement": {
-              "data": { "type": "entitlements", "id": "${LUDUS_ENTERPRISE_ENTITLEMENT_ID}" }
-            }
-          }
-        }]
-      }'
+      if curl -fsS "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases/${RELEASE_ID}/entitlements?limit=100" -H "Authorization: Bearer $KEYGEN_TOKEN" -H "Accept: application/vnd.api+json" | jq -e --arg id "${LUDUS_ENTERPRISE_ENTITLEMENT_ID}" 'any(.data[]; .id == $id)' >/dev/null; then
+        echo "Release already requires the enterprise plugin entitlement"
+      else
+        jq -n --arg id "${LUDUS_ENTERPRISE_ENTITLEMENT_ID}" '{data: [{type: "constraints", relationships: {entitlement: {data: {type: "entitlements", id: $id}}}}]}' |
+          curl -fsS -X POST "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases/${RELEASE_ID}/constraints" \
+            -H "Authorization: Bearer $KEYGEN_TOKEN" \
+            -H "Content-Type: application/vnd.api+json" \
+            -H "Accept: application/vnd.api+json" \
+            --data-binary @- >/dev/null
+      fi
     - keygen upload ludus-enterprise_${CI_COMMIT_TAG}.zip --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filetype 'zip' --filename ludus-enterprise_${CI_COMMIT_TAG}.zip --package ${LUDUS_ENTERPRISE_PACKAGE_ID}
     - keygen publish --release ${CI_COMMIT_TAG} --package ${LUDUS_ENTERPRISE_PACKAGE_ID}
     - keygen untag --release latest --package ${LUDUS_ENTERPRISE_PACKAGE_ID} || true
@@ -3633,23 +3630,34 @@ keygen-upload:
     - |
       export RELEASE_ID=$(curl -s "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases?package=${LUDUS_ANTISANDBOX_PACKAGE_ID}&limit=10" -H "Authorization: Bearer $KEYGEN_TOKEN" -H "Accept: application/vnd.api+json" | jq -r --arg ver "${CI_COMMIT_TAG}" '.data[] | select(.attributes.version == $ver) | .id')
     - echo "Anti-Sandbox Release ID for version ${CI_COMMIT_TAG} = $RELEASE_ID"
-    # Add the anti-sandbox plugin entitlement to the release
+    # Add the anti-sandbox plugin entitlement to the release (once; retries keep the existing constraint)
     - |
-      curl -X POST "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases/${RELEASE_ID}/constraints" \
-      -H "Authorization: Bearer $KEYGEN_TOKEN" \
-      -H "Content-Type: application/vnd.api+json" \
-      -d '{
-        "data":[{
-          "type": "constraints",
-          "relationships": {
-            "entitlement": {
-              "data": { "type": "entitlements", "id": "${LUDUS_ANTISANDBOX_ENTITLEMENT_ID}" }
-            }
-          }
-        }]
-      }'
+      if curl -fsS "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases/${RELEASE_ID}/entitlements?limit=100" -H "Authorization: Bearer $KEYGEN_TOKEN" -H "Accept: application/vnd.api+json" | jq -e --arg id "${LUDUS_ANTISANDBOX_ENTITLEMENT_ID}" 'any(.data[]; .id == $id)' >/dev/null; then
+        echo "Release already requires the anti-sandbox plugin entitlement"
+      else
+        jq -n --arg id "${LUDUS_ANTISANDBOX_ENTITLEMENT_ID}" '{data: [{type: "constraints", relationships: {entitlement: {data: {type: "entitlements", id: $id}}}}]}' |
+          curl -fsS -X POST "https://${KEYGEN_HOST}/v1/accounts/${KEYGEN_ACCOUNT_ID}/releases/${RELEASE_ID}/constraints" \
+            -H "Authorization: Bearer $KEYGEN_TOKEN" \
+            -H "Content-Type: application/vnd.api+json" \
+            -H "Accept: application/vnd.api+json" \
+            --data-binary @- >/dev/null
+      fi
     - keygen upload ludus-antisandbox_${CI_COMMIT_TAG}.zip --release ${CI_COMMIT_TAG} --platform 'linux' --arch 'amd64' --filetype 'zip' --filename ludus-antisandbox_${CI_COMMIT_TAG}.zip --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
     - keygen publish --release ${CI_COMMIT_TAG} --package ${LUDUS_ANTISANDBOX_PACKAGE_ID}
+
+# Regenerate the official plugin catalog (badsectorlabs/ludus-plugins/plugin-catalog) from the Enterprise
+# and Anti-Sandbox releases just published. The catalog pipeline reads each plugin's latest release from
+# Keygen and publishes plugins.json when it changed.
+update-plugin-catalog:
+  stage: upload
+  needs:
+    - keygen-upload
+  rules:
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /-beta/
+  trigger:
+    project: badsectorlabs/ludus-plugins/plugin-catalog
+    branch: main
+    strategy: depend
 
 release:
   stage: release-binaries

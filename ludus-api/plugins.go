@@ -53,12 +53,22 @@ type Server struct {
 	// declare is already claimed, by plugin key.
 	rejectedPlugins map[string]error
 
-	pluginTasksOnce     sync.Once
-	pluginTasks         chan func()
-	licensedRefreshMu   sync.Mutex
-	lastLicensedRefresh time.Time
-	appsOnce            sync.Once
-	apps                *pluginAppRegistry // plugin app sessions this service hosts
+	// licensedInstallMu serializes writes of licensed packages;
+	// licensedReconcileMu serializes starting and stopping them.
+	licensedInstallMu   sync.Mutex
+	licensedReconcileMu sync.Mutex
+	// The official plugin catalog: the last verified copy, from Keygen or
+	// <install>/install/plugin-catalog.json. pluginCatalogFetchMu serializes
+	// remote fetches without blocking readers of the cached copy.
+	pluginCatalogMu          sync.Mutex
+	pluginCatalogFetchMu     sync.Mutex
+	pluginCatalog            *pluginCatalogSnapshot
+	pluginCatalogDiskChecked time.Time
+	pluginCatalogFailedAt    time.Time
+	// pluginCatalogFetch returns plugins.json; tests substitute it.
+	pluginCatalogFetch func(context.Context) ([]byte, error)
+	appsOnce           sync.Once
+	apps               *pluginAppRegistry // plugin app sessions this service hosts
 
 	licenseMu                  sync.RWMutex
 	Version                    string
@@ -539,16 +549,19 @@ func (s *Server) StartPlugins() {
 		s.PluginResources.flagRejectedUploads(rejected)
 	}
 	for _, pkg := range packages {
-		if pkg.manifest.Executable != "" && pkg.manifest.RunAs == runAs {
+		if pkg.manifest.Executable != "" && pkg.manifest.RunAs == runAs && pkg.source != protocol.SourceLicensed {
 			s.startInstalledPackage(pkg)
 		}
 	}
+	s.reconcileLicensedPackages(packages)
 	if runAs == protocol.RunAsRoot {
 		s.reconcileUploadedRootPackages(true)
 		if s.Scheduler != nil {
 			s.Scheduler.Register(scheduler.Job{Name: "plugin-approvals", Interval: time.Minute, Fn: func(context.Context) error {
-				s.refreshPluginDeclarations(s.installedPackages())
+				packages := s.installedPackages()
+				s.refreshPluginDeclarations(packages)
 				s.reconcileUploadedRootPackages(false)
+				s.reconcileLicensedPackages(packages)
 				return nil
 			}})
 		}
@@ -570,7 +583,8 @@ func (s *Server) StartPlugins() {
 
 // syncInstalledPackages mirrors installed packages, including ones the admin
 // service's license flow installed, refreshes what it knows of the other
-// service's plugins, and flags plugins refused for conflicting routes.
+// service's plugins, flags plugins refused for conflicting routes, and starts
+// or stops the licensed plugins this service hosts.
 func (s *Server) syncInstalledPackages() {
 	packages := s.installedPackages()
 	rejected := s.refreshPluginDeclarations(packages)
@@ -578,6 +592,7 @@ func (s *Server) syncInstalledPackages() {
 		s.PluginResources.mirrorInstalled(packages, rejected)
 		s.PluginResources.flagRejectedUploads(rejected)
 	}
+	s.reconcileLicensedPackages(packages)
 }
 
 // reconcileUploadedRootPackages runs in the admin service. It stops and removes
@@ -644,24 +659,6 @@ func (s *Server) removeUploadedRootPackage(resourceID string) {
 	s.stopPluginByKey(pluginKey(protocol.SourceUploaded, "", resourceID))
 	if err := os.RemoveAll(s.uploadedRootPackageDir(resourceID)); err != nil {
 		s.logger().Error("Could not remove root-owned plugin copy", "resourceID", resourceID, "error", err)
-	}
-}
-
-// queuePluginTask runs plugin-management work after the triggering plugin
-// call returns, one task at a time, so host-service calls never wait on it.
-func (s *Server) queuePluginTask(task func()) {
-	s.pluginTasksOnce.Do(func() {
-		s.pluginTasks = make(chan func(), 16)
-		go func() {
-			for task := range s.pluginTasks {
-				task()
-			}
-		}()
-	})
-	select {
-	case s.pluginTasks <- task:
-	default:
-		s.logger().Error("Plugin task queue is full; dropping task")
 	}
 }
 

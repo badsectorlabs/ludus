@@ -10,6 +10,10 @@ title: "🚫🏖️ Anti-Sandbox"
 
 Ludus Enterprise can optionally include a plugin that enables the use of the Anti-Sandbox measures.
 
+## Installing the plugin
+
+With a license that includes the `ANTISANDBOX_PLUGIN` entitlement, an administrator installs the plugin from **Resources → Plugins → Official** by selecting **Install** on Anti-Sandbox. Ludus Enterprise does not install it automatically, and Ludus never updates it on its own. When a newer version is published, the Plugins page shows that an update is available and an administrator selects **Update** to install it. See [Official plugins](../developers/rpc-plugins.md#official-plugins).
+
 ## What is a VM sandbox?
 
 A VM sandbox is a virtual machine that is used for malware research or other purposes. It often includes software and other tools that are used to perform malware analysis, such as a debugger, memory analyzer, or disassembler.

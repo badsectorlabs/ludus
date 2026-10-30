@@ -139,6 +139,31 @@ type GetPackerLogsResponse struct {
 	Result string `json:"result,omitempty"`
 	Cursor int64  `json:"cursor,omitempty"`
 }
+type GetPluginCatalogResponse struct {
+	Plugins    []GetPluginCatalogResponsePluginsItem `json:"plugins"`
+	CanInstall bool                                  `json:"canInstall"`
+	Stale      bool                                  `json:"stale"`
+	FetchedAt  time.Time                             `json:"fetchedAt"`
+}
+type GetPluginCatalogResponsePluginsItem struct {
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	Author            string   `json:"author"`
+	Version           string   `json:"version"`
+	Entitlements      []string `json:"entitlements"`
+	Level             string   `json:"level"`
+	RunAs             string   `json:"runAs"`
+	HasUI             bool     `json:"hasUI"`
+	DocsURL           string   `json:"docsURL"`
+	MinLudusVersion   string   `json:"minLudusVersion"`
+	InstalledVersion  string   `json:"installedVersion"`
+	UpdateAvailable   bool     `json:"updateAvailable"`
+	Entitled          bool     `json:"entitled"`
+	AutoInstalled     bool     `json:"autoInstalled"`
+	CanInstall        bool     `json:"canInstall"`
+	UnavailableReason string   `json:"unavailableReason"`
+}
 type GetRolesAndCollectionsResponse struct {
 	Result []GetRolesAndCollectionsResponseItem `json:"result,omitempty"`
 }
@@ -193,6 +218,11 @@ type GetWireguardConfigResponseResult struct {
 }
 type IndexResponse struct {
 	Result string `json:"result,omitempty"`
+}
+type InstallCatalogPluginResponse struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Result  string `json:"result"`
 }
 type InstallCollectionResponse struct {
 	Result string `json:"result,omitempty"`

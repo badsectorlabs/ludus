@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/denisbrodbeck/machineid"
 	"github.com/keygen-sh/keygen-go/v3"
@@ -28,42 +27,51 @@ import (
 )
 
 const (
-	LicenseURL                              = "https://license.ludus.cloud"
-	LicenseAPIVersion                       = "1.7"
-	LicenseAPIPrefix                        = "v1"
-	LicenseProductLudus                     = "5722ca04-715d-4969-9130-a051532b7579"
-	LicenseProductSubscriptionRolesMetadata = "7b75d702-0448-4d82-9963-2b1f1f460022"
-	LicensePackageLudusEnterprisePlugin     = "a8ecdfa4-6cf7-4a7c-93cc-95fe44c94d14"
-	LicensePackageLudusAntisandboxPlugin    = "a335f37d-e603-405c-8c99-0bb3185a87e8"
-	LicenseAccount                          = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
-	LicensePublicKey                        = "70cb26141f38840b8f3f499d4875a829a9d251bd3337278995832b9ea4e39d12"
-	BinaryPublicKey                         = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
+	LicenseURL          = "https://license.ludus.cloud"
+	LicenseAPIVersion   = "1.7"
+	LicenseAPIPrefix    = "v1"
+	LicenseProductLudus = "5722ca04-715d-4969-9130-a051532b7579"
+	// LicenseProductMetadata is the OPEN metadata product: roles.json, the
+	// plugins.json catalog, and the free official plugins, downloadable
+	// without a license.
+	LicenseProductMetadata              = "7b75d702-0448-4d82-9963-2b1f1f460022"
+	LicensePackageLudusEnterprisePlugin = "a8ecdfa4-6cf7-4a7c-93cc-95fe44c94d14"
+	LicenseAccount                      = "baaa4d02-5c5e-413d-8af1-f7846db1a838"
+	LicensePublicKey                    = "70cb26141f38840b8f3f499d4875a829a9d251bd3337278995832b9ea4e39d12"
+	BinaryPublicKey                     = "7990d22676174928335ce3b5eb96dd294b970fdb1427f9e4c0b84e9f8f9a9c50"
 )
 
 const (
-	enterprisePluginID     = "ludus-enterprise"
-	antisandboxPluginID    = "ludus-antisandbox"
-	enterpriseEntitlement  = "ENTERPRISE_PLUGIN"
-	antisandboxEntitlement = "ANTISANDBOX_PLUGIN"
-	licensedRefreshPeriod  = time.Hour
+	enterprisePluginID    = "ludus-enterprise"
+	enterpriseEntitlement = "ENTERPRISE_PLUGIN"
 )
 
 // licensedPluginSpec is a package the license flow installs into
-// <install>/plugins/<id>/ from signature-verified <artifactBase>_<version>.zip
-// releases.
+// <install>/plugins/<id>/ from signature-verified <id>_<version>.zip releases
+// of a Keygen package.
 type licensedPluginSpec struct {
-	id           string
-	artifactBase string
-	packageUUID  string
-	entitlement  string
+	id          string
+	productID   string
+	packageUUID string
+	// entitlements are any-of; without any the package is free and its
+	// releases are downloaded anonymously from the OPEN product.
+	entitlements []string
 }
 
-var (
-	enterprisePluginSpec  = licensedPluginSpec{id: enterprisePluginID, artifactBase: "ludus-enterprise", packageUUID: LicensePackageLudusEnterprisePlugin, entitlement: enterpriseEntitlement}
-	antisandboxPluginSpec = licensedPluginSpec{id: antisandboxPluginID, artifactBase: "ludus-antisandbox", packageUUID: LicensePackageLudusAntisandboxPlugin, entitlement: antisandboxEntitlement}
-)
+// enterprisePluginSpec is built in: the license flow installs Enterprise once,
+// when the license grants ENTERPRISE_PLUGIN and it is not installed.
+var enterprisePluginSpec = licensedPluginSpec{id: enterprisePluginID, productID: LicenseProductLudus, packageUUID: LicensePackageLudusEnterprisePlugin, entitlements: []string{enterpriseEntitlement}}
 
-type pluginReleaseLookupFunc func(context.Context, string, string) (*keygen.Release, error)
+// licenseKey returns the key a release download authenticates with: none for
+// free packages.
+func (spec licensedPluginSpec) licenseKey(key string) string {
+	if len(spec.entitlements) == 0 {
+		return ""
+	}
+	return key
+}
+
+type pluginReleaseLookupFunc func(ctx context.Context, spec licensedPluginSpec, currentVersion string) (*keygen.Release, error)
 type pluginReleaseDownloadFunc func(*keygen.Release, licensedPluginSpec) error
 
 type licensedPluginReleases []keygen.Release
@@ -224,11 +232,8 @@ func (s *Server) checkLicense() {
 
 	// Only the admin service runs the license flow; it installs root-owned packages.
 	if pluginServiceRunAs() == protocol.RunAsRoot {
-		s.licensedRefreshMu.Lock()
-		s.lastLicensedRefresh = time.Now()
-		s.licensedRefreshMu.Unlock()
-		if err := s.refreshLicensedPlugins(ctx); err != nil {
-			log.Printf("LICENSE: error refreshing licensed plugins: %v", err)
+		if err := s.installMissingEnterprise(ctx); err != nil {
+			log.Printf("LICENSE: could not install %s: %v", enterprisePluginID, err)
 		}
 	}
 }
@@ -237,28 +242,25 @@ func (s *Server) licensedPackageDir(id string) string {
 	return filepath.Join(s.pluginsRoot(), id)
 }
 
-// refreshLicensedPlugins installs or updates the licensed packages the license
-// entitles: Enterprise always, add-ons once they have been requested.
-func (s *Server) refreshLicensedPlugins(ctx context.Context) error {
-	var refreshErrors []error
-	for _, spec := range []licensedPluginSpec{enterprisePluginSpec, antisandboxPluginSpec} {
-		if !s.HasEntitlement(spec.entitlement) {
-			continue
-		}
-		if spec.id != enterprisePluginID && !FileExists(filepath.Join(s.licensedPackageDir(spec.id), protocol.ManifestFile)) {
-			continue
-		}
-		if _, err := s.ensureLicensedPlugin(ctx, spec); err != nil {
-			refreshErrors = append(refreshErrors, fmt.Errorf("refresh %s: %w", spec.id, err))
-		}
+// installMissingEnterprise installs Enterprise when the license grants
+// ENTERPRISE_PLUGIN and no Enterprise package is installed. It never updates
+// an installed package: plugins are only updated by an administrator, from
+// the official plugin catalog.
+func (s *Server) installMissingEnterprise(ctx context.Context) error {
+	if !s.HasEntitlement(enterpriseEntitlement) {
+		return nil
 	}
-	return errors.Join(refreshErrors...)
+	_, err := s.ensureLicensedPlugin(ctx, enterprisePluginSpec, false)
+	return err
 }
 
-// ensureLicensedPlugin installs the newest release of a licensed package, or
-// updates the installed one. A .local-testing marker in the package directory
-// disables updates. It reports whether it wrote a new version.
-func (s *Server) ensureLicensedPlugin(ctx context.Context, spec licensedPluginSpec) (bool, error) {
+// ensureLicensedPlugin installs the newest release of a licensed package
+// that is not installed, or, with update, also updates the installed one. A
+// .local-testing marker in the package directory disables both. It reports
+// whether it wrote a new version.
+func (s *Server) ensureLicensedPlugin(ctx context.Context, spec licensedPluginSpec, update bool) (bool, error) {
+	s.licensedInstallMu.Lock()
+	defer s.licensedInstallMu.Unlock()
 	dir := s.licensedPackageDir(spec.id)
 	if isLocalPlugin(dir) {
 		return false, nil
@@ -273,6 +275,9 @@ func (s *Server) ensureLicensedPlugin(ctx context.Context, spec licensedPluginSp
 	case !errors.Is(err, os.ErrNotExist):
 		log.Printf("LICENSE: installed %s package is invalid; reinstalling: %v", spec.id, err)
 	}
+	if currentVersion != "" && !update {
+		return false, nil
+	}
 	installed, err := s.installPluginUpdate(ctx, spec, currentVersion)
 	if err != nil {
 		return false, err
@@ -280,64 +285,58 @@ func (s *Server) ensureLicensedPlugin(ctx context.Context, spec licensedPluginSp
 	if !installed && currentVersion == "" {
 		return false, fmt.Errorf("no published release found for %s", spec.id)
 	}
-	if installed && s.pluginByKey(pluginKey(protocol.SourceLicensed, spec.id, "")) != nil {
-		log.Printf("LICENSE: installed an updated %s package; restart Ludus to activate it", spec.id)
-	}
 	return installed, nil
 }
 
-// queueLicensedRefresh refreshes licensed packages after the current plugin
-// call returns, at most once per licensedRefreshPeriod, and starts any that
-// are installed but not running.
-func (s *Server) queueLicensedRefresh() {
-	s.licensedRefreshMu.Lock()
-	if time.Since(s.lastLicensedRefresh) < licensedRefreshPeriod {
-		s.licensedRefreshMu.Unlock()
-		return
-	}
-	s.lastLicensedRefresh = time.Now()
-	s.licensedRefreshMu.Unlock()
-	s.queuePluginTask(func() {
-		if err := s.refreshLicensedPlugins(context.Background()); err != nil {
-			log.Printf("LICENSE: error refreshing licensed plugins: %v", err)
-		}
-		s.startLicensedPackages()
-	})
-}
-
-func (s *Server) startLicensedPackages() {
-	for _, pkg := range s.installedPackages() {
-		if pkg.source == protocol.SourceLicensed && pkg.manifest.Executable != "" && pkg.manifest.RunAs == pluginServiceRunAs() &&
-			s.pluginByKey(pluginKey(pkg.source, pkg.manifest.ID, "")) == nil {
-			s.startInstalledPackage(pkg)
+// reconcileLicensedPackages aligns the licensed plugins this service hosts
+// with the installed packages and the license: it starts installed, entitled
+// packages that are not running, restarts those whose installed declaration
+// changed, and stops those that were removed or are no longer entitled.
+// Enterprise is never stopped, as it supplies the license itself; it is only
+// restarted to run an updated package. The new process starts with the
+// current license state and re-applies it from its license check. Callers
+// refresh plugin declarations first.
+func (s *Server) reconcileLicensedPackages(packages []installedPackage) {
+	s.licensedReconcileMu.Lock()
+	defer s.licensedReconcileMu.Unlock()
+	installed := map[string]installedPackage{}
+	for _, pkg := range packages {
+		if pkg.source == protocol.SourceLicensed && pkg.manifest.Executable != "" && pkg.manifest.RunAs == pluginServiceRunAs() {
+			installed[pkg.manifest.ID] = pkg
 		}
 	}
-}
-
-// requestAddOn validates an add-on request from Enterprise and queues its
-// installation through the license flow. Only Anti-Sandbox exists today.
-func (s *Server) requestAddOn(name string) error {
-	if name != antisandboxPluginID {
-		return protocol.HostErrorf(protocol.CodeInvalid, "unsupported add-on %q", name)
-	}
-	if pluginServiceRunAs() != protocol.RunAsRoot {
-		return protocol.HostErrorf(protocol.CodeUnavailable, "add-ons are installed by the admin service")
-	}
-	license := s.licenseSnapshot()
-	if !license.Valid || !slices.Contains(license.Entitlements, antisandboxEntitlement) {
-		return protocol.HostErrorf(protocol.CodeForbidden, "%s requires a valid license with %s", name, antisandboxEntitlement)
-	}
-	s.queuePluginTask(func() {
-		if s.pluginByKey(pluginKey(protocol.SourceLicensed, name, "")) != nil {
-			return
+	for _, plugin := range s.pluginSnapshot() {
+		if plugin.source != protocol.SourceLicensed {
+			continue
 		}
-		if _, err := s.ensureLicensedPlugin(context.Background(), antisandboxPluginSpec); err != nil {
-			log.Printf("LICENSE: could not install add-on %s: %v", name, err)
-			return
+		pkg, ok := installed[plugin.manifest.ID]
+		if !ok && plugin.manifest.ID == enterprisePluginID {
+			continue
 		}
-		s.startLicensedPackages()
-	})
-	return nil
+		block := s.licensedPackageBlock(plugin.manifest.ID)
+		if ok && block == "" && sameManifest(plugin.manifest, pkg.manifest) {
+			continue
+		}
+		switch {
+		case !ok:
+			s.logger().Info("Stopping removed licensed plugin", "plugin", plugin.manifest.ID)
+		case block != "":
+			s.logger().Info("Stopping licensed plugin", "plugin", plugin.manifest.ID, "reason", block)
+		default:
+			s.logger().Info("Restarting updated licensed plugin", "plugin", plugin.manifest.ID, "version", pkg.manifest.Version)
+		}
+		s.stopPlugin(plugin, true)
+	}
+	for _, pkg := range installed {
+		if s.pluginByKey(pluginKey(pkg.source, pkg.manifest.ID, "")) != nil {
+			continue
+		}
+		if block := s.licensedPackageBlock(pkg.manifest.ID); block != "" {
+			s.logger().Info("Not starting licensed plugin", "plugin", pkg.manifest.ID, "reason", block)
+			continue
+		}
+		s.startInstalledPackage(pkg)
+	}
 }
 
 // licenseSnapshot returns a copy of the current license state.
@@ -380,8 +379,9 @@ func (s *Server) applyLicense(state protocol.License) {
 }
 
 // setLicenseFromPlugin applies the license state Enterprise reports. The admin
-// service also hands it to the regular service through license-state.json and
-// refreshes licensed packages.
+// service also hands it to the regular service through license-state.json.
+// Each service's minute job then starts or stops the licensed plugins it
+// hosts to match.
 func (s *Server) setLicenseFromPlugin(state protocol.License) {
 	s.applyLicense(state)
 	if pluginServiceRunAs() != protocol.RunAsRoot {
@@ -390,7 +390,6 @@ func (s *Server) setLicenseFromPlugin(state protocol.License) {
 	if err := s.writeLicenseState(state); err != nil {
 		s.logger().Error("Could not write the license state file", "error", err)
 	}
-	s.queueLicensedRefresh()
 }
 
 func (s *Server) licenseStatePath() string {
@@ -402,11 +401,16 @@ func (s *Server) writeLicenseState(state protocol.License) error {
 	if err != nil {
 		return err
 	}
-	path := s.licenseStatePath()
+	return writeSharedInstallFile(s.licenseStatePath(), data)
+}
+
+// writeSharedInstallFile atomically replaces a world-readable file the other
+// Ludus service reads.
+func writeSharedInstallFile(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".license-state-*")
+	file, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
 	if err != nil {
 		return err
 	}
@@ -448,7 +452,7 @@ func (s *Server) installPluginUpdate(ctx context.Context, spec licensedPluginSpe
 	if lookup == nil {
 		lookup = s.lookupLicensedPluginRelease
 	}
-	release, err := lookup(ctx, currentVersion, spec.packageUUID)
+	release, err := lookup(ctx, spec, currentVersion)
 	if err != nil {
 		return false, fmt.Errorf("check %s release: %w", spec.id, err)
 	}
@@ -470,15 +474,15 @@ func (s *Server) installPluginUpdate(ctx context.Context, spec licensedPluginSpe
 	return true, nil
 }
 
-func (s *Server) lookupLicensedPluginRelease(ctx context.Context, currentVersion, packageUUID string) (*keygen.Release, error) {
-	client := newLicenseClient(s.Version, s.LicenseKey)
-	return lookupLicensedPluginRelease(ctx, client, currentVersion, packageUUID)
+func (s *Server) lookupLicensedPluginRelease(ctx context.Context, spec licensedPluginSpec, currentVersion string) (*keygen.Release, error) {
+	client := newLicenseClient(s.Version, spec.licenseKey(s.LicenseKey))
+	return lookupLicensedPluginRelease(ctx, client, currentVersion, spec.productID, spec.packageUUID)
 }
 
-func lookupLicensedPluginRelease(ctx context.Context, client *keygen.Client, currentVersion, packageUUID string) (*keygen.Release, error) {
+func lookupLicensedPluginRelease(ctx context.Context, client *keygen.Client, currentVersion, productID, packageUUID string) (*keygen.Release, error) {
 	query := url.Values{
 		"package": {packageUUID},
-		"product": {LicenseProductLudus},
+		"product": {productID},
 		"channel": {"stable"},
 	}
 	releaseVersion := strings.TrimPrefix(strings.TrimSpace(currentVersion), "v")
@@ -517,7 +521,7 @@ func lookupLicensedPluginRelease(ctx context.Context, client *keygen.Client, cur
 }
 
 func (s *Server) downloadPluginRelease(release *keygen.Release, spec licensedPluginSpec) error {
-	artifact := fmt.Sprintf("%s_%s.zip", spec.artifactBase, release.Version)
+	artifact := fmt.Sprintf("%s_%s.zip", spec.id, release.Version)
 	path := fmt.Sprintf("releases/%s/artifacts/%s", url.PathEscape(release.ID), url.PathEscape(artifact))
 	if err := os.MkdirAll(s.pluginsRoot(), 0755); err != nil {
 		return err
@@ -527,7 +531,7 @@ func (s *Server) downloadPluginRelease(release *keygen.Release, spec licensedPlu
 		return err
 	}
 	defer os.RemoveAll(staging)
-	if err := DownloadFileUsingLicenseKey(path, artifact, staging, s.Version, s.LicenseKey, spec.packageUUID); err != nil {
+	if err := DownloadFileUsingLicenseKey(context.Background(), path, artifact, staging, s.Version, spec.licenseKey(s.LicenseKey), spec.packageUUID, spec.productID); err != nil {
 		return err
 	}
 	data, err := os.ReadFile(filepath.Join(staging, artifact))
@@ -536,6 +540,13 @@ func (s *Server) downloadPluginRelease(release *keygen.Release, spec licensedPlu
 	}
 	return s.installLicensedPackage(data, spec, release.Version)
 }
+
+// routeConflictError marks a release refused because a core route or an
+// active plugin already claims one of its API routes.
+type routeConflictError struct{ err error }
+
+func (e *routeConflictError) Error() string { return e.err.Error() }
+func (e *routeConflictError) Unwrap() error { return e.err }
 
 // installLicensedPackage writes a signature-verified release ZIP into
 // <install>/plugins/<id>/ with a licensed approval. Declarations come from
@@ -557,7 +568,7 @@ func (s *Server) installLicensedPackage(data []byte, spec licensedPluginSpec, ex
 	// The installed version of the same package is replaced, so its own routes
 	// are not a conflict.
 	if err := apiRouteConflict(pkg.manifest, pluginKey(protocol.SourceLicensed, spec.id, ""), s.declaredAPIRoutes()); err != nil {
-		return err
+		return &routeConflictError{err: err}
 	}
 	return writeRootPackage(s.licensedPackageDir(spec.id), pkg, pluginApproval{Source: protocol.SourceLicensed})
 }
@@ -593,7 +604,7 @@ func GetSubscriptionRolesMetadata(e *core.RequestEvent) ([]dto.GetSubscriptionRo
 	}
 
 	// First get the version of the role from latest
-	err := DownloadFileUsingLicenseKey("roles.json", "roles.json", "/tmp", server.Version, server.LicenseKey, LicenseProductSubscriptionRolesMetadata)
+	err := DownloadFileUsingLicenseKey(context.Background(), "roles.json", "roles.json", "/tmp", server.Version, server.LicenseKey, LicenseProductMetadata)
 	if err != nil {
 		return nil, err
 	}
@@ -636,14 +647,18 @@ func DownloadRoleUsingLicenseKey(e *core.RequestEvent, roleName string, targetDi
 	}
 
 	roleFileName := fmt.Sprintf("%s_v%s.tar.gz", roleName, roleVersion)
-	err = DownloadFileUsingLicenseKey(roleFileName, roleFileName, targetDir, server.Version, server.LicenseKey, rolePackageUUID)
+	err = DownloadFileUsingLicenseKey(context.Background(), roleFileName, roleFileName, targetDir, server.Version, server.LicenseKey, rolePackageUUID)
 	if err != nil {
 		return "", err
 	}
 	return roleFileName, nil
 }
 
-func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string, version string, licenseKey string, packageUUID string) error {
+// DownloadFileUsingLicenseKey downloads a Keygen artifact into targetDir and
+// verifies its ed25519ph signature. An empty licenseKey downloads anonymously,
+// as OPEN products allow. The signature may use any of signatureContexts or
+// either product UUID.
+func DownloadFileUsingLicenseKey(ctx context.Context, path string, fileName string, targetDir string, version string, licenseKey string, signatureContexts ...string) error {
 	if !strings.HasPrefix(path, "artifacts/") &&
 		!strings.HasPrefix(path, "/artifacts/") &&
 		!strings.HasPrefix(path, "releases/") &&
@@ -663,7 +678,7 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 	}
 
 	artifact := &keygen.Artifact{}
-	response, err := client.Get(context.Background(), path, nil, artifact)
+	response, err := client.Get(ctx, path, nil, artifact)
 	if err != nil {
 		logger.Error(fmt.Sprintf("LICENSE: unable to download file %s: %v", fileName, err))
 		return err
@@ -675,7 +690,8 @@ func DownloadFileUsingLicenseKey(path string, fileName string, targetDir string,
 		return err
 	}
 	targetPath := filepath.Join(targetDir, fileName)
-	if err := installDownloadedArtifact(http.DefaultClient, artifact, targetPath, BinaryPublicKey, packageUUID); err != nil {
+	contexts := append(slices.Clone(signatureContexts), LicenseProductLudus, LicenseProductMetadata)
+	if err := installDownloadedArtifact(http.DefaultClient, artifact, targetPath, BinaryPublicKey, contexts...); err != nil {
 		logger.Error(fmt.Sprintf("LICENSE: unable to install downloaded file %s: %v", fileName, err))
 		return err
 	}
@@ -695,7 +711,7 @@ func newLicenseClient(version, licenseKey string) *keygen.Client {
 	})
 }
 
-func installDownloadedArtifact(httpClient *http.Client, artifact *keygen.Artifact, targetPath, publicKey, signatureContext string) error {
+func installDownloadedArtifact(httpClient *http.Client, artifact *keygen.Artifact, targetPath, publicKey string, signatureContexts ...string) error {
 	if artifact.URL == "" {
 		return errors.New("artifact download URL is empty")
 	}
@@ -731,7 +747,7 @@ func installDownloadedArtifact(httpClient *http.Client, artifact *keygen.Artifac
 	if err := os.Chmod(tempPath, 0644); err != nil {
 		return fmt.Errorf("set artifact permissions: %w", err)
 	}
-	if err := VerifySignature(tempPath, artifact.Signature, publicKey, signatureContext); err != nil {
+	if err := VerifySignature(tempPath, artifact.Signature, publicKey, signatureContexts...); err != nil {
 		return fmt.Errorf("verify artifact signature: %w", err)
 	}
 	if err := os.Rename(tempPath, targetPath); err != nil {
@@ -740,8 +756,12 @@ func installDownloadedArtifact(httpClient *http.Client, artifact *keygen.Artifac
 	return nil
 }
 
-func VerifySignature(filePath string, signatureString string, publicKeyHex string, context string) error {
-
+// VerifySignature checks an ed25519ph signature of the file, accepting any of
+// the given signing contexts (Keygen signs with the package or product UUID).
+func VerifySignature(filePath string, signatureString string, publicKeyHex string, contexts ...string) error {
+	if len(contexts) == 0 {
+		return errors.New("no ed25519ph signature context to verify with")
+	}
 	signature, err := base64.RawStdEncoding.DecodeString(signatureString)
 	if err != nil {
 		return err
@@ -772,30 +792,11 @@ func VerifySignature(filePath string, signatureString string, publicKeyHex strin
 		return errors.New("invalid ed25519ph public key")
 	}
 
-	// Set up verification options with context
-	opts := &ed25519.Options{
-		Hash:    crypto.SHA512,
-		Context: context,
-	}
-
-	// Verify the signature
-	err = ed25519.VerifyWithOptions(publicKey, checksum, signature, opts)
-	if err != nil {
-		// Fall back to the Ludus product UUID
-		if strings.Contains(err.Error(), "invalid signature") {
-			opts := &ed25519.Options{
-				Hash:    crypto.SHA512,
-				Context: LicenseProductLudus,
-			}
-			err = ed25519.VerifyWithOptions(publicKey, checksum, signature, opts)
-			if err != nil {
-				return fmt.Errorf("failed to verify ed25519ph signature with package and product UUID: %v", err)
-			} else {
-				return nil
-			}
+	for _, context := range contexts {
+		opts := &ed25519.Options{Hash: crypto.SHA512, Context: context}
+		if err = ed25519.VerifyWithOptions(publicKey, checksum, signature, opts); err == nil {
+			return nil
 		}
-		return fmt.Errorf("failed to verify ed25519ph signature: %v", err)
 	}
-
-	return nil
+	return fmt.Errorf("failed to verify ed25519ph signature with the package or product UUID: %v", err)
 }

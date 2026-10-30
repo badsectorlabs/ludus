@@ -59,6 +59,23 @@ flowchart TB
   Router <-->|"range egress"| Internet["External destinations"]
 ```
 
+## Official plugins
+
+**Resources → Plugins → Official** lists plugins published by Bad Sector Labs. Every signed-in user can browse the catalog; only administrators can install, update, or uninstall official plugins.
+
+| Tier | Required license entitlement | Examples |
+| --- | --- | --- |
+| Pro | `PRO_PLUGINS` | Assistant UI, Console Wall, Debug Helper, Traffic Observer |
+| Enterprise | `ENTERPRISE_PLUGINS` (also satisfies Pro) | Guacamole |
+| Add-on | a specific add-on entitlement, e.g. `ANTISANDBOX_PLUGIN` | [Anti-Sandbox](../enterprise/anti-sandbox.md) |
+
+Select **Install** on a plugin to download it, verify its signature, and start it. No approval step is needed: official packages are signed by Bad Sector Labs and count as approved. A plugin you cannot install shows why: missing license, missing entitlement, a Ludus version older than the plugin requires, or no permission. The Enterprise plugin is the one exception to manual installation: when the license grants `ENTERPRISE_PLUGIN` and the Enterprise plugin is not installed, Ludus installs it during its startup license check. If that fails, an administrator can install it from the catalog like any other plugin.
+
+- **Updates**: Ludus never updates a plugin on its own, and that includes the Enterprise plugin. When the catalog lists a newer version than the one installed, the Plugins page shows that an update is available. An administrator selects **Update** to download and verify the new version, and Ludus restarts the plugin on it. Ludus itself does not need a restart.
+- **Uninstall**: administrators can uninstall official plugins from the plugins list. The Enterprise plugin cannot be uninstalled.
+- **Offline**: the catalog is cached on the server. If Ludus cannot reach the license server, the page shows the last downloaded catalog marked as stale. With no cached copy, the catalog cannot be shown.
+- **License lapse**: if the license expires or loses the required entitlement, the plugin stays installed but is not started. It shows as unavailable (`Requires the <CODE> entitlement`) and starts again once the license covers it.
+
 ## Installing a plugin
 
 1. Open **Resources → Plugins** in the web UI.
@@ -264,6 +281,46 @@ Generate the file with `--ludus-manifest` rather than writing it by hand.
 ### Server-installed packages
 
 Packages can also be installed directly on the server as `/opt/ludus/plugins/<id>/` (`plugin.json`, `plugin`, optional `ui/index.html`). `/opt/ludus/plugins` and everything under it must be owned by `root:root` and not group- or world-writable. Both services scan `/opt/ludus/plugins/*/plugin.json` at startup and start the packages whose `runAs` matches their own user. Packages placed by root, and licensed packages installed by Ludus after signature verification, count as approved and show the same declarations on the plugins page.
+
+### Distribution channels
+
+- **Upload or GitHub import**: any author. Packages are stored per user and need administrator activation (see [Installing a plugin](#installing-a-plugin)).
+- **Official catalog**: Bad Sector Labs plugins only. Installed packages have `source: licensed` and live in `/opt/ludus/plugins/<id>/`.
+
+Official packages are Keygen release artifacts named `<id>_<version>.zip` with the same layout as any package. Ludus verifies each artifact's ed25519 signature before extracting it. Every official plugin today requires an entitlement, belongs to the licensed Ludus product, and downloads with the server's license key.
+
+The catalog itself is a signed `plugins.json` artifact that Ludus downloads from an open Keygen product without a license key. Bad Sector Labs generates it in CI from the latest published release of each official plugin: name, description, author, version, `level`, `runAs`, and UI come from the `plugin.json` inside that signature-verified package, and the remaining fields from a small hand-maintained list. It is regenerated whenever a plugin release is published, so the catalog never lists a version that cannot be installed. Its format:
+
+```json
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "id": "ludus-console-wall",
+      "name": "Console Wall",
+      "description": "…",
+      "author": "Bad Sector Labs",
+      "version": "1.0.0",
+      "productID": "<keygen product UUID>",
+      "packageID": "<keygen package UUID>",
+      "entitlements": ["PRO_PLUGINS"],
+      "level": "standard",
+      "runAs": "ludus",
+      "hasUI": true,
+      "docsURL": "https://docs.ludus.cloud/…",
+      "minLudusVersion": "2.4.0"
+    }
+  ]
+}
+```
+
+`entitlements` is any-of; `ENTERPRISE_PLUGINS` also satisfies `PRO_PLUGINS`. An empty list would make an entry downloadable without a license key from the open product; no official plugin uses that today. Unknown fields are ignored and any `schemaVersion` other than `1` is rejected. Ludus caches the catalog for 5 minutes in memory and on disk at `/opt/ludus/install/plugin-catalog.json`.
+
+API routes (under `/api/v2`):
+
+- `GET /plugin-catalog`: any signed-in user. Returns each entry with `installedVersion`, `updateAvailable` (the catalog version is newer than the installed one), `entitled`, `autoInstalled` (informational: `true` for `ludus-enterprise`, which the license check installs when it is missing), `canInstall`, and `unavailableReason` (`license`, `entitlement`, `ludusVersion`, `permission`, or empty), plus top-level `canInstall`, `stale`, and `fetchedAt`. Returns `502` if the catalog cannot be fetched and no cached copy exists.
+- `POST /plugin-catalog/{pluginID}/install`: administrators. Installs or updates any catalog entry, `ludus-enterprise` included, to the latest release, then starts the plugin, or restarts it on the new version. This is the only way an installed plugin is updated. Returns `{"id", "version", "result"}` where `result` is `installed`, `updated`, or `unchanged`. Errors: `403` permission, license, or entitlement; `404` unknown ID; `422` route conflict or Ludus too old; `502` download or signature failure.
+- `DELETE /plugins/{pluginID}?uninstall=true`: administrators can also uninstall `source: licensed` packages, except `ludus-enterprise`.
 
 ## Sharing plugins
 

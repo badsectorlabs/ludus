@@ -122,11 +122,6 @@ type SetLicenseStateArgs struct {
 	License License
 }
 
-type AddOnArgs struct {
-	Call CallID
-	Name string
-}
-
 // OpenAppArgs starts an app session for the caller, or, with Session set,
 // issues a new launch URL for one of the caller's live sessions.
 type OpenAppArgs struct {
@@ -278,7 +273,6 @@ type HostAPI interface {
 	PowerOffVMs(PowerOffArgs, *BatchReply) error                           // system level
 	RootProxmoxCredentials(CallArgs, *ProxmoxCredentialsReply) error       // system level
 	SetLicenseState(SetLicenseStateArgs, *EmptyReply) error                // licensed ludus-enterprise
-	RequestAddOn(AddOnArgs, *EmptyReply) error                             // licensed ludus-enterprise
 }
 
 // HostClient is the plugin-side client of the host service. Methods return a
@@ -417,11 +411,6 @@ func (h *HostClient) RootProxmoxCredentials(call CallID) (ProxmoxCredentials, er
 func (h *HostClient) SetLicenseState(call CallID, license License) error {
 	var reply EmptyReply
 	return h.invoke("SetLicenseState", SetLicenseStateArgs{Call: call, License: license}, &reply)
-}
-
-func (h *HostClient) RequestAddOn(call CallID, name string) error {
-	var reply EmptyReply
-	return h.invoke("RequestAddOn", AddOnArgs{Call: call, Name: name}, &reply)
 }
 
 func (h *HostClient) TouchRange(call CallID, number int) error {

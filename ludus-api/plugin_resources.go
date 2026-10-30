@@ -136,9 +136,14 @@ func (p *PluginResources) runtimeState(r *core.Record, m protocol.Manifest) stri
 func (p *PluginResources) response(r, auth *core.Record) map[string]any {
 	m := resourceManifest(r)
 	source := recordSource(r)
-	state := r.GetString("state")
+	state, message := r.GetString("state"), r.GetString("error")
 	if state == "approved" {
 		state = p.runtimeState(r, m)
+		if source == protocol.SourceLicensed {
+			if block := p.server.licensedPackageBlock(m.ID); block != "" {
+				state, message = "unavailable", block
+			}
+		}
 	}
 	apiRoutes := []map[string]string{}
 	for _, route := range m.Routes {
@@ -153,7 +158,7 @@ func (p *PluginResources) response(r, auth *core.Record) map[string]any {
 		"app": m.App, "vmActions": m.VMActions,
 		"apiRoutes": apiRoutes, "vmHooks": vmHookNames(m.VMHooks),
 		"canManage": pluginManage(r, auth), "canActivate": pluginAdmin(auth) && source == protocol.SourceUploaded,
-		"canUninstall": pluginManage(r, auth) && source == protocol.SourceUploaded, "sha256": r.GetString("sha256"), "error": r.GetString("error")}
+		"canUninstall": pluginManage(r, auth) && (source == protocol.SourceUploaded || uninstallableLicensed(r)), "sha256": r.GetString("sha256"), "error": message}
 	result["added"] = pluginVisible(r, auth)
 	if owner, err := p.app.FindRecordById("users", r.GetString("owner")); err == nil {
 		result["ownerUserID"] = owner.GetString("userID")
@@ -226,6 +231,23 @@ func (p *PluginResources) rootPluginRecord(auth *core.Record, pluginID string) b
 	}
 	r, err := p.resolve(auth, pluginID, false)
 	return err == nil && manifestRunsAsRoot(resourceManifest(r))
+}
+
+// uninstallableLicensed reports whether a record mirrors a licensed package an
+// administrator may uninstall: any but Enterprise, which the license installs.
+func uninstallableLicensed(r *core.Record) bool {
+	return recordSource(r) == protocol.SourceLicensed && r.GetString("pluginID") != enterprisePluginID
+}
+
+// licensedUninstallRecord reports whether a /plugins/{pluginID} uninstall
+// addresses a licensed package. Only the admin service can delete its
+// root-owned files.
+func (p *PluginResources) licensedUninstallRecord(auth *core.Record, pluginID string) bool {
+	if p == nil || auth == nil {
+		return false
+	}
+	r, err := p.resolve(auth, pluginID, false)
+	return err == nil && uninstallableLicensed(r)
 }
 
 // installedRecordID returns the record mirroring a server or licensed package.
@@ -390,26 +412,6 @@ func (p *PluginResources) Upload(e *core.RequestEvent) error {
 		if allUsers && !existing.GetBool("allUsers") {
 			return JSONError(e, 400, "replacement preserves access; change global scope using Access")
 		}
-	}
-	ownerID := e.Auth.Id
-	if existing != nil {
-		ownerID = existing.GetString("owner")
-	}
-	// Bound the number of packages owned by one user.
-	owned, err := p.app.FindAllRecords("plugin_resources", dbx.HashExp{"owner": ownerID})
-	if err != nil {
-		return JSONError(e, 500, err.Error())
-	}
-	if existing == nil && len(owned) >= 20 {
-		return JSONError(e, 409, "twenty stored packages per user; ask an administrator to archive unused packages")
-	}
-	// Bound pending submissions per user as well as each upload size.
-	pending, err := p.app.FindAllRecords("plugin_resources", dbx.HashExp{"owner": ownerID, "state": "pending"})
-	if err != nil {
-		return JSONError(e, 500, err.Error())
-	}
-	if len(pending) >= 5 && (existing == nil || existing.GetString("state") != "pending") {
-		return JSONError(e, 409, "at most five uploads may await activation")
 	}
 	c, err := p.app.FindCollectionByNameOrId("plugin_resources")
 	if err != nil {
@@ -731,6 +733,9 @@ func (p *PluginResources) Remove(e *core.RequestEvent) error {
 		if !pluginManage(r, e.Auth) {
 			return JSONError(e, 403, "only the owner of a personal plugin or an administrator can delete it")
 		}
+		if uninstallableLicensed(r) {
+			return p.uninstallLicensed(e, r)
+		}
 		if !uploaded {
 			return JSONError(e, 409, "remove this installed plugin using its server installer")
 		}
@@ -781,6 +786,53 @@ func (p *PluginResources) Remove(e *core.RequestEvent) error {
 		if err := p.app.Save(r); err != nil {
 			return JSONError(e, 500, err.Error())
 		}
+	}
+	return e.JSON(200, map[string]bool{"removed": true})
+}
+
+// uninstallLicensed deletes a licensed package and its record in the admin
+// service, which owns <install>/plugins. The regular service, which proxied
+// the request, then stops the plugin if it hosts it.
+func (p *PluginResources) uninstallLicensed(e *core.RequestEvent, r *core.Record) error {
+	if pluginServiceRunAs() != protocol.RunAsRoot {
+		return JSONError(e, 500, "this plugin is managed by the other Ludus service")
+	}
+	s := p.server
+	s.licensedInstallMu.Lock()
+	defer s.licensedInstallMu.Unlock()
+	id := r.GetString("pluginID")
+	if err := os.MkdirAll(s.pluginsRoot(), 0755); err != nil {
+		return JSONError(e, 500, "could not stage plugin deletion: "+err.Error())
+	}
+	staging, err := os.MkdirTemp(s.pluginsRoot(), ".deleting-"+id+"-")
+	if err != nil {
+		return JSONError(e, 500, "could not stage plugin deletion: "+err.Error())
+	}
+	packagePath := s.licensedPackageDir(id)
+	stagedPackage := filepath.Join(staging, "package")
+	moved := false
+	if err := os.Rename(packagePath, stagedPackage); err == nil {
+		moved = true
+	} else if !os.IsNotExist(err) {
+		_ = os.Remove(staging)
+		return JSONError(e, 500, "could not stage plugin package: "+err.Error())
+	}
+	if err := p.app.Delete(r); err != nil {
+		if moved {
+			if restoreErr := os.Rename(stagedPackage, packagePath); restoreErr != nil {
+				s.logger().Error("could not restore plugin package after deletion failure", "plugin", id, "error", restoreErr)
+			}
+		}
+		_ = os.Remove(staging)
+		return JSONError(e, 500, "could not delete plugin record: "+err.Error())
+	}
+	if plugin := s.pluginByKey(pluginKey(protocol.SourceLicensed, id, "")); plugin != nil {
+		s.stopPlugin(plugin, true)
+	}
+	s.refreshPluginDeclarations(s.installedPackages())
+	if err := os.RemoveAll(staging); err != nil {
+		s.logger().Error("could not remove deleted plugin package", "plugin", id, "error", err)
+		return JSONError(e, 500, "plugin record deleted but package cleanup failed: "+err.Error())
 	}
 	return e.JSON(200, map[string]bool{"removed": true})
 }
@@ -978,6 +1030,8 @@ func pluginResourceRoutes(p *PluginResources) PocketBaseRoutes {
 		{"RemovePlugin", http.MethodDelete, "/plugins/{pluginID}", p.Remove},
 		{"GetPluginUI", http.MethodGet, "/plugins/{pluginID}/ui", p.UI},
 		{"RenewPluginApp", http.MethodPost, "/plugins/{pluginID}/app/renew", p.RenewApp},
+		{"GetPluginCatalog", http.MethodGet, "/plugin-catalog", p.Catalog},
+		{"InstallCatalogPlugin", http.MethodPost, "/plugin-catalog/{pluginID}/install", p.InstallCatalogPlugin},
 	}
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		routes = append(routes, PocketBaseRoute{"PluginRPC", method, "/plugins/{pluginID}/rpc/{pluginPath...}", p.RPC})

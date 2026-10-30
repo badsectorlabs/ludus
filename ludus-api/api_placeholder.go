@@ -199,10 +199,9 @@ func (s *Server) servePluginAPIRoute(e *core.RequestEvent) error {
 // handlePluginRoute sends one request to a plugin under a CallID that expires
 // when the plugin returns.
 func (s *Server) handlePluginRoute(e *core.RequestEvent, plugin *managedPlugin, route protocol.Route, pluginScope bool) error {
-	if plugin.manifest.ID == antisandboxPluginID {
-		license := s.licenseSnapshot()
-		if !license.Valid || !slices.Contains(license.Entitlements, antisandboxEntitlement) {
-			return JSONError(e, http.StatusForbidden, "Anti-Sandbox requires a valid entitled license")
+	if plugin.source == protocol.SourceLicensed {
+		if block := s.licensedPackageBlock(plugin.manifest.ID); block != "" {
+			return JSONError(e, http.StatusForbidden, block)
 		}
 	}
 	call, done := plugin.host.beginRequest(e)

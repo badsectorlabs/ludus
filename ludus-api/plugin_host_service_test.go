@@ -345,7 +345,7 @@ func TestHostServiceLicensingIdentity(t *testing.T) {
 		{"licensed enterprise", testPlugin(enterprisePluginID, protocol.LevelSystem, protocol.SourceLicensed), true},
 		{"root-placed enterprise", testPlugin(enterprisePluginID, protocol.LevelSystem, protocol.SourceServer), true},
 		{"uploaded enterprise ID", testPlugin(enterprisePluginID, protocol.LevelSystem, protocol.SourceUploaded), false},
-		{"licensed other ID", testPlugin(antisandboxPluginID, protocol.LevelSystem, protocol.SourceLicensed), false},
+		{"licensed other ID", testPlugin("ludus-antisandbox", protocol.LevelSystem, protocol.SourceLicensed), false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			test.plugin.manifest.Name = "Ludus Enterprise"
@@ -362,10 +362,6 @@ func TestHostServiceLicensingIdentity(t *testing.T) {
 			h.SetLicenseState(protocol.SetLicenseStateArgs{Call: call, License: protocol.License{Valid: true}}, &reply)
 			if hostCode(reply.Err) != protocol.CodeForbidden {
 				t.Fatalf("SetLicenseState: %v", reply.Err)
-			}
-			h.RequestAddOn(protocol.AddOnArgs{Call: call, Name: antisandboxPluginID}, &reply)
-			if hostCode(reply.Err) != protocol.CodeForbidden {
-				t.Fatalf("RequestAddOn: %v", reply.Err)
 			}
 		})
 	}

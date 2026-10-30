@@ -481,20 +481,6 @@ func (h *HostService) SetLicenseState(args protocol.SetLicenseStateArgs, reply *
 	return nil
 }
 
-func (h *HostService) RequestAddOn(args protocol.AddOnArgs, reply *protocol.EmptyReply) error {
-	reply.Err = h.run(args.Call, accessEnterprise, "RequestAddOn", func(c *hostScope) *protocol.HostError {
-		if err := h.server.requestAddOn(args.Name); err != nil {
-			var hostErr *protocol.HostError
-			if errors.As(err, &hostErr) {
-				return hostErr
-			}
-			return hostErrorf(protocol.CodeInvalid, "%v", err)
-		}
-		return nil
-	})
-	return nil
-}
-
 // Quotas.
 
 func (h *HostService) QuotaStatus(args protocol.QuotaStatusArgs, reply *protocol.QuotaStatusReply) error {

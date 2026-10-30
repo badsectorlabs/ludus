@@ -36,7 +36,6 @@ type Host struct {
 	PowerOffVMsFunc               func(protocol.PowerOffArgs) ([]string, error)
 	RootProxmoxCredentialsFunc    func(protocol.CallArgs) (protocol.ProxmoxCredentials, error)
 	SetLicenseStateFunc           func(protocol.SetLicenseStateArgs) error
-	RequestAddOnFunc              func(protocol.AddOnArgs) error
 }
 
 var _ protocol.HostAPI = (*Host)(nil)
@@ -251,15 +250,6 @@ func (h *Host) SetLicenseState(args protocol.SetLicenseStateArgs, reply *protoco
 		return nil
 	}
 	reply.Err = hostError(h.SetLicenseStateFunc(args))
-	return nil
-}
-
-func (h *Host) RequestAddOn(args protocol.AddOnArgs, reply *protocol.EmptyReply) error {
-	if h.RequestAddOnFunc == nil {
-		reply.Err = unset("RequestAddOn")
-		return nil
-	}
-	reply.Err = hostError(h.RequestAddOnFunc(args))
 	return nil
 }
 
