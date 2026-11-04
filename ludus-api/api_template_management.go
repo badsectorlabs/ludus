@@ -688,6 +688,10 @@ func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus)
 		if err != nil && err != sql.ErrNoRows {
 			return fmt.Errorf("unable to query template '%s' in templates collection: %w", templateName, err)
 		}
+		iconPath := ""
+		if templateStatus.FilePath != "" && templateStatus.FilePath != "None" {
+			iconPath = templateIconPath(filepath.Dir(templateStatus.FilePath))
+		}
 		if existingRecord != nil {
 			// Backfill owner for a row created before owner population (or by a
 			// path that didn't know it). Only fill when empty — never reassign,
@@ -696,6 +700,11 @@ func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus)
 				existingRecord.Set("owner", templateStatus.Owner)
 				if err := app.Save(existingRecord); err != nil {
 					return fmt.Errorf("unable to backfill owner for template '%s': %w", templateName, err)
+				}
+			}
+			if iconPath != "" && existingRecord.GetString("icon") == "" {
+				if err := ensureTemplateRow(app, templateName, filepath.Dir(templateStatus.FilePath), iconPath, false); err != nil {
+					return fmt.Errorf("unable to import icon for template '%s': %w", templateName, err)
 				}
 			}
 			continue
@@ -718,6 +727,11 @@ func syncTemplatesCollection(app core.App, templateStatusArray []TemplateStatus)
 
 		if err := app.Save(template); err != nil {
 			return fmt.Errorf("unable to create template '%s' in templates collection: %w", templateName, err)
+		}
+		if iconPath != "" {
+			if err := ensureTemplateRow(app, templateName, filepath.Dir(templateStatus.FilePath), iconPath, false); err != nil {
+				return fmt.Errorf("unable to import icon for template '%s': %w", templateName, err)
+			}
 		}
 	}
 
