@@ -66,6 +66,26 @@
   delay: 15
   changed_when: false
 
+# ADWS answers over a local path that bypasses DNS, so it is ready well before the DC is
+# discoverable by clients: the DNS Server service starts after AD DS mounts the database
+# and Netlogon registers the _ldap._tcp/_kerberos._tcp SRV records ~45s after boot.
+# Domain joins resolve the DC through those SRV records, so wait until the DC advertises
+# itself in DNS before declaring it configured. dcdiag is not used because it returns exit
+# code 0 even when its tests fail. Soft gate: ignore_errors lets the play continue if the
+# DC never advertises, the hard gate with join retries lives in join-domain.yml.
+- name: Wait for DC to advertise itself in DNS
+  ansible.windows.win_shell: |
+    try {
+      Resolve-DnsName -Name "_ldap._tcp.{{ netbios_name }}.{{ fqdn_tail }}" -Type SRV -DnsOnly -Server 127.0.0.1 -ErrorAction Stop | Out-Null
+      exit 0
+    } catch { exit 1 }
+  register: dc_advertising
+  until: dc_advertising is succeeded
+  retries: 20
+  delay: 15
+  changed_when: false
+  ignore_errors: true
+
 - name: Configure default OUs
   microsoft.ad.ou:
     name: "{{ item }}"
