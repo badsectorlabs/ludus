@@ -75,7 +75,10 @@ ludus:
     linux: true
     roles:
       - ludus_guacamole_server
-      - ludus_guacamole_client
+      - name: ludus_guacamole_client
+        depends_on:
+          - vm_name: "{{ range_id }}-router"
+            role: ludus_guacamole_server
     role_vars:
       guac_admin_password: guacpassword
       guac_users:
@@ -95,7 +98,10 @@ ludus:
     cpus: 2
     linux: true
     roles:
-      - ludus_guacamole_client
+      - name: ludus_guacamole_client
+        depends_on:
+          - vm_name: "{{ range_id }}-router"
+            role: ludus_guacamole_server
     role_vars:
       guac_admin_password: guacpassword
       guac_connection_users:
@@ -121,7 +127,10 @@ ludus:
     windows:
       sysprep: false
     roles:
-      - ludus_guacamole_client
+      - name: ludus_guacamole_client
+        depends_on:
+          - vm_name: "{{ range_id }}-router"
+            role: ludus_guacamole_server
     role_vars:
       guac_admin_password: guacpassword
       guac_connection_users:
