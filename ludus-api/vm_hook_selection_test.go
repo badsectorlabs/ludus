@@ -41,7 +41,7 @@ func serveTestVMHookSelection(t *testing.T, admin *Server) {
 func TestRegularServiceSelectsRootRunHooksThroughTheAdminService(t *testing.T) {
 	state := &scopedVMTestState{}
 	var selectRequests []protocol.VMHookRequest
-	hookPlugin := testManagedVMHookPlugin(protocol.VMHookCapabilities{Select: true, Start: true, Status: true}, true,
+	hookPlugin := testManagedVMHookPlugin(protocol.VMHookCapabilities{Select: true, Start: true, Status: true, Revert: true}, true,
 		func(request protocol.VMHookRequest) (protocol.VMHookResponse, error) {
 			if request.Operation == protocol.VMHookSelect {
 				selectRequests = append(selectRequests, request)
@@ -57,7 +57,7 @@ func TestRegularServiceSelectsRootRunHooksThroughTheAdminService(t *testing.T) {
 	regular := &Server{LudusInstallPath: t.TempDir()}
 	declared := testExecutableManifest("hook-plugin")
 	declared.Level, declared.RunAs = protocol.LevelSystem, protocol.RunAsRoot
-	declared.VMHooks = protocol.VMHookCapabilities{Select: true, Start: true, Status: true}
+	declared.VMHooks = protocol.VMHookCapabilities{Select: true, Start: true, Status: true, Revert: true}
 	writeInstalledPackage(t, regular, declared, "#!/bin/sh\n")
 	if regular.hasStartVMHooks() {
 		t.Fatal("hooks counted before the package was known")
@@ -86,7 +86,7 @@ func TestRegularServiceSelectsRootRunHooksThroughTheAdminService(t *testing.T) {
 		t.Fatalf("stop selection: %v, %v, %d requests", selected, err, len(selectRequests)-asked)
 	}
 	plan, err := regular.deploymentVMHooks(ctx, "RANGE", []string{"selected", "ordinary"})
-	if err != nil || !plan["selected"].Start || plan["selected"].Address || plan["ordinary"].Start {
+	if err != nil || !plan["selected"].Start || !plan["selected"].Revert || plan["selected"].Address || plan["ordinary"].Start || plan["ordinary"].Revert {
 		t.Fatalf("deployment plan = %+v, %v", plan, err)
 	}
 	if selectRequests[len(selectRequests)-1].Source != StartVMSourceDeploymentFirstBoot {

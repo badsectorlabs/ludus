@@ -26,6 +26,7 @@ const (
 	StartVMSourceAPI                 = "api"
 	StartVMSourceDeployment          = "deployment"
 	StartVMSourceDeploymentFirstBoot = "deployment-first-boot"
+	StartVMSourceSnapshotRevert      = "snapshot-revert"
 )
 
 func pluginIsInitialized(plugin *managedPlugin) bool {
@@ -87,6 +88,7 @@ func unionVMHooks(a, b protocol.VMHookCapabilities) protocol.VMHookCapabilities 
 	return protocol.VMHookCapabilities{
 		Select: a.Select || b.Select, Start: a.Start || b.Start, Stop: a.Stop || b.Stop,
 		Status: a.Status || b.Status, BeforeDelete: a.BeforeDelete || b.BeforeDelete, Address: a.Address || b.Address,
+		Revert: a.Revert || b.Revert,
 	}
 }
 
@@ -96,6 +98,7 @@ func hookOperations(hooks, want protocol.VMHookCapabilities) protocol.VMHookCapa
 	return protocol.VMHookCapabilities{
 		Start: hooks.Start && want.Start, Stop: hooks.Stop && want.Stop, Status: hooks.Status && want.Status,
 		BeforeDelete: hooks.BeforeDelete && want.BeforeDelete, Address: hooks.Address && want.Address,
+		Revert: hooks.Revert && want.Revert,
 	}
 }
 
@@ -150,7 +153,7 @@ func (s *Server) hasVMStatusHooks() bool { return s.declaredVMHooks().Status }
 func (s *Server) hasBeforeDeleteVMHooks() bool { return s.declaredVMHooks().BeforeDelete }
 
 func (s *Server) hasVMLifecycleHooks() bool {
-	return hookOperations(s.declaredVMHooks(), protocol.VMHookCapabilities{Start: true, Stop: true, Status: true, BeforeDelete: true, Address: true}).Any()
+	return hookOperations(s.declaredVMHooks(), protocol.VMHookCapabilities{Start: true, Stop: true, Status: true, BeforeDelete: true, Address: true, Revert: true}).Any()
 }
 
 func (s *Server) runStartVMHooks(ctx context.Context, request StartVMHookRequest) (bool, error) {

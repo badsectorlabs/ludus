@@ -69,6 +69,32 @@
   loop: "{{ hostvars[router.vm_name | default(default_router_vm_name)]['vm_names_to_snapshot'] }}"
   when: snapshot_action == "revert_snapshot"
 
+- name: Offer snapshot revert to Ludus lifecycle hooks
+  ansible.builtin.uri:
+    url: http://localhost/v1/revert
+    unix_socket: /run/ludus/vm-hooks.sock
+    method: POST
+    body_format: json
+    body:
+      rangeId: "{{ range_id }}"
+      vmId: "{{ hostvars[item].proxmox_vmid }}"
+      vmName: "{{ item }}"
+      snapshot: "{{ snapshot_name }}"
+    return_content: true
+    status_code: 200
+    timeout: 1500
+  loop: "{{ hostvars[router.vm_name | default(default_router_vm_name)]['vm_names_to_snapshot'] }}"
+  when:
+    - snapshot_action == "revert_snapshot"
+    - (ludus_vm_hooks | default({})).get(item, {}).get('revert', false) | bool
+  register: revert_hooks
+  ignore_errors: "{{ allow_errors | default(false) }}"
+
+- name: Collect VMs reverted by Ludus lifecycle hooks
+  ansible.builtin.set_fact:
+    hook_reverted_vmids: "{{ revert_hooks.results | selectattr('json', 'defined') | selectattr('json.handled') | map(attribute='item') | map('extract', hostvars, 'proxmox_vmid') | list }}"
+  when: snapshot_action == "revert_snapshot"
+
 - name: Revert VM to snapshot
   community.proxmox.proxmox_snap:
     api_user: "{{ api_user }}"
@@ -81,7 +107,7 @@
     state: rollback
     snapname: "{{ snapshot_name }}"
     timeout: 300
-  loop: "{{ hostvars[router.vm_name | default(default_router_vm_name)]['vmids_to_snapshot'] }}"
+  loop: "{{ hostvars[router.vm_name | default(default_router_vm_name)]['vmids_to_snapshot'] | difference(hook_reverted_vmids | default([])) }}"
   when: snapshot_action == "revert_snapshot"
   register: revert_to_snapshot
   failed_when: revert_to_snapshot.changed == false or ('Too many redirections' in revert_to_snapshot.msg)
@@ -99,7 +125,7 @@
     vmid: "{{ item }}"
     state: started
     timeout: 300
-  loop: "{{ hostvars[router.vm_name | default(default_router_vm_name)]['vmids_to_snapshot'] }}"
+  loop: "{{ hostvars[router.vm_name | default(default_router_vm_name)]['vmids_to_snapshot'] | difference(hook_reverted_vmids | default([])) }}"
   # Only start the VM if it was started before the revert
   when: snapshot_action == "revert_snapshot" and vm_states[item] == 'running'
   # But sometimes it fails anyway?

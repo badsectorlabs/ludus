@@ -43,6 +43,8 @@ type vmHookServiceRequest struct {
 	FirstBoot vmHookServiceBool `json:"firstBoot,omitempty"`
 	// Hooks names the operations a /v1/select request asks about.
 	Hooks *protocol.VMHookCapabilities `json:"hooks,omitempty"`
+	// Snapshot names the snapshot a /v1/revert request rolls the VM back to.
+	Snapshot string `json:"snapshot,omitempty"`
 }
 
 type vmHookServiceVMID int
@@ -201,6 +203,7 @@ func (s *Server) StartVMHookService() error {
 	mux.HandleFunc("/v1/status", s.handleVMHookServiceStatus)
 	mux.HandleFunc("/v1/statuses", s.handleVMHookServiceStatuses)
 	mux.HandleFunc("/v1/address", s.handleVMHookServiceAddress)
+	mux.HandleFunc("/v1/revert", s.handleVMHookServiceRevert)
 	mux.HandleFunc("/v1/select", s.handleVMHookServiceSelect)
 	service := &http.Server{
 		Handler:           mux,
@@ -388,7 +391,7 @@ func (s *Server) handleVMHookServiceSelect(response http.ResponseWriter, request
 	writeVMHookServiceResponse(response, http.StatusOK, vmHookServiceResponse{Selected: hooks.Any(), Hooks: &hooks})
 }
 
-var allVMHookOperations = protocol.VMHookCapabilities{Start: true, Stop: true, Status: true, BeforeDelete: true, Address: true}
+var allVMHookOperations = protocol.VMHookCapabilities{Start: true, Stop: true, Status: true, BeforeDelete: true, Address: true, Revert: true}
 
 func vmHookServiceClient() (*http.Client, func()) {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
