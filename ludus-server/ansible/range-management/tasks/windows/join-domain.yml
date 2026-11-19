@@ -4,6 +4,25 @@
     dns_servers:
       - "{{ dc_ip }}"
 
+
+# A freshly promoted DC answers ADWS locally before its DNS Server service has loaded the
+# zone and Netlogon has registered the SRV records, and before it serves LDAP to remote
+# subnets. Joining through that window fails with "The specified domain either does not
+# exist or could not be contacted". Probe the client-side discovery path (SRV lookup
+# against the DC, then LDAP reachability) until it works.
+- name: Wait for the DC to answer SRV queries and LDAP from this host
+  ansible.windows.win_shell: |
+    Resolve-DnsName -Name "_ldap._tcp.{{ netbios_name }}.{{ fqdn_tail }}" -Type SRV -DnsOnly -Server "{{ dc_ip }}" -ErrorAction Stop | Out-Null
+    if (-not (Test-NetConnection -ComputerName "{{ dc_ip }}" -RemotePort 389 -InformationLevel Quiet -WarningAction SilentlyContinue)) {
+      throw "TCP 389 to DC {{ dc_ip }} failed"
+    }
+  register: dc_ready
+  until: dc_ready is succeeded
+  retries: 20
+  delay: 15
+  changed_when: false
+
+
 - name: Join the domain
   microsoft.ad.membership:
     dns_domain_name: "{{ netbios_name }}.{{ fqdn_tail }}"
@@ -12,6 +31,9 @@
     domain_ou_path: "ou={{ ou_name }},DC={{ netbios_name }},DC={{ fqdn_tail.split('.') | join(',DC=') }}"
     state: domain
   register: domain_joined
+  until: domain_joined is succeeded
+  retries: 10
+  delay: 30
 
 - name: Set autologin entries
   ansible.builtin.include_tasks: tasks/windows/configure-autologon.yml
