@@ -152,6 +152,8 @@ func (s *Server) hasVMStatusHooks() bool { return s.declaredVMHooks().Status }
 
 func (s *Server) hasBeforeDeleteVMHooks() bool { return s.declaredVMHooks().BeforeDelete }
 
+func (s *Server) hasVMRevertHooks() bool { return s.declaredVMHooks().Revert }
+
 func (s *Server) hasVMLifecycleHooks() bool {
 	return hookOperations(s.declaredVMHooks(), protocol.VMHookCapabilities{Start: true, Stop: true, Status: true, BeforeDelete: true, Address: true, Revert: true}).Any()
 }
@@ -276,4 +278,39 @@ func (s *Server) runBeforeDeleteVMHooks(ctx context.Context, request VMHookReque
 		}
 	}
 	return nil
+}
+
+// runVMRevertHooks offers a snapshot revert to the plugins that select the VM.
+// A handled revert has rolled the VM back to request.Snapshot and restored the
+// state in request.Status; otherwise Ludus reverts the VM itself.
+func (s *Server) runVMRevertHooks(ctx context.Context, request VMHookRequest) (bool, error) {
+	for _, plugin := range s.pluginSnapshot() {
+		if !plugin.manifest.VMHooks.Revert {
+			continue
+		}
+		selected, err := pluginSelectsVM(ctx, plugin, request)
+		if err != nil {
+			return false, err
+		}
+		if !selected {
+			continue
+		}
+		if !pluginIsInitialized(plugin) {
+			return false, fmt.Errorf("plugin %s registered a revert VM hook but is not initialized", plugin.manifest.Name)
+		}
+		result, err := pluginVMHook(ctx, plugin, protocol.VMHookRevert, request)
+		if err != nil {
+			return false, fmt.Errorf("plugin %s failed to revert VMID %d to snapshot %s: %w", plugin.manifest.Name, request.VMID, request.Snapshot, err)
+		}
+		switch result.Decision {
+		case StartVMContinue:
+			continue
+		case StartVMHandled:
+			logger.Debug(fmt.Sprintf("Plugin %s handled revert of VMID %d to snapshot %s", plugin.manifest.Name, request.VMID, request.Snapshot))
+			return true, nil
+		default:
+			return false, fmt.Errorf("plugin %s returned invalid revert VM hook result %d for VMID %d", plugin.manifest.Name, result.Decision, request.VMID)
+		}
+	}
+	return false, nil
 }

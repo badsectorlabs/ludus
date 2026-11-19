@@ -31,6 +31,9 @@ var (
 	vmHookServiceListener net.Listener
 	vmHookRangeIDPattern  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*(?:/[A-Za-z0-9_-]+){0,2}$`)
 	vmHookNamePattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+	// vmHookSnapshotPattern is Proxmox's snapshot name format (pve-configid,
+	// at most 40 characters).
+	vmHookSnapshotPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{1,39}$`)
 	// vmHookServiceClientSocket is the socket the regular service dials; tests
 	// substitute their own.
 	vmHookServiceClientSocket = VMHookServiceSocket
@@ -356,6 +359,29 @@ func (s *Server) handleVMHookServiceStart(response http.ResponseWriter, request 
 		return
 	}
 	handled, err := s.runStartVMHooks(request.Context(), hookRequest)
+	if err != nil {
+		writeVMHookServiceResponse(response, http.StatusConflict, vmHookServiceResponse{Error: err.Error()})
+		return
+	}
+	writeVMHookServiceResponse(response, http.StatusOK, vmHookServiceResponse{Handled: handled})
+}
+
+func (s *Server) handleVMHookServiceRevert(response http.ResponseWriter, request *http.Request) {
+	body, ok := decodeVMHookServiceRequest(response, request)
+	if !ok {
+		return
+	}
+	if !vmHookSnapshotPattern.MatchString(body.Snapshot) {
+		writeVMHookServiceResponse(response, http.StatusBadRequest, vmHookServiceResponse{Error: "snapshot must be a Proxmox snapshot name"})
+		return
+	}
+	hookRequest, err := s.verifiedVMHookRequest(request.Context(), body, StartVMSourceSnapshotRevert)
+	if err != nil {
+		writeVMHookServiceResponse(response, http.StatusConflict, vmHookServiceResponse{Error: err.Error()})
+		return
+	}
+	hookRequest.Snapshot = body.Snapshot
+	handled, err := s.runVMRevertHooks(request.Context(), hookRequest)
 	if err != nil {
 		writeVMHookServiceResponse(response, http.StatusConflict, vmHookServiceResponse{Error: err.Error()})
 		return
