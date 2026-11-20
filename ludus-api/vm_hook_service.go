@@ -31,6 +31,9 @@ var (
 	vmHookServiceListener net.Listener
 	vmHookRangeIDPattern  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*(?:/[A-Za-z0-9_-]+){0,2}$`)
 	vmHookNamePattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+	// vmHookSnapshotPattern is Proxmox's snapshot name format (pve-configid,
+	// at most 40 characters).
+	vmHookSnapshotPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{1,39}$`)
 	// vmHookServiceClientSocket is the socket the regular service dials; tests
 	// substitute their own.
 	vmHookServiceClientSocket = VMHookServiceSocket
@@ -43,6 +46,8 @@ type vmHookServiceRequest struct {
 	FirstBoot vmHookServiceBool `json:"firstBoot,omitempty"`
 	// Hooks names the operations a /v1/select request asks about.
 	Hooks *protocol.VMHookCapabilities `json:"hooks,omitempty"`
+	// Snapshot names the snapshot a /v1/revert request rolls the VM back to.
+	Snapshot string `json:"snapshot,omitempty"`
 }
 
 type vmHookServiceVMID int
@@ -201,6 +206,7 @@ func (s *Server) StartVMHookService() error {
 	mux.HandleFunc("/v1/status", s.handleVMHookServiceStatus)
 	mux.HandleFunc("/v1/statuses", s.handleVMHookServiceStatuses)
 	mux.HandleFunc("/v1/address", s.handleVMHookServiceAddress)
+	mux.HandleFunc("/v1/revert", s.handleVMHookServiceRevert)
 	mux.HandleFunc("/v1/select", s.handleVMHookServiceSelect)
 	service := &http.Server{
 		Handler:           mux,
@@ -360,6 +366,29 @@ func (s *Server) handleVMHookServiceStart(response http.ResponseWriter, request 
 	writeVMHookServiceResponse(response, http.StatusOK, vmHookServiceResponse{Handled: handled})
 }
 
+func (s *Server) handleVMHookServiceRevert(response http.ResponseWriter, request *http.Request) {
+	body, ok := decodeVMHookServiceRequest(response, request)
+	if !ok {
+		return
+	}
+	if !vmHookSnapshotPattern.MatchString(body.Snapshot) {
+		writeVMHookServiceResponse(response, http.StatusBadRequest, vmHookServiceResponse{Error: "snapshot must be a Proxmox snapshot name"})
+		return
+	}
+	hookRequest, err := s.verifiedVMHookRequest(request.Context(), body, StartVMSourceSnapshotRevert)
+	if err != nil {
+		writeVMHookServiceResponse(response, http.StatusConflict, vmHookServiceResponse{Error: err.Error()})
+		return
+	}
+	hookRequest.Snapshot = body.Snapshot
+	handled, err := s.runVMRevertHooks(request.Context(), hookRequest)
+	if err != nil {
+		writeVMHookServiceResponse(response, http.StatusConflict, vmHookServiceResponse{Error: err.Error()})
+		return
+	}
+	writeVMHookServiceResponse(response, http.StatusOK, vmHookServiceResponse{Handled: handled})
+}
+
 // handleVMHookServiceSelect reports which of the requested operations the
 // admin service's hook plugins select for a VM, so the regular service can
 // route the work here. Selection is non-mutating and may name a VM that does
@@ -388,7 +417,7 @@ func (s *Server) handleVMHookServiceSelect(response http.ResponseWriter, request
 	writeVMHookServiceResponse(response, http.StatusOK, vmHookServiceResponse{Selected: hooks.Any(), Hooks: &hooks})
 }
 
-var allVMHookOperations = protocol.VMHookCapabilities{Start: true, Stop: true, Status: true, BeforeDelete: true, Address: true}
+var allVMHookOperations = protocol.VMHookCapabilities{Start: true, Stop: true, Status: true, BeforeDelete: true, Address: true, Revert: true}
 
 func vmHookServiceClient() (*http.Client, func()) {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {

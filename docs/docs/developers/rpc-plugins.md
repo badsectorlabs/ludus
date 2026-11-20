@@ -274,7 +274,7 @@ The ZIP contains exactly the files declared in `plugin.json`, at its root. Do no
 | `app` | The executable serves a browser app under `/plugin-apps/{resourceID}/`. |
 | `vmActions` | The range editor offers the plugin's VM actions; requires `app` and the `/vm-actions` routes. |
 | `routes` | `[{"name", "method", "pattern", "scope"}]`; `scope` is `plugin` (default) or `api` (system level only). |
-| `vmHooks` | VM hook capabilities: `select`, `start`, `stop`, `status`, `beforeDelete`, `address` (system level only). |
+| `vmHooks` | VM hook capabilities: `select`, `start`, `stop`, `status`, `beforeDelete`, `address`, `revert` (system level only). |
 
 Generate the file with `--ludus-manifest` rather than writing it by hand.
 

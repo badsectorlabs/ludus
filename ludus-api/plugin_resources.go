@@ -96,7 +96,7 @@ func vmHookNames(hooks protocol.VMHookCapabilities) []string {
 	for _, hook := range []struct {
 		enabled bool
 		name    string
-	}{{hooks.Select, "select"}, {hooks.Start, "start"}, {hooks.Stop, "stop"}, {hooks.Status, "status"}, {hooks.BeforeDelete, "beforeDelete"}, {hooks.Address, "address"}} {
+	}{{hooks.Select, "select"}, {hooks.Start, "start"}, {hooks.Stop, "stop"}, {hooks.Status, "status"}, {hooks.BeforeDelete, "beforeDelete"}, {hooks.Address, "address"}, {hooks.Revert, "revert"}} {
 		if hook.enabled {
 			names = append(names, hook.name)
 		}

@@ -9,17 +9,18 @@ import (
 type deploymentVMHookCapabilities struct {
 	Start   bool `json:"start"`
 	Address bool `json:"address"`
+	Revert  bool `json:"revert"`
 }
 
 func (s *Server) deploymentVMHooks(ctx context.Context, rangeID string, names []string) (map[string]deploymentVMHookCapabilities, error) {
 	hooks := make(map[string]deploymentVMHookCapabilities)
 	for _, name := range names {
 		request := VMHookRequest{Source: StartVMSourceDeploymentFirstBoot, RangeID: rangeID, Pool: rangeID, VMName: name}
-		selected, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{Start: true, Address: true})
+		selected, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{Start: true, Address: true, Revert: true})
 		if err != nil {
 			return nil, err
 		}
-		hooks[name] = deploymentVMHookCapabilities{Start: selected.Start, Address: selected.Address}
+		hooks[name] = deploymentVMHookCapabilities{Start: selected.Start, Address: selected.Address, Revert: selected.Revert}
 	}
 	return hooks, nil
 }

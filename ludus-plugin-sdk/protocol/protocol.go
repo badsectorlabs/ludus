@@ -171,6 +171,7 @@ type VMHookCapabilities struct {
 	Status       bool `json:"status,omitempty"`
 	BeforeDelete bool `json:"beforeDelete,omitempty"`
 	Address      bool `json:"address,omitempty"`
+	Revert       bool `json:"revert,omitempty"`
 }
 
 // Any reports whether any capability is set.
@@ -187,6 +188,7 @@ const (
 	VMHookStatus       VMHookOperation = "status"
 	VMHookBeforeDelete VMHookOperation = "before-delete"
 	VMHookAddress      VMHookOperation = "address"
+	VMHookRevert       VMHookOperation = "revert"
 )
 
 type VMHookRequest struct {
@@ -199,6 +201,9 @@ type VMHookRequest struct {
 	Node      string
 	Pool      string
 	Status    string
+	// Snapshot names the snapshot a revert rolls the VM back to. Status is
+	// the VM's state before the revert, which the revert must restore.
+	Snapshot string
 }
 
 type VMHookDecision uint8

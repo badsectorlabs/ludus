@@ -212,7 +212,7 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	// Merge userVars with any extraVars provided
 	maps.Copy(userVars, extraVars)
 
-	if s.hasStartVMHooks() || s.hasVMAddressHooks() {
+	if s.hasStartVMHooks() || s.hasVMAddressHooks() || s.hasVMRevertHooks() {
 		// Select hooks from plugin configuration before deployment,
 		// independently of whether the privileged service is reachable.
 		vmNames := make([]string, 0, len(vmTargetNodes)+1)
