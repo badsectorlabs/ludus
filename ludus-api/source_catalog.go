@@ -428,10 +428,10 @@ func loadInstalledArtifacts(e *core.RequestEvent, walked *WalkedSource) map[stri
 	// installed and the picker won't offer a duplicating re-install. Build
 	// status is a separate axis surfaced by the templates API.
 	if viewerProxmoxUsername != "" {
-		have := userPackerTemplateNames(viewerProxmoxUsername)
+		have := userPackerTemplateDirs(viewerProxmoxUsername)
 		for _, dir := range walked.Templates {
 			name := templateNameForDir(dir)
-			if have[name] {
+			if _, ok := have[name]; ok {
 				out["template/"+name] = installedArtifact{}
 			}
 		}

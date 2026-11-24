@@ -209,7 +209,7 @@ func releaseSourceClaims(app core.App, kinds []string, name string) {
 // installTemplateDir validates the packer template in srcDir and copies it into
 // the given user's per-user packer dir, which survives server updates (the
 // embedded global packer dir is backed up and re-extracted on every update).
-// srcDir's basename becomes the packer subdir. Requires exactly one *.pkr.hcl
+// The template's *-template name becomes the packer subdir. Requires exactly one *.pkr.hcl
 // or *.pkr.json. A name matching a built-in/global template is rejected — it
 // would shadow the built-in and show up twice in the merged template list.
 // When the user already has this template: overwrite if force; a no-op if
@@ -246,13 +246,19 @@ func installTemplateDir(srcDir, proxmoxUsername string, force, idempotent bool) 
 	// Duplicate guard keyed on the template NAME, not the destination folder: a
 	// copy may already exist under a different folder (e.g. an older basename
 	// folder, or a CLI upload whose tar root differs from the *-template name).
-	// Checking the name keeps us from installing the same template twice.
-	if userPackerTemplateNames(proxmoxUsername)[name] {
+	// Checking the name keeps us from installing the same template twice, and a
+	// forced overwrite removes every existing copy so the new one replaces them.
+	if existingDirs, ok := userPackerTemplateDirs(proxmoxUsername)[name]; ok {
 		if !force {
 			if idempotent {
 				return nil
 			}
 			return fmt.Errorf("template %q already exists, use force to overwrite", name)
+		}
+		for _, dir := range existingDirs {
+			if err := os.RemoveAll(dir); err != nil {
+				return fmt.Errorf("removing existing template directory %s: %w", dir, err)
+			}
 		}
 	}
 
@@ -269,16 +275,20 @@ func installTemplateDir(srcDir, proxmoxUsername string, force, idempotent bool) 
 	return nil
 }
 
-// userPackerTemplateNames returns the set of *-template names present in the
-// given user's packer dir — every template that user's `templates list` would
-// show from their own scope. Keyed on the template name (not folder) so callers
-// detect a template regardless of the folder it was installed under.
-func userPackerTemplateNames(proxmoxUsername string) map[string]bool {
-	out := map[string]bool{}
+// userPackerTemplateDirs maps each *-template name present in the given user's
+// packer dir — every template that user's `templates list` would show from
+// their own scope — to the directories holding a packer file with that name.
+// Keyed on the template name (not folder) so callers detect and replace a
+// template regardless of the folder it was installed under. A packer file
+// directly in the packer root marks its name present without listing the root
+// as a removable directory.
+func userPackerTemplateDirs(proxmoxUsername string) map[string][]string {
+	out := map[string][]string{}
 	if proxmoxUsername == "" {
 		return out
 	}
-	files, err := findFiles(filepath.Join(ludusInstallPath, "users", proxmoxUsername, "packer"), "pkr.hcl", "pkr.json")
+	packerDir := filepath.Join(ludusInstallPath, "users", proxmoxUsername, "packer")
+	files, err := findFiles(packerDir, "pkr.hcl", "pkr.json")
 	if err != nil {
 		return out
 	}
@@ -287,8 +297,11 @@ func userPackerTemplateNames(proxmoxUsername string) map[string]bool {
 		if err != nil {
 			continue
 		}
-		out[n] = true
-
+		dirs := out[n]
+		if dir := filepath.Dir(f); dir != packerDir {
+			dirs = append(dirs, dir)
+		}
+		out[n] = dirs
 	}
 	return out
 }
