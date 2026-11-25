@@ -12,22 +12,29 @@ type deploymentVMHookCapabilities struct {
 	Revert  bool `json:"revert"`
 }
 
-func (s *Server) deploymentVMHooks(ctx context.Context, rangeID string, names []string) (map[string]deploymentVMHookCapabilities, error) {
+// deploymentVMHooks selects the deployment hooks for each VM and returns the
+// nodes its plugins limit placement to, by VM name (VMs without a limit are
+// absent). candidates are the nodes Ludus may place VMs on.
+func (s *Server) deploymentVMHooks(ctx context.Context, rangeID string, names, candidates []string) (map[string]deploymentVMHookCapabilities, map[string][]string, error) {
 	hooks := make(map[string]deploymentVMHookCapabilities)
+	limits := make(map[string][]string)
 	for _, name := range names {
-		request := VMHookRequest{Source: StartVMSourceDeploymentFirstBoot, RangeID: rangeID, Pool: rangeID, VMName: name}
-		selected, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{Start: true, Address: true, Revert: true})
+		request := VMHookRequest{Source: StartVMSourceDeploymentFirstBoot, RangeID: rangeID, Pool: rangeID, VMName: name, Candidates: candidates}
+		selected, nodes, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{Start: true, Address: true, Revert: true})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		hooks[name] = deploymentVMHookCapabilities{Start: selected.Start, Address: selected.Address, Revert: selected.Revert}
+		if nodes != nil {
+			limits[name] = nodes
+		}
 	}
-	return hooks, nil
+	return hooks, limits, nil
 }
 
 func (s *Server) selectsVMForPower(ctx context.Context, request VMHookRequest, action string) (bool, error) {
 	want := protocol.VMHookCapabilities{Start: action == "on", Stop: action == "off"}
-	selected, err := s.selectedVMHooks(ctx, request, want)
+	selected, _, err := s.selectedVMHooks(ctx, request, want)
 	return selected.Any(), err
 }
 
@@ -37,7 +44,7 @@ type vmDeleteHookError struct{ error }
 func (e *vmDeleteHookError) Unwrap() error { return e.error }
 
 func (s *Server) selectsVMForDelete(ctx context.Context, request VMHookRequest) (bool, error) {
-	selected, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{BeforeDelete: true})
+	selected, _, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{BeforeDelete: true})
 	if err != nil {
 		return false, &vmDeleteHookError{err}
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -66,6 +67,21 @@ func GetClusterNodes(client *goproxmox.Client) (goproxmox.NodeStatuses, error) {
 	return client.Nodes(ctx)
 }
 
+// OnlineClusterNodes returns the names of the cluster's online nodes.
+func OnlineClusterNodes(client *goproxmox.Client) ([]string, error) {
+	nodes, err := GetClusterNodes(client)
+	if err != nil {
+		return nil, err
+	}
+	var online []string
+	for _, node := range nodes {
+		if node.Status == "online" {
+			online = append(online, node.Node)
+		}
+	}
+	return online, nil
+}
+
 // GetNodeResourceUsage returns CPU and memory usage percentage for a node
 // Uses the NodeStatus which already has CPU and Mem info from the nodes list
 func GetNodeResourceUsage(client *goproxmox.Client, nodeName string) (cpuPercent float64, memPercent float64, err error) {
@@ -95,6 +111,12 @@ func GetNodeResourceUsage(client *goproxmox.Client, nodeName string) (cpuPercent
 // SelectOptimalNode selects the best node for deployment
 // Uses 80% RAM weight, 20% CPU weight to favor nodes with more available memory
 func SelectOptimalNode(client *goproxmox.Client) (string, error) {
+	return SelectOptimalNodeAmong(client, nil)
+}
+
+// SelectOptimalNodeAmong is SelectOptimalNode limited to the allowed nodes
+// (all nodes when allowed is empty).
+func SelectOptimalNodeAmong(client *goproxmox.Client, allowed []string) (string, error) {
 	nodes, err := GetClusterNodes(client)
 	if err != nil {
 		return "", fmt.Errorf("failed to get nodes: %w", err)
@@ -105,7 +127,7 @@ func SelectOptimalNode(client *goproxmox.Client) (string, error) {
 	}
 
 	// If only one node, return it
-	if len(nodes) == 1 {
+	if len(nodes) == 1 && (len(allowed) == 0 || slices.Contains(allowed, nodes[0].Node)) {
 		return nodes[0].Node, nil
 	}
 
@@ -113,8 +135,8 @@ func SelectOptimalNode(client *goproxmox.Client) (string, error) {
 	var bestScore float64 = 1000.0 // Start with a high score (lower is better)
 
 	for _, nodeStatus := range nodes {
-		// Skip offline nodes
-		if nodeStatus.Status != "online" {
+		// Skip offline nodes and nodes outside allowed
+		if nodeStatus.Status != "online" || len(allowed) > 0 && !slices.Contains(allowed, nodeStatus.Node) {
 			continue
 		}
 

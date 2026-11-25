@@ -190,7 +190,10 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 	rangeConfigPath := fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, usersRange.RangeId())
 
 	// Compute target nodes for cluster deployments
-	rangeDefaultTargetNode, vmTargetNodes := computeTargetNodes(e, usersRange.RangeId())
+	rangeDefaultTargetNode, vmTargetNodes, err := computeTargetNodes(e, usersRange.RangeId(), nil)
+	if err != nil {
+		return "", err
+	}
 
 	userVars := map[string]interface{}{
 		"username":           user.ProxmoxUsername(),
@@ -224,13 +227,28 @@ func (s *Server) RunAnsiblePlaybookWithVariables(e *core.RequestEvent, playbookP
 		if routerName, routerErr := GetRouterVMName(usersRange); routerErr == nil {
 			vmNames = append(vmNames, routerName)
 		}
+		// Plugins may limit the nodes a selected VM can run on; the candidates
+		// are the cluster's online nodes.
+		var candidates []string
+		if client, clientErr := GetRootGoProxmoxClient(); clientErr == nil {
+			if online, nodesErr := OnlineClusterNodes(client); nodesErr == nil {
+				candidates = online
+			}
+		}
 		hookContext, cancelHookSelection := context.WithTimeout(context.Background(), 10*time.Second)
-		hooks, hookErr := s.deploymentVMHooks(hookContext, usersRange.RangeId(), vmNames)
+		hooks, limits, hookErr := s.deploymentVMHooks(hookContext, usersRange.RangeId(), vmNames, candidates)
 		cancelHookSelection()
 		if hookErr != nil {
 			return "", hookErr
 		}
 		userVars["ludus_vm_hooks"] = hooks
+		if len(limits) > 0 {
+			if rangeDefaultTargetNode, vmTargetNodes, err = computeTargetNodes(e, usersRange.RangeId(), limits); err != nil {
+				return "", err
+			}
+			userVars["range_default_target_node"] = rangeDefaultTargetNode
+			userVars["vm_target_nodes"] = vmTargetNodes
+		}
 	}
 
 	// proxmox_token_secret must not appear on argv (visible in ps).
@@ -841,26 +859,28 @@ func getFatalErrorsFromLog(input string) []string {
 // 3. Range target_node
 // 4. Auto-select (80% RAM + 20% CPU weighted algorithm)
 // 5. Server proxmox_node
-func computeTargetNodes(e *core.RequestEvent, rangeID string) (string, map[string]string) {
+// limits holds, by VM name, the nodes VM hook plugins allow the VM on (see
+// placeVM); nil places every VM as above.
+func computeTargetNodes(e *core.RequestEvent, rangeID string, limits map[string][]string) (string, map[string]string, error) {
 	vmTargetNodes := make(map[string]string)
 
 	// Read and parse the range config
 	rangeConfigPath := fmt.Sprintf("%s/ranges/%s/range-config.yml", ludusInstallPath, rangeID)
 	if !FileExists(rangeConfigPath) {
 		// No range config, use default node
-		return ServerConfiguration.ProxmoxNode, vmTargetNodes
+		return ServerConfiguration.ProxmoxNode, vmTargetNodes, nil
 	}
 
 	configBytes, err := os.ReadFile(rangeConfigPath)
 	if err != nil {
 		logger.Debug(fmt.Sprintf("Failed to read range config for target node computation: %v", err))
-		return ServerConfiguration.ProxmoxNode, vmTargetNodes
+		return ServerConfiguration.ProxmoxNode, vmTargetNodes, nil
 	}
 
 	var config LudusConfig
 	if err := yaml.Unmarshal(configBytes, &config); err != nil {
 		logger.Debug(fmt.Sprintf("Failed to parse range config for target node computation: %v", err))
-		return ServerConfiguration.ProxmoxNode, vmTargetNodes
+		return ServerConfiguration.ProxmoxNode, vmTargetNodes, nil
 	}
 
 	// Replace {{ range_id }} with the actual range ID
@@ -878,6 +898,7 @@ func computeTargetNodes(e *core.RequestEvent, rangeID string) (string, map[strin
 	if config.Defaults != nil {
 		defaultTargetNode = config.Defaults.TargetNode
 	}
+	defaultIsAuto := defaultTargetNode == ""
 	if defaultTargetNode == "" {
 		// Try auto-selection based on resource usage
 		client, err := GetRootGoProxmoxClient()
@@ -894,44 +915,84 @@ func computeTargetNodes(e *core.RequestEvent, rangeID string) (string, map[strin
 		defaultTargetNode = ServerConfiguration.ProxmoxNode
 	}
 
+	// An automatic default that a VM's plugins exclude is replaced by the
+	// least-loaded node they allow.
+	pick := func(allowed []string) string {
+		if client, err := GetRootGoProxmoxClient(); err == nil {
+			if node, err := SelectOptimalNodeAmong(client, allowed); err == nil {
+				return node
+			}
+		}
+		return allowed[0]
+	}
+
 	// Build per-VM target node map
 	// Priority: Existing VM's node >VM target_node > Range default
 	for _, vm := range config.Ludus {
-		node, err := getNodeForVMByName(e, vm.VMName)
-		if err == nil && node != "" {
-			logger.Debug(fmt.Sprintf("VM %s is already running on node %s", vm.VMName, node))
-			vmTargetNodes[vm.VMName] = node
-		} else if vm.TargetNode != "" {
-			logger.Debug(fmt.Sprintf("VM %s target node is %s", vm.VMName, vm.TargetNode))
-			vmTargetNodes[vm.VMName] = vm.TargetNode
-		} else {
-			logger.Debug(fmt.Sprintf("VM %s target node is default node %s", vm.VMName, defaultTargetNode))
-			vmTargetNodes[vm.VMName] = defaultTargetNode
+		existing, err := getNodeForVMByName(e, vm.VMName)
+		if err != nil {
+			existing = ""
 		}
+		node, err := placeVM(vm.VMName, existing, vm.TargetNode, defaultTargetNode, defaultIsAuto, limits[vm.VMName], pick)
+		if err != nil {
+			return "", nil, err
+		}
+		vmTargetNodes[vm.VMName] = node
 	}
 
 	// Router: always set target node when we have a router VM name. Priority: existing node > router.target_node > range default
 	usersRange, err := GetRange(e)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Failed to get range for target node computation: %v", err))
-		return defaultTargetNode, vmTargetNodes
+		return defaultTargetNode, vmTargetNodes, nil
 	}
 	routerVMName, err := GetRouterVMName(usersRange)
 	if err == nil && routerVMName != "" {
-		if node, err := getNodeForVMByName(e, routerVMName); err == nil && node != "" {
-			logger.Debug(fmt.Sprintf("Router %s is running on node %s", routerVMName, node))
-			vmTargetNodes[routerVMName] = node
-		} else if config.Router != nil && config.Router.TargetNode != "" {
-			logger.Debug(fmt.Sprintf("Router %s target node is %s", routerVMName, config.Router.TargetNode))
-			vmTargetNodes[routerVMName] = config.Router.TargetNode
-		} else {
-			logger.Debug(fmt.Sprintf("Router %s target node is default node %s", routerVMName, defaultTargetNode))
-			vmTargetNodes[routerVMName] = defaultTargetNode
+		existing, err := getNodeForVMByName(e, routerVMName)
+		if err != nil {
+			existing = ""
 		}
+		target := ""
+		if config.Router != nil {
+			target = config.Router.TargetNode
+		}
+		node, err := placeVM(routerVMName, existing, target, defaultTargetNode, defaultIsAuto, limits[routerVMName], pick)
+		if err != nil {
+			return "", nil, err
+		}
+		vmTargetNodes[routerVMName] = node
 	}
 
 	logger.Debug(fmt.Sprintf("Computed target nodes for range %s: default=%s, per-vm=%v", rangeID, defaultTargetNode, vmTargetNodes))
-	return defaultTargetNode, vmTargetNodes
+	return defaultTargetNode, vmTargetNodes, nil
+}
+
+// placeVM returns a VM's node: the node it already runs on, else its
+// target_node, else the range default. allowed, when not empty, holds the only
+// nodes its VM hook plugins can run it on: an existing or explicitly chosen
+// node outside it fails, and an automatic default outside it is replaced by
+// pick(allowed).
+func placeVM(vmName, existing, target, rangeDefault string, defaultIsAuto bool, allowed []string, pick func([]string) string) (string, error) {
+	permitted := func(node string) bool { return len(allowed) == 0 || slices.Contains(allowed, node) }
+	only := strings.Join(allowed, ", ")
+	switch {
+	case existing != "":
+		if !permitted(existing) {
+			return "", fmt.Errorf("VM %s runs on node %s, but its VM hook plugins can only run it on %s", vmName, existing, only)
+		}
+		return existing, nil
+	case target != "":
+		if !permitted(target) {
+			return "", fmt.Errorf("VM %s has target_node %s, but its VM hook plugins can only run it on %s", vmName, target, only)
+		}
+		return target, nil
+	case permitted(rangeDefault):
+		return rangeDefault, nil
+	case !defaultIsAuto:
+		return "", fmt.Errorf("VM %s would use the range default node %s, but its VM hook plugins can only run it on %s; set target_node for this VM", vmName, rangeDefault, only)
+	default:
+		return pick(allowed), nil
+	}
 }
 
 // ansibleRolesSearchPath / ansibleCollectionsSearchPath build the

@@ -48,6 +48,8 @@ type vmHookServiceRequest struct {
 	Hooks *protocol.VMHookCapabilities `json:"hooks,omitempty"`
 	// Snapshot names the snapshot a /v1/revert request rolls the VM back to.
 	Snapshot string `json:"snapshot,omitempty"`
+	// Candidates lists the nodes a deployment /v1/select may place the VM on.
+	Candidates []string `json:"candidates,omitempty"`
 }
 
 type vmHookServiceVMID int
@@ -105,7 +107,9 @@ type vmHookServiceResponse struct {
 	Status   VMStatus                     `json:"status,omitempty"`
 	Selected bool                         `json:"selected,omitempty"`
 	Hooks    *protocol.VMHookCapabilities `json:"hooks,omitempty"`
-	Error    string                       `json:"error,omitempty"`
+	// Nodes limits a selected VM's placement (/v1/select); empty means any.
+	Nodes []string `json:"nodes,omitempty"`
+	Error string   `json:"error,omitempty"`
 }
 
 func validateVMHookServiceDirectory() error {
@@ -407,14 +411,14 @@ func (s *Server) handleVMHookServiceSelect(response http.ResponseWriter, request
 	if bool(body.FirstBoot) {
 		source = StartVMSourceDeploymentFirstBoot
 	}
-	hooks, err := s.selectLocalVMHooks(request.Context(), VMHookRequest{
-		Source: source, RangeID: body.RangeID, Pool: body.RangeID, VMID: int(body.VMID), VMName: body.VMName,
+	hooks, nodes, err := s.selectLocalVMHooks(request.Context(), VMHookRequest{
+		Source: source, RangeID: body.RangeID, Pool: body.RangeID, VMID: int(body.VMID), VMName: body.VMName, Candidates: body.Candidates,
 	}, *body.Hooks)
 	if err != nil {
 		writeVMHookServiceResponse(response, http.StatusConflict, vmHookServiceResponse{Error: err.Error()})
 		return
 	}
-	writeVMHookServiceResponse(response, http.StatusOK, vmHookServiceResponse{Selected: hooks.Any(), Hooks: &hooks})
+	writeVMHookServiceResponse(response, http.StatusOK, vmHookServiceResponse{Selected: hooks.Any(), Hooks: &hooks, Nodes: nodes})
 }
 
 var allVMHookOperations = protocol.VMHookCapabilities{Start: true, Stop: true, Status: true, BeforeDelete: true, Address: true, Revert: true}
@@ -427,38 +431,39 @@ func vmHookServiceClient() (*http.Client, func()) {
 }
 
 // callVMHookSelect asks the admin service which of the operations in want its
-// hook plugins select for the VM.
-func callVMHookSelect(ctx context.Context, hookRequest VMHookRequest, want protocol.VMHookCapabilities) (protocol.VMHookCapabilities, error) {
+// hook plugins select for the VM, and the nodes they limit its placement to.
+func callVMHookSelect(ctx context.Context, hookRequest VMHookRequest, want protocol.VMHookCapabilities) (protocol.VMHookCapabilities, []string, error) {
 	body, err := json.Marshal(vmHookServiceRequest{
 		RangeID: hookRequest.RangeID, VMID: vmHookServiceVMID(hookRequest.VMID), VMName: hookRequest.VMName,
 		FirstBoot: vmHookServiceBool(hookRequest.Source == StartVMSourceDeploymentFirstBoot), Hooks: &want,
+		Candidates: hookRequest.Candidates,
 	})
 	if err != nil {
-		return protocol.VMHookCapabilities{}, err
+		return protocol.VMHookCapabilities{}, nil, err
 	}
 	client, closeIdle := vmHookServiceClient()
 	defer closeIdle()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/select", bytes.NewReader(body))
 	if err != nil {
-		return protocol.VMHookCapabilities{}, err
+		return protocol.VMHookCapabilities{}, nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
-		return protocol.VMHookCapabilities{}, fmt.Errorf("call root VM hook service: %w", err)
+		return protocol.VMHookCapabilities{}, nil, fmt.Errorf("call root VM hook service: %w", err)
 	}
 	defer response.Body.Close()
 	var result vmHookServiceResponse
 	if err := json.NewDecoder(io.LimitReader(response.Body, 64*1024)).Decode(&result); err != nil {
-		return protocol.VMHookCapabilities{}, fmt.Errorf("decode root VM hook selection: %w", err)
+		return protocol.VMHookCapabilities{}, nil, fmt.Errorf("decode root VM hook selection: %w", err)
 	}
 	if response.StatusCode != http.StatusOK {
-		return protocol.VMHookCapabilities{}, fmt.Errorf("root VM hook service rejected selection of %s: %s (%s)", hookRequest.VMName, result.Error, response.Status)
+		return protocol.VMHookCapabilities{}, nil, fmt.Errorf("root VM hook service rejected selection of %s: %s (%s)", hookRequest.VMName, result.Error, response.Status)
 	}
 	if result.Hooks == nil {
-		return protocol.VMHookCapabilities{}, nil
+		return protocol.VMHookCapabilities{}, nil, nil
 	}
-	return *result.Hooks, nil
+	return *result.Hooks, result.Nodes, nil
 }
 
 func (s *Server) handleVMHookServiceStatus(response http.ResponseWriter, request *http.Request) {
