@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -45,7 +46,8 @@ func TestRegularServiceSelectsRootRunHooksThroughTheAdminService(t *testing.T) {
 		func(request protocol.VMHookRequest) (protocol.VMHookResponse, error) {
 			if request.Operation == protocol.VMHookSelect {
 				selectRequests = append(selectRequests, request)
-				return protocol.VMHookResponse{Selected: request.VMName == "selected"}, state.selectionErr
+				// Limits only take effect for a selected VM.
+				return protocol.VMHookResponse{Selected: request.VMName == "selected", Nodes: []string{"pve2"}}, state.selectionErr
 			}
 			t.Errorf("regular service selection ran %s", request.Operation)
 			return protocol.VMHookResponse{}, nil
@@ -85,12 +87,16 @@ func TestRegularServiceSelectsRootRunHooksThroughTheAdminService(t *testing.T) {
 	if selected, err := regular.selectsVMForPower(ctx, request, "off"); err != nil || selected || len(selectRequests) != asked {
 		t.Fatalf("stop selection: %v, %v, %d requests", selected, err, len(selectRequests)-asked)
 	}
-	plan, err := regular.deploymentVMHooks(ctx, "RANGE", []string{"selected", "ordinary"})
+	plan, limits, err := regular.deploymentVMHooks(ctx, "RANGE", []string{"selected", "ordinary"}, []string{"pve1", "pve2"})
 	if err != nil || !plan["selected"].Start || !plan["selected"].Revert || plan["selected"].Address || plan["ordinary"].Start || plan["ordinary"].Revert {
 		t.Fatalf("deployment plan = %+v, %v", plan, err)
 	}
-	if selectRequests[len(selectRequests)-1].Source != StartVMSourceDeploymentFirstBoot {
-		t.Fatalf("deployment selection source = %q", selectRequests[len(selectRequests)-1].Source)
+	if len(limits) != 1 || !slices.Equal(limits["selected"], []string{"pve2"}) {
+		t.Fatalf("deployment node limits = %+v", limits)
+	}
+	last := selectRequests[len(selectRequests)-1]
+	if last.Source != StartVMSourceDeploymentFirstBoot || !slices.Equal(last.Candidates, []string{"pve1", "pve2"}) {
+		t.Fatalf("deployment selection request = %+v", last)
 	}
 	statusRequests, err := regular.selectVMStatusRequests(ctx, []VMHookRequest{request, ordinary})
 	if err != nil || len(statusRequests) != 1 || statusRequests[0].VMName != "selected" {
@@ -107,7 +113,7 @@ func TestRegularServiceSelectsRootRunHooksThroughTheAdminService(t *testing.T) {
 	if _, err := regular.selectsVMForPower(ctx, invalid, "on"); err == nil {
 		t.Fatal("admin service accepted an invalid VM identity")
 	}
-	if _, err := callVMHookSelect(ctx, request, protocol.VMHookCapabilities{Select: true}); err == nil {
+	if _, _, err := callVMHookSelect(ctx, request, protocol.VMHookCapabilities{Select: true}); err == nil {
 		t.Fatal("admin service accepted a selection without hook operations")
 	}
 }
@@ -164,16 +170,33 @@ func TestDeploymentHookSelectionIsPerVMAndAddressIndependent(t *testing.T) {
 	state := &scopedVMTestState{}
 	addressOnly := scopedVMTestPlugin(state, protocol.VMHookCapabilities{Select: true, Address: true})
 	s := &Server{plugins: []*managedPlugin{addressOnly}}
-	plan, err := s.deploymentVMHooks(context.Background(), "RANGE", []string{"selected", "ordinary", "router"})
+	plan, _, err := s.deploymentVMHooks(context.Background(), "RANGE", []string{"selected", "ordinary", "router"}, nil)
 	if err != nil || plan["selected"].Start || !plan["selected"].Address || plan["ordinary"].Address || plan["router"].Address {
 		t.Fatalf("address-only plan: %+v, %v", plan, err)
 	}
 
 	lifecycle := scopedVMTestPlugin(state, protocol.VMHookCapabilities{Select: true, Start: true})
 	s.plugins = []*managedPlugin{lifecycle}
-	plan, err = s.deploymentVMHooks(context.Background(), "RANGE", []string{"selected", "ordinary"})
+	plan, _, err = s.deploymentVMHooks(context.Background(), "RANGE", []string{"selected", "ordinary"}, nil)
 	if err != nil || !plan["selected"].Start || plan["ordinary"].Start {
 		t.Fatalf("start plan: %+v, %v", plan, err)
+	}
+}
+
+func TestDeploymentNodeLimitsOfSelectingPluginsIntersect(t *testing.T) {
+	limited := func(nodes ...string) *managedPlugin {
+		return testManagedVMHookPlugin(protocol.VMHookCapabilities{Select: true, Start: true}, true, func(request protocol.VMHookRequest) (protocol.VMHookResponse, error) {
+			return protocol.VMHookResponse{Selected: request.VMName == "selected", Nodes: nodes}, nil
+		})
+	}
+	s := &Server{plugins: []*managedPlugin{limited("pve1", "pve2"), limited("pve2", "pve3"), limited()}}
+	_, limits, err := s.deploymentVMHooks(context.Background(), "RANGE", []string{"selected", "ordinary"}, []string{"pve1", "pve2", "pve3"})
+	if err != nil || len(limits) != 1 || !slices.Equal(limits["selected"], []string{"pve2"}) {
+		t.Fatalf("intersected limits = %+v, %v", limits, err)
+	}
+	s.plugins = []*managedPlugin{limited("pve1"), limited("pve3")}
+	if _, _, err := s.deploymentVMHooks(context.Background(), "RANGE", []string{"selected"}, nil); err == nil || !strings.Contains(err.Error(), "no common node") {
+		t.Fatalf("disjoint limits: %v", err)
 	}
 }
 
@@ -239,7 +262,7 @@ func TestSelectionFailureDoesNotFallBack(t *testing.T) {
 	state := &scopedVMTestState{selectionErr: cause}
 	plugin := scopedVMTestPlugin(state, protocol.VMHookCapabilities{Select: true, Start: true, Status: true})
 	s := &Server{plugins: []*managedPlugin{plugin}}
-	if _, err := s.deploymentVMHooks(context.Background(), "RANGE", []string{"selected"}); !errors.Is(err, cause) {
+	if _, _, err := s.deploymentVMHooks(context.Background(), "RANGE", []string{"selected"}, nil); !errors.Is(err, cause) {
 		t.Fatalf("selection error lost: %v", err)
 	}
 	if _, err := s.resolveVMStatuses(context.Background(), []VMHookRequest{{VMID: 126, VMName: "selected"}}); !errors.Is(err, cause) {

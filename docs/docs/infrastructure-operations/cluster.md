@@ -43,6 +43,8 @@ For each VM, the chosen node is determined in this order:
 4. **Auto-select**: Ludus picks a node using a weighted score (80% available RAM, 20% free CPU); only online nodes are considered.
 3. **Server `proxmox_node`**: If auto-select fails, the server’s configured `proxmox_node` is used.
 
+A system plugin with VM hooks can limit the nodes a VM it manages may run on, for example to the nodes where its host software is installed. Ludus then places that VM only on those nodes. An automatic choice moves to the least-loaded allowed node. An existing VM, a VM `target_node` or a range `defaults.target_node` outside those nodes stops the deployment with an error naming the VM and the allowed nodes.
+
 Example range config with node placement:
 
 ```yaml

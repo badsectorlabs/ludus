@@ -3,6 +3,7 @@ package ludusapi
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"gitlab.com/badsectorlabs/ludus/ludus-plugin-sdk/protocol"
 )
@@ -54,17 +55,48 @@ func pluginVMHook(ctx context.Context, plugin *managedPlugin, operation protocol
 }
 
 func pluginSelectsVM(ctx context.Context, plugin *managedPlugin, request VMHookRequest) (bool, error) {
+	selected, _, err := pluginSelection(ctx, plugin, request)
+	return selected, err
+}
+
+// pluginSelection reports whether the plugin selects the VM and, for a
+// selected VM, the nodes it limits placement to (nil when unlimited).
+func pluginSelection(ctx context.Context, plugin *managedPlugin, request VMHookRequest) (bool, []string, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if !plugin.manifest.VMHooks.Select {
-		return true, nil
+		return true, nil, nil
 	}
 	result, err := pluginVMHook(ctx, plugin, protocol.VMHookSelect, request)
 	if err != nil {
-		return false, fmt.Errorf("plugin %s could not select VMID %d: %w", plugin.manifest.Name, request.VMID, err)
+		return false, nil, fmt.Errorf("plugin %s could not select VMID %d: %w", plugin.manifest.Name, request.VMID, err)
 	}
-	return result.Selected, nil
+	if !result.Selected {
+		return false, nil, nil
+	}
+	return true, result.Nodes, nil
+}
+
+// limitNodes narrows the nodes a VM may be placed on (nil: unlimited) by a
+// plugin's limit. It fails when no node satisfies both.
+func limitNodes(vmName string, current, limit []string) ([]string, error) {
+	if len(limit) == 0 {
+		return current, nil
+	}
+	if current == nil {
+		return append([]string(nil), limit...), nil
+	}
+	var both []string
+	for _, node := range current {
+		if slices.Contains(limit, node) {
+			both = append(both, node)
+		}
+	}
+	if len(both) == 0 {
+		return nil, fmt.Errorf("VM hook plugins allow no common node for %s: %v and %v", vmName, current, limit)
+	}
+	return both, nil
 }
 
 // declaredVMHooks is the union of the VM hook capabilities this service can
@@ -103,45 +135,53 @@ func hookOperations(hooks, want protocol.VMHookCapabilities) protocol.VMHookCapa
 }
 
 // selectedVMHooks returns the operations in want that some plugin providing
-// them selects for the VM. Plugins this service hosts are asked directly;
+// them selects for the VM, and the nodes those plugins limit its placement to
+// (nil when unlimited). Plugins this service hosts are asked directly;
 // root-run plugins declared to the regular service are asked by the admin
 // service through the VM hook socket.
-func (s *Server) selectedVMHooks(ctx context.Context, request VMHookRequest, want protocol.VMHookCapabilities) (protocol.VMHookCapabilities, error) {
-	selected, err := s.selectLocalVMHooks(ctx, request, want)
+func (s *Server) selectedVMHooks(ctx context.Context, request VMHookRequest, want protocol.VMHookCapabilities) (protocol.VMHookCapabilities, []string, error) {
+	selected, nodes, err := s.selectLocalVMHooks(ctx, request, want)
 	if err != nil {
-		return protocol.VMHookCapabilities{}, err
+		return protocol.VMHookCapabilities{}, nil, err
 	}
 	s.pluginMu.Lock()
 	remote := hookOperations(s.remoteVMHooks, want)
 	s.pluginMu.Unlock()
 	if !remote.Any() {
-		return selected, nil
+		return selected, nodes, nil
 	}
-	remoteSelected, err := callVMHookSelect(ctx, request, remote)
+	remoteSelected, remoteNodes, err := callVMHookSelect(ctx, request, remote)
 	if err != nil {
-		return protocol.VMHookCapabilities{}, err
+		return protocol.VMHookCapabilities{}, nil, err
 	}
-	return unionVMHooks(selected, hookOperations(remoteSelected, want)), nil
+	if nodes, err = limitNodes(request.VMName, nodes, remoteNodes); err != nil {
+		return protocol.VMHookCapabilities{}, nil, err
+	}
+	return unionVMHooks(selected, hookOperations(remoteSelected, want)), nodes, nil
 }
 
 // selectLocalVMHooks asks this service's plugins that provide any operation in
-// want whether they select the VM.
-func (s *Server) selectLocalVMHooks(ctx context.Context, request VMHookRequest, want protocol.VMHookCapabilities) (protocol.VMHookCapabilities, error) {
+// want whether they select the VM, and collects their placement limits.
+func (s *Server) selectLocalVMHooks(ctx context.Context, request VMHookRequest, want protocol.VMHookCapabilities) (protocol.VMHookCapabilities, []string, error) {
 	var selected protocol.VMHookCapabilities
+	var nodes []string
 	for _, plugin := range s.pluginSnapshot() {
 		operations := hookOperations(plugin.manifest.VMHooks, want)
 		if !operations.Any() {
 			continue
 		}
-		applies, err := pluginSelectsVM(ctx, plugin, request)
+		applies, limit, err := pluginSelection(ctx, plugin, request)
 		if err != nil {
-			return protocol.VMHookCapabilities{}, err
+			return protocol.VMHookCapabilities{}, nil, err
 		}
 		if applies {
 			selected = unionVMHooks(selected, operations)
+			if nodes, err = limitNodes(request.VMName, nodes, limit); err != nil {
+				return protocol.VMHookCapabilities{}, nil, err
+			}
 		}
 	}
-	return selected, nil
+	return selected, nodes, nil
 }
 
 func (s *Server) hasStartVMHooks() bool { return s.declaredVMHooks().Start }

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/apenella/go-ansible/pkg/playbook"
@@ -303,6 +304,42 @@ ansible_shell_type=powershell
 						t.Errorf("%s shell (explicit override=%v) = %q, want %q", host, override, shell, want)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestPlaceVMHonorsPluginNodeLimits(t *testing.T) {
+	// The fake least-loaded choice returns the last allowed node.
+	pick := func(allowed []string) string { return allowed[len(allowed)-1] }
+	tests := []struct {
+		name                      string
+		existing, target, initial string
+		auto                      bool
+		allowed                   []string
+		want, err                 string
+	}{
+		{name: "existing node without limit", existing: "pve1", target: "pve2", initial: "pve3", auto: true, want: "pve1"},
+		{name: "target_node without limit", target: "pve2", initial: "pve3", auto: true, want: "pve2"},
+		{name: "range default without limit", initial: "pve3", want: "pve3"},
+		{name: "existing node outside limit", existing: "pve1", initial: "pve2", auto: true, allowed: []string{"pve2"}, err: "runs on node pve1"},
+		{name: "target_node outside limit", target: "pve1", initial: "pve2", auto: true, allowed: []string{"pve2"}, err: "has target_node pve1"},
+		{name: "target_node inside limit", target: "pve2", initial: "pve1", auto: true, allowed: []string{"pve2"}, want: "pve2"},
+		{name: "explicit range default outside limit", initial: "pve1", allowed: []string{"pve2"}, err: "set target_node for this VM"},
+		{name: "automatic default outside limit", initial: "pve1", auto: true, allowed: []string{"pve2", "pve3"}, want: "pve3"},
+		{name: "automatic default inside limit", initial: "pve2", auto: true, allowed: []string{"pve2", "pve3"}, want: "pve2"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := placeVM("R1-ws01", test.existing, test.target, test.initial, test.auto, test.allowed, pick)
+			if test.err != "" {
+				if err == nil || !strings.Contains(err.Error(), test.err) {
+					t.Fatalf("placeVM = %q, %v; want error containing %q", got, err, test.err)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("placeVM = %q, %v; want %q", got, err, test.want)
 			}
 		})
 	}

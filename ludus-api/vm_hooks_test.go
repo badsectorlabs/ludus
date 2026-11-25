@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -124,7 +125,7 @@ func TestVMHookIdentityVerificationRetriesStaleCloneMetadata(t *testing.T) {
 		}
 		return expected, nil
 	})
-	if err != nil || got != expected || calls != 3 {
+	if err != nil || !reflect.DeepEqual(got, expected) || calls != 3 {
 		t.Fatalf("request=%+v calls=%d error=%v", got, calls, err)
 	}
 }
@@ -137,7 +138,7 @@ func TestVMHookIdentityVerificationDoesNotAcceptPersistentMismatch(t *testing.T)
 			calls++
 			return VMHookRequest{}, mismatch
 		})
-		if !errors.Is(err, mismatch) || got != (VMHookRequest{}) || calls != attempts {
+		if !errors.Is(err, mismatch) || !reflect.DeepEqual(got, VMHookRequest{}) || calls != attempts {
 			t.Fatalf("request=%+v calls=%d error=%v", got, calls, err)
 		}
 	}

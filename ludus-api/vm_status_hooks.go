@@ -21,7 +21,7 @@ type vmStatusBatchResponse struct {
 func (s *Server) selectVMStatusRequests(ctx context.Context, requests []VMHookRequest) ([]VMHookRequest, error) {
 	var selected []VMHookRequest
 	for _, request := range requests {
-		hooks, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{Status: true})
+		hooks, _, err := s.selectedVMHooks(ctx, request, protocol.VMHookCapabilities{Status: true})
 		if err != nil {
 			return nil, err
 		}

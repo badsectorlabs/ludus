@@ -204,6 +204,9 @@ type VMHookRequest struct {
 	// Snapshot names the snapshot a revert rolls the VM back to. Status is
 	// the VM's state before the revert, which the revert must restore.
 	Snapshot string
+	// Candidates lists the cluster nodes Ludus may place the VM on. It is set
+	// only on the select request Ludus makes while planning a deployment.
+	Candidates []string
 }
 
 type VMHookDecision uint8
@@ -228,6 +231,9 @@ type VMHookResponse struct {
 	Status   VMStatus
 	Ready    bool
 	Address  string
+	// Nodes, in a selecting response to a request with Candidates, limits the
+	// nodes Ludus may place the VM on. Empty means any node.
+	Nodes []string
 }
 
 type InitializeRequest struct {
